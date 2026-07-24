@@ -33,6 +33,9 @@ export const composerStore = {
   clearContextFiles,
   addClipboardImage,
   removeClipboardImage,
+  removeSentClipboardImage(id: string) {
+    removeClipboardImage(id, false);
+  },
   clearClipboardImages,
   resetPastedImageIndex,
   getCurrentDocumentEnabled,

@@ -1,6 +1,7 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
 import type { PermissionMode } from '../../../shared/protocol';
 import type { QueuedMessage } from '../../lib/app-state-types';
+import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
 
@@ -109,7 +110,7 @@ export async function retryMessage(messageId: string, sessionId?: string | null)
 export async function editMessage(
   messageId: string,
   text: string,
-  options?: { allowEmptyText?: boolean }
+  options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
 ) {
   return await getCurrentOpenCodeRuntime().editMessage(messageId, text, options);
 }

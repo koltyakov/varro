@@ -1,4 +1,4 @@
-import { For, Show, createMemo, onCleanup, onMount } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
 import {
@@ -7,6 +7,7 @@ import {
   unregisterInlineEditMount,
 } from '../../lib/message-edit-state';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
+import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type {
@@ -81,6 +82,8 @@ function InlineEditComposerSlot() {
 export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
   let rowRef: HTMLDivElement | undefined;
   const animateEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
+  const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
+  const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>
     props.msg.info.role === 'user' && editingMessage()?.messageId === props.msg.info.id;
@@ -118,6 +121,13 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
     props.isPlanningAssistantMessage(props.msg.info as AssistantMessage);
 
   onMount(() => {
+    if (rowRef && animateEntrance) {
+      prepareMeasuredEntrance(rowRef, {
+        animationName: 'streamed-message-row-in',
+        heightProperty: '--streamed-message-row-height',
+        onFinish: () => setEntrancePending(false),
+      });
+    }
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
   });
   onCleanup(() => {
@@ -136,7 +146,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
         fileEditStackGroup()
           ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
           : ''
-      }${animateEntrance ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }`}
     >
@@ -160,6 +170,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
           fileEditStackGroup={fileEditStackGroup()}
           streamingPartId={streamingPartId()}
           streamingText={streamingText()}
+          allowInitialAssistantItemReveal={allowInitialAssistantItemReveal}
           claimAssistantItemReveal={props.claimAssistantItemReveal}
           questionRequestForTool={props.questionRequestForTool}
           permissionMatchForTool={props.permissionMatchForTool}

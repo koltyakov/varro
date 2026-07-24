@@ -185,7 +185,7 @@ describe('deduplicateFileEdits', () => {
 });
 
 describe('AssistantMessageContent', () => {
-  it('reveals live parts once without replaying the animation for part updates', () => {
+  it('shows mounted parts immediately, then reveals newly streamed parts once', () => {
     const info = createAssistantMessage({ time: { created: 0 } });
     const initialPart = textPart('text-1', 'Streaming');
     const [parts, setParts] = createSignal<Part[]>([initialPart]);
@@ -205,7 +205,7 @@ describe('AssistantMessageContent', () => {
 
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
-    ).toContain('assistant-message-flow-item-streamed');
+    ).not.toContain('assistant-message-flow-item-streamed');
 
     setParts([{ ...initialPart, text: 'Streaming update' }]);
 
@@ -249,6 +249,7 @@ describe('AssistantMessageContent', () => {
               part.type === 'text' || part.type === 'reasoning' ? part.text : null
             }
             claimItemReveal={claimItemReveal}
+            allowInitialItemReveal
           />
         ),
         container!
@@ -274,6 +275,7 @@ describe('AssistantMessageContent', () => {
         <AssistantMessageContent
           info={info}
           parts={parts()}
+          allowInitialItemReveal
           textForPart={(part) =>
             part.type === 'text' || part.type === 'reasoning' ? part.text : null
           }

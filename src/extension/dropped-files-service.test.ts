@@ -291,6 +291,34 @@ describe('DroppedFilesService', () => {
     expect(remove).toHaveBeenCalledWith(dropsDir, { recursive: true, force: true });
   });
 
+  it('waits for active content writes before removing the temp directory', async () => {
+    const dropsDir = '/tmp/varro-drops/drop-active-write';
+    const contentWrite = createDeferred<void>();
+    const create = vi.fn(async () => dropsDir);
+    const remove = vi.fn(async () => {});
+    const write = vi.fn((path: string) =>
+      path.endsWith('.varro-owner.json') ? Promise.resolve() : contentWrite.promise
+    );
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never, {
+      create,
+      remove,
+      write,
+    });
+    services.push(service);
+
+    const pendingFiles = service.fromContent([{ name: 'race.txt', content: 'cmFjZQ==', size: 4 }]);
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    const pendingDispose = service.dispose();
+    await Promise.resolve();
+
+    expect(remove).not.toHaveBeenCalledWith(dropsDir, { recursive: true, force: true });
+    contentWrite.resolve();
+    await pendingFiles;
+    await pendingDispose;
+
+    expect(remove).toHaveBeenCalledWith(dropsDir, { recursive: true, force: true });
+  });
+
   it('enforces the live owned-content cap and releases bytes after removal', async () => {
     const dropsDir = join(tmpdir(), 'varro-drops', 'drop-owned-cap');
     const create = vi.fn(async () => dropsDir);

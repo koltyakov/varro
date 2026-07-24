@@ -13,7 +13,7 @@ import type {
   RalphRun,
   RalphSelectedModel,
 } from '../../shared/ralph';
-import { MAX_RALPH_ITERATIONS } from '../../shared/ralph';
+import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
 
 const MAX_PATH_LENGTH = 4096;
@@ -266,7 +266,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'ralph/start': {
       const payload = asRecord(message?.payload);
       if (!payload || !isWithinRalphStructuralBudget(payload)) return null;
-      const config = parseRalphConfig(payload?.config, MAX_RALPH_ITERATIONS);
+      const config = parseRalphConfig(payload?.config, MAX_RALPH_ITERATIONS, false);
       return config ? { type, payload: { config } } : null;
     }
 
@@ -326,9 +326,15 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
   }
 }
 
-function parseRalphConfig(value: unknown, maxIterations: number): RalphConfig | null {
+function parseRalphConfig(
+  value: unknown,
+  maxIterations: number,
+  allowMissingWorkspace: boolean
+): RalphConfig | null {
   const record = asRecord(value);
   const managerSessionId = getSafeRalphId(record?.managerSessionId);
+  const rawWorkspaceDirectory = record?.workspaceDirectory ?? record?.workspacePath;
+  const workspaceDirectory = normalizeRalphWorkspaceDirectory(rawWorkspaceDirectory);
   const planDocPath = getBoundedString(record?.planDocPath, MAX_PATH_LENGTH);
   const iterations = getBoundedInteger(record?.iterations, 1, maxIterations);
   const promptTemplate = getBoundedString(record?.promptTemplate, MAX_RALPH_PROMPT_LENGTH);
@@ -337,6 +343,10 @@ function parseRalphConfig(value: unknown, maxIterations: number): RalphConfig | 
   if (
     !record ||
     !managerSessionId ||
+    (!workspaceDirectory && !allowMissingWorkspace) ||
+    (rawWorkspaceDirectory !== undefined &&
+      rawWorkspaceDirectory !== null &&
+      !workspaceDirectory) ||
     !planDocPath ||
     iterations === null ||
     !promptTemplate ||
@@ -364,6 +374,7 @@ function parseRalphConfig(value: unknown, maxIterations: number): RalphConfig | 
 
   return {
     managerSessionId,
+    workspaceDirectory,
     planDocPath,
     iterations,
     promptTemplate,
@@ -412,7 +423,7 @@ function parseRalphRuns(
 
 function parseRalphRun(value: unknown, contentBudget: RalphContentBudget): RalphRun | null {
   const record = asRecord(value);
-  const config = parseRalphConfig(record?.config, MAX_RALPH_ITERATIONS);
+  const config = parseRalphConfig(record?.config, MAX_RALPH_ITERATIONS, true);
   const status = getRalphStatus(record?.status);
   const currentIteration = getBoundedInteger(
     record?.currentIteration,
@@ -441,13 +452,17 @@ function parseRalphRun(value: unknown, contentBudget: RalphContentBudget): Ralph
     iterations.push(iteration);
   }
 
-  if (record.stopReason === undefined) {
-    return { config, status, currentIteration, iterations, updatedAt };
+  const run: RalphRun = { config, status, currentIteration, iterations, updatedAt };
+  if (record.note !== undefined) {
+    const note = getBoundedString(record.note, MAX_RALPH_NOTE_LENGTH);
+    if (!note) return null;
+    run.note = note;
   }
+  if (record.stopReason === undefined) return run;
   const stopReason = getRalphStopReason(record.stopReason);
-  return stopReason
-    ? { config, status, currentIteration, iterations, updatedAt, stopReason }
-    : null;
+  if (!stopReason) return null;
+  run.stopReason = stopReason;
+  return run;
 }
 
 function parseRalphIteration(
@@ -842,6 +857,15 @@ const onlyQuery = (url: URL, ...keys: string[]) => {
 
 const requiredQuery = (url: URL, key: string) => Boolean(url.searchParams.get(key)?.trim());
 
+const optionalDirectoryQuery = (url: URL) => {
+  const directories = url.searchParams.getAll('directory');
+  return (
+    onlyQuery(url, 'directory') &&
+    directories.length <= 1 &&
+    (directories.length === 0 || requiredQuery(url, 'directory'))
+  );
+};
+
 const methodsNoQuery =
   (...methods: string[]) =>
   ({ method, url }: RouteContext) =>
@@ -884,7 +908,11 @@ const API_ROUTES: ApiRoute[] = [
   route('/question', methodsNoQuery('GET')),
   route('/permission', methodsNoQuery('GET')),
   route('/permission/:id/reply', methodsNoQuery('POST')),
-  route('/session', methodsNoQuery('GET', 'POST')),
+  route(
+    '/session',
+    ({ method, url }) =>
+      (method === 'GET' && noQuery(url)) || (method === 'POST' && optionalDirectoryQuery(url))
+  ),
   route('/session/status', methodsNoQuery('GET')),
   route('/experimental/workspace/status', methodsNoQuery('GET')),
   route(
@@ -953,7 +981,9 @@ const API_ROUTES: ApiRoute[] = [
   route(
     '/session/:id/:action',
     ({ method, url, params }) =>
-      method === 'POST' && noQuery(url) && SESSION_ACTIONS.has(params.action!)
+      method === 'POST' &&
+      SESSION_ACTIONS.has(params.action!) &&
+      (params.action === 'prompt_async' ? optionalDirectoryQuery(url) : noQuery(url))
   ),
   route('/session/:id', methodsNoQuery('GET', 'PATCH', 'DELETE')),
 ];

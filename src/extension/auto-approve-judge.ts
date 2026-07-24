@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from 'path';
+import { lstatSync, realpathSync, statSync } from 'fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'path';
 import type {
   AutoApproveJudgeReference,
   AutoApproveJudgeRequest,
@@ -36,11 +37,15 @@ const DENY_ALL_PERMISSION_NAMES = [
   'skill',
 ] as const;
 
-const DENY_ALL_PERMISSION_RULES: PermissionRule[] = DENY_ALL_PERMISSION_NAMES.map((permission) => ({
-  permission,
-  pattern: '*',
-  action: 'deny',
-}));
+const DENY_ALL_PERMISSION_RULES: PermissionRule[] = [
+  ...DENY_ALL_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
+    permission,
+    pattern: '*',
+    action: 'deny',
+  })),
+  { permission: '*', pattern: '*', action: 'deny' },
+  { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+];
 const SAFE_GIT_INSPECTION_COMMANDS = new Set([
   'diff',
   'log',
@@ -200,13 +205,11 @@ export class AutoApproveJudge {
   }
 
   private judgeLocally(permission: NormalizedJudgePermission): AutoApproveJudgeResponse | null {
-    if (
-      isEditPermissionType(permission) &&
-      isWorkspaceEditPermission(permission, this.server.getWorkspaceCwd())
-    ) {
+    const workspacePath = this.server.getWorkspaceCwd?.();
+    if (isEditPermissionType(permission) && isWorkspaceEditPermission(permission, workspacePath)) {
       return { decision: 'allow', reason: 'Workspace file edit.' };
     }
-    if (isSafeLocalBashPermission(permission)) {
+    if (isSafeLocalBashPermission(permission, workspacePath)) {
       return { decision: 'allow', reason: 'Safe local command.' };
     }
     return null;
@@ -279,9 +282,11 @@ function isWorkspaceEditPermission(
 ) {
   if (!isEditPermissionType(permission)) return false;
   if (hasDeletedFileChange(permission.metadata)) return false;
+  const workspace = resolveCanonicalWorkspace(workspacePath);
+  if (!workspace) return false;
 
   const paths = collectPermissionPaths(permission);
-  return paths.length > 0 && paths.every((item) => isWorkspacePath(item, workspacePath));
+  return paths.length > 0 && paths.every((item) => isWorkspacePath(item, workspace));
 }
 
 function isEditPermissionType(permission: NormalizedJudgePermission) {
@@ -328,21 +333,76 @@ function collectPermissionPaths(permission: NormalizedJudgePermission) {
   return [...new Set(paths)];
 }
 
-// Sentinel base used to detect traversal in relative paths when no workspace is
-// known. Resolving against it collapses interior `..` segments so paths that
-// escape the base (e.g. `a/../../etc`) can be rejected.
-const WORKSPACE_TRAVERSAL_SENTINEL = resolve('/__varro_workspace_sentinel__');
+type CanonicalWorkspace = {
+  sourcePath: string;
+  canonicalPath: string;
+};
 
-function isWorkspacePath(filePath: string, workspacePath: string | undefined) {
-  const base = workspacePath ? resolve(workspacePath) : null;
-  if (isAbsolute(filePath)) {
-    if (!base) return false;
-    return isContainedPath(base, resolve(filePath));
+function resolveCanonicalWorkspace(workspacePath: string | undefined): CanonicalWorkspace | null {
+  if (!workspacePath) return null;
+  const sourcePath = resolve(workspacePath);
+  try {
+    const canonicalPath = realpathSync(sourcePath);
+    if (!statSync(canonicalPath).isDirectory()) return null;
+    return { sourcePath, canonicalPath };
+  } catch {
+    return null;
   }
-  const normalized = filePath.replace(/\\/g, '/');
-  if (!normalized) return false;
-  const sentinelBase = base ?? WORKSPACE_TRAVERSAL_SENTINEL;
-  return isContainedPath(sentinelBase, resolve(sentinelBase, normalized));
+}
+
+function isWorkspacePath(filePath: string, workspace: CanonicalWorkspace) {
+  const targetPath = resolvePathFromWorkspace(filePath, workspace.sourcePath);
+  if (!targetPath) return false;
+  const canonicalTarget = resolveCanonicalPotentialPath(targetPath);
+  return canonicalTarget !== null && isContainedPath(workspace.canonicalPath, canonicalTarget);
+}
+
+function isExistingWorkspaceDirectory(filePath: string, workspacePath: string | undefined) {
+  const workspace = resolveCanonicalWorkspace(workspacePath);
+  if (!workspace) return false;
+  const targetPath = resolvePathFromWorkspace(filePath, workspace.sourcePath);
+  if (!targetPath) return false;
+  try {
+    const canonicalTarget = realpathSync(targetPath);
+    return (
+      statSync(canonicalTarget).isDirectory() &&
+      isContainedPath(workspace.canonicalPath, canonicalTarget)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function resolvePathFromWorkspace(filePath: string, workspacePath: string) {
+  if (!filePath) return null;
+  return isAbsolute(filePath) ? resolve(filePath) : resolve(workspacePath, filePath);
+}
+
+function resolveCanonicalPotentialPath(targetPath: string): string | null {
+  let ancestor = targetPath;
+  const missingSegments: string[] = [];
+
+  // Follow the nearest existing ancestor so symlink escapes are caught for new files too.
+  while (true) {
+    try {
+      lstatSync(ancestor);
+    } catch (err) {
+      if (asRecord(err)?.code !== 'ENOENT') return null;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) return null;
+      missingSegments.unshift(basename(ancestor));
+      ancestor = parent;
+      continue;
+    }
+
+    try {
+      const canonicalAncestor = realpathSync(ancestor);
+      if (missingSegments.length > 0 && !statSync(canonicalAncestor).isDirectory()) return null;
+      return resolve(canonicalAncestor, ...missingSegments);
+    } catch {
+      return null;
+    }
+  }
 }
 
 function isContainedPath(base: string, target: string) {
@@ -353,14 +413,17 @@ function isContainedPath(base: string, target: string) {
   );
 }
 
-function isSafeLocalBashPermission(permission: NormalizedJudgePermission) {
+function isSafeLocalBashPermission(
+  permission: NormalizedJudgePermission,
+  workspacePath: string | undefined
+) {
   if (permission.type !== 'bash' && permission.type !== 'shell') return false;
   const command = extractCommand(permission);
   if (!command) return false;
   if (/[;|`<>\r\n]|\$\(/.test(command)) return false;
   const commands = splitSafeCommandSequence(command);
   if (!commands) return false;
-  return commands.every(isSafeLocalCommandSegment);
+  return commands.every((item) => isSafeLocalCommandSegment(item, workspacePath));
 }
 
 function splitSafeCommandSequence(command: string) {
@@ -374,21 +437,26 @@ function splitSafeCommandSequence(command: string) {
   return commands;
 }
 
-function isSafeLocalCommandSegment(command: string) {
+function isSafeLocalCommandSegment(command: string, workspacePath: string | undefined) {
   return (
-    /^(?:rtk\s+)?npm\s+run\s+[\w:.-]+(?:\s|$)/.test(command) ||
-    isSafeGitInspectionCommand(command) ||
+    isSafeGitInspectionCommand(command, workspacePath) ||
     /^(?:rtk\s+)?(?:pwd|date|uname|whoami)\s*$/.test(command) ||
-    /^(?:rtk\s+)?(?:which\s+\S+|command\s+-v\s+\S+)\s*$/.test(command) ||
-    /^(?:rtk\s+)?\S+(?:\s+(?:--version|-v|version))\s*$/.test(command)
+    /^(?:rtk\s+)?(?:which\s+\S+|command\s+-v\s+\S+)\s*$/.test(command)
   );
 }
 
-function isSafeGitInspectionCommand(command: string) {
-  const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
+function isSafeGitInspectionCommand(command: string, workspacePath: string | undefined) {
+  const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+("[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
   if (!match) return false;
-  const subcommand = match[1]!;
-  const args = match[2]!.trim();
+  const gitDirectory = match[1];
+  if (gitDirectory) {
+    const literalDirectory = parseLiteralShellArgument(gitDirectory);
+    if (!literalDirectory || !isExistingWorkspaceDirectory(literalDirectory, workspacePath)) {
+      return false;
+    }
+  }
+  const subcommand = match[2]!;
+  const args = match[3]!.trim();
   if (/\s--(?:output|ext-diff)\b/.test(` ${args}`)) return false;
   if (SAFE_GIT_INSPECTION_COMMANDS.has(subcommand)) return true;
   if (subcommand !== 'branch') return false;
@@ -396,6 +464,15 @@ function isSafeGitInspectionCommand(command: string) {
   return args
     .split(/\s+/)
     .every((arg) => SAFE_GIT_BRANCH_FLAGS.has(arg) || /^--sort=\S+$/.test(arg));
+}
+
+function parseLiteralShellArgument(value: string) {
+  const unquoted =
+    (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
+      ? value.slice(1, -1)
+      : value;
+  if (!unquoted || /[$~*?[\]{}\\]/.test(unquoted)) return null;
+  return unquoted;
 }
 
 function extractCommand(permission: NormalizedJudgePermission) {

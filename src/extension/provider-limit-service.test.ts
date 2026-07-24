@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   extractOpenCodeProviderLimitMock: vi.fn(),
   fetchProviderLimitFromAdapterMock: vi.fn(),
   getOpenCodeAuthFilePathMock: vi.fn(() => '/tmp/opencode/auth.json'),
-  parseProviderAuthStoreMock: vi.fn(() => ({})),
+  parseProviderAuthStoreMock: vi.fn((_raw: string) => ({})),
   readProviderLimitConfigMock: vi.fn(() => ({
     enabledAdapters: new Set(['github-copilot', 'openrouter', 'zai', 'minimax', 'openai']),
     pollIntervalSeconds: 120,
@@ -172,6 +172,105 @@ describe('ProviderLimitService', () => {
 
     await expect(first).resolves.toEqual(available);
     expect(mocks.extractOpenCodeProviderLimitMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates metadata snapshots without letting an older failure clear the replacement', async () => {
+    const firstConfig = deferred<unknown>();
+    let configRequests = 0;
+    const server = {
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/config/providers') {
+          configRequests += 1;
+          if (configRequests === 1) return firstConfig.promise;
+          return { providers: [{ id: 'new-provider', models: {} }] };
+        }
+        if (path === '/experimental/console') throw new Error('console unavailable');
+        throw new Error(`Unexpected path: ${path}`);
+      }),
+    };
+    const service = new ProviderLimitService(server);
+
+    const stale = service.get('old-provider', null);
+    service.clearCache();
+    await expect(service.get('new-provider', null)).resolves.not.toMatchObject({
+      note: 'Provider not found in OpenCode config',
+    });
+
+    firstConfig.reject(new Error('stale metadata request failed'));
+    await expect(stale).resolves.toMatchObject({
+      status: 'error',
+      note: 'Failed to load provider metadata: stale metadata request failed',
+    });
+
+    await service.get('new-provider', 'another-model');
+    expect(configRequests).toBe(2);
+  });
+
+  it('invalidates an in-flight auth snapshot and retains the newer replacement', async () => {
+    const firstAuth = deferred<string>();
+    const secondAuth = deferred<string>();
+    mocks.readFileMock.mockReset();
+    mocks.readFileMock
+      .mockReturnValueOnce(firstAuth.promise)
+      .mockReturnValueOnce(secondAuth.promise);
+    mocks.parseProviderAuthStoreMock.mockImplementation((raw: string) => ({
+      anthropic: { type: 'oauth', access: raw },
+    }));
+    const server = createProviderServer([{ id: 'anthropic', models: {} }]);
+    const service = new ProviderLimitService(server);
+
+    const stale = service.get('anthropic', null);
+    await vi.waitFor(() => expect(mocks.readFileMock).toHaveBeenCalledTimes(1));
+    service.clearCache();
+    const fresh = service.get('anthropic', null);
+    await vi.waitFor(() => expect(mocks.readFileMock).toHaveBeenCalledTimes(2));
+
+    secondAuth.resolve('new-token');
+    await fresh;
+    firstAuth.resolve('old-token');
+    await stale;
+
+    await service.get('anthropic', 'another-model');
+    expect(mocks.readFileMock).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authStore: { anthropic: { type: 'oauth', access: 'new-token' } },
+      }),
+      expect.anything()
+    );
+  });
+
+  it('does not restore an auth-failure cache entry from a stale load', async () => {
+    const staleAdapter = deferred<ProviderLimitStatus | null>();
+    mocks.parseProviderAuthStoreMock.mockReturnValue({
+      anthropic: { type: 'oauth', access: 'same-token' },
+    });
+    mocks.fetchProviderLimitFromAdapterMock
+      .mockReturnValueOnce(staleAdapter.promise)
+      .mockResolvedValue(null);
+    const service = new ProviderLimitService(
+      createProviderServer([{ id: 'anthropic', models: {} }])
+    );
+
+    const stale = service.get('anthropic', 'model-1');
+    await vi.waitFor(() =>
+      expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(1)
+    );
+    service.clearCache();
+    await service.get('anthropic', 'model-1');
+
+    staleAdapter.resolve({
+      providerID: 'anthropic',
+      modelID: 'model-1',
+      status: 'unsupported',
+      source: 'provider',
+      checkedAt: Date.now(),
+      note: 'Anthropic usage endpoint rejected credentials (401)',
+    });
+    await stale;
+    await service.get('anthropic', 'model-2');
+
+    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledTimes(3);
   });
 
   it('caches available statuses for five minutes', async () => {

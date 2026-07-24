@@ -1,4 +1,5 @@
 import type { Message, Session, SessionStatus } from '../../types';
+import type { QueuedAttachmentSnapshot } from './session-send';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
 
@@ -13,23 +14,26 @@ export async function reviewSessionWithDependencies(
   await deps.sendMessage(prompt);
 }
 
-export async function abortSessionWithDependencies(deps: {
-  getActiveSessionId(): string | null;
-  getSessionTreeRootId(sessionId: string): string | null;
-  getSessionTreeIds(sessionId: string): string[];
-  getSelectedAgentForSession(sessionId: string): string | null;
-  skipPlanSession(sessionId: string): void;
-  getSessionStatus(sessionId: string): SessionStatus | undefined;
-  getSessionUsageLimit(sessionId: string): unknown;
-  markPendingAbortTree(sessionIds: string[]): void;
-  setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
-  stopLoading(): void;
-  abortRemoteSession(sessionId: string): Promise<unknown>;
-  clearPendingAbortTree(sessionIds: string[]): void;
-  setSessionUsageLimit(sessionId: string, notice: unknown): void;
-  logError(context: string, err: unknown): void;
-}) {
-  const sessionId = deps.getActiveSessionId();
+export async function abortSessionWithDependencies(
+  deps: {
+    getActiveSessionId(): string | null;
+    getSessionTreeRootId(sessionId: string): string | null;
+    getSessionTreeIds(sessionId: string): string[];
+    getSelectedAgentForSession(sessionId: string): string | null;
+    skipPlanSession(sessionId: string): void;
+    getSessionStatus(sessionId: string): SessionStatus | undefined;
+    getSessionUsageLimit(sessionId: string): unknown;
+    markPendingAbortTree(sessionIds: string[]): void;
+    setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
+    stopLoading(): void;
+    abortRemoteSession(sessionId: string): Promise<unknown>;
+    clearPendingAbortTree(sessionIds: string[]): void;
+    setSessionUsageLimit(sessionId: string, notice: unknown): void;
+    logError(context: string, err: unknown): void;
+  },
+  targetSessionId = deps.getActiveSessionId()
+) {
+  const sessionId = targetSessionId;
   if (!sessionId) return;
 
   const rootSessionId = deps.getSessionTreeRootId(sessionId) || sessionId;
@@ -49,7 +53,7 @@ export async function abortSessionWithDependencies(deps: {
   for (const id of sessionTreeIds) {
     deps.setSessionStatusEntry(id, { type: 'idle' });
   }
-  deps.stopLoading();
+  if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
 
   try {
     await Promise.all(sessionTreeIds.map((id) => deps.abortRemoteSession(id)));
@@ -100,19 +104,28 @@ export async function editMessageWithDependencies(
     getActiveSessionId(): string | null;
     getMessages(): Array<{ info: Message }>;
     isSessionWorking(sessionId: string): boolean;
-    abortSession(): Promise<void>;
+    abortSession(sessionId: string): Promise<void>;
     startLoading(): void;
-    invalidateMessageSync?(): void;
+    invalidateMessageSync?(sessionId: string): void;
     pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
     deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
     syncSessionMessages(sessionId: string): Promise<void>;
-    sendEditedMessage(text: string): Promise<boolean>;
+    sendEditedMessage(
+      text: string,
+      sessionId: string,
+      queuedAttachments?: QueuedAttachmentSnapshot
+    ): Promise<boolean>;
+    prepareEditedMessageSend?(
+      text: string,
+      sessionId: string,
+      queuedAttachments?: QueuedAttachmentSnapshot
+    ): () => Promise<boolean>;
     stopLoading(): void;
     setError(message: string): void;
   },
   messageId: string,
   text: string,
-  options?: { allowEmptyText?: boolean }
+  options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
 ) {
   const sessionId = deps.getActiveSessionId();
   if (!sessionId || (!options?.allowEmptyText && !text.trim())) return false;
@@ -125,12 +138,15 @@ export async function editMessageWithDependencies(
   if (!target || target.info.sessionID !== sessionId) return false;
 
   const messagesToDelete = messages.slice(targetIndex).toReversed();
+  const sendEditedMessage = deps.prepareEditedMessageSend
+    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments)
+    : () => deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
   try {
     deps.startLoading();
-    deps.invalidateMessageSync?.();
+    deps.invalidateMessageSync?.(sessionId);
     deps.pruneMessagesFrom?.(sessionId, messageId);
     if (deps.isSessionWorking(sessionId)) {
-      await deps.abortSession();
+      await deps.abortSession(sessionId);
     }
     // Session revert also restores filesystem snapshots; direct history deletion does not.
     for (const message of messagesToDelete) {
@@ -138,17 +154,21 @@ export async function editMessageWithDependencies(
     }
   } catch (err) {
     await deps.syncSessionMessages(sessionId).catch(() => {});
-    deps.stopLoading();
-    deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
+    if (deps.getActiveSessionId() === sessionId) {
+      deps.stopLoading();
+      deps.setError(err instanceof Error ? err.message : 'Failed to edit message');
+    }
     return false;
   }
 
   try {
-    if (await deps.sendEditedMessage(text)) return true;
+    if (await sendEditedMessage()) return true;
   } catch (err) {
-    deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
+    if (deps.getActiveSessionId() === sessionId) {
+      deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
+    }
   }
-  deps.stopLoading();
+  if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
   return false;
 }
 
@@ -246,8 +266,17 @@ type SessionControlDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   setError(message: string): void;
   isSessionWorking(sessionId: string): boolean;
-  sendEditedMessage(text: string): Promise<boolean>;
-  invalidateMessageSync(): void;
+  sendEditedMessage(
+    text: string,
+    sessionId: string,
+    queuedAttachments?: QueuedAttachmentSnapshot
+  ): Promise<boolean>;
+  prepareEditedMessageSend?(
+    text: string,
+    sessionId: string,
+    queuedAttachments?: QueuedAttachmentSnapshot
+  ): () => Promise<boolean>;
+  invalidateMessageSync(sessionId: string): void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
   deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
   unrevertSession(sessionId: string): Promise<Session>;
@@ -272,23 +301,27 @@ export class SessionControlOperations {
     });
   };
 
-  readonly abortSession = async () => {
-    await abortSessionWithDependencies({
-      getActiveSessionId: this.deps.getActiveSessionId,
-      getSessionTreeRootId: this.deps.getSessionTreeRootId,
-      getSessionTreeIds: this.deps.getSessionTreeIds,
-      getSelectedAgentForSession: this.deps.getSelectedAgentForSession,
-      skipPlanSession: this.deps.skipPlanSession,
-      getSessionStatus: this.deps.getSessionStatus,
-      getSessionUsageLimit: this.deps.getSessionUsageLimit,
-      markPendingAbortTree: this.deps.markPendingAbortTree,
-      setSessionStatusEntry: this.deps.setSessionStatusEntry,
-      stopLoading: this.deps.stopLoading,
-      abortRemoteSession: this.deps.abortRemoteSession,
-      clearPendingAbortTree: this.deps.clearPendingAbortTree,
-      setSessionUsageLimit: this.deps.setSessionUsageLimit,
-      logError: this.deps.logError,
-    });
+  readonly abortSession = async (sessionId = this.deps.getActiveSessionId()) => {
+    if (!sessionId) return;
+    await abortSessionWithDependencies(
+      {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        getSessionTreeRootId: this.deps.getSessionTreeRootId,
+        getSessionTreeIds: this.deps.getSessionTreeIds,
+        getSelectedAgentForSession: this.deps.getSelectedAgentForSession,
+        skipPlanSession: this.deps.skipPlanSession,
+        getSessionStatus: this.deps.getSessionStatus,
+        getSessionUsageLimit: this.deps.getSessionUsageLimit,
+        markPendingAbortTree: this.deps.markPendingAbortTree,
+        setSessionStatusEntry: this.deps.setSessionStatusEntry,
+        stopLoading: this.deps.stopLoading,
+        abortRemoteSession: this.deps.abortRemoteSession,
+        clearPendingAbortTree: this.deps.clearPendingAbortTree,
+        setSessionUsageLimit: this.deps.setSessionUsageLimit,
+        logError: this.deps.logError,
+      },
+      sessionId
+    );
   };
 
   readonly undoSession = async () => {
@@ -307,7 +340,7 @@ export class SessionControlOperations {
   readonly editMessage = async (
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean }
+    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
   ) => {
     return await editMessageWithDependencies(
       {
@@ -321,6 +354,7 @@ export class SessionControlOperations {
         deleteMessage: this.deps.deleteMessage,
         syncSessionMessages: this.deps.syncSessionMessages,
         sendEditedMessage: this.deps.sendEditedMessage,
+        prepareEditedMessageSend: this.deps.prepareEditedMessageSend,
         stopLoading: this.deps.stopLoading,
         setError: this.deps.setError,
       },

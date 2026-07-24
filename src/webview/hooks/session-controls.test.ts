@@ -9,6 +9,14 @@ import {
   undoSessionWithDependencies,
 } from './session/session-controls';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 function userMessage(id: string): Message {
   return {
     id,
@@ -187,7 +195,7 @@ describe('session-controls helpers', () => {
       ['session-1', 'user-1'],
     ]);
     expect(syncSessionMessages).not.toHaveBeenCalled();
-    expect(sendEditedMessage).toHaveBeenCalledWith('updated prompt');
+    expect(sendEditedMessage).toHaveBeenCalledWith('updated prompt', 'session-1', undefined);
     expect(callOrder).toEqual([
       'loading',
       'invalidate-sync',
@@ -253,6 +261,50 @@ describe('session-controls helpers', () => {
     );
 
     expect(callOrder).toEqual(['abort', 'delete', 'send']);
+  });
+
+  it('keeps an edit targeted to its captured session when the active session changes', async () => {
+    const abortGate = deferred<void>();
+    let activeSessionId = 'session-1';
+    const abortSession = vi.fn(async (_sessionId: string) => abortGate.promise);
+    const deleteMessage = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => true);
+
+    const edit = editMessageWithDependencies(
+      {
+        getActiveSessionId: () => activeSessionId,
+        getMessages: () => [{ info: userMessage('user-1') }],
+        isSessionWorking: () => true,
+        abortSession,
+        startLoading: vi.fn(),
+        deleteMessage,
+        syncSessionMessages: vi.fn(async () => {}),
+        sendEditedMessage,
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt',
+      {
+        queuedAttachments: {
+          droppedFiles: [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
+          clipboardImages: [],
+          terminalSelection: null,
+        },
+      }
+    );
+
+    await vi.waitFor(() => expect(abortSession).toHaveBeenCalledWith('session-1'));
+    activeSessionId = 'session-2';
+    abortGate.resolve();
+
+    await expect(edit).resolves.toBe(true);
+    expect(deleteMessage).toHaveBeenCalledWith('session-1', 'user-1');
+    expect(sendEditedMessage).toHaveBeenCalledWith('updated prompt', 'session-1', {
+      droppedFiles: [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
+      clipboardImages: [],
+      terminalSelection: null,
+    });
   });
 
   it('editMessage returns early for blank text, missing messages, and inactive sessions', async () => {
@@ -322,7 +374,7 @@ describe('session-controls helpers', () => {
     );
 
     expect(deleteMessage).toHaveBeenCalledWith('session-1', 'user-1');
-    expect(sendEditedMessage).toHaveBeenCalledWith('');
+    expect(sendEditedMessage).toHaveBeenCalledWith('', 'session-1', undefined);
   });
 
   it('resyncs history and reports errors without sending when deletion fails', async () => {

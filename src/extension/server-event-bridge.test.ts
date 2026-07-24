@@ -40,6 +40,10 @@ interface CapturedHandlers {
 function createMocks(options?: {
   workspacePath?: string | null;
   isSessionInWorkspace?: (sessionID: string, workspacePath: string | null | undefined) => boolean;
+  getSessionWorkspaceMatch?: (
+    sessionID: string,
+    workspacePath: string | null | undefined
+  ) => boolean | undefined;
   hiddenSessions?: HiddenSessionManager;
 }) {
   const handlers: CapturedHandlers = { status: undefined, event: undefined };
@@ -53,6 +57,9 @@ function createMocks(options?: {
   const sessionState = {
     handleServerEvent: vi.fn(),
     isSessionInWorkspace: vi.fn(options?.isSessionInWorkspace || (() => true)),
+    getSessionWorkspaceMatch: vi.fn(
+      options?.getSessionWorkspaceMatch || options?.isSessionInWorkspace || (() => true)
+    ),
     persist: vi.fn(() => Promise.resolve()),
     flush: vi.fn(() => Promise.resolve()),
   };
@@ -278,6 +285,22 @@ describe('ServerEventBridge', () => {
     handlers.event!({});
     expect(sessionState.handleServerEvent).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an unknown session directory as a foreign workspace', () => {
+    const { bridge, handlers, post, sessionState } = createMocks({
+      workspacePath: '/repo',
+      getSessionWorkspaceMatch: () => undefined,
+    });
+    const parsed = { type: 'session.status' as const, properties: { sessionID: 'session-1' } };
+    mocks.parseServerEvent.mockReturnValue(parsed);
+    mocks.getSessionIdsForEvent.mockReturnValue(['session-1']);
+
+    bridge.attach();
+    handlers.event!({});
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(parsed);
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
   it('event handler does not suppress when session is not hidden', () => {

@@ -362,6 +362,7 @@ describe('WebviewSession', () => {
       payload: {
         config: {
           managerSessionId: 'manager-1',
+          workspaceDirectory: '/workspace',
           planDocPath: 'RALPH.md',
           iterations: 5,
           promptTemplate: 'Follow the plan',

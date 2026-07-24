@@ -10,6 +10,14 @@ import {
 const vscodeMock = getVscodeMock();
 const spawnMock = getSpawnMock();
 
+function createExportServer() {
+  return createServer({
+    request: vi.fn(async () => [{ id: 'session-1', directory: '/repo' }]),
+    resolveCommand: vi.fn(() => 'opencode'),
+    getWorkspaceCwd: vi.fn(() => '/repo'),
+  });
+}
+
 describe('SidebarProvider export flows', () => {
   it('exports a session through the OpenCode CLI and opens the result', async () => {
     const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
@@ -27,10 +35,7 @@ describe('SidebarProvider export flows', () => {
     });
 
     const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        resolveCommand: vi.fn(() => 'opencode'),
-        getWorkspaceCwd: vi.fn(() => '/repo'),
-      }),
+      server: createExportServer(),
     });
 
     const exportPromise = provider.handleMessage({
@@ -73,10 +78,7 @@ describe('SidebarProvider export flows', () => {
     });
 
     const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        resolveCommand: vi.fn(() => 'opencode'),
-        getWorkspaceCwd: vi.fn(() => '/repo'),
-      }),
+      server: createExportServer(),
     });
 
     const exportPromise = provider.handleMessage({
@@ -121,10 +123,7 @@ describe('SidebarProvider export flows', () => {
     });
 
     const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        resolveCommand: vi.fn(() => 'opencode'),
-        getWorkspaceCwd: vi.fn(() => '/repo'),
-      }),
+      server: createExportServer(),
     });
 
     const exportPromise = provider.handleMessage({
@@ -166,10 +165,7 @@ describe('SidebarProvider export flows', () => {
     });
 
     const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        resolveCommand: vi.fn(() => 'opencode'),
-        getWorkspaceCwd: vi.fn(() => '/repo'),
-      }),
+      server: createExportServer(),
     });
 
     const exportPromise = provider.handleMessage({
@@ -199,22 +195,27 @@ describe('SidebarProvider export flows', () => {
   });
 
   it('times out a hung export process and reports an error', async () => {
-    const kill = vi.fn();
-    spawnMock.mockReturnValue({
+    let closeHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+    const proc = {
       stderr: {
         on: vi.fn(),
       },
-      once: vi.fn(),
-      kill,
+      once: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'close') {
+          closeHandler = handler as (code: number | null, signal: NodeJS.Signals | null) => void;
+        }
+      }),
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        queueMicrotask(() => closeHandler?.(null, signal));
+        return true;
+      }),
       exitCode: null,
       signalCode: null,
-    });
+    };
+    spawnMock.mockReturnValue(proc);
 
     const { provider } = await createSidebarProviderInstance({
-      server: createServer({
-        resolveCommand: vi.fn(() => 'opencode'),
-        getWorkspaceCwd: vi.fn(() => '/repo'),
-      }),
+      server: createExportServer(),
     });
 
     const exportService = provider as unknown as {
@@ -229,7 +230,7 @@ describe('SidebarProvider export flows', () => {
         payload: { sessionId: 'session-1' },
       });
 
-      expect(kill).toHaveBeenCalledWith('SIGTERM');
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
       expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
         'Failed to export session: OpenCode CLI export timed out'
       );

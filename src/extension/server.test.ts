@@ -389,7 +389,7 @@ describe('OpenCodeServer event stream', () => {
     server.on('status', (status) => statuses.push(status));
     setRunning(server);
 
-    const oversizedChunk = new TextEncoder().encode('x'.repeat(1_000_001));
+    const oversizedChunk = new TextEncoder().encode('x'.repeat(8_000_001));
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockImplementation(async (_input, init) => {
       const signal = init?.signal as AbortSignal;
@@ -415,13 +415,49 @@ describe('OpenCodeServer event stream', () => {
     await server.dispose();
   });
 
+  it('accepts large OpenCode sync events without reconnecting', async () => {
+    const server = new OpenCodeServer(4096, false);
+    const events: unknown[] = [];
+    const statuses: ServerStatus[] = [];
+    server.on('event', (event) => events.push(event));
+    server.on('status', (status) => statuses.push(status));
+    setRunning(server);
+
+    const payload = JSON.stringify({
+      type: 'sync',
+      properties: { content: 'x'.repeat(2_500_000) },
+    });
+    const encoded = new TextEncoder().encode(`data: ${payload}\n\n`);
+    const chunks: Uint8Array[] = [];
+    for (let offset = 0; offset < encoded.length; offset += 64_000) {
+      chunks.push(encoded.subarray(offset, offset + 64_000));
+    }
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (_input, init) =>
+      createChunkedEventResponse(init?.signal as AbortSignal, chunks)
+    );
+
+    const stream = startEventStream(server);
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+
+    const event = events[0] as { type?: string; properties?: { content?: string } };
+    expect(event.type).toBe('sync');
+    expect(event.properties?.content).toHaveLength(2_500_000);
+    expect(
+      statuses.some((status) => status.state === 'running' && status.eventStream === 'degraded')
+    ).toBe(false);
+
+    stopEventStream(server);
+    await stream;
+  });
+
   it('drops oversized SSE payloads before parsing them', async () => {
     const server = new OpenCodeServer(4096, false);
     const events: unknown[] = [];
     server.on('event', (event) => events.push(event));
     setRunning(server);
 
-    const oversizedPayload = `data: {"type":"${'x'.repeat(250_001)}"}\n\n`;
+    const oversizedPayload = `data: {"type":"${'x'.repeat(8_000_001)}"}\n\n`;
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue(createImmediateEventResponse(oversizedPayload));
 
@@ -429,7 +465,7 @@ describe('OpenCodeServer event stream', () => {
 
     expect(events).toEqual([]);
     expect(loggerMock.warn).toHaveBeenCalledWith(
-      'Ignoring oversized event stream payload (250012 chars > 250000)'
+      'Ignoring oversized event stream payload (8000012 chars > 8000000)'
     );
 
     await server.dispose();
@@ -832,6 +868,30 @@ describe('OpenCodeServer maintenance', () => {
     api.handleServerEvent(event);
 
     expect(listener).toHaveBeenCalledWith(event);
+    expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
+  });
+
+  it('checks for deferred maintenance from a global event envelope without changing emission', () => {
+    const server = new OpenCodeServer(4096, false);
+    const requestMaintenanceCheck = vi.fn();
+    const envelope = {
+      directory: '/repo',
+      payload: {
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      },
+    };
+    const listener = vi.fn();
+    const api = server as unknown as {
+      handleServerEvent: (value: unknown) => void;
+      requestMaintenanceCheck: () => void;
+    };
+    api.requestMaintenanceCheck = requestMaintenanceCheck;
+    server.on('event', listener);
+
+    api.handleServerEvent(envelope);
+
+    expect(listener).toHaveBeenCalledWith(envelope);
     expect(requestMaintenanceCheck).toHaveBeenCalledOnce();
   });
 
@@ -1560,6 +1620,7 @@ describe('OpenCodeServer startup health polling', () => {
       ) => void;
       startAttemptId: number;
       disposeGeneration: number;
+      processManager: { confirmManagedServerOwnership: () => Promise<boolean> };
     };
 
     api.readHealthInfo = vi
@@ -1568,6 +1629,7 @@ describe('OpenCodeServer startup health polling', () => {
       .mockResolvedValueOnce({ healthy: true, version: MINIMUM_SUPPORTED_OPENCODE_VERSION });
     api.startAttemptId = 1;
     api.disposeGeneration = 0;
+    api.processManager.confirmManagedServerOwnership = vi.fn().mockResolvedValue(true);
 
     api.pollHealth(1, 0, resolved, rejected);
     await vi.advanceTimersByTimeAsync(200);
@@ -1582,6 +1644,117 @@ describe('OpenCodeServer startup health polling', () => {
 });
 
 describe('OpenCodeServer managed process lifecycle', () => {
+  it('terminates the spawned child before rejecting a health-read failure', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server, false);
+    api.readHealthInfo = vi
+      .fn<() => Promise<{ healthy: boolean; version?: string }>>()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockRejectedValueOnce(new Error('health read failed'));
+
+    const startResult = expect(server.start()).rejects.toThrow('health read failed');
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(200);
+    await startResult;
+
+    expect(children).toHaveLength(1);
+    expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(
+      (server as unknown as { processManager: { process: MockChildProcess | null } }).processManager
+        .process
+    ).toBeNull();
+  });
+
+  it('terminates the captured child before rejecting an asynchronous spawn error', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server, false);
+    api.pollHealth = () => {};
+
+    const startResult = expect(server.start()).rejects.toThrow('spawn EACCES');
+    await flushMicrotasks();
+    expect(children).toHaveLength(1);
+
+    children[0]!.emit('error', new Error('spawn EACCES'));
+    await startResult;
+
+    expect(server.status).toEqual({
+      state: 'error',
+      message: 'OpenCode server failed to spawn: spawn EACCES',
+    });
+    expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(
+      (server as unknown as { processManager: { process: MockChildProcess | null } }).processManager
+        .process
+    ).toBeNull();
+  });
+
+  it('terminates the spawned child and rejects when ownership confirmation is false', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureManagedStartup(server, false);
+    api.readHealthInfo = vi
+      .fn<() => Promise<{ healthy: boolean; version?: string }>>()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockResolvedValueOnce({
+        healthy: true,
+        version: MINIMUM_SUPPORTED_OPENCODE_VERSION,
+      });
+    const processManager = (
+      server as unknown as {
+        processManager: {
+          confirmManagedServerOwnership: () => Promise<boolean>;
+          process: MockChildProcess | null;
+        };
+      }
+    ).processManager;
+    processManager.confirmManagedServerOwnership = vi.fn().mockResolvedValue(false);
+
+    const startResult = expect(server.start()).rejects.toThrow(
+      'Could not confirm ownership of the OpenCode server started by Varro'
+    );
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(200);
+    await startResult;
+
+    expect(server.status).toEqual(
+      expect.objectContaining({
+        state: 'error',
+        message: 'Could not confirm ownership of the OpenCode server started by Varro',
+      })
+    );
+    expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(processManager.process).toBeNull();
+  });
+
+  it('cleans a tracked child from a failed startup before launching a retry', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    const previous = createMockChildProcess();
+    const processManager = (
+      server as unknown as {
+        processManager: {
+          process: MockChildProcess | null;
+          managedProcess: boolean;
+          stopServerForRestart: ReturnType<typeof vi.fn>;
+        };
+      }
+    ).processManager;
+    processManager.process = previous;
+    processManager.managedProcess = true;
+    processManager.stopServerForRestart = vi.fn(async () => {
+      expect(processManager.process).toBe(previous);
+      processManager.process = null;
+      processManager.managedProcess = false;
+    });
+
+    await expect(server.start()).resolves.toBe(server.url);
+
+    expect(processManager.stopServerForRestart).toHaveBeenCalledOnce();
+    expect(children).toHaveLength(1);
+    expect(processManager.stopServerForRestart.mock.invocationCallOrder[0]).toBeLessThan(
+      spawnMock.mock.invocationCallOrder[0]!
+    );
+  });
+
   it('updates status and restarts when a managed child exits after startup', async () => {
     const server = new OpenCodeServer(4096, true);
     const { children } = configureManagedStartup(server);
@@ -1596,6 +1769,41 @@ describe('OpenCodeServer managed process lifecycle', () => {
     await flushMicrotasks();
 
     expect(children).toHaveLength(2);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('isolates stale exit and error callbacks from a replacement child', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureManagedStartup(server);
+    const processManager = (
+      server as unknown as { processManager: { process: MockChildProcess | null } }
+    ).processManager;
+
+    await server.start();
+    const first = children[0]!;
+    const staleExit = first.listeners('exit').at(-1) as (
+      code: number | null,
+      signal: NodeJS.Signals | null
+    ) => void;
+    const staleError = first.listeners('error').at(-1) as (err: Error) => void;
+
+    first.emit('exit', 1, null);
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushMicrotasks();
+
+    const replacement = children[1]!;
+    expect(processManager.process).toBe(replacement);
+    const replacementExitListeners = replacement.listenerCount('exit');
+    const replacementErrorListeners = replacement.listenerCount('error');
+
+    staleExit(1, null);
+    staleError(new Error('stale spawn error'));
+    await flushMicrotasks();
+
+    expect(processManager.process).toBe(replacement);
+    expect(replacement.listenerCount('exit')).toBe(replacementExitListeners);
+    expect(replacement.listenerCount('error')).toBe(replacementErrorListeners);
     expect(server.status.state).toBe('running');
   });
 
@@ -1614,6 +1822,7 @@ describe('OpenCodeServer managed process lifecycle', () => {
     await server.dispose();
 
     await startResult;
+    expect(children[0]!.kill).toHaveBeenCalledWith('SIGTERM');
     expect(server.status.state).toBe('stopped');
   });
 

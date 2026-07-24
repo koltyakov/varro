@@ -151,7 +151,7 @@ describe('FileSearchService', () => {
     service.dispose();
   });
 
-  it('cancels stale searches and only reports the latest result', async () => {
+  it('cancels stale delivery without cancelling shared workspace discovery', async () => {
     const pendingFiles = deferred<Array<{ fsPath: string }>>();
     vscodeMock.workspace.findFiles.mockReturnValue(pendingFiles.promise);
     const onResult = vi.fn();
@@ -172,6 +172,12 @@ describe('FileSearchService', () => {
 
     expect(firstSearch?.cancel).toHaveBeenCalledTimes(1);
     expect(firstSearch?.dispose).toHaveBeenCalledTimes(1);
+    expect(vscodeMock.workspace.findFiles.mock.calls[0]).toHaveLength(3);
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
+      '**/*',
+      '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
+      4_000
+    );
     expect(onResult).toHaveBeenCalledTimes(1);
     expect(onResult).toHaveBeenCalledWith({
       requestId: 2,
@@ -269,6 +275,35 @@ describe('FileSearchService', () => {
       requestId: 2,
       query: '',
       files: [{ path: '/repo/src/second.ts', relativePath: 'src/second.ts', type: 'file' }],
+    });
+    service.dispose();
+  });
+
+  it('reruns discovery instead of publishing a snapshot invalidated in flight', async () => {
+    const staleFiles = deferred<Array<{ fsPath: string }>>();
+    const freshFiles = deferred<Array<{ fsPath: string }>>();
+    vscodeMock.workspace.findFiles
+      .mockReturnValueOnce(staleFiles.promise)
+      .mockReturnValueOnce(freshFiles.promise);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+
+    service.search(1, '', 10, onResult);
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+    };
+    watcher.fireCreate();
+    staleFiles.resolve([{ fsPath: '/repo/src/stale.ts' }]);
+    await vi.waitFor(() => expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2));
+
+    expect(onResult).not.toHaveBeenCalled();
+    freshFiles.resolve([{ fsPath: '/repo/src/fresh.ts' }]);
+    await vi.waitFor(() => expect(onResult).toHaveBeenCalledOnce());
+    expect(onResult).toHaveBeenCalledWith({
+      requestId: 1,
+      query: '',
+      files: [{ path: '/repo/src/fresh.ts', relativePath: 'src/fresh.ts', type: 'file' }],
     });
     service.dispose();
   });

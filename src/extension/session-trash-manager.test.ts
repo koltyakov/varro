@@ -112,6 +112,34 @@ describe('SessionTrashManager', () => {
     expect(manager.list()).toEqual([]);
   });
 
+  it('replaces a child-first trash entry with its ancestor and restores the merged tree', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    const sessions = [session('root', 3_000), session('child', 2_000, { parentID: 'root' })];
+
+    await manager.moveToTrash('child', sessions, 4_000);
+    const ancestor = await manager.moveToTrash('root', sessions, 5_000);
+
+    expect(manager.list()).toHaveLength(1);
+    expect(ancestor?.rootID).toBe('root');
+    expect(ancestor?.sessions.map(({ id }) => id)).toEqual(['root', 'child']);
+    await expect(manager.restore('root')).resolves.toEqual(ancestor);
+    expect(manager.isHidden('root')).toBe(false);
+    expect(manager.isHidden('child')).toBe(false);
+  });
+
+  it('deletes a child-first tree once after replacing it with its ancestor', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    const sessions = [session('root', 3_000), session('child', 2_000, { parentID: 'root' })];
+    const deleteSession = vi.fn(async () => undefined);
+
+    await manager.moveToTrash('child', sessions, 4_000);
+    await manager.moveToTrash('root', sessions, 5_000);
+    await manager.deletePermanently('root', deleteSession);
+
+    expect(deleteSession.mock.calls.map(([target]) => target.id)).toEqual(['root', 'child']);
+    expect(manager.list()).toEqual([]);
+  });
+
   it('does not hide or unhide sessions when persistence fails', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     workspaceState.set.mockRejectedValueOnce(new Error('write failed'));
@@ -184,7 +212,14 @@ describe('SessionTrashManager', () => {
         deletedAt: 10,
         expiresAt: 20,
         root: session('root', 3_000),
-        sessions: [session('root', 3_000), { id: 'bad-session' }],
+        sessions: [session('root', 3_000)],
+      } as never,
+      {
+        rootID: 'corrupt-tree',
+        deletedAt: 10,
+        expiresAt: 20,
+        root: session('corrupt-tree', 3_000),
+        sessions: [session('corrupt-tree', 3_000), { id: 'bad-session' }],
       } as never,
       {
         rootID: 'missing-fields',
@@ -200,6 +235,47 @@ describe('SessionTrashManager', () => {
         sessions: [{ id: 'root' }],
       },
     ]);
+  });
+
+  it('drops all persisted entries that overlap', () => {
+    const child = session('child', 2_000, { parentID: 'root' });
+    mementoState.stored = [
+      {
+        rootID: 'root',
+        deletedAt: 10,
+        expiresAt: 20,
+        root: session('root', 3_000),
+        sessions: [session('root', 3_000), child],
+      },
+      {
+        rootID: 'child',
+        deletedAt: 11,
+        expiresAt: 21,
+        root: child,
+        sessions: [child],
+      },
+    ];
+
+    expect(new SessionTrashManager(workspaceState as never).list()).toEqual([]);
+  });
+
+  it('rejects a persisted tree containing an unrelated session before deletion', async () => {
+    mementoState.stored = [
+      {
+        rootID: 'root',
+        deletedAt: 10,
+        expiresAt: 20,
+        root: session('root', 3_000),
+        sessions: [session('root', 3_000), session('unrelated', 2_000)],
+      },
+    ];
+    const manager = new SessionTrashManager(workspaceState as never);
+    const deleteSession = vi.fn(async () => undefined);
+
+    await manager.empty(deleteSession);
+
+    expect(manager.list()).toEqual([]);
+    expect(deleteSession).not.toHaveBeenCalled();
   });
 
   it('ignores a malformed persisted recycle-bin container', () => {

@@ -4,6 +4,7 @@ import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from '
 function createRalphConfig() {
   return {
     managerSessionId: 'manager-1',
+    workspaceDirectory: '/workspace',
     planDocPath: 'RALPH.md',
     iterations: 5,
     promptTemplate: 'Follow the plan',
@@ -50,8 +51,10 @@ describe('webview message validation', () => {
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/prompt_async?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/command')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/fork')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
@@ -98,6 +101,10 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', 'https://example.com/session')).toBe(false);
     expect(isAllowedApiRequest('GET', '//example.com/session')).toBe(false);
     expect(isAllowedApiRequest('GET', '/experimental/console')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session?directory=')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&directory=%2Fb')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&extra=1')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/abc/abort?directory=%2Frepo-a')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);
@@ -358,6 +365,33 @@ describe('webview message validation', () => {
   });
 
   it('rejects malformed or unbounded Ralph command payloads', () => {
+    const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = createRalphConfig();
+    expect(
+      parseWebviewMessage({ type: 'ralph/start', payload: { config: legacyConfig } })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'ralph/sync',
+        payload: {
+          legacyRuns: {
+            'manager-1': {
+              ...createRalphRun(),
+              config: legacyConfig,
+            },
+          },
+        },
+      })
+    ).toEqual({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          'manager-1': {
+            ...createRalphRun(),
+            config: { ...legacyConfig, workspaceDirectory: null },
+          },
+        },
+      },
+    });
     expect(
       parseWebviewMessage({
         type: 'ralph/start',

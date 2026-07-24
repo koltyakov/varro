@@ -45,7 +45,6 @@ import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import { writeClipboard } from '../../lib/write-clipboard';
-import { getSpinnerPhaseDelayStyle } from './spinner-phase';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -114,7 +113,6 @@ const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
 const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
 const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
-const SESSION_RUNNING_SPINNER_DURATION_MS = 850;
 
 function getDiffSummaryKey(sessionId: string, updated: number): string {
   return `${sessionId}:${updated}`;
@@ -1439,7 +1437,8 @@ function SessionListItem(props: {
     if (interactive && !interactive.classList.contains('session-item-main')) return;
     const row = event.currentTarget;
     if (row instanceof HTMLElement) row.setPointerCapture?.(event.pointerId);
-    if (props.embedded && event.pointerType === 'mouse') {
+    if (event.pointerType === 'mouse') {
+      event.preventDefault();
       openedPointerId = event.pointerId;
       openSession();
     }
@@ -1548,11 +1547,6 @@ function SessionListItem(props: {
           {(kind) => (
             <span
               class={`session-item-indicator session-status-indicator ${getSessionStatusIndicatorClass(kind())}`}
-              style={
-                kind() === 'running'
-                  ? getSpinnerPhaseDelayStyle(SESSION_RUNNING_SPINNER_DURATION_MS)
-                  : undefined
-              }
               title={indicatorTitle(kind())}
               aria-label={indicatorTitle(kind())}
             />

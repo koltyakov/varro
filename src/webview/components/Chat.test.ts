@@ -585,6 +585,7 @@ describe('empty session pruning', () => {
     setShowSessionPicker(true);
     ralphStore.startRun({
       managerSessionId: 'manager',
+      workspaceDirectory: '/workspace',
       planDocPath: 'TESTS.md',
       iterations: 15,
       promptTemplate: 'Prompt',
@@ -1722,8 +1723,7 @@ describe('header status badges', () => {
     expect(indicator?.getAttribute('title')).toBe('Permission request pending');
   });
 
-  it('phases running spinners from the current clock', () => {
-    vi.setSystemTime(1_234);
+  it('leaves running spinner timing to CSS', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('sessionStatus', { 'session-1': { type: 'busy' } });
     setShowSessionPicker(true);
@@ -1737,9 +1737,9 @@ describe('header status badges', () => {
       '.session-item .session-item-indicator'
     ) as HTMLElement | null;
 
-    expect(headerSpinner?.style.animationDelay).toBe('-334ms');
+    expect(headerSpinner?.style.animationDelay).toBe('');
     expect(indicator?.classList.contains('is-running')).toBe(true);
-    expect(indicator?.style.animationDelay).toBe('-384ms');
+    expect(indicator?.style.animationDelay).toBe('');
   });
 
   it('keeps the active session in the sessions picker after returning from chat', async () => {
@@ -2737,6 +2737,7 @@ describe('usage-limit session status precedence', () => {
     });
     ralphStore.startRun({
       managerSessionId: 'session-1',
+      workspaceDirectory: '/workspace',
       planDocPath: 'TESTS.md',
       iterations: 15,
       promptTemplate: 'Prompt',
@@ -2763,6 +2764,7 @@ describe('usage-limit session status precedence', () => {
     });
     ralphStore.startRun({
       managerSessionId: 'session-1',
+      workspaceDirectory: '/workspace',
       planDocPath: 'PLAN.md',
       iterations: 15,
       promptTemplate: 'Prompt',
@@ -2792,6 +2794,7 @@ describe('usage-limit session status precedence', () => {
     });
     ralphStore.startRun({
       managerSessionId: 'manager',
+      workspaceDirectory: '/workspace',
       planDocPath: 'TESTS.md',
       iterations: 15,
       promptTemplate: 'Prompt',
@@ -2827,6 +2830,7 @@ describe('usage-limit session status precedence', () => {
     ]);
     ralphStore.startRun({
       managerSessionId: 'manager',
+      workspaceDirectory: '/workspace',
       planDocPath: 'TESTS.md',
       iterations: 15,
       promptTemplate: 'Prompt',
@@ -2867,6 +2871,7 @@ describe('usage-limit session status precedence', () => {
     ]);
     ralphStore.startRun({
       managerSessionId: 'manager',
+      workspaceDirectory: '/workspace',
       planDocPath: 'TESTS.md',
       iterations: 15,
       promptTemplate: 'Prompt',

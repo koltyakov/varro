@@ -1,7 +1,10 @@
 import type { PermissionMode } from './protocol';
+import { normalizeWorkspaceIdentity } from './workspace-path';
 
 export const RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT = 5;
 export const MAX_RALPH_ITERATIONS = 1_000;
+export const RALPH_WORKSPACE_MISSING_NOTE =
+  'This Ralph run predates workspace binding, so it cannot be resumed safely. Start a new Ralph run from the intended workspace.';
 
 export type RalphStatus = 'running' | 'paused' | 'stopped' | 'done' | 'incomplete' | 'failed';
 
@@ -32,6 +35,8 @@ export type RalphSelectedModel = {
 
 export type RalphConfig = {
   managerSessionId: string;
+  /** Canonical workspace directory captured when this run was created. */
+  workspaceDirectory: string | null;
   planDocPath: string;
   iterations: number;
   promptTemplate: string;
@@ -85,4 +90,28 @@ export type RalphRun = {
   updatedAt: number;
   /** Set when the loop transitions to a terminal status. */
   stopReason?: RalphStopReason;
+  /** Run-level explanation for failures that occur outside an iteration. */
+  note?: string;
 };
+
+export function normalizeRalphWorkspaceDirectory(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const identity = normalizeWorkspaceIdentity(trimmed);
+  if (!identity) return null;
+  if (
+    !identity.startsWith('/') &&
+    !/^[a-z]:\//.test(identity) &&
+    !/^\/\/[^/]+\/[^/]+/.test(identity)
+  ) {
+    return null;
+  }
+  if (
+    trimmed === '/' ||
+    /^[A-Za-z]:[\\/]+$/.test(trimmed) ||
+    /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+[\\/]*$/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return trimmed.replace(/[\\/]+$/, '') || null;
+}

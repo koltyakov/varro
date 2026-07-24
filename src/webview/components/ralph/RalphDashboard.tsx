@@ -32,7 +32,9 @@ export function RalphDashboard(props: { sessionId: string }) {
   const isRunning = () => run()?.status === 'running';
   const isResumable = () => {
     const s = run()?.status;
-    return s === 'paused' || s === 'failed' || s === 'incomplete';
+    return (
+      !!run()?.config.workspaceDirectory && (s === 'paused' || s === 'failed' || s === 'incomplete')
+    );
   };
   const isTerminal = () => {
     const s = run()?.status;
@@ -63,6 +65,8 @@ export function RalphDashboard(props: { sessionId: string }) {
     return iteration.status === 'failed' || (iteration.status === 'running' && !!activeIssue());
   };
   const globalIssue = () => {
+    const runNote = run()?.note;
+    if (runNote) return runNote;
     const issue = activeIssue();
     return latestIterationShowsOwnError() ? null : issue;
   };

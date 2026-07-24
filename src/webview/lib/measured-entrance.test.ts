@@ -1,0 +1,83 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { prepareMeasuredEntrance } from './measured-entrance';
+
+describe('prepareMeasuredEntrance', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.unstubAllGlobals();
+  });
+
+  it('measures the target height and releases temporary layout constraints afterward', async () => {
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {
+          disconnect();
+        }
+      }
+    );
+    const element = document.createElement('div');
+    Object.defineProperty(element, 'scrollHeight', { configurable: true, value: 84 });
+    document.body.appendChild(element);
+    const onFinish = vi.fn();
+
+    prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+      onFinish,
+    });
+    await Promise.resolve();
+
+    expect(element.classList).toContain('measured-entrance-active');
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('84px');
+
+    const event = new Event('animationend') as AnimationEvent;
+    Object.defineProperty(event, 'animationName', { value: 'test-entrance' });
+    element.dispatchEvent(event);
+
+    expect(element.classList).not.toContain('measured-entrance-active');
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('');
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(onFinish).toHaveBeenCalledOnce();
+  });
+
+  it('does not start a nested entrance when its row is already entering', async () => {
+    const row = document.createElement('div');
+    row.className = 'interactive-item-entering';
+    const element = document.createElement('div');
+    row.appendChild(element);
+    document.body.appendChild(row);
+
+    prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+      skipWithin: '.interactive-item-entering',
+    });
+    await Promise.resolve();
+
+    expect(element.classList).not.toContain('measured-entrance-active');
+  });
+
+  it('starts at zero height so an initially empty row can grow during the animation', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+
+    prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+    });
+    await Promise.resolve();
+
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('0px');
+    expect(element.classList).toContain('measured-entrance-active');
+  });
+});

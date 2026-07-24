@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { readFile, rename, stat, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import type {
@@ -30,6 +30,11 @@ const ANTHROPIC_USER_AGENT = 'claude-code/2.1.69';
 const ANTHROPIC_STATUSLINE_STALENESS_MS = 5 * 60_000;
 const MERIDIAN_QUOTA_ENDPOINT_PATH = '/v1/usage/quota';
 const HIDDEN_MERIDIAN_WINDOW_IDS = new Set(['seven_day_omelette']);
+const CREDENTIAL_LOCK_WAIT_MS = 2_000;
+const CREDENTIAL_LOCK_RETRY_MS = 25;
+const CREDENTIAL_LOCK_STALE_MS = 30_000;
+const CREDENTIAL_COMPARE_RETRIES = 3;
+const anthropicCredentialWriteQueues = new Map<string, Promise<void>>();
 
 const ANTHROPIC_QUOTA_DEFS = [
   { id: 'five_hour', label: '5-Hour Limit' },
@@ -127,6 +132,7 @@ export function createAnthropicAdapter(): ProviderLimitAdapter {
           try {
             await writeAnthropicCredentials(
               credentials.credentialsFilePath,
+              credentials.refreshToken,
               refreshed.accessToken,
               refreshed.refreshToken,
               refreshed.expiresInSeconds
@@ -652,36 +658,120 @@ async function refreshAnthropicAccessToken(refreshToken: string) {
 
 async function writeAnthropicCredentials(
   credentialsFilePath: string,
+  expectedRefreshToken: string,
   accessToken: string,
   refreshToken: string,
   expiresInSeconds: number | null
 ) {
-  const raw = await readFile(credentialsFilePath, 'utf-8');
-  const root = asRecord(JSON.parse(raw) as unknown) ?? {};
-  const oauth = asRecord(root.claudeAiOauth) ?? {};
+  const previous = anthropicCredentialWriteQueues.get(credentialsFilePath) ?? Promise.resolve();
+  const update = () =>
+    writeAnthropicCredentialsNow(
+      credentialsFilePath,
+      expectedRefreshToken,
+      accessToken,
+      refreshToken,
+      expiresInSeconds
+    );
+  const operation = previous.then(update, update);
+  anthropicCredentialWriteQueues.set(credentialsFilePath, operation);
+  void operation
+    .finally(() => {
+      if (anthropicCredentialWriteQueues.get(credentialsFilePath) === operation) {
+        anthropicCredentialWriteQueues.delete(credentialsFilePath);
+      }
+    })
+    .catch(() => undefined);
+  return operation;
+}
 
-  const updatedOauth: Record<string, unknown> = {
-    ...oauth,
-    accessToken,
-    refreshToken,
-  };
-  if (expiresInSeconds != null) {
-    updatedOauth.expiresAt = Date.now() + expiresInSeconds * 1000;
+async function writeAnthropicCredentialsNow(
+  credentialsFilePath: string,
+  expectedRefreshToken: string,
+  accessToken: string,
+  refreshToken: string,
+  expiresInSeconds: number | null
+) {
+  const releaseLock = await acquireCredentialLock(credentialsFilePath);
+  try {
+    for (let attempt = 0; attempt < CREDENTIAL_COMPARE_RETRIES; attempt += 1) {
+      const raw = await readFile(credentialsFilePath, 'utf-8');
+      const root = asRecord(JSON.parse(raw) as unknown) ?? {};
+      const oauth = asRecord(root.claudeAiOauth) ?? {};
+      if (getString(oauth.refreshToken) !== expectedRefreshToken) return;
+
+      const updatedOauth: Record<string, unknown> = {
+        ...oauth,
+        accessToken,
+        refreshToken,
+      };
+      if (expiresInSeconds != null) {
+        updatedOauth.expiresAt = Date.now() + expiresInSeconds * 1000;
+      }
+
+      const tempPath = `${credentialsFilePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+      const fileMode = await stat(credentialsFilePath)
+        .then((file) => file.mode & 0o777)
+        .catch(() => 0o600);
+      try {
+        await writeFile(
+          tempPath,
+          JSON.stringify({
+            ...root,
+            claudeAiOauth: updatedOauth,
+          }),
+          { encoding: 'utf-8', mode: fileMode }
+        );
+        if ((await readFile(credentialsFilePath, 'utf-8')) !== raw) continue;
+        await rename(tempPath, credentialsFilePath);
+        return;
+      } finally {
+        await rm(tempPath, { force: true }).catch(() => undefined);
+      }
+    }
+    throw new Error('Anthropic credentials changed repeatedly during refresh');
+  } finally {
+    await releaseLock();
   }
+}
 
-  const tempPath = `${credentialsFilePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-  const fileMode = await stat(credentialsFilePath)
-    .then((file) => file.mode & 0o777)
-    .catch(() => 0o600);
-  await writeFile(
-    tempPath,
-    JSON.stringify({
-      ...root,
-      claudeAiOauth: updatedOauth,
-    }),
-    { encoding: 'utf-8', mode: fileMode }
-  );
-  await rename(tempPath, credentialsFilePath);
+async function acquireCredentialLock(credentialsFilePath: string): Promise<() => Promise<void>> {
+  const lockPath = `${credentialsFilePath}.varro.lock`;
+  const deadline = Date.now() + CREDENTIAL_LOCK_WAIT_MS;
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      return () => rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
+    } catch (err) {
+      if (!isFileSystemError(err, 'EEXIST')) throw err;
+      if (await isStaleCredentialLock(lockPath)) {
+        await rm(lockPath, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error('Timed out waiting to update Anthropic credentials', { cause: err });
+      }
+      await delay(CREDENTIAL_LOCK_RETRY_MS);
+    }
+  }
+}
+
+async function isStaleCredentialLock(lockPath: string) {
+  try {
+    const lockStat = await stat(lockPath);
+    return (
+      Number.isFinite(lockStat.mtimeMs) && Date.now() - lockStat.mtimeMs >= CREDENTIAL_LOCK_STALE_MS
+    );
+  } catch (err) {
+    return isFileSystemError(err, 'ENOENT');
+  }
+}
+
+function isFileSystemError(value: unknown, code: string) {
+  return !!value && typeof value === 'object' && 'code' in value && value.code === code;
+}
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function parsePositiveInteger(value: unknown) {

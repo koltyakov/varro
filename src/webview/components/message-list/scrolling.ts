@@ -91,18 +91,10 @@ export function resolveAutoScrollOnUserScroll(args: {
   autoScrollThresholdPx: number;
 }): AutoScrollDecision {
   const delta = args.top - args.lastObservedScrollTop;
-  const intentionalUserBreak =
-    delta < -1 &&
-    (args.userScrolledUp ||
-      (args.distanceFromBottom >= args.autoScrollThresholdPx &&
-        args.bottomTargetStable &&
-        !args.followModeLocked));
+  const intentionalUserBreak = delta < -1 && args.userScrolledUp;
   const nextFollowModeLocked = args.followModeLocked && !intentionalUserBreak;
   const userMovedAwayNearBottom =
-    args.autoScroll &&
-    delta < -1 &&
-    args.distanceFromBottom > 1 &&
-    (args.userScrolledUp || (args.bottomTargetStable && !nextFollowModeLocked));
+    args.autoScroll && delta < -1 && args.distanceFromBottom > 1 && args.userScrolledUp;
   const userMovedAwayFromExpectedTarget =
     args.expectedScrollTop !== -1 &&
     args.userScrolledUp &&
@@ -179,7 +171,7 @@ export function resolveAutoScrollOnUserScroll(args: {
     };
   }
 
-  if (args.autoScroll && (delta >= 0 || nextFollowModeLocked)) {
+  if (args.autoScroll && !intentionalUserBreak) {
     return {
       nextAutoScroll: null,
       nextExpectedScrollTop: -1,

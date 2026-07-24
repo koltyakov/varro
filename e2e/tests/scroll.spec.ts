@@ -164,6 +164,19 @@ async function updateExpandableDiffPreview(
   await updateDiffPreviewWithPatch(page, messageId, patchText);
 }
 
+function makeWideDiffPatch(lineCount: number) {
+  return [
+    '*** Begin Patch',
+    '*** Update File: src/wide-report.ts',
+    '@@',
+    ...Array.from(
+      { length: lineCount },
+      (_, index) => `+export const value${index} = '${'wide content '.repeat(20)}';`
+    ),
+    '*** End Patch',
+  ].join('\n');
+}
+
 async function updateDiffPreviewWithPatch(
   page: Page,
   messageId: string,
@@ -518,46 +531,166 @@ test.describe('auto-scroll', () => {
     expect(topOffset).toBeLessThan(2);
   });
 
-  test('shows six collapsed diff rows with the toggle over the final row', async ({ page }) => {
+  test('overlays the diff toggle without obscuring horizontal scrolling', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     await expect(page.locator('.interactive-list')).toBeVisible();
 
     const messageId = 'message-diff-preview-assistant-59';
-    await updateExpandableDiffPreview(page, messageId);
+    await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(8));
 
     const preview = page.locator(`[data-msg-id="${messageId}"] .diff-view-lines`);
     const dimensions = await preview.evaluate((viewport) => {
       const viewportRect = viewport.getBoundingClientRect();
+      const shell = viewport.closest<HTMLElement>('.diff-view-lines-shell')!;
       const rows = Array.from(viewport.querySelectorAll<HTMLElement>('.diff-view-line'));
       const visibleRows = rows.filter((row) => {
         const rect = row.getBoundingClientRect();
         return rect.top < viewportRect.bottom && rect.bottom > viewportRect.top;
       });
-      const finalVisibleRect = visibleRows.at(-1)!.getBoundingClientRect();
-      const toggleRect = viewport
-        .closest<HTMLElement>('.diff-view-lines-shell')!
-        .querySelector<HTMLElement>('.diff-view-toggle')!
-        .getBoundingClientRect();
+      const toggle = shell
+        .closest<HTMLElement>('.diff-view-file')!
+        .querySelector<HTMLElement>('.diff-view-toggle')!;
       const fadeHeight = Number.parseFloat(
-        getComputedStyle(viewport.closest<HTMLElement>('.diff-view-lines-shell')!, '::after').height
+        getComputedStyle(shell, '::after').height
       );
 
       return {
         clientHeight: viewport.clientHeight,
         fadeHeight,
-        finalRowOverlap: finalVisibleRect.bottom - toggleRect.top,
         rowHeight: rows[0]!.getBoundingClientRect().height,
+        shellHeight: shell.getBoundingClientRect().height,
+        toggleInHeader: toggle.parentElement?.classList.contains('diff-view-item-expandable'),
         visibleRowCount: visibleRows.length,
       };
     });
 
     expect(dimensions.visibleRowCount).toBe(6);
     expect(dimensions.clientHeight).toBe(dimensions.rowHeight * 6);
-    expect(dimensions.finalRowOverlap).toBeGreaterThan(0);
+    expect(dimensions.shellHeight).toBe(dimensions.clientHeight + 1);
     expect(dimensions.fadeHeight).toBe(dimensions.rowHeight / 2);
+    expect(dimensions.toggleInHeader).toBe(true);
+
+    const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
+    await expect(toggle).toHaveAttribute('title', 'Expand diff preview');
+    await expect.poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity)).toBe('0.35');
+
+    const header = page.locator(`[data-msg-id="${messageId}"] .diff-view-item`);
+    const headerBounds = await header.boundingBox();
+    expect(headerBounds).not.toBeNull();
+    await page.mouse.move(headerBounds!.x + 4, headerBounds!.y + 4);
+    await expect
+      .poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity))
+      .toBe('0.7');
+
+    await toggle.hover();
+    await expect.poll(() => toggle.evaluate((button) => getComputedStyle(button).opacity)).toBe('1');
+    const headerTopBeforeExpansion = await header.evaluate(
+      (element) => element.getBoundingClientRect().top
+    );
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await waitForAnimationFrames(page, 4);
+    const headerTopAfterExpansion = await header.evaluate(
+      (element) => element.getBoundingClientRect().top
+    );
+    expect(Math.abs(headerTopAfterExpansion - headerTopBeforeExpansion)).toBeLessThan(2);
+
+    const expandedLayout = await preview.evaluate((viewport) => {
+      const shell = viewport.closest<HTMLElement>('.diff-view-lines-shell')!;
+
+      return {
+        fadeContent: getComputedStyle(shell, '::after').content,
+        hasHorizontalScrollbar: !!shell.querySelector('.diff-view-scrollbar-horizontal'),
+        shellHeight: shell.getBoundingClientRect().height,
+        viewportHeight: viewport.getBoundingClientRect().height,
+      };
+    });
+
+    expect(expandedLayout.shellHeight).toBe(expandedLayout.viewportHeight);
+    expect(expandedLayout.hasHorizontalScrollbar).toBe(true);
+    expect(expandedLayout.fadeContent).toBe('none');
+
+    await page.waitForTimeout(300);
+    const list = page.locator('.interactive-list');
+    const scrollTopAfterExpansion = await list.evaluate((element) => element.scrollTop);
+
+    await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(30));
+    await waitForAnimationFrames(page, 4);
+
+    const expandedMetrics = await getScrollMetrics(page, '.interactive-list');
+    expect(Math.abs(expandedMetrics.scrollTop - scrollTopAfterExpansion)).toBeLessThan(2);
+    expect(expandedMetrics.distanceFromBottom).toBeGreaterThan(200);
+
+    await page
+      .locator('.jump-to-latest-button')
+      .evaluate((button) => (button as HTMLButtonElement).click());
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom))
+      .toBeLessThan(3);
+
+    const focusPreview = page.locator(
+      '[data-msg-id="message-diff-preview-assistant-58"] .diff-view-lines'
+    );
+    await focusPreview.focus();
+    await expect(focusPreview).toBeFocused();
+    const scrollTopBeforeGrowth = await list.evaluate((element) => element.scrollTop);
+
+    await updateDiffPreview(page, messageId, 12);
+    await waitForAnimationFrames(page, 4);
+
+    const focusedMetrics = await getScrollMetrics(page, '.interactive-list');
+    expect(Math.abs(focusedMetrics.scrollTop - scrollTopBeforeGrowth)).toBeLessThan(2);
+    expect(focusedMetrics.distanceFromBottom).toBeGreaterThan(200);
+
+    await page.locator('[contenteditable="true"]').focus();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom))
+      .toBeLessThan(3);
   });
 
-  test('stays at the bottom when an expanded diff is collapsed', async ({ page }) => {
+  test('keeps a focused diff anchored when it is expanded after scrolling', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    const messageId = 'message-diff-preview-assistant-30';
+    await updateExpandableDiffPreview(page, messageId);
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * 0.5);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 4);
+
+    const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
+    const header = page.locator(`[data-msg-id="${messageId}"] .diff-view-item`);
+    await expect(toggle).toBeAttached();
+    await toggle.scrollIntoViewIfNeeded();
+    await toggle.focus();
+
+    await list.evaluate((element) => {
+      element.scrollTop += 100;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 2);
+    const headerTopBeforeExpansion = await header.evaluate((element) => {
+      const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+    });
+
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.waitForTimeout(300);
+    await waitForAnimationFrames(page, 4);
+
+    const headerTopAfterExpansion = await header.evaluate((element) => {
+      const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+    });
+    expect(Math.abs(headerTopAfterExpansion - headerTopBeforeExpansion)).toBeLessThan(2);
+  });
+
+  test('stops following the bottom when an expanded diff is collapsed', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -607,6 +740,15 @@ test.describe('auto-scroll', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
     expect(Math.max(...collapseDistances)).toBeLessThan(3);
+
+    await page.waitForTimeout(300);
+    const scrollTopAfterCollapse = await list.evaluate((element) => element.scrollTop);
+    await updateDiffPreview(page, messageId, 12);
+    await waitForAnimationFrames(page, 4);
+
+    const detachedMetrics = await getScrollMetrics(page, '.interactive-list');
+    expect(Math.abs(detachedMetrics.scrollTop - scrollTopAfterCollapse)).toBeLessThan(2);
+    expect(detachedMetrics.distanceFromBottom).toBeGreaterThan(200);
   });
 
   test('does not reattach to bottom after a zero-delta layout scroll event', async ({ page }) => {
@@ -614,6 +756,16 @@ test.describe('auto-scroll', () => {
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
+    await expect(
+      page.locator('[data-msg-id="message-diff-preview-assistant-59"]')
+    ).toBeAttached();
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then(
+          (metrics) => metrics.scrollHeight - metrics.clientHeight
+        )
+      )
+      .toBeGreaterThan(1_000);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)

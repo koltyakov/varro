@@ -4,7 +4,7 @@ import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
   OPENCODE_UPDATE_REQUIRED_PREFIX,
 } from '../shared/opencode-compatibility';
-import type { ServerStatus } from '../shared/protocol';
+import { parseServerEvent, type ServerStatus } from '../shared/protocol';
 import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
 import {
   OpenCodeTransport,
@@ -75,11 +75,17 @@ function createUpdateRequiredMessage(observed: string, reason: string): string {
   return `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${observed}. ${reason} Run "opencode upgrade", stop any running OpenCode server, then run "Varro: Restart Server".`;
 }
 
+function describeManagedProcessCleanupFailure(context: string, err: unknown): string {
+  return `${context}. Failed to stop the managed startup process: ${err instanceof Error ? err.message : String(err)}`;
+}
+
 export class OpenCodeServer extends EventEmitter {
   private static readonly START_DISPOSED_MESSAGE = 'Server start was cancelled';
   private static readonly MAX_RETRIES = 3;
   private static readonly MAX_RESTART_DELAY_MS = 30_000;
   private static readonly CRASH_STABILITY_WINDOW_MS = 30_000;
+  private static readonly OWNERSHIP_CONFIRMATION_FAILED_MESSAGE =
+    'Could not confirm ownership of the OpenCode server started by Varro';
 
   private readonly lifecycle = new ServerLifecycleStateMachine();
   private readonly processManager: OpenCodeProcess;
@@ -117,17 +123,10 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private handleServerEvent(event: unknown) {
+    const parsed = parseServerEvent(event);
     this.emit('event', event);
-    if (!event || typeof event !== 'object') return;
-    const value = event as { type?: unknown; properties?: unknown };
-    if (
-      value.type !== 'session.status' ||
-      !value.properties ||
-      typeof value.properties !== 'object'
-    ) {
-      return;
-    }
-    const status = (value.properties as { status?: unknown }).status;
+    if (parsed?.type !== 'session.status') return;
+    const status = (parsed.properties as { status?: unknown } | undefined)?.status;
     if (status && typeof status === 'object' && (status as { type?: unknown }).type === 'idle') {
       this.requestMaintenanceCheck();
     }
@@ -268,6 +267,10 @@ export class OpenCodeServer extends EventEmitter {
         await this.processManager.recoverManagedServerOwnership();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
+      if (this.process && this._status.state !== 'running') {
+        await this.processManager.stopServerForRestart();
+        this.throwIfStartCancelled(disposeGeneration, signal);
+      }
       const health = await this.readHealthInfo();
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
@@ -302,7 +305,7 @@ export class OpenCodeServer extends EventEmitter {
         );
       }
 
-      if (this.managedProcess && !this.process) {
+      if (this.managedProcess || this.process) {
         await this.processManager.stopServerForRestart();
         this.throwIfStartCancelled(disposeGeneration, signal);
       }
@@ -348,6 +351,10 @@ export class OpenCodeServer extends EventEmitter {
       let attemptFinished = false;
       let operationSettled = false;
       let awaitedBoundaries = 0;
+      let attemptProcess: ChildProcess | null = null;
+      let attemptProcessExited = false;
+      let attemptCleanup: Promise<void> | null = null;
+      let outcomeCleanup: Promise<void> | null = null;
 
       const isInvalidAttempt = () =>
         signal.aborted || !this.lifecycle.isCurrentStartAttempt(attemptId, disposeGeneration);
@@ -370,11 +377,35 @@ export class OpenCodeServer extends EventEmitter {
         reject(err);
       };
 
-      const rejectCancelledAttempt = () => {
+      const cleanupAttemptProcess = () => {
+        if (attemptCleanup) return attemptCleanup;
+        attemptCleanup = attemptProcess
+          ? attemptProcessExited
+            ? this.processManager.releaseExitedProcess(attemptProcess)
+            : this.processManager.terminateLaunchAttempt(attemptProcess)
+          : this.processManager.cleanupPreparedInjectedConfigFile();
+        return attemptCleanup;
+      };
+
+      const beginAttemptCleanup = () => {
         attemptFinished = true;
         this.cancelPollHealth();
+        outcomeCleanup ||= cleanupAttemptProcess();
+        return outcomeCleanup;
+      };
+
+      const rejectCancelledAttempt = () => {
+        if (operationSettled) return;
+        this.cancelPollHealth();
         this.clearRestartTimer();
-        rejectOperation(this.getCancellationError(signal));
+        const cancellation = this.getCancellationError(signal);
+        void (outcomeCleanup || beginAttemptCleanup()).then(
+          () => rejectOperation(cancellation),
+          (err: unknown) => {
+            logger.error(describeManagedProcessCleanupFailure(cancellation.message, err));
+            rejectOperation(cancellation);
+          }
+        );
       };
 
       const handleAbort = () => {
@@ -424,12 +455,23 @@ export class OpenCodeServer extends EventEmitter {
           rejectCancelledAttempt();
           return;
         }
-        attemptFinished = true;
-        this.cancelPollHealth();
         this.setStatus({ state: 'error', message });
-        void this.processManager.cleanupPreparedInjectedConfigFile().finally(() => {
-          rejectOperation(err || new Error(message));
-        });
+        const failure = err || new Error(message);
+        void beginAttemptCleanup().then(
+          () => {
+            if (isInvalidAttempt()) rejectOperation(this.getCancellationError(signal));
+            else rejectOperation(failure);
+          },
+          (cleanupErr: unknown) => {
+            if (isInvalidAttempt()) {
+              rejectOperation(this.getCancellationError(signal));
+              return;
+            }
+            const cleanupMessage = describeManagedProcessCleanupFailure(message, cleanupErr);
+            this.setStatus({ state: 'error', message: cleanupMessage });
+            rejectOperation(new Error(cleanupMessage, { cause: cleanupErr }));
+          }
+        );
       };
 
       const finishStartup = (url: string) => {
@@ -450,21 +492,39 @@ export class OpenCodeServer extends EventEmitter {
           rejectCancelledAttempt();
           return;
         }
-        attemptFinished = true;
-        this.cancelPollHealth();
-        this.restartTimer = setTimeout(() => {
-          this.restartTimer = null;
-          if (isInvalidAttempt()) {
-            rejectCancelledAttempt();
-            return;
-          }
-          cleanup();
-          this.launchManagedServer(disposeGeneration, preserveRetryCount, signal)
-            .then(resolveOperation)
-            .catch((err: unknown) =>
-              rejectOperation(err instanceof Error ? err : new Error(String(err)))
+        void beginAttemptCleanup().then(
+          () => {
+            if (isInvalidAttempt()) {
+              rejectCancelledAttempt();
+              return;
+            }
+            this.restartTimer = setTimeout(() => {
+              this.restartTimer = null;
+              if (isInvalidAttempt()) {
+                rejectCancelledAttempt();
+                return;
+              }
+              cleanup();
+              this.launchManagedServer(disposeGeneration, preserveRetryCount, signal)
+                .then(resolveOperation)
+                .catch((err: unknown) =>
+                  rejectOperation(err instanceof Error ? err : new Error(String(err)))
+                );
+            }, delay);
+          },
+          (cleanupErr: unknown) => {
+            if (isInvalidAttempt()) {
+              rejectOperation(this.getCancellationError(signal));
+              return;
+            }
+            const message = describeManagedProcessCleanupFailure(
+              'Could not retry OpenCode server startup',
+              cleanupErr
             );
-        }, delay);
+            this.setStatus({ state: 'error', message });
+            rejectOperation(new Error(message, { cause: cleanupErr }));
+          }
+        );
       };
 
       const recoverOrFailStartup = async (fallback: string) => {
@@ -501,9 +561,29 @@ export class OpenCodeServer extends EventEmitter {
           return;
         }
         if (healthNow.healthy) {
-          await this.processManager.confirmManagedServerOwnership();
+          let ownershipConfirmed: boolean;
+          try {
+            ownershipConfirmed = await awaitBoundary(
+              attemptProcess
+                ? this.processManager.confirmManagedServerOwnership(attemptProcess)
+                : Promise.resolve(false)
+            );
+          } catch (err) {
+            if (isInvalidAttempt()) rejectCancelledAttempt();
+            else {
+              failStartup(
+                OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE,
+                err instanceof Error ? err : new Error(String(err))
+              );
+            }
+            return;
+          }
           if (isInvalidAttempt()) {
             rejectCancelledAttempt();
+            return;
+          }
+          if (!ownershipConfirmed) {
+            failStartup(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE);
             return;
           }
           this.setRunningStatus(this.url, 'healthy');
@@ -534,7 +614,7 @@ export class OpenCodeServer extends EventEmitter {
       };
 
       try {
-        this.processManager.launchServer({
+        attemptProcess = this.processManager.launchServer({
           getWorkspaceCwd: () => this.getWorkspaceCwd(),
           onStdout: (data) => {
             logger.info(`[server] ${data.toString().trim()}`);
@@ -547,39 +627,92 @@ export class OpenCodeServer extends EventEmitter {
             }
             logger.error(`[server] ${text}`);
           },
-          onExit: (code, exitSignal) => {
-            this.detachProcessListeners(this.process);
+          onExit: (proc, code, exitSignal) => {
+            const wasCurrentProcess = this.process === proc;
+            attemptProcessExited = true;
+            const processCleanup = this.processManager.releaseExitedProcess(proc);
+            attemptCleanup ||= processCleanup;
             logger.info(`Server process exited with code ${code}`);
-            this.process = null;
-            this.managedProcess = false;
+            if (!wasCurrentProcess || (attemptProcess && attemptProcess !== proc)) return;
             this.stopEventStream();
-            if (isInvalidAttempt()) return;
+            if (isInvalidAttempt()) {
+              rejectCancelledAttempt();
+              return;
+            }
             if (this._status.state === 'running') {
-              this.handleRuntimeProcessExit(code, exitSignal, attemptId, disposeGeneration);
+              this.handleRuntimeProcessExit(
+                code,
+                exitSignal,
+                attemptId,
+                disposeGeneration,
+                processCleanup
+              );
               return;
             }
 
             this.cancelPollHealth();
-            void recoverOrFailStartup(
-              `OpenCode server exited during startup${exitSignal ? ` (${exitSignal})` : code !== null ? ` (code ${code})` : ''}`
+            void processCleanup.then(
+              () =>
+                recoverOrFailStartup(
+                  `OpenCode server exited during startup${exitSignal ? ` (${exitSignal})` : code !== null ? ` (code ${code})` : ''}`
+                ),
+              (err: unknown) =>
+                failStartup(
+                  describeManagedProcessCleanupFailure(
+                    'OpenCode server exited during startup',
+                    err
+                  ),
+                  err instanceof Error ? err : new Error(String(err))
+                )
             );
           },
-          onError: (err) => {
-            this.detachProcessListeners(this.process);
+          onError: (proc, err) => {
             logger.error(`Server process error: ${err.message}`);
+            if ((attemptProcess && attemptProcess !== proc) || this.process !== proc) {
+              void this.processManager.terminateLaunchAttempt(proc).catch((cleanupErr: unknown) => {
+                logger.error(
+                  describeManagedProcessCleanupFailure('Stale OpenCode process error', cleanupErr)
+                );
+              });
+              return;
+            }
+            if (isInvalidAttempt()) {
+              rejectCancelledAttempt();
+              return;
+            }
+            if (attemptFinished || operationSettled) {
+              const processCleanup = this.processManager.terminateLaunchAttempt(proc);
+              if (this._status.state === 'running') {
+                this.stopEventStream();
+                this.handleRuntimeProcessExit(
+                  null,
+                  null,
+                  attemptId,
+                  disposeGeneration,
+                  processCleanup
+                );
+              } else {
+                void processCleanup.catch((cleanupErr: unknown) => {
+                  logger.error(
+                    describeManagedProcessCleanupFailure(
+                      'OpenCode process error after startup',
+                      cleanupErr
+                    )
+                  );
+                });
+              }
+              return;
+            }
             if (err.message.includes('ENOENT')) {
               failStartup(OpenCodeProcess.MISSING_CLI_MESSAGE);
               return;
             }
 
-            this.cancelPollHealth();
-            void recoverOrFailStartup(`OpenCode server failed to spawn: ${err.message}`);
+            failStartup(`OpenCode server failed to spawn: ${err.message}`, err);
           },
         });
       } catch (err) {
-        void this.processManager.cleanupPreparedInjectedConfigFile().finally(() => {
-          failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
-        });
+        failStartup(String(err), err instanceof Error ? err : new Error(String(err)));
         return;
       }
 
@@ -594,7 +727,13 @@ export class OpenCodeServer extends EventEmitter {
         },
         0,
         signal,
-        () => awaitBoundary(this.readHealthInfo())
+        () => awaitBoundary(this.readHealthInfo()),
+        () =>
+          awaitBoundary(
+            attemptProcess
+              ? this.processManager.confirmManagedServerOwnership(attemptProcess)
+              : Promise.resolve(false)
+          )
       );
     });
   }
@@ -610,7 +749,8 @@ export class OpenCodeServer extends EventEmitter {
     code: number | null,
     signal: NodeJS.Signals | null,
     startAttemptId: number,
-    disposeGeneration: number
+    disposeGeneration: number,
+    processCleanup: Promise<void>
   ) {
     this.clearRetryResetTimer();
     this.setStatus({ state: 'stopped' });
@@ -623,13 +763,22 @@ export class OpenCodeServer extends EventEmitter {
     const retryAttempt = ++this.retryCount;
     const delay = this.getRestartDelay(retryAttempt);
     logger.info(`Restarting server in ${delay}ms (attempt ${retryAttempt})`);
-    this.restartTimer = setTimeout(() => {
-      this.restartTimer = null;
-      if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
-      void this.startOperation(true).catch(() => {
-        // Startup reports its own error status; this catch only owns the background promise.
-      });
-    }, delay);
+    void processCleanup.then(
+      () => {
+        if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
+        this.restartTimer = setTimeout(() => {
+          this.restartTimer = null;
+          if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
+          void this.startOperation(true).catch(() => {
+            // Startup reports its own error status; this catch only owns the background promise.
+          });
+        }, delay);
+      },
+      (err: unknown) => {
+        const message = `Failed to clean up the stopped OpenCode server: ${err instanceof Error ? err.message : String(err)}`;
+        this.setStatus({ state: 'error', message });
+      }
+    );
   }
 
   private pollHealth(
@@ -639,7 +788,9 @@ export class OpenCodeServer extends EventEmitter {
     reject: (err: Error) => void,
     attempt = 0,
     signal?: AbortSignal,
-    readHealth: () => Promise<{ healthy: boolean; version?: string }> = () => this.readHealthInfo()
+    readHealth: () => Promise<{ healthy: boolean; version?: string }> = () => this.readHealthInfo(),
+    confirmOwnership: () => Promise<boolean> = () =>
+      this.processManager.confirmManagedServerOwnership()
   ) {
     if (
       signal?.aborted ||
@@ -690,12 +841,22 @@ export class OpenCodeServer extends EventEmitter {
         reject(new Error(message));
       } else if (health.healthy) {
         this.cancelPollHealth();
-        await this.processManager.confirmManagedServerOwnership();
+        let ownershipConfirmed: boolean;
+        try {
+          ownershipConfirmed = await confirmOwnership();
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
         if (
           signal?.aborted ||
           !this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)
         ) {
           reject(this.getCancellationError(signal));
+          return;
+        }
+        if (!ownershipConfirmed) {
+          reject(new Error(OpenCodeServer.OWNERSHIP_CONFIRMATION_FAILED_MESSAGE));
           return;
         }
         this.setRunningStatus(this.url, 'healthy');
@@ -710,7 +871,8 @@ export class OpenCodeServer extends EventEmitter {
           reject,
           attempt + 1,
           signal,
-          readHealth
+          readHealth,
+          confirmOwnership
         );
       }
     }, 200);

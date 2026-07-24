@@ -36,6 +36,7 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     setSelectedMcpsForSession: vi.fn(),
     listQuestions: async () => [],
     setQuestions: vi.fn(),
+    getQuestions: () => [],
     listAgents: async () => [],
     getSelectedAgent: () => null,
     getSelectedAgentForSession: () => null,
@@ -67,6 +68,7 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     loadSessionStatuses: async () => ({}),
     setSessionStatuses: vi.fn(),
     getSessions: () => [],
+    clearQueuedMessagesForSession: vi.fn(),
     updateUsageLimitState: vi.fn(),
     logError: vi.fn(),
     ...overrides,
@@ -505,6 +507,164 @@ describe('data loaders', () => {
       { workspaceID: 'ws-1', status: 'connected' },
     ]);
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('preserves a session created while an older session snapshot is in flight', async () => {
+    const response = deferred<Session[]>();
+    let currentSessions = [session('existing')];
+    const applySessions = vi.fn((sessions: Session[]) => {
+      currentSessions = sessions;
+    });
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: () => response.promise,
+        getSessions: () => currentSessions,
+        applySessions,
+      })
+    );
+
+    const load = operations.loadSessions();
+    currentSessions = [...currentSessions, session('new-session')];
+    response.resolve([session('existing')]);
+    await load;
+
+    expect(applySessions).toHaveBeenCalledWith([session('existing'), session('new-session')]);
+  });
+
+  it('allows a locally removed session to reappear in a later snapshot', async () => {
+    const first = deferred<Session[]>();
+    const removed = session('removed');
+    let currentSessions = [removed];
+    const applySessions = vi.fn((sessions: Session[]) => {
+      currentSessions = sessions;
+    });
+    const listSessions = vi
+      .fn<() => Promise<Session[]>>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce([removed]);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({ listSessions, getSessions: () => currentSessions, applySessions })
+    );
+
+    const staleLoad = operations.loadSessions();
+    currentSessions = [];
+    first.resolve([removed]);
+    await staleLoad;
+    expect(currentSessions).toEqual([]);
+
+    await operations.loadSessions();
+    expect(currentSessions).toEqual([removed]);
+  });
+
+  it('clears queued messages for sessions removed by a confirmed snapshot', async () => {
+    const removed = session('removed');
+    const retained = session('retained');
+    let currentSessions = [removed, retained];
+    const clearQueuedMessagesForSession = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => [retained],
+        getSessions: () => currentSessions,
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+        clearQueuedMessagesForSession,
+      })
+    );
+
+    await operations.loadSessions();
+
+    expect(currentSessions).toEqual([retained]);
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledOnce();
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
+  });
+
+  it('applies only the latest overlapping session snapshot', async () => {
+    const first = deferred<Session[]>();
+    const second = deferred<Session[]>();
+    let currentSessions = [session('existing')];
+    const applySessions = vi.fn((sessions: Session[]) => {
+      currentSessions = sessions;
+    });
+    const listSessions = vi
+      .fn<() => Promise<Session[]>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({ listSessions, getSessions: () => currentSessions, applySessions })
+    );
+
+    const staleLoad = operations.loadSessions();
+    const latestLoad = operations.loadSessions();
+    second.resolve([session('latest')]);
+    await latestLoad;
+    first.resolve([session('stale')]);
+    await staleLoad;
+
+    expect(currentSessions).toEqual([session('latest')]);
+    expect(applySessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not resurrect a question answered while its snapshot is in flight', async () => {
+    const response = deferred<QuestionRequest[]>();
+    const answered: QuestionRequest = {
+      id: 'answered',
+      sessionID: 'session-1',
+      questions: [],
+    };
+    const current: QuestionRequest = {
+      id: 'current',
+      sessionID: 'session-1',
+      questions: [],
+    };
+    let questions = [answered];
+    const setQuestions = vi.fn((next: QuestionRequest[]) => {
+      questions = next;
+    });
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listQuestions: () => response.promise,
+        getQuestions: () => questions,
+        setQuestions,
+      })
+    );
+
+    const load = operations.loadQuestions();
+    questions = [];
+    response.resolve([answered, current]);
+    await load;
+
+    expect(questions).toEqual([current]);
+    expect(setQuestions).toHaveBeenCalledWith([current]);
+  });
+
+  it('allows an answered question to reappear in a later snapshot', async () => {
+    const first = deferred<QuestionRequest[]>();
+    const answered: QuestionRequest = {
+      id: 'answered',
+      sessionID: 'session-1',
+      questions: [],
+    };
+    let questions = [answered];
+    const setQuestions = vi.fn((next: QuestionRequest[]) => {
+      questions = next;
+    });
+    const listQuestions = vi
+      .fn<() => Promise<QuestionRequest[]>>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce([answered]);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({ listQuestions, getQuestions: () => questions, setQuestions })
+    );
+
+    const staleLoad = operations.loadQuestions();
+    questions = [];
+    first.resolve([answered]);
+    await staleLoad;
+    expect(questions).toEqual([]);
+
+    await operations.loadQuestions();
+    expect(questions).toEqual([answered]);
   });
 
   it('requires confirmation before applying an empty session snapshot over existing sessions', async () => {

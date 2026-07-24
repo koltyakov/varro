@@ -239,6 +239,7 @@ describe('tool file change helpers', () => {
         kind: 'added',
         path: 'src/new.ts',
         patch: '+export const value = true;',
+        patchFormat: 'headerless',
         additions: 1,
         deletions: 0,
         dedupeKey: 'added:src/new.ts',
@@ -247,6 +248,7 @@ describe('tool file change helpers', () => {
         kind: 'edited',
         path: 'src/app.ts',
         patch: '@@\n-old\n+new',
+        patchFormat: 'headerless',
         additions: 1,
         deletions: 1,
         dedupeKey: 'edited:src/app.ts',
@@ -256,6 +258,10 @@ describe('tool file change helpers', () => {
         path: 'src/renamed.ts',
         fromPath: 'src/old.ts',
         toPath: 'src/renamed.ts',
+        patch: '@@\n-old\n+new',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 1,
         dedupeKey: 'moved:src/old.ts->src/renamed.ts',
       },
       {
@@ -266,6 +272,377 @@ describe('tool file change helpers', () => {
         dedupeKey: 'removed:src/gone.ts',
       },
     ]);
+  });
+
+  it('merges completed apply_patch metadata with input patches by path', () => {
+    const state = completedState(
+      {
+        patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** Update File: src/old.ts
+*** Move to: src/renamed.ts
+@@
+-before
++after
+*** Add File: src/input-only.ts
++export const inputOnly = true;
+*** End Patch`,
+      },
+      {
+        metadata: {
+          files: [
+            {
+              type: 'update',
+              filePath: '/repo/src/app.ts',
+              relativePath: 'src/app.ts',
+              additions: 1,
+              deletions: 1,
+              patch: '--- a/src/app.ts\n+++ b/src/app.ts',
+            },
+            {
+              type: 'move',
+              filePath: '/repo/src/old.ts',
+              movePath: '/repo/src/renamed.ts',
+              additions: 0,
+              deletions: 0,
+            },
+          ],
+        },
+      }
+    );
+
+    expect(getToolFileChanges('apply_patch', state)).toEqual([
+      {
+        kind: 'edited',
+        path: 'src/app.ts',
+        patch: '@@\n-old\n+new',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 1,
+        dedupeKey: 'edited:src/app.ts',
+      },
+      {
+        kind: 'moved',
+        path: '/repo/src/renamed.ts',
+        fromPath: '/repo/src/old.ts',
+        toPath: '/repo/src/renamed.ts',
+        patch: '@@\n-before\n+after',
+        patchFormat: 'headerless',
+        additions: 0,
+        deletions: 0,
+        dedupeKey: 'moved:/repo/src/old.ts->/repo/src/renamed.ts',
+      },
+      {
+        kind: 'added',
+        path: 'src/input-only.ts',
+        patch: '+export const inputOnly = true;',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 0,
+        dedupeKey: 'added:src/input-only.ts',
+      },
+    ]);
+  });
+
+  it('keeps path-only apply_patch metadata without classifying generic file metadata as edits', () => {
+    expect(
+      getToolFileChanges(
+        'apply_patch',
+        completedState(
+          {},
+          {
+            metadata: {
+              files: [{ relativePath: 'assets/data.bin', additions: 0, deletions: 0 }],
+            },
+          }
+        )
+      )
+    ).toEqual([
+      {
+        kind: 'edited',
+        path: 'assets/data.bin',
+        additions: 0,
+        deletions: 0,
+        dedupeKey: 'edited:assets/data.bin',
+      },
+    ]);
+
+    expect(
+      getToolFileChanges(
+        'search',
+        completedState(
+          {},
+          {
+            metadata: {
+              files: [{ type: 'file', filePath: '/repo/src/app.ts', relativePath: 'src/app.ts' }],
+            },
+          }
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it('merges source-path metadata with an input move destination', () => {
+    const state = completedState(
+      {
+        patchText: `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-old
++new
+*** End Patch`,
+      },
+      {
+        metadata: {
+          files: [{ type: 'update', relativePath: 'src/old.ts', additions: 1, deletions: 1 }],
+        },
+      }
+    );
+
+    expect(getToolFileChanges('apply_patch', state)).toEqual([
+      {
+        kind: 'moved',
+        path: 'src/new.ts',
+        fromPath: 'src/old.ts',
+        toPath: 'src/new.ts',
+        patch: '@@\n-old\n+new',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 1,
+        dedupeKey: 'moved:src/old.ts->src/new.ts',
+      },
+    ]);
+  });
+
+  it('matches metadata one-to-one without merging a move source with a separate add', () => {
+    const state = completedState(
+      {
+        patchText: `*** Begin Patch
+*** Add File: src/a.ts
++replacement
+*** Update File: src/a.ts
+*** Move to: src/b.ts
+@@
+-original
++moved
+*** End Patch`,
+      },
+      {
+        metadata: {
+          files: [
+            {
+              type: 'move',
+              filePath: 'src/a.ts',
+              movePath: 'src/b.ts',
+              additions: 1,
+              deletions: 1,
+            },
+            { type: 'add', relativePath: 'src/a.ts', additions: 1, deletions: 0 },
+          ],
+        },
+      }
+    );
+
+    expect(getToolFileChanges('apply_patch', state)).toEqual([
+      {
+        kind: 'moved',
+        path: 'src/b.ts',
+        fromPath: 'src/a.ts',
+        toPath: 'src/b.ts',
+        patch: '@@\n-original\n+moved',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 1,
+        dedupeKey: 'moved:src/a.ts->src/b.ts',
+      },
+      {
+        kind: 'added',
+        path: 'src/a.ts',
+        patch: '+replacement',
+        patchFormat: 'headerless',
+        additions: 1,
+        deletions: 0,
+        dedupeKey: 'added:src/a.ts',
+      },
+    ]);
+  });
+
+  it('lets explicit add and delete input kinds override untyped metadata fallbacks', () => {
+    const state = completedState(
+      {
+        patchText: `*** Begin Patch
+*** Add File: src/new.ts
++new
+*** Delete File: src/gone.ts
+-gone
+*** End Patch`,
+      },
+      {
+        metadata: {
+          files: [
+            { relativePath: 'src/new.ts', additions: 1, deletions: 0 },
+            { relativePath: 'src/gone.ts', additions: 0, deletions: 1 },
+          ],
+        },
+      }
+    );
+
+    expect(
+      getToolFileChanges('apply_patch', state).map(({ kind, path }) => ({ kind, path }))
+    ).toEqual([
+      { kind: 'added', path: 'src/new.ts' },
+      { kind: 'removed', path: 'src/gone.ts' },
+    ]);
+  });
+
+  it('bounds model patch bytes and emits one explicit overflow summary', () => {
+    const state: ToolState = {
+      status: 'running',
+      input: {
+        patchText: `*** Begin Patch\n*** Add File: src/large.ts\n+${'x'.repeat(1_100_000)}\n*** Add File: src/unscanned.ts\n+late`,
+      },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 0 },
+    };
+
+    const changes = getToolFileChanges('apply_patch', state);
+    expect(changes).toHaveLength(2);
+    expect(changes[0]).toMatchObject({
+      kind: 'added',
+      path: 'src/large.ts',
+      previewStatus: 'truncated',
+    });
+    expect(changes[0]?.patch).toBeUndefined();
+    expect(changes[1]).toMatchObject({
+      isSummary: true,
+      previewStatus: 'truncated',
+    });
+    expect(changes[1]?.previewMessage).toContain('1 MB input limit');
+  });
+
+  it('shares metadata preview budgets without hiding a valid input patch fallback', () => {
+    const largePatch = `@@\n+${'x'.repeat(300 * 1024)}`;
+    const metadataOnly = getToolFileChanges(
+      'apply_patch',
+      completedState(
+        {},
+        {
+          metadata: {
+            files: Array.from({ length: 3 }, (_, index) => ({
+              type: 'update',
+              relativePath: `src/metadata-${index}.ts`,
+              patch: largePatch,
+            })),
+          },
+        }
+      )
+    );
+
+    expect(metadataOnly).toHaveLength(3);
+    expect(metadataOnly.every((change) => change.patch === undefined)).toBe(true);
+    expect(metadataOnly.every((change) => change.previewStatus === 'truncated')).toBe(true);
+    expect(metadataOnly[2]?.previewMessage).toContain('total inline patch content limit');
+
+    const merged = getToolFileChanges(
+      'apply_patch',
+      completedState(
+        {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** End Patch`,
+        },
+        {
+          metadata: {
+            files: [{ type: 'update', relativePath: 'src/app.ts', patch: largePatch }],
+          },
+        }
+      )
+    );
+    expect(merged[0]).toMatchObject({ path: 'src/app.ts', patch: '@@\n-old\n+new' });
+    expect(merged[0]?.previewStatus).toBeUndefined();
+  });
+
+  it('caps file count and total stored section work', () => {
+    const manyFilesPatch = [
+      '*** Begin Patch',
+      ...Array.from(
+        { length: 70 },
+        (_, index) => `*** Add File: src/file-${index}.ts\n+line ${index}`
+      ),
+      '*** End Patch',
+    ].join('\n');
+    const manyFiles = getToolFileChanges('apply_patch', {
+      status: 'running',
+      input: { patchText: manyFilesPatch },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 0 },
+    });
+
+    expect(manyFiles.filter((change) => !change.isSummary)).toHaveLength(64);
+    expect(manyFiles.at(-1)).toMatchObject({ isSummary: true, previewStatus: 'truncated' });
+    expect(manyFiles.at(-1)?.previewMessage).toContain('after 64 files');
+
+    const oversizedSection = getToolFileChanges('apply_patch', {
+      status: 'running',
+      input: {
+        patchText: [
+          '*** Begin Patch',
+          '*** Add File: src/oversized-section.ts',
+          ...Array.from({ length: 2_100 }, (_, index) => `+line ${index}`),
+          '*** Add File: src/after-section.ts',
+          '+after',
+          '*** End Patch',
+        ].join('\n'),
+      },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 0 },
+    });
+
+    expect(oversizedSection).toHaveLength(2);
+    expect(oversizedSection[0]).toMatchObject({
+      path: 'src/oversized-section.ts',
+      previewStatus: 'truncated',
+    });
+    expect(oversizedSection[0]?.previewMessage).toContain('file patch section exceeds');
+    expect(oversizedSection[1]).toMatchObject({
+      path: 'src/after-section.ts',
+      patch: '+after',
+    });
+
+    const sectionLines = Array.from({ length: 1_200 }, (_, index) => `+line ${index}`).join('\n');
+    const storedWork = getToolFileChanges('apply_patch', {
+      status: 'running',
+      input: {
+        patchText: [
+          '*** Begin Patch',
+          ...Array.from(
+            { length: 4 },
+            (_, index) => `*** Add File: src/section-${index}.ts\n${sectionLines}`
+          ),
+          '*** End Patch',
+        ].join('\n'),
+      },
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 0 },
+    });
+
+    expect(storedWork).toHaveLength(4);
+    expect(storedWork[3]).toMatchObject({
+      path: 'src/section-3.ts',
+      previewStatus: 'truncated',
+    });
+    expect(storedWork[3]?.previewMessage).toContain('total inline patch content limit');
   });
 
   it('returns null when there is no recognizable file change', () => {

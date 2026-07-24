@@ -35,6 +35,15 @@ import {
   scopeOpenCodeRequest,
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
+import { SessionStateManager } from './session-state-manager';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxyCallbacks {
   return {
@@ -61,6 +70,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     },
     sessionState: {
       handleServerEvent: vi.fn(),
+      getSessionWorkspaceMatch: vi.fn(() => true),
       isSessionInWorkspace: vi.fn(() => true),
       markSessionBusy: vi.fn((sessionID: string) => ({ sessionID, id: 1 })),
       deferPromptFailure: vi.fn(),
@@ -569,6 +579,22 @@ describe('RestProxy handleRequest', () => {
 
     expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
+  });
+
+  it('returns the selected plan path with its multi-root workspace directory', async () => {
+    const selected = { fsPath: '/repo-b/docs/RALPH.md' };
+    const workspaceFolder = { name: 'repo-b', uri: { fsPath: '/repo-b' } };
+    mocks.vscode.window.showOpenDialog.mockResolvedValueOnce([selected] as never);
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce(workspaceFolder as never);
+    mocks.vscode.workspace.asRelativePath.mockReturnValueOnce('docs/RALPH.md');
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(makePayload(62, 'GET', '/varro/workspace-file/pick'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 62,
+      data: { path: 'docs/RALPH.md', workspaceDirectory: '/repo-b' },
+    });
   });
 
   it('returns error for workspace file request without path', async () => {
@@ -1222,6 +1248,106 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(22, 'GET', '/session/status'));
     expect(filterStatuses).toHaveBeenCalledWith(statuses);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 22, data: filtered });
+  });
+
+  it.each([
+    [
+      '/session/status',
+      { local: { type: 'busy' }, foreign: { type: 'idle' } },
+      { local: { type: 'busy' } },
+    ],
+    ['/question', [{ sessionID: 'local' }, { sessionID: 'foreign' }], [{ sessionID: 'local' }]],
+    ['/permission', [{ sessionID: 'local' }, { sessionID: 'foreign' }], [{ sessionID: 'local' }]],
+  ])(
+    'reconciles unknown workspace metadata with a concurrent session bootstrap for %s',
+    async (path, bulkResponse, expected) => {
+      const sessionList = deferred<unknown[]>();
+      const serverRequest = vi.fn(async (_method: string, requestPath: string) => {
+        if (requestPath === '/session') return sessionList.promise;
+        if (requestPath === path) return bulkResponse;
+        throw new Error(`Unexpected path: ${requestPath}`);
+      });
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          getSessionWorkspaceMatch: vi.fn(() => undefined),
+          isSessionInWorkspace: vi.fn(() => false),
+        } as never,
+      });
+
+      const bootstrap = proxy.handleRequest(makePayload(220, 'GET', '/session'));
+      await vi.waitFor(() =>
+        expect(serverRequest).toHaveBeenCalledWith('GET', '/session', undefined)
+      );
+      const bulk = proxy.handleRequest(makePayload(221, 'GET', path));
+      await Promise.resolve();
+      expect(callbacks.postApiResponse).not.toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ id: 221 })
+      );
+
+      sessionList.resolve([
+        { id: 'local', directory: '/repo' },
+        { id: 'foreign', directory: '/other' },
+      ]);
+      await Promise.all([bootstrap, bulk]);
+
+      expect(
+        serverRequest.mock.calls.filter(([, requestPath]) => requestPath === '/session')
+      ).toHaveLength(1);
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 221, data: expected });
+    }
+  );
+
+  it('uses the authoritative session snapshot after bounded metadata evicts old sessions', async () => {
+    const manager = new SessionStateManager(
+      {
+        get: vi.fn(),
+        set: vi.fn(() => Promise.resolve()),
+        remove: vi.fn(() => Promise.resolve()),
+      } as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+    const sessions = [
+      { id: 'foreign', directory: '/other' },
+      ...Array.from({ length: 251 }, (_, index) => ({
+        id: `local-${index}`,
+        directory: '/repo',
+      })),
+    ];
+    const statuses = {
+      foreign: { type: 'idle' },
+      'local-0': { type: 'busy' },
+    };
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session') return sessions;
+      if (path === '/session/status') return statuses;
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        handleServerEvent: (event) => manager.handleServerEvent(event),
+        getSessionWorkspaceMatch: (sessionID, workspacePath) =>
+          manager.getSessionWorkspaceMatch(sessionID, workspacePath),
+        isSessionInWorkspace: (sessionID, workspacePath) =>
+          manager.isSessionInWorkspace(sessionID, workspacePath),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(222, 'GET', '/session'));
+    expect(manager.getSessionWorkspaceMatch('local-0', '/repo')).toBeUndefined();
+    expect(manager.getSessionWorkspaceMatch('foreign', '/repo')).toBeUndefined();
+    await proxy.handleRequest(makePayload(223, 'GET', '/session/status'));
+
+    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 223,
+      data: { 'local-0': { type: 'busy' } },
+    });
   });
 
   it('filters question responses through sessionTrash', async () => {

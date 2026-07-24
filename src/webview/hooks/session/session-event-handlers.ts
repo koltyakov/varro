@@ -638,19 +638,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     pending.syncing = true;
     void deps
       .syncSessionMessages(sessionID)
-      .then(() => {
+      .then(async () => {
         const queued = pendingMissingPartDeltas.get(key);
         if (!queued) return;
-        pendingMissingPartDeltas.delete(key);
-        for (const item of queued.deltas) {
-          sessionStore.applyMessagePartDelta(
-            item.messageID,
-            item.partID,
-            item.delta,
-            queued.sessionID,
-            item.field
-          );
-        }
+        // The synchronized part is canonical. A second bounded sync closes the
+        // race where queued deltas arrived after the first snapshot was read.
+        await deps.syncSessionMessages(queued.sessionID);
+        if (pendingMissingPartDeltas.get(key) === queued) pendingMissingPartDeltas.delete(key);
       })
       .catch((err) => {
         pendingMissingPartDeltas.delete(key);

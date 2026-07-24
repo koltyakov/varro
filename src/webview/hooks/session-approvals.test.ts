@@ -6,8 +6,19 @@ import {
   rejectQuestionWithDependencies,
   respondPermissionWithDependencies,
   respondQuestionWithDependencies,
+  SessionApprovalOperations,
   updatePermissionModeForSessionWithDependencies,
 } from './session/session-approvals';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
 
 function permission(
   id: string,
@@ -316,6 +327,197 @@ describe('session-approvals helpers', () => {
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(1, 'full');
     expect(saveProjectPermissionMode).toHaveBeenNthCalledWith(2, 'default');
     expect(setError).toHaveBeenCalledWith('permission update failed');
+  });
+
+  it('serializes full then auto PATCHes and applies only the latest success', async () => {
+    const fullUpdate = deferred<Session>();
+    const autoUpdate = deferred<Session>();
+    let sessionMode: 'default' | 'auto' | 'full' = 'default';
+    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    const upsertSession = vi.fn();
+    const autoApprovePermissionsForSession = vi.fn(async () => {});
+    const syncPendingPermissions = vi.fn(async () => {});
+    const updateSessionPermission = vi
+      .fn()
+      .mockReturnValueOnce(fullUpdate.promise)
+      .mockReturnValueOnce(autoUpdate.promise);
+    const operations = new SessionApprovalOperations({
+      respondRemotePermission: vi.fn(async () => {}),
+      removePermission: vi.fn(),
+      setError: vi.fn(),
+      replyQuestion: vi.fn(async () => {}),
+      removeQuestion: vi.fn(),
+      rejectRemoteQuestion: vi.fn(async () => {}),
+      getPermissionModeForSession: () => sessionMode,
+      getDraftPermissionMode: () => draftMode,
+      setPermissionModeForSession: (_sessionId, mode) => {
+        sessionMode = mode;
+      },
+      setDraftPermissionMode: (mode) => {
+        draftMode = mode;
+      },
+      saveProjectPermissionMode: vi.fn(),
+      updateSessionPermission,
+      upsertSession,
+      getPermissionsForSession: () => [permission('perm-1')],
+      syncPendingPermissions,
+    });
+    vi.spyOn(operations, 'autoApprovePermissionsForSession').mockImplementation(
+      autoApprovePermissionsForSession
+    );
+
+    const full = operations.updatePermissionModeForSession(
+      'full',
+      [{ permission: 'bash', pattern: '*', action: 'allow' }],
+      'session-1'
+    );
+    const auto = operations.updatePermissionModeForSession(
+      'auto',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      'session-1'
+    );
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(1));
+    expect(updateSessionPermission).toHaveBeenNthCalledWith(1, 'session-1', {
+      permission: [{ permission: 'bash', pattern: '*', action: 'allow' }],
+    });
+
+    fullUpdate.resolve(session('session-1'));
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(2));
+    expect(updateSessionPermission).toHaveBeenNthCalledWith(2, 'session-1', {
+      permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
+    });
+    autoUpdate.resolve(session('session-1'));
+    await Promise.all([full, auto]);
+
+    expect(sessionMode).toBe('auto');
+    expect(draftMode).toBe('auto');
+    expect(upsertSession).toHaveBeenCalledTimes(1);
+    expect(upsertSession).toHaveBeenCalledWith(session('session-1'));
+    expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
+    expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls full then auto failures back to the last confirmed mode', async () => {
+    const fullUpdate = deferred<Session>();
+    const autoUpdate = deferred<Session>();
+    let sessionMode: 'default' | 'auto' | 'full' = 'default';
+    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    const setPermissionModeForSession = vi.fn((_sessionId, mode) => {
+      sessionMode = mode;
+    });
+    const setDraftPermissionMode = vi.fn((mode) => {
+      draftMode = mode;
+    });
+    const saveProjectPermissionMode = vi.fn();
+    const setError = vi.fn();
+    const updateSessionPermission = vi
+      .fn()
+      .mockReturnValueOnce(fullUpdate.promise)
+      .mockReturnValueOnce(autoUpdate.promise);
+    const operations = new SessionApprovalOperations({
+      respondRemotePermission: vi.fn(async () => {}),
+      removePermission: vi.fn(),
+      setError,
+      replyQuestion: vi.fn(async () => {}),
+      removeQuestion: vi.fn(),
+      rejectRemoteQuestion: vi.fn(async () => {}),
+      getPermissionModeForSession: () => sessionMode,
+      getDraftPermissionMode: () => draftMode,
+      setPermissionModeForSession,
+      setDraftPermissionMode,
+      saveProjectPermissionMode,
+      updateSessionPermission,
+      upsertSession: vi.fn(),
+      getPermissionsForSession: () => [],
+    });
+
+    const full = operations.updatePermissionModeForSession(
+      'full',
+      [{ permission: 'bash', pattern: '*', action: 'allow' }],
+      'session-1'
+    );
+    const auto = operations.updatePermissionModeForSession(
+      'auto',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      'session-1'
+    );
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(1));
+    fullUpdate.reject(new Error('full failed'));
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(2));
+    autoUpdate.reject(new Error('auto failed'));
+    await Promise.all([full, auto]);
+
+    expect(sessionMode).toBe('default');
+    expect(draftMode).toBe('default');
+    expect(setPermissionModeForSession.mock.calls.map((call) => call[1])).toEqual([
+      'full',
+      'auto',
+      'default',
+    ]);
+    expect(setDraftPermissionMode.mock.calls.map((call) => call[0])).toEqual([
+      'full',
+      'auto',
+      'default',
+    ]);
+    expect(saveProjectPermissionMode.mock.calls.map((call) => call[0])).toEqual([
+      'full',
+      'auto',
+      'default',
+    ]);
+    expect(setError).toHaveBeenCalledOnce();
+    expect(setError).toHaveBeenCalledWith('auto failed');
+  });
+
+  it('rolls a failed latest auto selection back to a confirmed full selection', async () => {
+    const fullUpdate = deferred<Session>();
+    const autoUpdate = deferred<Session>();
+    let sessionMode: 'default' | 'auto' | 'full' = 'default';
+    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    const saveProjectPermissionMode = vi.fn();
+    const updateSessionPermission = vi
+      .fn()
+      .mockReturnValueOnce(fullUpdate.promise)
+      .mockReturnValueOnce(autoUpdate.promise);
+    const operations = new SessionApprovalOperations({
+      respondRemotePermission: vi.fn(async () => {}),
+      removePermission: vi.fn(),
+      setError: vi.fn(),
+      replyQuestion: vi.fn(async () => {}),
+      removeQuestion: vi.fn(),
+      rejectRemoteQuestion: vi.fn(async () => {}),
+      getPermissionModeForSession: () => sessionMode,
+      getDraftPermissionMode: () => draftMode,
+      setPermissionModeForSession: (_sessionId, mode) => {
+        sessionMode = mode;
+      },
+      setDraftPermissionMode: (mode) => {
+        draftMode = mode;
+      },
+      saveProjectPermissionMode,
+      updateSessionPermission,
+      upsertSession: vi.fn(),
+      getPermissionsForSession: () => [],
+    });
+
+    const full = operations.updatePermissionModeForSession(
+      'full',
+      [{ permission: 'bash', pattern: '*', action: 'allow' }],
+      'session-1'
+    );
+    const auto = operations.updatePermissionModeForSession(
+      'auto',
+      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      'session-1'
+    );
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(1));
+    fullUpdate.resolve(session('session-1'));
+    await vi.waitFor(() => expect(updateSessionPermission).toHaveBeenCalledTimes(2));
+    autoUpdate.reject(new Error('auto failed'));
+    await Promise.all([full, auto]);
+
+    expect(sessionMode).toBe('full');
+    expect(draftMode).toBe('full');
+    expect(saveProjectPermissionMode).toHaveBeenLastCalledWith('full');
   });
 
   it('updates local permission state without a session id', async () => {

@@ -104,6 +104,7 @@ function run(
   return {
     config: {
       managerSessionId: 'manager-1',
+      workspaceDirectory: '/workspace',
       planDocPath: 'docs/PLAN.md',
       iterations: 4,
       promptTemplate: 'follow the plan',

@@ -37,13 +37,20 @@ export class ProviderLimitService {
   private providerMetadataFetchedAt = 0;
   private providerAuthStorePromise: Promise<Record<string, ProviderAuthRecord>> | null = null;
   private providerAuthStoreFetchedAt = 0;
+  private providerSnapshotGeneration = 0;
 
   constructor(private readonly server: Pick<OpenCodeServer, 'request'>) {}
 
   clearCache() {
+    this.providerSnapshotGeneration += 1;
     this.providerLimitCache.clear();
+    this.providerAuthFailureCache.clear();
     this.providerLastKnownGoodCache.clear();
     this.providerRateLimitBackoff.clear();
+    this.providerMetadataPromise = null;
+    this.providerMetadataFetchedAt = 0;
+    this.providerAuthStorePromise = null;
+    this.providerAuthStoreFetchedAt = 0;
   }
 
   shouldClearCache(previous: ServerStatus, next: ServerStatus) {
@@ -64,7 +71,8 @@ export class ProviderLimitService {
     const cached = this.providerLimitCache.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.promise;
 
-    const loadPromise = this.load(providerID, modelID);
+    const generation = this.providerSnapshotGeneration;
+    const loadPromise = this.load(providerID, modelID, generation);
     const promise = loadPromise
       .then((result) => result.status)
       .catch((err) => {
@@ -121,7 +129,11 @@ export class ProviderLimitService {
     }
   }
 
-  private async load(providerID: string, modelID: string | null): Promise<ProviderLimitLoadResult> {
+  private async load(
+    providerID: string,
+    modelID: string | null,
+    generation: number
+  ): Promise<ProviderLimitLoadResult> {
     const cacheKey = `${providerID}:${modelID || ''}`;
     const checkedAt = Date.now();
     // Provider limits are best-effort metadata: no failure in this subsystem
@@ -144,7 +156,9 @@ export class ProviderLimitService {
     const provider = providers.find((item) => item.id === providerID);
 
     if (!provider) {
-      this.providerRateLimitBackoff.delete(`${providerID}:${modelID || ''}`);
+      if (generation === this.providerSnapshotGeneration) {
+        this.providerRateLimitBackoff.delete(`${providerID}:${modelID || ''}`);
+      }
       return createProviderLimitLoadResult({
         providerID,
         modelID,
@@ -186,7 +200,11 @@ export class ProviderLimitService {
         note: `Provider limit adapter failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
-    if (providerLimit && isAuthFailureProviderStatus(providerLimit)) {
+    if (
+      providerLimit &&
+      isAuthFailureProviderStatus(providerLimit) &&
+      generation === this.providerSnapshotGeneration
+    ) {
       this.providerAuthFailureCache.set(provider.id, {
         credentialFingerprint,
         note: providerLimit.note,
@@ -252,8 +270,8 @@ export class ProviderLimitService {
       return this.providerAuthStorePromise;
     }
 
-    this.providerAuthStoreFetchedAt = now;
-    this.providerAuthStorePromise = (async () => {
+    const generation = this.providerSnapshotGeneration;
+    const promise = (async () => {
       try {
         const raw = await fs.readFile(getOpenCodeAuthFilePath(), 'utf-8');
         return parseProviderAuthStore(raw);
@@ -262,7 +280,11 @@ export class ProviderLimitService {
       }
     })();
 
-    return this.providerAuthStorePromise;
+    if (generation === this.providerSnapshotGeneration) {
+      this.providerAuthStoreFetchedAt = now;
+      this.providerAuthStorePromise = promise;
+    }
+    return promise;
   }
 
   private async getProviderMetadata() {
@@ -274,22 +296,29 @@ export class ProviderLimitService {
       return this.providerMetadataPromise;
     }
 
-    this.providerMetadataFetchedAt = now;
-    this.providerMetadataPromise = (async () => {
+    const generation = this.providerSnapshotGeneration;
+    const promise = (async () => {
       const rawConfig = (await this.server.request('GET', '/config/providers')) as unknown;
       const config = asRecord(rawConfig);
       return Array.isArray(config?.providers)
         ? config.providers.filter((item): item is ProviderMetadata => Boolean(asRecord(item)))
         : [];
     })().catch((err) => {
-      if (this.providerMetadataPromise) {
+      if (
+        generation === this.providerSnapshotGeneration &&
+        this.providerMetadataPromise === promise
+      ) {
         this.providerMetadataPromise = null;
         this.providerMetadataFetchedAt = 0;
       }
       throw err;
     });
 
-    return this.providerMetadataPromise;
+    if (generation === this.providerSnapshotGeneration) {
+      this.providerMetadataFetchedAt = now;
+      this.providerMetadataPromise = promise;
+    }
+    return promise;
   }
 }
 

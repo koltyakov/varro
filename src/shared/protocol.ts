@@ -35,6 +35,11 @@ export interface DroppedFile {
   attachmentSequence?: number;
 }
 
+export interface WorkspaceFilePick {
+  path: string;
+  workspaceDirectory: string | null;
+}
+
 export type PermissionMode = 'default' | 'auto' | 'full';
 
 export function isPermissionMode(value: unknown): value is PermissionMode {

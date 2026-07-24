@@ -10,7 +10,6 @@ import {
 import { isAbortedToolError } from '../../shared/error-classification';
 import type {
   AssistantMessage,
-  FileDiff,
   QuestionRequest,
   ToolPart,
   ToolStateCompleted,
@@ -36,6 +35,7 @@ import { selectSession } from '../hooks/useOpenCode';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 import { DiffView } from './DiffView';
+import type { DiffViewFile } from './DiffView';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
@@ -43,6 +43,7 @@ const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
 const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
+const MAX_FILE_ERROR_DISPLAY_CHARS = 4000;
 type ToolPreview = { text: string; key: string };
 
 export function getToolCallExpansionKey(part: ToolPart) {
@@ -299,7 +300,7 @@ export function ToolCall(props: {
     const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
     const keys = ['file_path', 'pattern', 'query', 'command', 'path'];
     for (const k of keys) {
-      if (typeof input[k] === 'string') return { text: String(input[k]).slice(0, 100), key: k };
+      if (typeof input[k] === 'string') return { text: input[k], key: k };
     }
     return null;
   });
@@ -519,34 +520,50 @@ function FileChangeCard(props: {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
+  const isPending = () => s().status === 'pending';
   const isRunning = () => s().status === 'running';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
-  const changes = () => props.changes;
-  const change = () => changes()[0]!;
-  const isMultiFile = () => changes().length > 1;
-  const effectiveKind = () => (isMultiFile() ? 'edited' : change().kind);
+  const summaries = () => props.changes.filter((item) => item.isSummary);
+  const changes = () => props.changes.filter((item) => !item.isSummary);
+  const change = () => changes()[0];
+  const hasTruncatedSummary = () => summaries().length > 0;
+  const isMultiFile = () => changes().length > 1 || hasTruncatedSummary();
+  const effectiveKind = () => (isMultiFile() ? 'edited' : (change()?.kind ?? 'edited'));
+  const fileCountLabel = () => {
+    const count = changes().length;
+    if (count === 0) return 'Files';
+    return `${count}${hasTruncatedSummary() ? '+' : ''} file${count === 1 ? '' : 's'}`;
+  };
   const visibleMultiFileCount = () => (changes().length > 2 ? 1 : changes().length);
   const visibleMultiFileChanges = () => changes().slice(0, visibleMultiFileCount());
   const hiddenMultiFileChanges = () => changes().slice(visibleMultiFileCount());
   const hiddenMultiFileCount = () => hiddenMultiFileChanges().length;
-  const inlineDiffs = createMemo<FileDiff[]>(() =>
-    changes().flatMap((item) => {
-      if (item.patch === undefined && item.before === undefined && item.after === undefined)
-        return [];
-      const before = item.before ?? (item.after !== undefined ? '' : undefined);
-      const after = item.after ?? (item.before !== undefined ? '' : undefined);
-      return [
-        {
-          file: item.toPath || item.path,
-          before,
-          after,
-          patch: item.patch,
-          additions: item.additions ?? countContentLines(after),
-          deletions: item.deletions ?? countContentLines(before),
-        },
-      ];
-    })
+  const hasInlinePreviewContent = () =>
+    changes().some(
+      (item) =>
+        item.patch !== undefined ||
+        item.before !== undefined ||
+        item.after !== undefined ||
+        item.previewStatus !== undefined
+    );
+  const showInlinePreview = () => showInlineFileChanges() && hasInlinePreviewContent();
+  const showCompactCard = () => !isCompleted() || !showInlinePreview();
+  const inlineDiffs = createMemo<DiffViewFile[]>(() =>
+    changes().map((item) => ({
+      file: item.toPath || item.path,
+      fromFile: item.kind === 'moved' ? item.fromPath : undefined,
+      changeKind: item.kind,
+      status: item.kind === 'added' ? 'added' : item.kind === 'removed' ? 'deleted' : 'modified',
+      before: item.before,
+      after: item.after,
+      patch: item.patch,
+      patchFormat: item.patchFormat,
+      previewStatus: item.previewStatus,
+      previewMessage: item.previewMessage,
+      additions: item.additions ?? (item.kind === 'added' ? countContentLines(item.after) : 0),
+      deletions: item.deletions ?? (item.kind === 'removed' ? countContentLines(item.before) : 0),
+    }))
   );
 
   createEffect(() => {
@@ -577,16 +594,31 @@ function FileChangeCard(props: {
   });
 
   const action = () => {
+    const completed = isCompleted();
     switch (effectiveKind()) {
       case 'added':
-        return 'Added';
+        return completed ? 'Added' : 'Add';
       case 'removed':
-        return 'Removed';
+        return completed ? 'Removed' : 'Remove';
       case 'moved':
-        return 'Moved';
+        return completed ? 'Moved' : 'Move';
       default:
-        return 'Edited';
+        return completed ? 'Edited' : 'Edit';
     }
+  };
+
+  const statusClass = () => {
+    if (isPending()) return 'pending';
+    if (isRunning()) return 'running';
+    if (isError()) return isAborted() ? 'aborted' : 'error';
+    return 'done';
+  };
+
+  const statusLabel = () => {
+    if (isPending()) return 'Pending';
+    if (isRunning()) return 'Running';
+    if (isError()) return isAborted() ? 'Aborted' : 'Failed';
+    return 'Completed';
   };
 
   const diffStats = () => {
@@ -627,22 +659,31 @@ function FileChangeCard(props: {
           (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
         )
       : null;
+  const errorMessage = () => {
+    if (!isError()) return null;
+    const message = (s() as ToolStateError).error.trim();
+    if (!message) return null;
+    if (message.length <= MAX_FILE_ERROR_DISPLAY_CHARS) return message;
+    return `${message.slice(0, MAX_FILE_ERROR_DISPLAY_CHARS)}\n... error truncated`;
+  };
 
   return (
     <>
-      <Show when={!showInlineFileChanges() || inlineDiffs().length === 0}>
+      <Show when={showCompactCard()}>
         <div class="chat-tool-invocation-part file-change-card">
           <div class="file-change-card-header">
             <span
-              class={`file-edit-dot ${isRunning() ? 'running' : isError() ? (isAborted() ? 'aborted' : 'error') : 'done'}`}
-              aria-label={
-                isRunning() ? 'Running' : isError() ? (isAborted() ? 'Aborted' : 'Error') : 'Done'
-              }
+              class={`file-edit-dot ${statusClass()}`}
+              role="status"
+              aria-label={statusLabel()}
+              aria-live="polite"
+              aria-atomic="true"
+              title={statusLabel()}
             />
             <span class="file-edit-action-label">{action()}</span>
             <Show
-              when={!isMultiFile()}
-              fallback={<span class="file-edit-summary-label">{changes().length} files</span>}
+              when={!isMultiFile() && change()}
+              fallback={<span class="file-edit-summary-label">{fileCountLabel()}</span>}
             >
               <Show
                 when={effectiveKind() !== 'moved'}
@@ -651,17 +692,17 @@ function FileChangeCard(props: {
                     <a
                       href="#"
                       class="file-path-link file-edit-path-link"
-                      onClick={openFileChangePath(change().fromPath || change().path)}
+                      onClick={openFileChangePath(change()!.fromPath || change()!.path)}
                     >
-                      {formatFileChangeDisplayName(change().fromPath || change().path)}
+                      {formatFileChangeDisplayName(change()!.fromPath || change()!.path)}
                     </a>
                     <span class="file-edit-move-arrow">→</span>
                     <a
                       href="#"
                       class="file-path-link file-edit-path-link"
-                      onClick={openFileChangePath(change().toPath || change().path)}
+                      onClick={openFileChangePath(change()!.toPath || change()!.path)}
                     >
-                      {formatFileChangeDisplayName(change().toPath || change().path)}
+                      {formatFileChangeDisplayName(change()!.toPath || change()!.path)}
                     </a>
                   </span>
                 }
@@ -669,13 +710,13 @@ function FileChangeCard(props: {
                 <a
                   href="#"
                   class="file-path-link file-edit-path-link"
-                  onClick={openFileChangePath(change().path)}
+                  onClick={openFileChangePath(change()!.path)}
                 >
-                  {formatFileChangeDisplayName(change().path)}
+                  {formatFileChangeDisplayName(change()!.path)}
                 </a>
               </Show>
             </Show>
-            <Show when={isMultiFile()}>
+            <Show when={isMultiFile() && changes().length > 0}>
               <span class="file-edit-multi-list">
                 <For each={visibleMultiFileChanges()}>
                   {(item) => {
@@ -761,9 +802,23 @@ function FileChangeCard(props: {
               </span>
             </Show>
           </div>
+          <Show when={errorMessage()}>
+            {(message) => (
+              <div class="file-edit-error-detail" role="alert" aria-label="File change error">
+                {message()}
+              </div>
+            )}
+          </Show>
         </div>
       </Show>
-      <Show when={showInlineFileChanges() && inlineDiffs().length > 0}>
+      <For each={summaries()}>
+        {(summary) => (
+          <div class="file-change-truncated-summary" role="note">
+            {summary.previewMessage}
+          </div>
+        )}
+      </For>
+      <Show when={showInlinePreview()}>
         <div class="file-change-inline-diffs file-change-inline-diffs-unwrapped">
           <DiffView diffs={inlineDiffs()} showChanges stateKey={props.previewStateKey} />
         </div>

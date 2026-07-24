@@ -11,6 +11,7 @@ import {
 import {
   state,
   inputText,
+  inputTextMutationVersion,
   setState,
   setInputText,
   nextPastedImageIndex,
@@ -36,8 +37,10 @@ import {
   reorderQueuedMessage,
   replaceQueuedMessage,
   removeQueuedMessage,
+  setQueuedMessageDispatchingId as setDispatchingQueuedMessageId,
+  setQueuedMessageFailed,
+  setQueuedMessageEdit,
   getPermissionModeForSession,
-  error,
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
   getProviderLimit,
@@ -220,6 +223,18 @@ function composerActiveFile() {
   return state.editorContext.activeFile;
 }
 
+function queuedMessageEdit() {
+  return state.queuedMessageEdit;
+}
+
+function dispatchingQueuedMessageId() {
+  return state.queuedMessageDispatchingId;
+}
+
+function failedQueuedMessageIds() {
+  return new Set(state.failedQueuedMessageIds);
+}
+
 function canEditQueuedMessage() {
   return (
     inputText().length === 0 &&
@@ -372,10 +387,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
-  const [queuedMessageEdit, setQueuedMessageEdit] = createSignal<{
-    id: string;
-    sessionId: string;
-  } | null>(null);
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
 
@@ -1136,6 +1147,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
+    const sendSessionId = composerSessionId();
     const queuedEdit = queuedMessageEdit();
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
@@ -1172,12 +1184,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setHistoryDraft('');
       setCompletionIndex(0);
       setInputText('');
+      const clearedInputVersion = inputTextMutationVersion();
       resetPastedImageIndex();
       let sent = false;
       if (editTargetExists) {
         clearUsageLimitsForSessionTree(composerSessionId());
         sent = await editMessage(editing.messageId, text, {
           allowEmptyText: hasEditableAttachments,
+          queuedAttachments,
         });
       } else {
         clearUsageLimitsForSessionTree(composerSessionId());
@@ -1185,7 +1199,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       if (sent) {
         resetMessageEditState();
-      } else {
+      } else if (
+        composerSessionId() === sendSessionId &&
+        inputTextMutationVersion() === clearedInputVersion &&
+        inputText() === ''
+      ) {
         setInputText(text);
       }
       return;
@@ -1239,45 +1257,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
-    const prevError = error();
     setInputText('');
+    const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
     clearUsageLimitsForSessionTree(composerSessionId());
-    const sent = await sendMessage(
-      text,
-      mode === 'steer'
-        ? { delivery: 'steer' }
-        : {
-            noReply: false,
-            ...(props.newSession ? { queuedAttachments } : {}),
-          }
-    );
+    let sent = false;
+    try {
+      sent = await sendMessage(
+        text,
+        mode === 'steer'
+          ? { delivery: 'steer' }
+          : {
+              noReply: false,
+              ...(props.newSession ? { queuedAttachments } : {}),
+            }
+      );
+    } catch {
+      sent = false;
+    }
     if (sent) {
       if (queuedEdit) removeQueuedMessage(queuedEdit.id);
       setQueuedMessageEdit(null);
     }
-    if (error() && error() !== prevError) {
+    if (
+      !sent &&
+      composerSessionId() === sendSessionId &&
+      inputTextMutationVersion() === clearedInputVersion &&
+      inputText() === ''
+    ) {
       setInputText(text);
     }
-  }
-
-  const [dispatchingQueuedMessageId, setDispatchingQueuedMessageId] = createSignal<string | null>(
-    null
-  );
-  const [failedQueuedMessageIds, setFailedQueuedMessageIds] = createSignal<ReadonlySet<string>>(
-    new Set()
-  );
-
-  function setQueuedMessageFailed(id: string, failed: boolean) {
-    setFailedQueuedMessageIds((ids) => {
-      const next = new Set(ids);
-      if (failed) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
   }
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {

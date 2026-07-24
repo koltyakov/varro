@@ -564,6 +564,29 @@ describe('SessionListView selection', () => {
     expect(capturePointer).toHaveBeenCalledTimes(1);
     expect(selectSession).toHaveBeenCalledTimes(1);
   });
+
+  it('opens picker sessions on pointer down without starting text selection', () => {
+    vi.mocked(selectSession).mockClear();
+    const now = Date.now();
+    setState('sessions', [session('session-1', now), session('session-2', now - 1)]);
+    cleanup = render(() => <SessionListView />, container);
+    const row = container.querySelector<HTMLElement>('.session-item')!;
+
+    const pointerDown = new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      pointerId: 7,
+      pointerType: 'mouse',
+    });
+    row.querySelector<HTMLElement>('.session-item-main')!.dispatchEvent(pointerDown);
+
+    expect(pointerDown.defaultPrevented).toBe(true);
+    expect(selectSession).toHaveBeenCalledWith('session-1');
+    setState('sessions', [session('session-2', now + 1), session('session-1', now)]);
+    row.querySelector<HTMLElement>('.session-item-main')!.click();
+    expect(selectSession).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('SessionListView ordering', () => {

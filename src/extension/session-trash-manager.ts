@@ -1,6 +1,7 @@
 import type { Persistence } from '../shared/persistence';
-import { normalizeRecycleBinEntry, normalizeRecycleBinSession } from '../shared/recycle-bin';
+import { normalizeRecycleBinEntries, normalizeRecycleBinSession } from '../shared/recycle-bin';
 import type { RecycleBinEntry, RecycleBinSession } from '../shared/protocol';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 
 export type SessionDeleteTarget = {
   id: string;
@@ -17,9 +18,8 @@ export class SessionTrashManager {
   constructor(private readonly persistence: Persistence) {
     const value = persistence.get<unknown>(SESSION_TRASH_KEY);
     const stored = Array.isArray(value) ? value : [];
-    for (const entry of stored) {
-      const normalized = normalizeRecycleBinEntry(entry);
-      if (normalized) this.entries.set(normalized.rootID, normalized);
+    for (const entry of normalizeRecycleBinEntries(stored)) {
+      this.entries.set(entry.rootID, entry);
     }
   }
 
@@ -59,7 +59,8 @@ export class SessionTrashManager {
 
   async moveToTrash(sessionID: string, sessions: unknown[], now = Date.now()) {
     return this.mutate(async () => {
-      if (this.isHidden(sessionID)) return this.entries.get(sessionID) || null;
+      const containingEntry = this.findEntryContaining(sessionID);
+      if (containingEntry) return containingEntry;
       const normalized = sessions
         .map(normalizeRecycleBinSession)
         .filter((session): session is RecycleBinSession => !!session);
@@ -67,6 +68,15 @@ export class SessionTrashManager {
       if (!root) return null;
       const tree = collectSessionTree(sessionID, normalized);
       if (tree.length === 0) return null;
+      if (
+        tree.some(
+          (session) =>
+            session.projectID !== root.projectID ||
+            !isSameWorkspacePath(session.directory, root.directory)
+        )
+      ) {
+        return null;
+      }
 
       const entry: RecycleBinEntry = {
         rootID: sessionID,
@@ -76,6 +86,12 @@ export class SessionTrashManager {
         sessions: tree.map(cloneSession),
       };
       const next = new Map(this.entries);
+      const treeIDs = new Set(tree.map((session) => session.id));
+      for (const existing of next.values()) {
+        if (existing.sessions.some((session) => treeIDs.has(session.id))) {
+          next.delete(existing.rootID);
+        }
+      }
       next.set(entry.rootID, entry);
       await this.persist(next);
       this.entries = next;
@@ -162,6 +178,10 @@ export class SessionTrashManager {
 
   private async persist(entries: ReadonlyMap<string, RecycleBinEntry>) {
     await this.persistence.set(SESSION_TRASH_KEY, listEntries(entries));
+  }
+
+  private findEntryContaining(sessionID: string) {
+    return this.list().find((entry) => entry.sessions.some((session) => session.id === sessionID));
   }
 }
 

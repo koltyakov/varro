@@ -5,6 +5,7 @@ import { permissionsStore } from '../lib/stores/permissions-store';
 import { routingStore } from '../lib/stores/routing-store';
 import { sessionStore } from '../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
+import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type {
   Agent,
@@ -51,6 +52,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     listQuestions: () => client.question.list(),
     setQuestions: permissionsStore.setQuestions,
+    getQuestions: () => appStore.state.questions,
     listAgents: () => client.agent.list(),
     getSelectedAgent: () => appStore.state.selectedAgent,
     getSelectedAgentForSession: routingStore.getSelectedAgentForSession,
@@ -79,6 +81,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     loadSessionStatuses: () => client.session.status(),
     setSessionStatuses: sessionStore.setSessionStatuses,
     getSessions: () => appStore.state.sessions,
+    clearQueuedMessagesForSession,
     updateUsageLimitState: deps.updateUsageLimitState,
     logError: deps.logError,
   });
@@ -92,6 +95,7 @@ export function createDataLoaderOperations(deps: {
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   listQuestions(): Promise<QuestionRequest[]>;
   setQuestions(questions: QuestionRequest[]): void;
+  getQuestions(): QuestionRequest[];
   listAgents(): Promise<Agent[]>;
   getSelectedAgent(): string | null;
   getSelectedAgentForSession(sessionId: string): string | null;
@@ -134,6 +138,7 @@ export function createDataLoaderOperations(deps: {
     options?: SessionStatusSnapshotOptions
   ): void;
   getSessions(): Session[];
+  clearQueuedMessagesForSession(sessionId: string): void;
   updateUsageLimitState(
     sessionId: string,
     status: SessionStatus | null | undefined,
@@ -143,8 +148,12 @@ export function createDataLoaderOperations(deps: {
 }) {
   let emptySessionSnapshotCount = 0;
   let mcpLoadGeneration = 0;
+  let questionLoadGeneration = 0;
+  let sessionLoadGeneration = 0;
   let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
   let knownProviderIDs: Set<string> | null = null;
+  const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
+  const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
 
   const shouldApplySessionsSnapshot = (sessions: Session[]) => {
     if (sessions.length > 0 || deps.getSessions().length === 0) {
@@ -184,12 +193,17 @@ export function createDataLoaderOperations(deps: {
   };
 
   const loadQuestions = async () => {
+    const generation = ++questionLoadGeneration;
+    const mutationBaseline = questionSnapshots.captureBaseline();
     await loadQuestionsWithDependencies(
       {
         listQuestions: deps.listQuestions,
-        setQuestions: deps.setQuestions,
+        setQuestions: (questions) => {
+          deps.setQuestions(questionSnapshots.reconcile(questions, mutationBaseline));
+        },
       },
-      deps.logError
+      deps.logError,
+      () => generation === questionLoadGeneration
     );
   };
 
@@ -279,13 +293,23 @@ export function createDataLoaderOperations(deps: {
   };
 
   const loadSessions = async () => {
+    const generation = ++sessionLoadGeneration;
+    const mutationBaseline = sessionSnapshots.captureBaseline();
     await loadSessionsWithDependencies(
       {
         listSessions: deps.listSessions,
         shouldApplySessionsSnapshot,
-        applySessions: deps.applySessions,
+        applySessions: (sessions) => {
+          const reconciled = sessionSnapshots.reconcile(sessions, mutationBaseline);
+          const retainedIds = new Set(reconciled.map((session) => session.id));
+          for (const current of deps.getSessions()) {
+            if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
+          }
+          deps.applySessions(reconciled);
+        },
       },
-      deps.logError
+      deps.logError,
+      () => generation === sessionLoadGeneration
     );
   };
 
@@ -324,6 +348,30 @@ export function createDataLoaderOperations(deps: {
     loadRecycleBin,
     hydrateSessionStatuses,
   };
+}
+
+function createMutationAwareSnapshotReconciler<T extends { id: string }>(getCurrent: () => T[]) {
+  const captureBaseline = () => new Map(getCurrent().map((item) => [item.id, item]));
+
+  const reconcile = (snapshot: T[], baseline: Map<string, T>) => {
+    const current = getCurrent();
+    const currentById = new Map(current.map((item) => [item.id, item]));
+    const locallyRemovedIds = new Set([...baseline.keys()].filter((id) => !currentById.has(id)));
+    const locallyAddedOrReplaced = current.filter(
+      (item) => !baseline.has(item.id) || baseline.get(item.id) !== item
+    );
+    const locallyChangedIds = new Set([
+      ...locallyRemovedIds,
+      ...locallyAddedOrReplaced.map((item) => item.id),
+    ]);
+
+    return [
+      ...snapshot.filter((item) => !locallyChangedIds.has(item.id)),
+      ...locallyAddedOrReplaced,
+    ];
+  };
+
+  return { captureBaseline, reconcile };
 }
 
 export async function loadProviderAuthMethodsWithDependencies(
@@ -395,9 +443,15 @@ export async function loadQuestionsWithDependencies(
     listQuestions(): Promise<QuestionRequest[]>;
     setQuestions(questions: QuestionRequest[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
-  await runLoad('loadQuestions', deps.listQuestions, deps.setQuestions, logError);
+  try {
+    const questions = await deps.listQuestions();
+    if (isCurrent()) deps.setQuestions(questions);
+  } catch (err) {
+    if (isCurrent()) logError('loadQuestions', err);
+  }
 }
 
 export async function loadAgentsWithDependencies(
@@ -534,10 +588,12 @@ export async function loadSessionsWithDependencies(
     shouldApplySessionsSnapshot?(sessions: Session[]): boolean;
     applySessions(sessions: Session[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   try {
     const sessions = await deps.listSessions();
+    if (!isCurrent()) return;
     // Session reads are intentionally broad. Workspace filtering belongs in
     // applySessions(), not the transport/backend layer, to avoid platform-
     // specific path formatting mismatches from hiding valid sessions.

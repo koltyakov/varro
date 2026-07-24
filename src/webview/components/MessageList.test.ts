@@ -267,6 +267,70 @@ describe('message entrance detection', () => {
 });
 
 describe('MessageList entrance animation', () => {
+  it('shows a transcript instantly when it loads after switching to an existing chat', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    replaceMessages([
+      {
+        info: assistantMessage('message-1', { time: { created: 1 } }),
+        parts: [textPart('text-1', 'Loaded history')],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="message-1"]')?.classList).not.toContain(
+      'interactive-item-entering'
+    );
+    expect(container?.querySelector('.assistant-message-flow-item-streamed')).toBeNull();
+  });
+
+  it('shows existing unfinished chat content immediately and reveals only later streamed parts', async () => {
+    const info = assistantMessage('message-1', { time: { created: 1 } });
+    const initialPart = textPart('text-1', 'Already loaded');
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info, parts: [initialPart] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
+    ).not.toContain('assistant-message-flow-item-streamed');
+
+    replaceMessages([
+      {
+        info,
+        parts: [initialPart, textPart('text-2', 'Streamed after opening')],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-2"]')?.classList
+    ).toContain('assistant-message-flow-item-streamed');
+  });
+
+  it('reveals the first part streamed into an assistant row that opened empty', async () => {
+    const info = assistantMessage('message-1', { time: { created: 1 } });
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info, parts: [] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    replaceMessages([{ info, parts: [textPart('text-1', 'First streamed content')] }]);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:text-1"]')?.classList
+    ).toContain('assistant-message-flow-item-streamed');
+  });
+
   it('animates a newly appended message row only once while pinned to the bottom', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
@@ -3928,6 +3992,75 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('keeps following after a delayed scroll event from a layout bounce', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
+    // event only after the old bottom target has returned.
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1000);
+    animationFrames.restore();
+  });
+
   it('does not rewrite scrollTop when resize leaves the list already at bottom', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
@@ -4054,6 +4187,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     expect(scrollTopValue).toBe(800);
 
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
@@ -4104,6 +4238,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     expect(scrollTopValue).toBe(800);
 
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
@@ -4246,6 +4381,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     expect(scrollTopValue).toBe(800);
 
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
     scrollTopValue = 400;
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
@@ -4259,6 +4395,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     animationFrames.flush();
 
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
     scrollTopValue = 760;
     list?.dispatchEvent(new Event('scroll'));
     animationFrames.flush();

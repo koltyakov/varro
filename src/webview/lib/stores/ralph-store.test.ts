@@ -10,6 +10,7 @@ vi.mock('../bridge', () => ({ postMessage }));
 function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
   return {
     managerSessionId: 'manager-1',
+    workspaceDirectory: '/workspace',
     planDocPath: 'RALPH.md',
     iterations: 10,
     promptTemplate: 'Prompt',

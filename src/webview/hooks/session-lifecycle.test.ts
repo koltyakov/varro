@@ -123,6 +123,7 @@ function createDeps(overrides?: {
       clearSessionSeen: vi.fn(),
       setSessionUsageLimit: vi.fn(),
       setSessionFailed: vi.fn(),
+      clearQueuedMessagesForSession: vi.fn(),
       filterQuestions: vi.fn(),
       filterPermissions: vi.fn(),
       filterPendingAttentionSessionIds: vi.fn(),
@@ -147,6 +148,7 @@ function createDeps(overrides?: {
       clearSessionSeen: vi.fn(),
       setSessionUsageLimit: vi.fn(),
       setSessionFailed: vi.fn(),
+      clearQueuedMessagesForSession: vi.fn(),
       filterQuestions: vi.fn(),
       filterPermissions: vi.fn(),
       filterPendingAttentionSessionIds: vi.fn(),
@@ -273,6 +275,7 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearSelectedMcpsForSession).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('session-1');
+    expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('session-1');
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
   });
 
@@ -289,6 +292,8 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('child');
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('root');
     expect(setup.deps.clearSessionSeen).toHaveBeenCalledWith('child');
+    expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearQueuedMessagesForSession).toHaveBeenCalledWith('child');
   });
 
   it('upserts sessions inside the current workspace and marks the active one seen', () => {

@@ -248,6 +248,24 @@ describe('ToolCall', () => {
     expect(container?.textContent).toContain('git status');
   });
 
+  it('does not repeat long commands in the collapsed preview', () => {
+    const command = `npm run test -- ${'src/webview/components/MessageList.test.ts '.repeat(3)}`;
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command }, command),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(command.length).toBeGreaterThan(100);
+    expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
+  });
+
   it('does not offer expansion when a generic tool has no details', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -1672,6 +1690,39 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-more-menu')).toBeNull();
   });
 
+  it('keeps the compact completed row when inline previews are disabled', () => {
+    const part: ToolPart = {
+      id: 'tool-compact-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-compact-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'completed',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-const oldValue = 1;
++const newValue = 2;
+*** End Patch`,
+        },
+        output: '',
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-change-card')).not.toBeNull();
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited');
+    expect(container?.querySelector('.file-edit-path-link')?.textContent).toBe('src/app.ts');
+    expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
+  });
+
   it('shows live apply_patch changes inline when enabled', () => {
     setShowInlineFileChanges(true);
     const part: ToolPart = {
@@ -1701,8 +1752,11 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-change-card')).toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')).toBeNull();
+    expect(container?.querySelector('.file-change-card')).not.toBeNull();
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit');
+    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
+    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Running');
+    expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
     expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
       2
     );
@@ -1710,5 +1764,182 @@ describe('FileChangeCard', () => {
       'const oldValue = 1;'
     );
     expect(container?.querySelectorAll('.diff-view-line-addition')).toHaveLength(2);
+  });
+
+  it('keeps failed apply_patch status visible beside proposed inline changes', () => {
+    setShowInlineFileChanges(true);
+    const part: ToolPart = {
+      id: 'tool-failed-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-failed-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'error',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++proposed
+*** End Patch`,
+        },
+        error: 'Patch rejected: <script>window.bad = true</script>',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-dot')?.classList).toContain('error');
+    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Failed');
+    expect(container?.querySelector('.file-edit-dot')?.getAttribute('role')).toBe('status');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit');
+    expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
+    const errorDetail = container?.querySelector('.file-edit-error-detail');
+    expect(errorDetail?.getAttribute('role')).toBe('alert');
+    expect(errorDetail?.textContent).toContain(
+      'Patch rejected: <script>window.bad = true</script>'
+    );
+    expect(errorDetail?.querySelector('script')).toBeNull();
+    expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
+    expect(container?.textContent).not.toContain('Edited');
+  });
+
+  it('keeps aborted apply_patch status visible beside proposed inline changes', () => {
+    setShowInlineFileChanges(true);
+    const part: ToolPart = {
+      id: 'tool-aborted-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-aborted-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'error',
+        input: {
+          patchText: `*** Begin Patch
+*** Add File: src/proposed.ts
++export const proposed = true;
+*** End Patch`,
+        },
+        error: 'Aborted',
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-dot')?.classList).toContain('aborted');
+    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Aborted');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Add');
+    expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('aborted');
+    expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
+    expect(container?.textContent).not.toContain('Added');
+  });
+
+  it('replaces the compact completed row with inline file previews', () => {
+    setShowInlineFileChanges(true);
+    const part: ToolPart = {
+      id: 'tool-mixed-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-mixed-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'completed',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** Update File: src/old.ts
+*** Move to: src/renamed.ts
+*** End Patch`,
+        },
+        output: '',
+        title: 'apply_patch',
+        metadata: {
+          files: [
+            { type: 'update', relativePath: 'src/app.ts', additions: 1, deletions: 1 },
+            {
+              type: 'move',
+              filePath: 'src/old.ts',
+              movePath: 'src/renamed.ts',
+              additions: 0,
+              deletions: 0,
+            },
+            {
+              type: 'update',
+              relativePath: 'assets/logo.png',
+              patch: 'Binary files a/logo.png and b/logo.png differ',
+              additions: 0,
+              deletions: 0,
+            },
+          ],
+        },
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-change-card')).toBeNull();
+    const inlineFiles = Array.from(
+      container?.querySelectorAll('.file-change-inline-diffs .diff-view-file') || []
+    );
+    expect(inlineFiles).toHaveLength(3);
+    expect(
+      inlineFiles.map((file) => file.querySelector('.diff-view-filename')?.textContent)
+    ).toEqual(['app.ts', 'old.ts -> renamed.ts', 'logo.png']);
+    expect(inlineFiles[0]?.querySelector('.diff-view-line-addition')?.textContent).toContain('new');
+    expect(inlineFiles[1]?.querySelector('.diff-view-preview-unavailable')?.textContent).toContain(
+      'File moved'
+    );
+    expect(inlineFiles[2]?.querySelector('.diff-view-preview-unavailable')?.textContent).toContain(
+      'Binary file changed'
+    );
+  });
+
+  it('bounds model patch file cards and shows an overflow summary', () => {
+    setShowInlineFileChanges(true);
+    const patchText = [
+      '*** Begin Patch',
+      ...Array.from(
+        { length: 70 },
+        (_, index) => `*** Add File: src/generated-${index}.ts\n+line ${index}`
+      ),
+      '*** End Patch',
+    ].join('\n');
+    const part: ToolPart = {
+      id: 'tool-bounded-patch',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-bounded-patch',
+      tool: 'apply_patch',
+      state: {
+        status: 'running',
+        input: { patchText },
+        title: 'apply_patch',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('64+ files');
+    expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
+      64
+    );
+    expect(container?.querySelector('.file-change-truncated-summary')?.textContent).toContain(
+      'after 64 files'
+    );
   });
 });

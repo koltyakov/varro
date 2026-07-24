@@ -11,9 +11,36 @@ export type FileChange = {
   before?: string;
   after?: string;
   patch?: string;
+  patchFormat?: 'headerless' | 'unified';
   additions?: number;
   deletions?: number;
+  previewStatus?: 'unavailable' | 'truncated';
+  previewMessage?: string;
+  isSummary?: boolean;
   dedupeKey: string;
+};
+
+type MetadataFileChange = {
+  change: FileChange;
+  fallbackKind: boolean;
+};
+
+type PatchSection = {
+  operation: 'add' | 'update' | 'delete';
+  path: string;
+  movePath?: string;
+  lines: string[];
+  bytes: number;
+  lineCount: number;
+  additions: number;
+  deletions: number;
+  previewMessage?: string;
+};
+
+type BoundedTextMeasurement = {
+  bytes: number;
+  lines: number;
+  exceeded: 'bytes' | 'lines' | null;
 };
 
 const FILE_CHANGE_TOOL_NAMES = new Set([
@@ -76,6 +103,14 @@ const TARGET_PATH_KEYS = [
 ];
 const OPERATION_KEYS = ['operation', 'action', 'changeType', 'change_type', 'status', 'type'];
 const FILE_READ_TOOLS = new Set(['read', 'file_read']);
+const MAX_LAYOUT_CONTENT_SCAN_CHARS = 256 * 1024;
+const MAX_PATCH_FILE_CHANGES = 64;
+const MAX_MODEL_PATCH_BYTES = 1024 * 1024;
+const MAX_MODEL_PATCH_LINES = 10_000;
+const MAX_PATCH_SECTION_BYTES = 256 * 1024;
+const MAX_PATCH_SECTION_LINES = 2_000;
+const MAX_STORED_PATCH_BYTES = 512 * 1024;
+const MAX_STORED_PATCH_LINES = 4_000;
 
 function looksLikePath(value: string): boolean {
   const trimmed = value.trim();
@@ -163,8 +198,9 @@ function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {
   const result: FileChange = {
     kind: change.kind,
     path: change.path,
-    dedupeKey:
-      change.kind === 'moved'
+    dedupeKey: change.isSummary
+      ? `summary:${change.previewMessage || 'truncated'}`
+      : change.kind === 'moved'
         ? `moved:${normalizePath(change.fromPath || '')}->${normalizePath(change.toPath || change.path)}`
         : `${change.kind}:${normalizePath(change.path)}`,
   };
@@ -173,8 +209,12 @@ function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {
   if (change.before !== undefined) result.before = change.before;
   if (change.after !== undefined) result.after = change.after;
   if (change.patch !== undefined) result.patch = change.patch;
+  if (change.patchFormat !== undefined) result.patchFormat = change.patchFormat;
   if (change.additions !== undefined) result.additions = change.additions;
   if (change.deletions !== undefined) result.deletions = change.deletions;
+  if (change.previewStatus !== undefined) result.previewStatus = change.previewStatus;
+  if (change.previewMessage !== undefined) result.previewMessage = change.previewMessage;
+  if (change.isSummary !== undefined) result.isSummary = change.isSummary;
   return result;
 }
 
@@ -247,19 +287,27 @@ export function getToolInlineFileChangesLayoutSignature(
   toolName: string,
   toolState: ToolState
 ): string | null {
-  const previewChanges = getToolFileChanges(toolName, toolState).filter(
+  const changes = getToolFileChanges(toolName, toolState);
+  const hasPreviewContent = changes.some(
     (change) =>
-      change.patch !== undefined || change.before !== undefined || change.after !== undefined
+      change.patch !== undefined ||
+      change.before !== undefined ||
+      change.after !== undefined ||
+      change.previewStatus !== undefined
   );
-  if (previewChanges.length === 0) return null;
+  if (!hasPreviewContent) return null;
 
-  return previewChanges
+  return changes
     .map((change) => {
-      const content =
-        change.patch !== undefined
-          ? `patch:${change.patch}`
-          : `snapshots:${change.before ?? ''}\u0000${change.after ?? ''}`;
-      return `${change.dedupeKey}:${getLayoutContentSignature(content)}`;
+      const contentSignature =
+        change.previewStatus !== undefined
+          ? `preview:${change.previewStatus}:${change.previewMessage ?? ''}`
+          : change.patch !== undefined
+            ? `patch:${getLayoutContentSignature(change.patch)}`
+            : change.before !== undefined || change.after !== undefined
+              ? `snapshots:${getLayoutContentSignature(change.before ?? '')}:${getLayoutContentSignature(change.after ?? '')}`
+              : `metadata:${change.kind}:${change.fromPath ?? ''}:${change.toPath ?? ''}:${change.additions ?? ''}:${change.deletions ?? ''}`;
+      return `${change.dedupeKey}:${contentSignature}`;
     })
     .join('|');
 }
@@ -267,56 +315,118 @@ export function getToolInlineFileChangesLayoutSignature(
 function getLayoutContentSignature(content: string) {
   let hash = 2_166_136_261;
   let lineCount = 1;
-  for (let index = 0; index < content.length; index += 1) {
-    const code = content.charCodeAt(index);
-    if (code === 10) lineCount += 1;
-    hash ^= code;
+  const sampleLength = Math.min(content.length, MAX_LAYOUT_CONTENT_SCAN_CHARS);
+  const firstSampleEnd =
+    content.length <= MAX_LAYOUT_CONTENT_SCAN_CHARS ? sampleLength : Math.floor(sampleLength / 2);
+  const lastSampleStart =
+    content.length <= MAX_LAYOUT_CONTENT_SCAN_CHARS
+      ? firstSampleEnd
+      : content.length - (sampleLength - firstSampleEnd);
+
+  const scan = (start: number, end: number) => {
+    for (let index = start; index < end; index += 1) {
+      const code = content.charCodeAt(index);
+      if (code === 10) lineCount += 1;
+      hash ^= code;
+      hash = Math.imul(hash, 16_777_619);
+    }
+  };
+
+  scan(0, firstSampleEnd);
+  if (lastSampleStart > firstSampleEnd) {
+    hash ^= lastSampleStart;
     hash = Math.imul(hash, 16_777_619);
+    scan(lastSampleStart, content.length);
   }
-  return `${content.length}:${lineCount}:${hash >>> 0}`;
+
+  return `${content.length}:${content.length > sampleLength ? 'sampled' : lineCount}:${hash >>> 0}`;
 }
 
 function computeToolFileChanges(toolName: string, toolState: ToolState): FileChange[] {
   const metadata = getToolMetadata(toolState) || {};
-  const metadataChanges = fileChangesFromMetadataFiles(metadata);
-  if (metadataChanges.length > 0) return metadataChanges;
-
   const normalizedToolName = toolName.trim().toLowerCase().split('.').pop();
+  const metadataChanges = fileChangesFromMetadataFiles(
+    metadata,
+    normalizedToolName === 'apply_patch' ? 'edited' : null
+  );
   if (normalizedToolName === 'apply_patch') {
     const inputChanges = fileChangesFromPatchInput(
       (toolState.input || {}) as Record<string, unknown>
     );
-    if (inputChanges.length > 0) return inputChanges;
+    if (metadataChanges.length > 0 || inputChanges.length > 0) {
+      return mergeFileChanges(metadataChanges, inputChanges);
+    }
+  }
+  if (metadataChanges.length > 0) {
+    return limitFileChanges(metadataChanges.map((entry) => entry.change));
   }
 
   const single = computeToolFileChange(toolName, toolState);
   return single ? [single] : [];
 }
 
-function fileChangesFromMetadataFiles(metadata: Record<string, unknown>): FileChange[] {
+function fileChangesFromMetadataFiles(
+  metadata: Record<string, unknown>,
+  fallbackKind: FileChangeKind | null
+): MetadataFileChange[] {
   const files = metadata.files;
   if (!Array.isArray(files)) return [];
 
-  return files.flatMap((item) => {
-    if (!isRecord(item)) return [];
+  const changes: MetadataFileChange[] = [];
+  let previewBytesRemaining = MAX_STORED_PATCH_BYTES;
+  let previewLinesRemaining = MAX_STORED_PATCH_LINES;
+  const count = Math.min(files.length, MAX_PATCH_FILE_CHANGES);
+  for (let index = 0; index < count; index += 1) {
+    const item = files[index];
+    if (!isRecord(item)) continue;
     const primaryPath = firstString(item, ['relativePath', ...PRIMARY_PATH_KEYS]);
-    const fromPath =
-      firstString(item, SOURCE_PATH_KEYS) || firstString(item, ['filePath', 'filepath']);
+    const explicitFromPath = firstString(item, SOURCE_PATH_KEYS);
+    const explicitToPath = firstString(item, TARGET_PATH_KEYS);
+    const fromPath = explicitFromPath || firstString(item, ['filePath', 'filepath']);
+    const explicitKind =
+      kindFromText(firstString(item, OPERATION_KEYS)) ||
+      (fromPath && explicitToPath ? 'moved' : null);
+    const kind = explicitKind || fallbackKind;
     const toPath =
-      firstString(item, ['movePath', 'move_path']) || firstString(item, ['relativePath']);
-    const kind =
-      kindFromText(firstString(item, OPERATION_KEYS)) || (toPath && fromPath ? 'moved' : null);
+      kind === 'moved'
+        ? explicitToPath || firstString(item, ['relativePath']) || primaryPath
+        : undefined;
     const additions = numberValue(item, 'additions');
     const deletions = numberValue(item, 'deletions');
-    const before = stringValue(item, ['before', 'oldContent', 'old_content']);
-    const after = stringValue(item, ['after', 'newContent', 'new_content']);
-    const patch = firstString(item, ['patch', 'diff']);
+    let before = stringValue(item, ['before', 'oldContent', 'old_content']);
+    let after = stringValue(item, ['after', 'newContent', 'new_content']);
+    let patch = firstString(item, ['patch', 'diff']);
+    let previewMessage: string | undefined;
+    for (const content of [patch, before, after]) {
+      if (content === undefined) continue;
+      if (previewBytesRemaining <= 0 || previewLinesRemaining <= 0) {
+        previewMessage = 'Preview truncated: total inline patch content limit reached.';
+        break;
+      }
+      const byteLimit = Math.min(MAX_PATCH_SECTION_BYTES, previewBytesRemaining);
+      const lineLimit = Math.min(MAX_PATCH_SECTION_LINES, previewLinesRemaining);
+      const measured = measureBoundedText(content, byteLimit, lineLimit);
+      previewBytesRemaining = Math.max(0, previewBytesRemaining - measured.bytes);
+      previewLinesRemaining = Math.max(0, previewLinesRemaining - measured.lines);
+      if (!measured.exceeded) continue;
+      previewMessage =
+        byteLimit < MAX_PATCH_SECTION_BYTES || lineLimit < MAX_PATCH_SECTION_LINES
+          ? 'Preview truncated: total inline patch content limit reached.'
+          : 'Preview truncated: file patch section exceeds 2,000 lines or 256 KB.';
+      break;
+    }
+    if (previewMessage) {
+      before = undefined;
+      after = undefined;
+      patch = undefined;
+    }
 
     if (kind === 'moved') {
       const path = toPath || primaryPath || fromPath;
-      if (!path) return [];
-      return [
-        withDedupeKey({
+      if (!path) continue;
+      changes.push({
+        fallbackKind: explicitKind === null,
+        change: withDedupeKey({
           kind,
           path,
           fromPath,
@@ -326,50 +436,424 @@ function fileChangesFromMetadataFiles(metadata: Record<string, unknown>): FileCh
           patch,
           additions,
           deletions,
+          previewStatus: previewMessage ? 'truncated' : undefined,
+          previewMessage,
         }),
-      ];
+      });
+      continue;
     }
 
     const path = primaryPath || toPath || fromPath;
-    if (!path || !kind) return [];
-    return [withDedupeKey({ kind, path, before, after, patch, additions, deletions })];
-  });
+    if (!path || !kind) continue;
+    changes.push({
+      fallbackKind: explicitKind === null,
+      change: withDedupeKey({
+        kind,
+        path,
+        before,
+        after,
+        patch,
+        additions,
+        deletions,
+        previewStatus: previewMessage ? 'truncated' : undefined,
+        previewMessage,
+      }),
+    });
+  }
+
+  if (files.length > MAX_PATCH_FILE_CHANGES) {
+    changes.push({
+      fallbackKind: false,
+      change: createTruncatedSummary(
+        `Additional metadata files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`
+      ),
+    });
+  }
+  return changes;
 }
 
 function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[] {
   const patchText = firstString(input, ['patchText', 'patch_text', 'patch']);
   if (!patchText) return [];
 
-  const headerPattern = /^\*\*\* (Add|Update|Delete) File:\s*(.+?)\s*$/gm;
-  const headers = [...patchText.matchAll(headerPattern)];
-  return headers.flatMap((match, index) => {
-    const operation = match[1]?.toLowerCase();
-    const path = stripPathWrapping(match[2] || '');
-    if (!operation || !path) return [];
+  const changes: FileChange[] = [];
+  let current: PatchSection | null = null;
+  let fileCount = 0;
+  let storedBytes = 0;
+  let storedLines = 0;
+  let stopMessage: string | null = null;
+  let reachedEndPatch = false;
 
-    if (operation === 'update') {
-      const sectionEnd = headers[index + 1]?.index ?? patchText.length;
-      const section = patchText.slice((match.index ?? 0) + match[0].length, sectionEnd);
-      const movePath = section.match(/^\*\*\* Move to:\s*(.+?)\s*$/m)?.[1];
-      if (movePath) {
-        const toPath = stripPathWrapping(movePath);
-        if (toPath) {
-          return [withDedupeKey({ kind: 'moved', path: toPath, fromPath: path, toPath })];
-        }
+  const finishSection = () => {
+    if (!current) return;
+    const section = current;
+    current = null;
+    const patch = section.lines.length > 0 ? section.lines.join('\n') : undefined;
+    const previewStatus = section.previewMessage ? 'truncated' : undefined;
+    const additions = previewStatus ? undefined : section.additions;
+    const deletions = previewStatus ? undefined : section.deletions;
+
+    if (section.operation === 'update' && section.movePath) {
+      const toPath = stripPathWrapping(section.movePath);
+      if (toPath) {
+        changes.push(
+          withDedupeKey({
+            kind: 'moved',
+            path: toPath,
+            fromPath: section.path,
+            toPath,
+            patch,
+            patchFormat: patch ? 'headerless' : undefined,
+            additions,
+            deletions,
+            previewStatus,
+            previewMessage: section.previewMessage,
+          })
+        );
+        return;
       }
     }
 
-    const kind = operation === 'add' ? 'added' : operation === 'delete' ? 'removed' : 'edited';
-    const sectionEnd = headers[index + 1]?.index ?? patchText.length;
-    const section = patchText
-      .slice((match.index ?? 0) + match[0].length, sectionEnd)
-      .replace(/\r?\n\*\*\* End Patch\s*$/, '')
-      .replace(/^\r?\n/, '')
-      .replace(/\r?\n$/, '');
-    const additions = section.split('\n').filter((line) => line.startsWith('+')).length;
-    const deletions = section.split('\n').filter((line) => line.startsWith('-')).length;
-    return [withDedupeKey({ kind, path, patch: section || undefined, additions, deletions })];
+    const kind =
+      section.operation === 'add' ? 'added' : section.operation === 'delete' ? 'removed' : 'edited';
+    changes.push(
+      withDedupeKey({
+        kind,
+        path: section.path,
+        patch,
+        patchFormat: patch ? 'headerless' : undefined,
+        additions,
+        deletions,
+        previewStatus,
+        previewMessage: section.previewMessage,
+      })
+    );
+  };
+
+  const processLine = (line: string, lineBytes: number): 'continue' | 'complete' | 'limit' => {
+    const header = /^\*\*\* (Add|Update|Delete) File:\s*(.+?)\s*$/.exec(line);
+    if (header) {
+      finishSection();
+      if (fileCount >= MAX_PATCH_FILE_CHANGES) {
+        stopMessage = `Additional patch files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`;
+        return 'limit';
+      }
+      const path = stripPathWrapping(header[2] || '');
+      if (!path) return 'continue';
+      current = {
+        operation: header[1]!.toLowerCase() as PatchSection['operation'],
+        path,
+        lines: [],
+        bytes: 0,
+        lineCount: 0,
+        additions: 0,
+        deletions: 0,
+      };
+      fileCount += 1;
+      return 'continue';
+    }
+
+    if (/^\*\*\* End Patch\s*$/.test(line)) {
+      finishSection();
+      reachedEndPatch = true;
+      return 'complete';
+    }
+    if (!current) return 'continue';
+
+    const move = /^\*\*\* Move to:\s*(.+?)\s*$/.exec(line);
+    if (current.operation === 'update' && move) {
+      current.movePath = move[1];
+      return 'continue';
+    }
+
+    const nextSectionBytes = current.bytes + lineBytes + (current.lines.length > 0 ? 1 : 0);
+    const nextStoredBytes = storedBytes + lineBytes + (current.lines.length > 0 ? 1 : 0);
+    if (
+      nextSectionBytes > MAX_PATCH_SECTION_BYTES ||
+      current.lineCount + 1 > MAX_PATCH_SECTION_LINES
+    ) {
+      current.previewMessage ||=
+        'Preview truncated: file patch section exceeds 2,000 lines or 256 KB.';
+      return 'continue';
+    }
+    if (nextStoredBytes > MAX_STORED_PATCH_BYTES || storedLines + 1 > MAX_STORED_PATCH_LINES) {
+      current.previewMessage ||= 'Preview truncated: total inline patch content limit reached.';
+      return 'continue';
+    }
+
+    current.lines.push(line);
+    current.bytes = nextSectionBytes;
+    current.lineCount += 1;
+    storedBytes = nextStoredBytes;
+    storedLines += 1;
+    if (line.startsWith('+')) current.additions += 1;
+    else if (line.startsWith('-')) current.deletions += 1;
+    return 'continue';
+  };
+
+  let scannedBytes = 0;
+  let scannedLines = 0;
+  let lineStart = 0;
+  let lineBytes = 0;
+  let index = 0;
+  for (; index < patchText.length; index += 1) {
+    const { bytes, codeUnits } = getUtf8Width(patchText, index);
+    if (scannedBytes + bytes > MAX_MODEL_PATCH_BYTES) {
+      stopMessage = 'Additional patch content was omitted after the 1 MB input limit.';
+      break;
+    }
+    scannedBytes += bytes;
+
+    if (patchText.charCodeAt(index) !== 10) {
+      lineBytes += bytes;
+      index += codeUnits - 1;
+      continue;
+    }
+    if (scannedLines >= MAX_MODEL_PATCH_LINES) {
+      stopMessage = `Additional patch content was omitted after ${MAX_MODEL_PATCH_LINES.toLocaleString()} input lines.`;
+      break;
+    }
+
+    const lineEnd = index > lineStart && patchText.charCodeAt(index - 1) === 13 ? index - 1 : index;
+    scannedLines += 1;
+    const result = processLine(patchText.slice(lineStart, lineEnd), lineBytes);
+    lineStart = index + 1;
+    lineBytes = 0;
+    if (result !== 'continue') break;
+  }
+
+  if (
+    !stopMessage &&
+    !reachedEndPatch &&
+    index >= patchText.length &&
+    lineStart < patchText.length
+  ) {
+    if (scannedLines >= MAX_MODEL_PATCH_LINES) {
+      stopMessage = `Additional patch content was omitted after ${MAX_MODEL_PATCH_LINES.toLocaleString()} input lines.`;
+    } else {
+      processLine(patchText.slice(lineStart), lineBytes);
+    }
+  }
+  const unfinishedSection = current as PatchSection | null;
+  if (stopMessage && unfinishedSection) {
+    unfinishedSection.previewMessage ||=
+      'Preview truncated because the model patch input limit was reached.';
+  }
+  finishSection();
+  if (stopMessage) changes.push(createTruncatedSummary(stopMessage));
+  return limitFileChanges(changes);
+}
+
+function getUtf8Width(value: string, index: number) {
+  const code = value.charCodeAt(index);
+  if (code <= 0x7f) return { bytes: 1, codeUnits: 1 };
+  if (code <= 0x7ff) return { bytes: 2, codeUnits: 1 };
+  if (code >= 0xd800 && code <= 0xdbff) {
+    const next = value.charCodeAt(index + 1);
+    if (next >= 0xdc00 && next <= 0xdfff) return { bytes: 4, codeUnits: 2 };
+  }
+  return { bytes: 3, codeUnits: 1 };
+}
+
+function measureBoundedText(
+  content: string,
+  maxBytes: number,
+  maxLines: number
+): BoundedTextMeasurement {
+  let bytes = 0;
+  let lines = content.length > 0 ? 1 : 0;
+  if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
+
+  for (let index = 0; index < content.length; index += 1) {
+    const width = getUtf8Width(content, index);
+    bytes += width.bytes;
+    if (bytes > maxBytes) return { bytes, lines, exceeded: 'bytes' };
+    if (content.charCodeAt(index) === 10) {
+      lines += 1;
+      if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
+    }
+    index += width.codeUnits - 1;
+  }
+  return { bytes, lines, exceeded: null };
+}
+
+function createTruncatedSummary(message: string): FileChange {
+  return withDedupeKey({
+    kind: 'edited',
+    path: '',
+    previewStatus: 'truncated',
+    previewMessage: message,
+    isSummary: true,
   });
+}
+
+function limitFileChanges(changes: readonly FileChange[]): FileChange[] {
+  const files = changes.filter((change) => !change.isSummary);
+  const messages = changes
+    .filter((change) => change.isSummary && change.previewMessage)
+    .map((change) => change.previewMessage!);
+  if (files.length > MAX_PATCH_FILE_CHANGES) {
+    messages.push(`Additional patch files were omitted after ${MAX_PATCH_FILE_CHANGES} files.`);
+  }
+  const result = files.slice(0, MAX_PATCH_FILE_CHANGES);
+  if (messages.length > 0) result.push(createTruncatedSummary([...new Set(messages)].join(' ')));
+  return result;
+}
+
+function mergeFileChanges(
+  metadataChanges: readonly MetadataFileChange[],
+  inputChanges: readonly FileChange[]
+): FileChange[] {
+  const result: FileChange[] = [];
+  const matchedInputs = new Set<number>();
+
+  for (const metadataEntry of metadataChanges) {
+    if (metadataEntry.change.isSummary) {
+      result.push({ ...metadataEntry.change });
+      continue;
+    }
+
+    let bestInputIndex = -1;
+    let bestScore = 0;
+    for (let index = 0; index < inputChanges.length; index += 1) {
+      if (matchedInputs.has(index) || inputChanges[index]!.isSummary) continue;
+      const score = getMergeScore(metadataEntry, inputChanges[index]!);
+      if (score <= bestScore) continue;
+      bestScore = score;
+      bestInputIndex = index;
+    }
+
+    if (bestInputIndex < 0) {
+      result.push({ ...metadataEntry.change });
+      continue;
+    }
+    matchedInputs.add(bestInputIndex);
+    result.push(
+      mergeFileChange(
+        metadataEntry.change,
+        inputChanges[bestInputIndex]!,
+        metadataEntry.fallbackKind
+      )
+    );
+  }
+
+  for (let index = 0; index < inputChanges.length; index += 1) {
+    if (!matchedInputs.has(index)) result.push({ ...inputChanges[index]! });
+  }
+  return limitFileChanges(result);
+}
+
+function getMergeScore(metadataEntry: MetadataFileChange, inputChange: FileChange) {
+  const metadataChange = metadataEntry.change;
+  const metadataTarget = metadataChange.toPath || metadataChange.path;
+  const inputTarget = inputChange.toPath || inputChange.path;
+
+  if (metadataChange.kind === 'moved' && inputChange.kind === 'moved') {
+    const sameTarget = isSameChangePath(metadataTarget, inputTarget);
+    const sameSource =
+      !!metadataChange.fromPath &&
+      !!inputChange.fromPath &&
+      isSameChangePath(metadataChange.fromPath, inputChange.fromPath);
+    if (sameTarget && sameSource) return 140;
+    if (sameTarget) return 120;
+    if (sameSource) return 110;
+    return 0;
+  }
+
+  if (inputChange.kind === 'moved') {
+    if (isSameChangePath(metadataTarget, inputTarget)) return 80;
+    if (inputChange.fromPath && isSameChangePath(metadataTarget, inputChange.fromPath)) return 70;
+    return 0;
+  }
+  if (metadataChange.kind === 'moved') return 0;
+  if (!isSameChangePath(metadataTarget, inputTarget)) return 0;
+  if (metadataChange.kind === inputChange.kind) return 140;
+  return metadataEntry.fallbackKind ? 120 : 0;
+}
+
+function isSameChangePath(a: string, b: string) {
+  return isSameFileKey(normalizeChangePath(a), normalizeChangePath(b));
+}
+
+function normalizeChangePath(path: string) {
+  return normalizePath(path).replace(/^\.\//, '');
+}
+
+function mergeFileChange(
+  metadataChange: FileChange,
+  inputChange: FileChange,
+  metadataKindIsFallback: boolean
+): FileChange {
+  const kind = metadataKindIsFallback
+    ? inputChange.kind
+    : metadataChange.kind === 'moved' || inputChange.kind === 'moved'
+      ? 'moved'
+      : metadataChange.kind;
+  const fromPath = metadataChange.fromPath ?? inputChange.fromPath;
+  const toPath = metadataChange.toPath ?? inputChange.toPath;
+  const path =
+    kind === 'moved' ? toPath || metadataChange.path || inputChange.path : metadataChange.path;
+  const metadataHasPreview =
+    metadataChange.patch !== undefined ||
+    metadataChange.before !== undefined ||
+    metadataChange.after !== undefined;
+  const inputHasPreview =
+    inputChange.patch !== undefined ||
+    inputChange.before !== undefined ||
+    inputChange.after !== undefined;
+  const previewStateSource =
+    metadataHasPreview && !metadataChange.previewStatus
+      ? metadataChange
+      : inputHasPreview
+        ? inputChange
+        : metadataChange.previewStatus
+          ? metadataChange
+          : inputChange;
+  const patch = getPreferredPatch(metadataChange.patch, inputChange.patch);
+  const patchFormat =
+    patch !== undefined && patch === inputChange.patch && inputChange.patchFormat
+      ? inputChange.patchFormat
+      : metadataChange.patchFormat;
+
+  return withDedupeKey({
+    kind,
+    path,
+    fromPath,
+    toPath,
+    before: metadataChange.before ?? inputChange.before,
+    after: metadataChange.after ?? inputChange.after,
+    patch,
+    patchFormat,
+    additions: metadataChange.additions ?? inputChange.additions,
+    deletions: metadataChange.deletions ?? inputChange.deletions,
+    previewStatus: previewStateSource.previewStatus,
+    previewMessage: previewStateSource.previewMessage,
+  });
+}
+
+function getPreferredPatch(metadataPatch: string | undefined, inputPatch: string | undefined) {
+  if (!metadataPatch || !inputPatch) return metadataPatch ?? inputPatch;
+  if (!hasChangedPatchLine(metadataPatch) && hasChangedPatchLine(inputPatch)) return inputPatch;
+  return metadataPatch;
+}
+
+function hasChangedPatchLine(patch: string) {
+  const end = Math.min(patch.length, MAX_LAYOUT_CONTENT_SCAN_CHARS);
+  let atLineStart = true;
+  for (let index = 0; index < end; index += 1) {
+    if (atLineStart) {
+      const marker = patch[index];
+      if (
+        (marker === '+' || marker === '-') &&
+        !patch.startsWith('+++ ', index) &&
+        !patch.startsWith('--- ', index)
+      ) {
+        return true;
+      }
+    }
+    atLineStart = patch.charCodeAt(index) === 10;
+  }
+  return false;
 }
 
 function computeToolFileChange(toolName: string, toolState: ToolState): FileChange | null {
@@ -437,7 +921,9 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
 }
 
 export function getToolChangePath(part: ToolPart): string | null {
-  return getToolFileChange(part.tool, part.state)?.path || null;
+  return (
+    getToolFileChanges(part.tool, part.state).find((change) => !change.isSummary)?.path || null
+  );
 }
 
 function diffCount(diff: FileDiff, primary: 'additions' | 'deletions', alias: string): number {
@@ -562,7 +1048,7 @@ export function getMessageFileChanges(
     for (const part of message.parts) {
       if (part.type === 'tool') {
         for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
-          record(change);
+          if (!change.isSummary) record(change);
         }
         continue;
       }

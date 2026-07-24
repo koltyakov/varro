@@ -24,6 +24,30 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function requestPath(path: string): string {
+  return new URL(path, 'http://localhost').pathname;
+}
+
+function requestDirectory(path: string): string | null {
+  return new URL(path, 'http://localhost').searchParams.get('directory');
+}
+
+function expectScopedRequest(
+  server: FakeServer,
+  method: string,
+  path: string,
+  workspaceDirectory = '/workspace'
+): void {
+  expect(
+    server.request.mock.calls.some(
+      ([requestMethod, requestUrl]) =>
+        requestMethod === method &&
+        requestPath(requestUrl as string) === path &&
+        requestDirectory(requestUrl as string) === workspaceDirectory
+    )
+  ).toBe(true);
+}
+
 function createMemoryPersistence() {
   const storage = new Map<string, unknown>();
   const persistence: Persistence = {
@@ -41,6 +65,7 @@ function createMemoryPersistence() {
 function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
   return {
     managerSessionId: 'manager-1',
+    workspaceDirectory: '/workspace',
     planDocPath: 'RALPH.md',
     iterations: 1,
     promptTemplate: 'Prompt',
@@ -53,21 +78,53 @@ function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
 }
 
 class FakeServer extends EventEmitter {
-  request = vi.fn(async (method: string, path: string, _body?: unknown): Promise<unknown> => {
-    if (method === 'POST' && path === '/session') {
+  request = vi.fn(async (method: string, path: string, body?: unknown): Promise<unknown> => {
+    const url = new URL(path, 'http://localhost');
+    const pathname = url.pathname;
+    const directory = url.searchParams.get('directory') || undefined;
+    if (method === 'POST' && pathname === '/session') {
       this.sessionCount += 1;
       return { id: `child-${this.sessionCount}` };
     }
     if (method === 'PATCH') return {};
-    if (method === 'POST' && path.endsWith('/prompt_async')) {
-      const sessionID = decodeURIComponent(path.split('/')[2] || '');
+    if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+      const sessionID = decodeURIComponent(pathname.split('/')[2] || '');
+      const messageID = (body as { messageID?: unknown } | undefined)?.messageID;
       setTimeout(() => {
-        this.emit('event', { type: 'session.idle', properties: { sessionID } });
+        this.emit('event', {
+          directory,
+          payload: {
+            type: 'session.next.prompt.admitted',
+            properties: {
+              sessionID,
+              ...(typeof messageID === 'string' ? { messageID } : {}),
+            },
+          },
+        });
+        this.emit('event', {
+          directory,
+          payload: {
+            type: 'message.updated',
+            properties: {
+              info: {
+                id: `assistant-${String(messageID)}`,
+                sessionID,
+                role: 'assistant',
+                parentID: messageID,
+                time: { created: 1, completed: 2 },
+              },
+            },
+          },
+        });
+        this.emit('event', {
+          directory,
+          payload: { type: 'session.idle', properties: { sessionID } },
+        });
       }, 0);
       return {};
     }
-    if (method === 'POST' && path.endsWith('/abort')) return {};
-    if (method === 'GET' && path === '/session/status') {
+    if (method === 'POST' && pathname.endsWith('/abort')) return {};
+    if (method === 'GET' && pathname === '/session/status') {
       return Object.fromEntries(
         Array.from({ length: this.sessionCount }, (_, index) => [
           `child-${index + 1}`,
@@ -75,8 +132,8 @@ class FakeServer extends EventEmitter {
         ])
       );
     }
-    if (method === 'GET' && path === '/session') return [];
-    if (method === 'GET' && path.endsWith('/message')) {
+    if (method === 'GET' && pathname === '/session') return [];
+    if (method === 'GET' && pathname.endsWith('/message')) {
       return [
         {
           info: { role: 'assistant' },
@@ -269,6 +326,52 @@ describe('HostRalphStore', () => {
     expect(Object.prototype.hasOwnProperty.call(store.snapshot(), 'toString')).toBe(false);
   });
 
+  it('normalizes a legacy workspacePath into the persisted workspace identity', async () => {
+    const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = createConfig();
+    const { persistence, storage } = createMemoryPersistence();
+    await persistence.set(RALPH_RUNS_KEY, {
+      'manager-1': {
+        config: { ...legacyConfig, workspacePath: '/workspace-a/' },
+        status: 'paused',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    });
+
+    const store = new HostRalphStore(persistence, vi.fn());
+    await store.flush();
+
+    expect(store.getRun('manager-1')?.config.workspaceDirectory).toBe('/workspace-a');
+    expect(
+      (storage.get(RALPH_RUNS_KEY) as Record<string, RalphRun>)['manager-1']?.config
+        .workspaceDirectory
+    ).toBe('/workspace-a');
+  });
+
+  it('pauses a running legacy run whose workspace identity cannot be recovered', async () => {
+    const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = createConfig();
+    const { persistence, storage } = createMemoryPersistence();
+    await persistence.set(RALPH_RUNS_KEY, {
+      'manager-1': {
+        config: legacyConfig,
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    });
+
+    const store = new HostRalphStore(persistence, vi.fn());
+    await store.flush();
+    const run = store.getRun('manager-1');
+
+    expect(run?.status).toBe('paused');
+    expect(run?.config.workspaceDirectory).toBeNull();
+    expect(run?.note).toContain('cannot be resumed safely');
+    expect((storage.get(RALPH_RUNS_KEY) as Record<string, RalphRun>)['manager-1']).toEqual(run);
+  });
+
   it('evicts the oldest terminal run at the run limit without evicting active runs', async () => {
     const { persistence } = createMemoryPersistence();
     const store = new HostRalphStore(persistence, vi.fn());
@@ -404,6 +507,32 @@ describe('RalphHost', () => {
     expect(ensureServerStarted).not.toHaveBeenCalled();
   });
 
+  it('does not reattach a legacy running run without a workspace identity', () => {
+    const config = createConfig();
+    const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = config;
+    const persistence: Persistence = {
+      get: () => ({
+        [config.managerSessionId]: {
+          config: legacyConfig,
+          status: 'running',
+          currentIteration: 0,
+          iterations: [],
+          updatedAt: 1,
+        },
+      }),
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const { host, ensureServerStarted } = createHost({ persistence });
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
+    expect(host.getStatePayload().runs[config.managerSessionId]?.note).toContain(
+      'cannot be resumed safely'
+    );
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
   it('does not start a run after a stop overtakes pending server startup', async () => {
     const serverStart = deferred<void>();
     const { host, server, broadcasts, ensureServerStarted } = createHost({
@@ -422,6 +551,68 @@ describe('RalphHost', () => {
     await vi.waitFor(() => expect(broadcasts).toHaveLength(1));
     expect(host.getStatePayload().runs[config.managerSessionId]).toBeUndefined();
     expect(server.request).not.toHaveBeenCalled();
+  });
+
+  it('aborts a child that is created after the run was cancelled', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    const childCreation = deferred<{ id: string }>();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return childCreation.promise;
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() => expectScopedRequest(server, 'POST', '/session'));
+
+    host.handleMessage({
+      type: 'ralph/stop',
+      payload: { managerSessionId: config.managerSessionId },
+    });
+    childCreation.resolve({ id: 'child-late' });
+
+    await vi.waitFor(() => expectScopedRequest(server, 'POST', '/session/child-late/abort'));
+    expect(
+      server.request.mock.calls.some(
+        ([method, path]) =>
+          method === 'POST' && requestPath(path as string).endsWith('/prompt_async')
+      )
+    ).toBe(false);
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('stopped');
+  });
+
+  it('re-aborts a child when its prompt request settles after cancellation', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    const promptRequest = deferred<unknown>();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-late-prompt' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) return promptRequest.promise;
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const abortRequestCount = () =>
+      server.request.mock.calls.filter(
+        ([method, path]) => method === 'POST' && requestPath(path as string).endsWith('/abort')
+      ).length;
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expectScopedRequest(server, 'POST', '/session/child-late-prompt/prompt_async')
+    );
+
+    host.handleMessage({
+      type: 'ralph/stop',
+      payload: { managerSessionId: config.managerSessionId },
+    });
+    await vi.waitFor(() => expect(abortRequestCount()).toBe(1));
+    promptRequest.resolve({});
+
+    await vi.waitFor(() => expect(abortRequestCount()).toBe(2));
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('stopped');
   });
 
   it('does not start a run after disposal overtakes pending server startup', async () => {
@@ -474,11 +665,12 @@ describe('RalphHost', () => {
     const { host, server } = createHost();
     const config = createConfig();
     server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'child-shutdown' };
-      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
-      if (method === 'POST' && path.endsWith('/abort')) return {};
-      if (method === 'GET' && path === '/session') return [];
-      if (method === 'GET' && path.endsWith('/message')) return [];
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-shutdown' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) return {};
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
+      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'GET' && pathname.endsWith('/message')) return [];
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
 
@@ -493,7 +685,7 @@ describe('RalphHost', () => {
     expect(run?.iterations[0]?.status).toBe('running');
     expect(host.getStatePayload().activeIds).toEqual([]);
     expect(server.listenerCount('event')).toBe(0);
-    expect(server.request).toHaveBeenCalledWith('POST', '/session/child-shutdown/abort', undefined);
+    expectScopedRequest(server, 'POST', '/session/child-shutdown/abort');
   });
 
   it('does not hang disposal when prompt and abort requests never settle', async () => {
@@ -501,10 +693,11 @@ describe('RalphHost', () => {
     const config = createConfig();
     const never = new Promise<never>(() => {});
     server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'child-never' };
-      if (method === 'POST' && path.endsWith('/prompt_async')) return never;
-      if (method === 'POST' && path.endsWith('/abort')) return never;
-      if (method === 'GET' && path === '/session/status') {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-never' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) return never;
+      if (method === 'POST' && pathname.endsWith('/abort')) return never;
+      if (method === 'GET' && pathname === '/session/status') {
         return { 'child-never': { type: 'busy' } };
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -512,11 +705,7 @@ describe('RalphHost', () => {
 
     host.handleMessage({ type: 'ralph/start', payload: { config } });
     await vi.waitFor(() =>
-      expect(server.request).toHaveBeenCalledWith(
-        'POST',
-        '/session/child-never/prompt_async',
-        expect.anything()
-      )
+      expectScopedRequest(server, 'POST', '/session/child-never/prompt_async')
     );
 
     await expect(host.dispose()).resolves.toBeUndefined();
@@ -535,11 +724,12 @@ describe('RalphHost', () => {
 
     expect(ensureServerStarted).toHaveBeenCalled();
     // Child session created with its permission rules in the create body.
-    expect(server.request).toHaveBeenCalledWith(
-      'POST',
-      '/session',
-      expect.objectContaining({ permission: expect.any(Array) })
-    );
+    expectScopedRequest(server, 'POST', '/session');
+    expect(
+      server.request.mock.calls.find(
+        ([method, path]) => method === 'POST' && requestPath(path as string) === '/session'
+      )?.[2]
+    ).toEqual(expect.objectContaining({ permission: expect.any(Array) }));
     const run = host.getStatePayload().runs[config.managerSessionId];
     expect(run?.iterations[0]).toEqual(
       expect.objectContaining({ status: 'passed', verification: { lint: 'pass', test: 'pass' } })
@@ -549,16 +739,127 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().activeIds).toEqual([]);
   });
 
+  it('keeps every request and plan read bound to the originating workspace', async () => {
+    const readFile = vi.fn(async () => '# Plan\n- [x] all done');
+    const { host, server } = createHost({ readFile });
+    const config = createConfig({ workspaceDirectory: '/workspace-a/' });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.config.workspaceDirectory).toBe(
+      '/workspace-a'
+    );
+    expect(readFile).toHaveBeenCalledWith('/workspace-a/RALPH.md');
+    expect(server.request.mock.calls.length).toBeGreaterThan(0);
+    expect(
+      server.request.mock.calls.every(
+        ([, path]) => requestDirectory(path as string) === '/workspace-a'
+      )
+    ).toBe(true);
+  });
+
+  it('unwraps global events and ignores envelopes from another workspace', async () => {
+    const { host, server } = createHost();
+    const config = createConfig({ workspaceDirectory: '/workspace-a' });
+    let promptCount = 0;
+    let completeFirstPrompt: (() => void) | null = null;
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-envelope' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        promptCount += 1;
+        const messageID = (body as { messageID: string }).messageID;
+        server.emit('event', {
+          directory: '/workspace-b',
+          payload: {
+            type: 'session.next.prompt.admitted',
+            properties: { sessionID: 'child-envelope', messageID },
+          },
+        });
+        server.emit('event', {
+          directory: '/workspace-b',
+          payload: { type: 'session.idle', properties: { sessionID: 'child-envelope' } },
+        });
+        const emitMatchingCompletion = () => {
+          server.emit('event', {
+            directory: '/workspace-a',
+            payload: {
+              type: 'session.next.prompt.admitted',
+              properties: { sessionID: 'child-envelope', messageID },
+            },
+          });
+          server.emit('event', {
+            directory: '/workspace-a',
+            payload: {
+              type: 'message.updated',
+              properties: {
+                info: {
+                  id: `assistant-${messageID}`,
+                  sessionID: 'child-envelope',
+                  role: 'assistant',
+                  parentID: messageID,
+                  time: { created: 1, completed: 2 },
+                },
+              },
+            },
+          });
+          server.emit('event', {
+            directory: '/workspace-a',
+            payload: { type: 'session.idle', properties: { sessionID: 'child-envelope' } },
+          });
+        };
+        if (promptCount === 1) completeFirstPrompt = emitMatchingCompletion;
+        else setTimeout(emitMatchingCompletion, 0);
+        return {};
+      }
+      if (method === 'GET' && pathname === '/session/status') {
+        return { 'child-envelope': { type: 'idle' } };
+      }
+      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'GET' && pathname.endsWith('/message')) {
+        return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'lint: PASS' }] }];
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() => expect(promptCount).toBe(1));
+    expect(promptCount).toBe(1);
+    completeFirstPrompt?.();
+
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+    expect(promptCount).toBe(2);
+  });
+
   it('treats an omitted status as idle when the child still exists and SSE is lost', async () => {
     const { host, server } = createHost();
     const config = createConfig();
-    server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'child-polled' };
-      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
-      if (method === 'GET' && path === '/session/status') return {};
-      if (method === 'GET' && path === '/session') return [{ id: 'child-polled' }];
-      if (method === 'GET' && path.endsWith('/message')) {
-        return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'lint: PASS' }] }];
+    let promptMessageID = '';
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-polled' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        promptMessageID = (body as { messageID: string }).messageID;
+        return {};
+      }
+      if (method === 'GET' && pathname === '/session/status') return {};
+      if (method === 'GET' && pathname === '/session') return [{ id: 'child-polled' }];
+      if (method === 'GET' && pathname.endsWith('/message')) {
+        return [
+          {
+            info: {
+              role: 'assistant',
+              parentID: promptMessageID,
+              time: { created: 1, completed: 2 },
+            },
+            parts: [{ type: 'text', text: 'lint: PASS' }],
+          },
+        ];
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
@@ -568,20 +869,21 @@ describe('RalphHost', () => {
       expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/status', undefined);
-    expect(server.request).toHaveBeenCalledWith('GET', '/session', undefined);
+    expectScopedRequest(server, 'GET', '/session/status');
+    expectScopedRequest(server, 'GET', '/session');
   });
 
   it('surfaces terminal status errors with child-session context', async () => {
     const { host, server } = createHost();
     const config = createConfig();
     server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'child-error' };
-      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
-      if (method === 'GET' && path === '/session/status') {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-error' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) return {};
+      if (method === 'GET' && pathname === '/session/status') {
         return { 'child-error': { type: 'error', message: 'provider unavailable' } };
       }
-      if (method === 'POST' && path.endsWith('/abort')) return {};
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
 
@@ -593,6 +895,54 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
       'Ralph session child-error failed while waiting for idle: provider unavailable'
     );
+  });
+
+  it('surfaces an error from the assistant for the exact prompt', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-assistant-error' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        const messageID = (body as { messageID: string }).messageID;
+        server.emit('event', {
+          directory: config.workspaceDirectory,
+          payload: {
+            type: 'session.next.prompt.admitted',
+            properties: { sessionID: 'child-assistant-error', messageID },
+          },
+        });
+        server.emit('event', {
+          directory: config.workspaceDirectory,
+          payload: {
+            type: 'message.updated',
+            properties: {
+              info: {
+                id: `assistant-${messageID}`,
+                sessionID: 'child-assistant-error',
+                role: 'assistant',
+                parentID: messageID,
+                time: { created: 1, completed: 2 },
+                error: { name: 'ProviderError', data: { message: 'provider quota exhausted' } },
+              },
+            },
+          },
+        });
+        return {};
+      }
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('failed')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
+      'assistant failed for the current prompt: provider quota exhausted'
+    );
+    expectScopedRequest(server, 'POST', '/session/child-assistant-error/abort');
   });
 
   it.each([
@@ -609,12 +959,23 @@ describe('RalphHost', () => {
   ])('does not treat a $label child status as idle', async ({ statuses, expected }) => {
     const { host, server } = createHost();
     const config = createConfig();
-    server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'child-status' };
-      if (method === 'POST' && path.endsWith('/prompt_async')) return {};
-      if (method === 'GET' && path === '/session/status') return statuses;
-      if (method === 'GET' && path === '/session') return [];
-      if (method === 'POST' && path.endsWith('/abort')) return {};
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-status' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        const messageID = (body as { messageID: string }).messageID;
+        server.emit('event', {
+          directory: config.workspaceDirectory,
+          payload: {
+            type: 'session.next.prompt.admitted',
+            properties: { sessionID: 'child-status', messageID },
+          },
+        });
+        return {};
+      }
+      if (method === 'GET' && pathname === '/session/status') return statuses;
+      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
 
@@ -650,6 +1011,47 @@ describe('RalphHost', () => {
         expect.objectContaining({ legacyMigrationAcknowledged: true })
       );
     });
+  });
+
+  it('waits for an in-flight legacy sync before disposal completes', async () => {
+    const config = createConfig({ managerSessionId: 'manager-dispose-sync' });
+    const write = deferred<void>();
+    const persistence: Persistence = {
+      get: () => undefined,
+      set: vi.fn(() => write.promise),
+      remove: () => undefined,
+    };
+    const { host, ensureServerStarted } = createHost({ persistence });
+
+    host.handleMessage({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          [config.managerSessionId]: {
+            config,
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 1,
+          },
+        },
+      },
+    });
+    await vi.waitFor(() => expect(persistence.set).toHaveBeenCalledTimes(1));
+
+    let disposed = false;
+    const disposePromise = host.dispose().then(() => {
+      disposed = true;
+    });
+    await Promise.resolve();
+    expect(disposed).toBe(false);
+
+    write.resolve();
+    await disposePromise;
+
+    expect(persistence.set).toHaveBeenCalledTimes(2);
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
+    expect(ensureServerStarted).not.toHaveBeenCalled();
   });
 
   it('does not acknowledge or retain a legacy run when persistence fails', async () => {
@@ -836,19 +1238,46 @@ describe('RalphHost', () => {
     });
 
     const { host, server } = createHost({ persistence });
-    server.request.mockImplementation(async (method: string, path: string) => {
-      if (method === 'GET' && path === '/session/status') {
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'GET' && pathname === '/session/status') {
         return { 'child-persisted': { type: 'idle' } };
       }
-      if (method === 'POST' && path.endsWith('/prompt_async')) {
-        const sessionID = decodeURIComponent(path.split('/')[2] || '');
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        const sessionID = decodeURIComponent(pathname.split('/')[2] || '');
+        const messageID = (body as { messageID: string }).messageID;
         setTimeout(() => {
-          server.emit('event', { type: 'session.idle', properties: { sessionID } });
+          server.emit('event', {
+            directory: config.workspaceDirectory,
+            payload: {
+              type: 'session.next.prompt.admitted',
+              properties: { sessionID, messageID },
+            },
+          });
+          server.emit('event', {
+            directory: config.workspaceDirectory,
+            payload: {
+              type: 'message.updated',
+              properties: {
+                info: {
+                  id: `assistant-${messageID}`,
+                  sessionID,
+                  role: 'assistant',
+                  parentID: messageID,
+                  time: { created: 1, completed: 2 },
+                },
+              },
+            },
+          });
+          server.emit('event', {
+            directory: config.workspaceDirectory,
+            payload: { type: 'session.idle', properties: { sessionID } },
+          });
         }, 0);
         return {};
       }
-      if (method === 'GET' && path === '/session') return [];
-      if (method === 'GET' && path.endsWith('/message')) {
+      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'GET' && pathname.endsWith('/message')) {
         return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text: 'lint: PASS' }] }];
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -857,8 +1286,12 @@ describe('RalphHost', () => {
       expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session/status', undefined);
-    expect(server.request).not.toHaveBeenCalledWith('POST', '/session', expect.anything());
+    expectScopedRequest(server, 'GET', '/session/status');
+    expect(
+      server.request.mock.calls.some(
+        ([method, path]) => method === 'POST' && requestPath(path as string) === '/session'
+      )
+    ).toBe(false);
     expect(
       host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.childSessionId
     ).toBe('child-persisted');

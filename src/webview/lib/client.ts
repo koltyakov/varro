@@ -25,6 +25,7 @@ import type {
   SessionDiffSummary,
   SessionTitleFallbackResponse,
   WorkspaceStatusEventSummary,
+  WorkspaceFilePick,
 } from '../../shared/protocol';
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
@@ -48,12 +49,15 @@ export const client = {
     async get(id: string): Promise<Session> {
       return apiCall('GET', `/session/${id}`);
     },
-    async create(body?: {
-      title?: string;
-      permission?: PermissionRule[];
-      parentID?: string;
-    }): Promise<Session> {
-      return apiCall<Session>('POST', '/session', body || {});
+    async create(
+      body?: {
+        title?: string;
+        permission?: PermissionRule[];
+        parentID?: string;
+      },
+      options?: { directory?: string }
+    ): Promise<Session> {
+      return apiCall<Session>('POST', withDirectory('/session', options?.directory), body || {});
     },
     async update(
       id: string,
@@ -124,7 +128,8 @@ export const client = {
         noReply?: boolean;
         delivery?: 'steer' | 'queue';
         variant?: string;
-      }
+      },
+      options?: { directory?: string }
     ): Promise<void> {
       // `delivery` is a client-side timing concern, not a server one. "Steer" means
       // inject this prompt into the turn that is already running: opencode's active
@@ -135,7 +140,7 @@ export const client = {
       // through prompt_async; the queue/steer distinction lives entirely in the UI
       // (queue holds the message until idle, steer sends it immediately).
       const { delivery: _delivery, ...rest } = body;
-      await apiCall('POST', `/session/${id}/prompt_async`, rest);
+      await apiCall('POST', withDirectory(`/session/${id}/prompt_async`, options?.directory), rest);
     },
     async respondPermission(
       _sessionId: string,
@@ -217,7 +222,7 @@ export const client = {
     async openPlan(content: string): Promise<{ path: string }> {
       return apiCall('POST', VARRO_API_ENDPOINTS.planOpen, { content });
     },
-    async pickWorkspaceFile(): Promise<string | null> {
+    async pickWorkspaceFile(): Promise<WorkspaceFilePick | null> {
       return apiCall('GET', VARRO_API_ENDPOINTS.workspaceFilePick);
     },
     async readWorkspaceFile(path: string): Promise<string | null> {
@@ -319,6 +324,12 @@ export const client = {
     },
   },
 };
+
+function withDirectory(path: string, directory: string | undefined): string {
+  if (!directory) return path;
+  const params = new URLSearchParams({ directory });
+  return `${path}?${params.toString()}`;
+}
 
 let fileStatusCache: {
   expiresAt: number;

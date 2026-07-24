@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { isLoading, showInlineFileChanges } from '../../lib/state';
+import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
@@ -217,6 +218,7 @@ export function AssistantMessageContent(props: {
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   textForPart: (part: Part) => string | null;
+  allowInitialItemReveal?: boolean;
   claimItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
@@ -319,6 +321,13 @@ export function AssistantMessageContent(props: {
   }, []);
   const revealedRenderKeys = new Set<string>();
 
+  if (!props.claimItemReveal && !props.allowInitialItemReveal) {
+    for (const item of renderItems()) {
+      const trackingKey = getRevealTrackingKey(item);
+      revealedRenderKeys.add(trackingKey);
+    }
+  }
+
   const isLightweight = createMemo(
     () => props.outerListVirtualized && props.nearViewport === false
   );
@@ -338,7 +347,19 @@ export function AssistantMessageContent(props: {
   const renderAssistantItem = (item: AssistantRenderItem) => {
     const revealClass = getRevealClass(item);
     return item.kind === 'file-edit-stack' ? (
-      <div class={`assistant-message-flow-item${revealClass}`} data-assistant-render-key={item.key}>
+      <div
+        ref={(element) => {
+          if (revealClass) {
+            prepareMeasuredEntrance(element, {
+              animationName: 'streamed-assistant-item-in',
+              heightProperty: '--streamed-assistant-item-height',
+              skipWithin: '.interactive-item-entering',
+            });
+          }
+        }}
+        class={`assistant-message-flow-item${revealClass}`}
+        data-assistant-render-key={item.key}
+      >
         <div class="assistant-file-edit-stack">
           <For each={item.parts}>
             {(part) => (
@@ -364,6 +385,15 @@ export function AssistantMessageContent(props: {
       </div>
     ) : (
       <div
+        ref={(element) => {
+          if (revealClass) {
+            prepareMeasuredEntrance(element, {
+              animationName: 'streamed-assistant-item-in',
+              heightProperty: '--streamed-assistant-item-height',
+              skipWithin: '.interactive-item-entering',
+            });
+          }
+        }}
         data-assistant-render-key={item.key}
         class={`${getAssistantFlowItemClass(
           item.part,

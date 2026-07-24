@@ -108,7 +108,7 @@ export const ralphStore = {
     setRuns(config.managerSessionId, run);
   },
 
-  setStatus(sessionId: string, status: RalphStatus, stopReason?: RalphStopReason) {
+  setStatus(sessionId: string, status: RalphStatus, stopReason?: RalphStopReason, note?: string) {
     if (!runs[sessionId]) return;
     setRuns(sessionId, 'status', status);
     setRuns(sessionId, 'updatedAt', Date.now());
@@ -118,6 +118,8 @@ export const ralphStore = {
       // Clear any prior terminal stop reason when leaving a terminal state.
       setRuns(sessionId, 'stopReason', undefined);
     }
+    if (note !== undefined) setRuns(sessionId, 'note', note);
+    else if (status === 'running') setRuns(sessionId, 'note', undefined);
   },
 
   addIterations(sessionId: string, count: number) {

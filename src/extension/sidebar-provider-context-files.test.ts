@@ -54,6 +54,14 @@ function asPostDroppedFilesInput(files: DroppedFile[]): PostDroppedFileInput[] {
   return files as unknown as PostDroppedFileInput[];
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('SidebarProviderContextFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,6 +97,92 @@ describe('SidebarProviderContextFiles', () => {
     expect(post).toHaveBeenCalledWith({ type: 'files/dropped', payload: droppedFiles });
     expect(service.getContextFiles()).toEqual(droppedFiles);
     expect(onContextFilesChanged).toHaveBeenCalledOnce();
+  });
+
+  it('does not restore an async content drop after context is cleared', async () => {
+    const { service, droppedFilesService, post } = createService();
+    const pending = deferred<DroppedFile[]>();
+    const droppedFiles: DroppedFile[] = [
+      { path: '/tmp/drop-a.ts', relativePath: 'a.ts', type: 'file' },
+    ];
+    droppedFilesService.fromContent.mockReturnValue(pending.promise);
+
+    const dropping = service.handleDroppedContent(
+      [{ name: 'a.ts', content: 'QQ==', size: 1 }],
+      post
+    );
+    service.clearContextFiles();
+    pending.resolve(droppedFiles);
+    await dropping;
+
+    expect(service.getContextFiles()).toEqual([]);
+    expect(post).not.toHaveBeenCalled();
+    expect(droppedFilesService.removeOwnedFiles).toHaveBeenCalledWith(['/tmp/drop-a.ts']);
+  });
+
+  it('does not restore an async path drop after a file is removed', async () => {
+    const { service, droppedFilesService, post } = createService();
+    const pending = deferred<DroppedFile[]>();
+    const droppedFile: DroppedFile = {
+      path: '/repo/a.ts',
+      relativePath: 'a.ts',
+      type: 'file',
+    };
+    service.postDroppedFiles([droppedFile], post);
+    post.mockClear();
+    droppedFilesService.fromPaths.mockReturnValue(pending.promise);
+
+    const dropping = service.handleDroppedPaths(['/repo/a.ts'], post);
+    service.removeContextFile('/repo/a.ts', post);
+    pending.resolve([droppedFile]);
+    await dropping;
+
+    expect(service.getContextFiles()).toEqual([]);
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'files/removed',
+      payload: { path: '/repo/a.ts' },
+    });
+  });
+
+  it('keeps unrelated pending additions when an existing file is removed', async () => {
+    const { service, droppedFilesService, post } = createService();
+    const pending = deferred<DroppedFile[]>();
+    service.postDroppedFiles([{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }], post);
+    post.mockClear();
+    droppedFilesService.fromPaths.mockReturnValue(pending.promise);
+
+    const dropping = service.handleDroppedPaths(['/repo/b.ts'], post);
+    service.removeContextFile('/repo/a.ts', post);
+    pending.resolve([{ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' }]);
+    await dropping;
+
+    expect(service.getContextFiles()).toEqual([
+      { path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
+    ]);
+    expect(post).toHaveBeenLastCalledWith({
+      type: 'files/dropped',
+      payload: [{ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' }],
+    });
+  });
+
+  it('does not cancel a pending addition for a no-op removal', async () => {
+    const { service, droppedFilesService, post } = createService();
+    const pending = deferred<DroppedFile[]>();
+    droppedFilesService.fromPaths.mockReturnValue(pending.promise);
+
+    const dropping = service.handleDroppedPaths(['/repo/b.ts'], post);
+    service.removeContextFile('/repo/missing.ts', post);
+    pending.resolve([{ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' }]);
+    await dropping;
+
+    expect(service.getContextFiles()).toEqual([
+      { path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
+    ]);
+    expect(post).toHaveBeenCalledWith({
+      type: 'files/dropped',
+      payload: [{ path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' }],
+    });
   });
 
   it('merges line ranges for an existing file and posts only the merged update', () => {

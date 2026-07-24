@@ -156,6 +156,34 @@ describe('session-send helpers', () => {
     });
   });
 
+  it('keeps an explicitly attached active file when automatic document context is disabled', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({
+          activeFile: { path: '/repo/src/a.ts', relativePath: 'src/a.ts', language: 'typescript' },
+          selection: { startLine: 4, endLine: 8 },
+        }),
+        droppedFiles: [
+          {
+            path: '/repo/src/a.ts',
+            relativePath: 'src/a.ts',
+            type: 'file',
+            lineRanges: [{ startLine: 2, endLine: 3 }],
+          },
+        ],
+      }),
+      'session-1',
+      'Review this file',
+      () => false
+    );
+
+    expect(result?.body.parts).toEqual([
+      { type: 'text', text: 'Review this file' },
+      { type: 'text', text: '[Working directory: /repo]' },
+      { type: 'text', text: '[Selection from src/a.ts lines 2-3]' },
+    ]);
+  });
+
   it('preserves mixed attachment send order between files and images', () => {
     const result = buildSessionSendBody(
       createState({
@@ -337,6 +365,7 @@ describe('session-send helpers', () => {
   });
 
   it('creates a session when needed and sends the built payload', async () => {
+    let activeSessionId: string | null = null;
     const sendAsync = vi.fn(async () => {});
     const syncSessionMcps = vi.fn(async () => {});
     const applyEffectiveModel = vi.fn();
@@ -344,9 +373,12 @@ describe('session-send helpers', () => {
 
     await sendMessageWithDependencies(
       {
-        getActiveSessionId: () => null,
+        getActiveSessionId: () => activeSessionId,
         getDefaultPermissionMode: () => 'default',
-        createSession: vi.fn(async () => 'session-2'),
+        createSession: vi.fn(async () => {
+          activeSessionId = 'session-2';
+          return activeSessionId;
+        }),
         clearPendingAbort: vi.fn(),
         syncSessionMcps,
         buildSendPayload: () => ({
@@ -755,9 +787,10 @@ describe('session-send helpers', () => {
     expect(updateSessionPermission).not.toHaveBeenCalled();
   });
 
-  it('retries message sync when the immediate post-send sync leaves the active chat empty', async () => {
+  it('checks and retries message sync against the target session', async () => {
     vi.useFakeTimers();
     let messageCount = 0;
+    const getMessageCount = vi.fn((_sessionId: string) => messageCount);
     const syncSessionMessages = vi.fn(async () => {
       if (syncSessionMessages.mock.calls.length >= 2) messageCount = 2;
     });
@@ -780,7 +813,7 @@ describe('session-send helpers', () => {
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
         sendAsync: vi.fn(async () => {}),
-        getMessageCount: () => messageCount,
+        getMessageCount,
         clearDroppedFiles: vi.fn(),
         clearTerminalSelection: vi.fn(),
         clearClipboardImages: vi.fn(),
@@ -792,13 +825,19 @@ describe('session-send helpers', () => {
         stopLoading: vi.fn(),
         shouldClearComposerAfterSend: () => true,
       },
-      'hello'
+      'hello',
+      { targetSessionId: 'session-target' }
     );
 
     await vi.advanceTimersByTimeAsync(1_000);
     await sendPromise;
 
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-target');
+    expect(getMessageCount).toHaveBeenCalled();
+    expect(getMessageCount.mock.calls.every(([sessionId]) => sessionId === 'session-target')).toBe(
+      true
+    );
   });
 
   it('preserves the live composer when replaying a queued attachment snapshot', async () => {

@@ -206,7 +206,7 @@ describe('areCompactionSettingsEqual', () => {
 describe('OpenCodeProcess Windows termination', () => {
   it('taskkills only the known managed wrapper tree, then verifies the port is free', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    waitForProcessExitMock.mockResolvedValue(false);
+    waitForProcessExitMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     let listenerQueries = 0;
     spawnMock.mockImplementation((command: string, args: string[]) => {
       const child = Object.assign(new EventEmitter(), {
@@ -251,7 +251,65 @@ describe('OpenCodeProcess Windows termination', () => {
       ['/PID', '777', '/T', '/F'],
       expect.anything()
     );
-    expect(listenerQueries).toBe(2);
+    expect(listenerQueries).toBeGreaterThanOrEqual(2);
+  });
+
+  it('kills a surviving cmd listener after the wrapper has already exited', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    waitForProcessExitMock.mockResolvedValue(true);
+    let listening = true;
+    const wrapper = Object.assign(new EventEmitter(), {
+      pid: 123,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+    });
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === 'cmd.exe') return wrapper;
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        const script = args.at(-1) || '';
+        if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
+          if (listening) child.stdout.emit('data', Buffer.from('777\n'));
+        } else if (command === 'powershell.exe' && script.includes('ParentProcessId')) {
+          child.stdout.emit('data', Buffer.from('123\n'));
+        } else if (command === 'taskkill.exe' && args[1] === '777') {
+          listening = false;
+        }
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const manager = new OpenCodeProcess(4096, true, 'C:\\OpenCode\\opencode.cmd');
+    manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    wrapper.exitCode = 0;
+    wrapper.emit('exit', 0, null);
+    await manager.releaseExitedProcess(wrapper);
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'taskkill.exe',
+      ['/PID', '123', '/T', '/F'],
+      expect.anything()
+    );
+    expect(spawnMock).toHaveBeenCalledWith(
+      'taskkill.exe',
+      ['/PID', '777', '/T', '/F'],
+      expect.anything()
+    );
+    expect(manager.process).toBeNull();
   });
 
   it('reports an unmanaged occupied port without terminating its listener', async () => {
@@ -280,6 +338,115 @@ describe('OpenCodeProcess Windows termination', () => {
       expect.anything(),
       expect.anything()
     );
+  });
+});
+
+describe('OpenCodeProcess startup termination', () => {
+  it('terminates a surviving POSIX listener through its launch process group', async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const wrapperPid = MOCK_LINUX_PID + 1;
+    const listenerPid = MOCK_LINUX_PID + 2;
+    let groupAlive = true;
+    let listening = true;
+    const child = Object.assign(new EventEmitter(), {
+      pid: wrapperPid,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+    });
+    spawnMock.mockImplementation((command: string, args: string[]) => {
+      if (command === '/usr/bin/opencode-wrapper') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => {
+        if (command === 'lsof' && listening) {
+          result.stdout.emit('data', Buffer.from(`${listenerPid}\n`));
+        } else if (command === 'ps' && args.includes('pgid=')) {
+          result.stdout.emit('data', Buffer.from(`${wrapperPid}\n`));
+        }
+        result.emit('close', 0);
+      });
+      return result;
+    });
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid !== -wrapperPid) return true;
+      if (signal === 0) {
+        if (groupAlive) return true;
+        throw Object.assign(new Error('no process group'), { code: 'ESRCH' });
+      }
+      if (signal === 'SIGKILL') {
+        groupAlive = false;
+        listening = false;
+      }
+      return true;
+    });
+    const manager = new OpenCodeProcess(4096, true, '/usr/bin/opencode-wrapper');
+    manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    child.exitCode = 0;
+    child.emit('exit', 0, null);
+    const cleanup = manager.releaseExitedProcess(child);
+    await vi.advanceTimersByTimeAsync(5_100);
+    await cleanup;
+
+    expect(kill).toHaveBeenCalledWith(-wrapperPid, 'SIGTERM');
+    expect(kill).toHaveBeenCalledWith(-wrapperPid, 'SIGKILL');
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/usr/bin/opencode-wrapper',
+      ['serve', '--port', '4096'],
+      expect.objectContaining({ detached: true })
+    );
+    expect(manager.process).toBeNull();
+    kill.mockRestore();
+  });
+
+  it('allows a later cleanup attempt after bounded termination fails', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const child = Object.assign(new EventEmitter(), {
+      pid: 124,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+    });
+    spawnMock.mockReturnValue(child);
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+    const terminateManagedProcess = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('process tree survived'))
+      .mockResolvedValueOnce(undefined);
+    (
+      manager as unknown as {
+        terminateManagedProcess: typeof terminateManagedProcess;
+      }
+    ).terminateManagedProcess = terminateManagedProcess;
+
+    await expect(manager.terminateLaunchAttempt(child)).rejects.toThrow('process tree survived');
+    expect(manager.process).toBe(child);
+
+    await expect(manager.terminateLaunchAttempt(child)).resolves.toBeUndefined();
+    expect(manager.process).toBeNull();
+    expect(terminateManagedProcess).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -996,15 +1163,54 @@ describe('OpenCodeProcess config ownership', () => {
     const secondPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
+    (
+      manager as unknown as {
+        terminateManagedProcess: ReturnType<typeof vi.fn>;
+      }
+    ).terminateManagedProcess = vi.fn().mockResolvedValue(undefined);
 
     first.emit('exit', 1, null);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await manager.releaseExitedProcess(first);
 
     expect(firstPath).not.toBe(secondPath);
     expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toEqual({
       compaction: { auto: true, reserved: 4096 },
     });
     await manager.cleanupPreparedInjectedConfigFile();
+  });
+
+  it('refuses to overwrite a live tracked child', () => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 101,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+    });
+    spawnMock.mockReturnValue(child);
+    const manager = new OpenCodeProcess(4096, true, 'opencode');
+    const callbacks = {
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    };
+
+    expect(manager.launchServer(callbacks)).toBe(child);
+    expect(() => manager.launchServer(callbacks)).toThrow(
+      'Cannot launch OpenCode while a managed child is still running'
+    );
+
+    expect(spawnMock).toHaveBeenCalledOnce();
+    expect(manager.process).toBe(child);
+
+    child.exitCode = 0;
+    expect(() => manager.launchServer(callbacks)).toThrow(
+      'Cannot launch OpenCode before the previous managed process tree is cleaned'
+    );
+    expect(spawnMock).toHaveBeenCalledOnce();
   });
 
   it('preserves a child-owned config when disconnect leaves the child alive', async () => {
@@ -1063,10 +1269,14 @@ describe('OpenCodeProcess config ownership', () => {
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
     await manager.disposeProcess({ stopProcess: false });
+    (
+      manager as unknown as {
+        terminateManagedProcess: ReturnType<typeof vi.fn>;
+      }
+    ).terminateManagedProcess = vi.fn().mockResolvedValue(undefined);
 
     child.emit('exit', 0, null);
-    await (manager as unknown as { injectedConfigOperation: Promise<void> })
-      .injectedConfigOperation;
+    await manager.releaseExitedProcess(child);
 
     await expect(stat(configPath)).rejects.toThrow();
   });

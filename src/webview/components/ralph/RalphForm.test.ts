@@ -82,6 +82,7 @@ async function flushMicrotasks(count = 4) {
 }
 
 beforeEach(() => {
+  vi.mocked(ralphRunner.start).mockReset();
   clientMocks.create.mockReset();
   clientMocks.sendAsync.mockReset();
   clientMocks.pickWorkspaceFile.mockReset();
@@ -150,7 +151,10 @@ describe('RalphForm', () => {
   });
 
   it('fills the plan path from the picker button', async () => {
-    clientMocks.pickWorkspaceFile.mockResolvedValue('docs/RALPH.md');
+    clientMocks.pickWorkspaceFile.mockResolvedValue({
+      path: 'docs/RALPH.md',
+      workspaceDirectory: '/repo-b',
+    });
     cleanup = render(() => RalphForm(), container!);
 
     const pickButton = Array.from(document.body.querySelectorAll('button')).find(
@@ -165,6 +169,40 @@ describe('RalphForm', () => {
     expect(input).toBeInstanceOf(HTMLInputElement);
     expect((input as HTMLInputElement | null)?.value).toBe('docs/RALPH.md');
     expect(clientMocks.pickWorkspaceFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts in the workspace root returned with a multi-root plan selection', async () => {
+    stateMock.editorContext.workspacePath = '/repo-a';
+    clientMocks.pickWorkspaceFile.mockResolvedValue({
+      path: 'docs/RALPH.md',
+      workspaceDirectory: '/repo-b/',
+    });
+    clientMocks.create.mockResolvedValue({ id: 'ralph-session' });
+    clientMocks.sendAsync.mockResolvedValue(undefined);
+    cleanup = render(() => RalphForm(), container!);
+
+    const pickButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Pick file'
+    );
+    pickButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushMicrotasks();
+
+    stateMock.editorContext.workspacePath = '/repo-a-changed';
+    const startButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Start loop'
+    );
+    startButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushMicrotasks();
+
+    expect(ralphRunner.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planDocPath: 'docs/RALPH.md',
+        workspaceDirectory: '/repo-b',
+      })
+    );
+    expect(clientMocks.create).toHaveBeenCalledWith(expect.anything(), {
+      directory: '/repo-b',
+    });
   });
 
   it('preselects the current context document when the form opens', () => {
@@ -201,6 +239,7 @@ describe('RalphForm', () => {
       relativePath: 'docs/RALPH.md',
       language: 'markdown',
     };
+    stateMock.editorContext.workspacePath = '/repo/';
     clientMocks.create.mockResolvedValue({ id: 'ralph-session' });
     clientMocks.sendAsync.mockResolvedValue(undefined);
     cleanup = render(() => RalphForm(), container!);
@@ -215,9 +254,35 @@ describe('RalphForm', () => {
 
     expect(ralphRunner.start).toHaveBeenCalledWith(
       expect.objectContaining({
+        workspaceDirectory: '/repo',
         model: { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' },
       })
     );
+    expect(clientMocks.create).toHaveBeenCalledWith(expect.anything(), { directory: '/repo' });
+    expect(clientMocks.sendAsync).toHaveBeenCalledWith('ralph-session', expect.anything(), {
+      directory: '/repo',
+    });
+  });
+
+  it('does not start without an originating workspace directory', async () => {
+    stateMock.editorContext.activeFile = {
+      path: '/tmp/RALPH.md',
+      relativePath: '/tmp/RALPH.md',
+      language: 'markdown',
+    };
+    cleanup = render(() => RalphForm(), container!);
+
+    const startButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Start loop'
+    );
+    startButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushMicrotasks();
+
+    expect(document.body.textContent).toContain(
+      'Open the plan from a workspace folder before starting Ralph'
+    );
+    expect(clientMocks.create).not.toHaveBeenCalled();
+    expect(ralphRunner.start).not.toHaveBeenCalled();
   });
 
   it('prefills the provider default model when no model is selected', () => {

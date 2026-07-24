@@ -1,13 +1,4 @@
-import {
-  For,
-  Index,
-  Show,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  onMount,
-} from 'solid-js';
+import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 import { getLeafPathName } from '../lib/path-display';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
@@ -37,6 +28,37 @@ type UnifiedDiffHunk = {
   newCount: number;
 };
 
+export type DiffViewFile = FileDiff & {
+  changeKind?: 'added' | 'edited' | 'removed' | 'moved';
+  fromFile?: string;
+  previewStatus?: 'unavailable' | 'truncated';
+  previewMessage?: string;
+  patchFormat?: 'headerless' | 'unified';
+};
+
+type DiffPreviewResult = {
+  status: 'ready' | 'unavailable' | 'truncated';
+  lines: UnifiedDiffLine[];
+  message?: string;
+};
+
+type DiffWorkBudget = {
+  textBytes: number;
+  textLines: number;
+  lcsCells: number;
+};
+
+type MeasuredText = {
+  bytes: number;
+  lines: number;
+  exceeded: 'bytes' | 'lines' | null;
+};
+
+type PreparedDiff = {
+  diff: DiffViewFile;
+  preview: DiffPreviewResult | null;
+};
+
 type DiffScrollThumb = {
   size: number;
   offset: number;
@@ -53,7 +75,14 @@ type DiffScrollDrag = {
   scrollPerPixel: number;
 };
 
-const MAX_FALLBACK_DIFF_CELLS = 1_000_000;
+const MAX_PATCH_BYTES = 256 * 1024;
+const MAX_PATCH_LINES = 2_000;
+const MAX_SNAPSHOT_BYTES = 256 * 1024;
+const MAX_SNAPSHOT_LINES = 2_000;
+const MAX_DIFF_VIEW_TEXT_BYTES = 512 * 1024;
+const MAX_DIFF_VIEW_TEXT_LINES = 4_000;
+const MAX_FALLBACK_DIFF_CELLS = 250_000;
+const MAX_DIFF_VIEW_LCS_CELLS = 500_000;
 const DIFF_CONTEXT_LINES = 3;
 const COLLAPSED_DIFF_LINE_COUNT = 6;
 const DIFF_FILE_TYPE_OVERRIDES: Record<string, { label?: string; language?: string }> = {
@@ -170,44 +199,64 @@ function getScrollThumb(
   return { size, offset };
 }
 
-export function parseUnifiedPatch(patch: string | undefined): UnifiedDiffLine[] {
+export function parseUnifiedPatch(
+  patch: string | undefined,
+  options?: { headerless?: boolean }
+): UnifiedDiffLine[] {
   if (!patch) return [];
 
+  const patchLines = patch.replace(/\r\n/g, '\n').split('\n');
   const lines: UnifiedDiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
+  let oldLine: number | null = null;
+  let newLine: number | null = null;
+  let oldRemaining: number | null = null;
+  let newRemaining: number | null = null;
   let insideHunk = false;
+  let sawHunk = false;
 
-  for (const rawLine of patch.replace(/\r\n/g, '\n').split('\n')) {
-    const hunk = parseUnifiedHunk(rawLine);
-    if (hunk) {
-      oldLine = hunk.oldStart;
-      newLine = hunk.newStart;
+  for (const rawLine of patchLines) {
+    if (rawLine.startsWith('@@')) {
+      const hunk = parseUnifiedHunk(rawLine);
+      oldLine = hunk?.oldStart ?? null;
+      newLine = hunk?.newStart ?? null;
+      oldRemaining = hunk?.oldCount ?? null;
+      newRemaining = hunk?.newCount ?? null;
       insideHunk = true;
+      sawHunk = true;
       lines.push({ kind: 'hunk', content: rawLine, oldLine: null, newLine: null });
       continue;
     }
     if (!insideHunk || rawLine === '\\ No newline at end of file') continue;
+    if (oldRemaining === 0 && newRemaining === 0) {
+      insideHunk = false;
+      continue;
+    }
 
     if (rawLine.startsWith('+')) {
       lines.push({ kind: 'addition', content: rawLine.slice(1), oldLine: null, newLine });
-      newLine += 1;
+      if (newLine !== null) newLine += 1;
+      if (newRemaining !== null) newRemaining = Math.max(0, newRemaining - 1);
     } else if (rawLine.startsWith('-')) {
       lines.push({ kind: 'deletion', content: rawLine.slice(1), oldLine, newLine: null });
-      oldLine += 1;
+      if (oldLine !== null) oldLine += 1;
+      if (oldRemaining !== null) oldRemaining = Math.max(0, oldRemaining - 1);
     } else if (rawLine.startsWith(' ')) {
       lines.push({ kind: 'context', content: rawLine.slice(1), oldLine, newLine });
-      oldLine += 1;
-      newLine += 1;
+      if (oldLine !== null) oldLine += 1;
+      if (newLine !== null) newLine += 1;
+      if (oldRemaining !== null) oldRemaining = Math.max(0, oldRemaining - 1);
+      if (newRemaining !== null) newRemaining = Math.max(0, newRemaining - 1);
     }
   }
 
-  if (lines.length > 0) return lines;
+  if (sawHunk) return lines;
+  if ((!options?.headerless && hasUnifiedFileHeaders(patchLines)) || isBinaryPatch(patchLines)) {
+    return [];
+  }
 
-  for (const rawLine of patch.replace(/\r\n/g, '\n').split('\n')) {
-    if (rawLine.startsWith('@@')) {
-      lines.push({ kind: 'hunk', content: rawLine, oldLine: null, newLine: null });
-    } else if (rawLine.startsWith('+')) {
+  for (const rawLine of patchLines) {
+    if (rawLine === '\\ No newline at end of file') continue;
+    if (rawLine.startsWith('+')) {
       lines.push({ kind: 'addition', content: rawLine.slice(1), oldLine: null, newLine: null });
     } else if (rawLine.startsWith('-')) {
       lines.push({ kind: 'deletion', content: rawLine.slice(1), oldLine: null, newLine: null });
@@ -219,23 +268,171 @@ export function parseUnifiedPatch(patch: string | undefined): UnifiedDiffLine[] 
   return lines;
 }
 
-export function getDiffLines(diff: FileDiff): UnifiedDiffLine[] {
-  const patchLines = parseUnifiedPatch(diff.patch);
-  if (patchLines.length > 0) return patchLines;
-  if (diff.before === undefined || diff.after === undefined || diff.before === diff.after)
-    return [];
+function hasUnifiedFileHeaders(lines: readonly string[]) {
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    if (
+      isCanonicalUnifiedHeader(lines[index]!, '---', 'a') &&
+      isCanonicalUnifiedHeader(lines[index + 1]!, '+++', 'b')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
-  const before = splitFileLines(diff.before);
-  const after = splitFileLines(diff.after);
-  if ((before.length + 1) * (after.length + 1) > MAX_FALLBACK_DIFF_CELLS) return [];
+function isCanonicalUnifiedHeader(line: string, marker: '---' | '+++', prefix: 'a' | 'b') {
+  if (!line.startsWith(`${marker} `)) return false;
+  const path = line.slice(marker.length + 1).trimStart();
+  return (
+    path.startsWith('/dev/null') || path.startsWith(`${prefix}/`) || path.startsWith(`"${prefix}/`)
+  );
+}
 
-  const width = after.length + 1;
-  const commonLengths = new Uint32Array((before.length + 1) * width);
-  for (let oldIndex = before.length - 1; oldIndex >= 0; oldIndex -= 1) {
-    for (let newIndex = after.length - 1; newIndex >= 0; newIndex -= 1) {
+function isBinaryPatch(lines: readonly string[]) {
+  return lines.some(
+    (line) =>
+      /^Binary files .+ differ$/i.test(line) ||
+      /^GIT binary patch$/i.test(line) ||
+      /^literal \d+$/i.test(line)
+  );
+}
+
+function measureText(content: string, maxBytes: number, maxLines: number): MeasuredText {
+  let bytes = 0;
+  let lines = content.length > 0 ? 1 : 0;
+  if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
+
+  for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = content.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+
+    if (bytes > maxBytes) return { bytes, lines, exceeded: 'bytes' };
+    if (code === 10 || (code === 13 && content.charCodeAt(index + 1) !== 10)) {
+      lines += 1;
+      if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
+    }
+  }
+
+  return { bytes, lines, exceeded: null };
+}
+
+function unavailablePreview(message: string): DiffPreviewResult {
+  return { status: 'unavailable', lines: [], message };
+}
+
+function truncatedPreview(message: string): DiffPreviewResult {
+  return { status: 'truncated', lines: [], message };
+}
+
+function previewKind(diff: DiffViewFile) {
+  if (diff.changeKind) return diff.changeKind;
+  if (diff.status === 'added') return 'added';
+  if (diff.status === 'deleted') return 'removed';
+  return 'edited';
+}
+
+function getDiffPreview(diff: DiffViewFile, budget: DiffWorkBudget): DiffPreviewResult {
+  if (diff.previewStatus) {
+    return {
+      status: diff.previewStatus,
+      lines: [],
+      message: diff.previewMessage || 'Text preview unavailable for this change.',
+    };
+  }
+
+  let patchUnavailableMessage: string | undefined;
+  if (diff.patch !== undefined) {
+    const measured = measureText(diff.patch, MAX_PATCH_BYTES, MAX_PATCH_LINES);
+    if (measured.exceeded) {
+      return truncatedPreview(
+        `Preview truncated: patch exceeds ${MAX_PATCH_LINES.toLocaleString()} lines or 256 KB.`
+      );
+    }
+    if (measured.bytes > budget.textBytes || measured.lines > budget.textLines) {
+      return truncatedPreview('Preview truncated: inline diff work limit reached.');
+    }
+    budget.textBytes -= measured.bytes;
+    budget.textLines -= measured.lines;
+
+    const patchLines = parseUnifiedPatch(diff.patch, {
+      headerless: diff.patchFormat === 'headerless',
+    });
+    if (patchLines.some((line) => line.kind === 'addition' || line.kind === 'deletion')) {
+      return { status: 'ready', lines: patchLines };
+    }
+    if (isBinaryPatch(diff.patch.replace(/\r\n/g, '\n').split('\n'))) {
+      return unavailablePreview('Binary file changed; text preview unavailable.');
+    }
+    patchUnavailableMessage = 'Text preview unavailable for this patch.';
+  }
+
+  let before = diff.before;
+  let after = diff.after;
+  const kind = previewKind(diff);
+  if (kind === 'added' && before === undefined && after !== undefined) before = '';
+  if (kind === 'removed' && after === undefined && before !== undefined) after = '';
+
+  if (before === undefined || after === undefined) {
+    if (before === undefined && after !== undefined) {
+      return unavailablePreview('Previous content was not provided; text preview unavailable.');
+    }
+    if (after === undefined && before !== undefined) {
+      return unavailablePreview('Updated content was not provided; text preview unavailable.');
+    }
+    if (kind === 'moved') return unavailablePreview('File moved; no text preview available.');
+    return unavailablePreview(
+      patchUnavailableMessage || 'Text preview unavailable for this change.'
+    );
+  }
+  if (before === after) return unavailablePreview('No textual changes to preview.');
+
+  const beforeMeasured = measureText(before, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_LINES);
+  if (beforeMeasured.exceeded) {
+    return truncatedPreview('Preview truncated: file snapshots exceed inline preview limits.');
+  }
+  const afterMeasured = measureText(
+    after,
+    MAX_SNAPSHOT_BYTES - beforeMeasured.bytes,
+    MAX_SNAPSHOT_LINES - beforeMeasured.lines
+  );
+  if (afterMeasured.exceeded) {
+    return truncatedPreview('Preview truncated: file snapshots exceed inline preview limits.');
+  }
+  const snapshotBytes = beforeMeasured.bytes + afterMeasured.bytes;
+  const snapshotLines = beforeMeasured.lines + afterMeasured.lines;
+  if (snapshotBytes > budget.textBytes || snapshotLines > budget.textLines) {
+    return truncatedPreview('Preview truncated: inline diff work limit reached.');
+  }
+  budget.textBytes -= snapshotBytes;
+  budget.textLines -= snapshotLines;
+
+  const beforeLines = splitFileLines(before);
+  const afterLines = splitFileLines(after);
+  const lcsCells = (beforeLines.length + 1) * (afterLines.length + 1);
+  if (lcsCells > MAX_FALLBACK_DIFF_CELLS || lcsCells > budget.lcsCells) {
+    return unavailablePreview('Files are too large to compare in an inline preview.');
+  }
+  budget.lcsCells -= lcsCells;
+
+  const width = afterLines.length + 1;
+  const commonLengths = new Uint32Array(lcsCells);
+  for (let oldIndex = beforeLines.length - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = afterLines.length - 1; newIndex >= 0; newIndex -= 1) {
       const index = oldIndex * width + newIndex;
       commonLengths[index] =
-        before[oldIndex] === after[newIndex]
+        beforeLines[oldIndex] === afterLines[newIndex]
           ? commonLengths[(oldIndex + 1) * width + newIndex + 1]! + 1
           : Math.max(
               commonLengths[(oldIndex + 1) * width + newIndex]!,
@@ -247,29 +444,29 @@ export function getDiffLines(diff: FileDiff): UnifiedDiffLine[] {
   const allLines: UnifiedDiffLine[] = [];
   let oldIndex = 0;
   let newIndex = 0;
-  while (oldIndex < before.length || newIndex < after.length) {
+  while (oldIndex < beforeLines.length || newIndex < afterLines.length) {
     if (
-      oldIndex < before.length &&
-      newIndex < after.length &&
-      before[oldIndex] === after[newIndex]
+      oldIndex < beforeLines.length &&
+      newIndex < afterLines.length &&
+      beforeLines[oldIndex] === afterLines[newIndex]
     ) {
       allLines.push({
         kind: 'context',
-        content: before[oldIndex]!,
+        content: beforeLines[oldIndex]!,
         oldLine: oldIndex + 1,
         newLine: newIndex + 1,
       });
       oldIndex += 1;
       newIndex += 1;
     } else if (
-      newIndex < after.length &&
-      (oldIndex === before.length ||
+      newIndex < afterLines.length &&
+      (oldIndex === beforeLines.length ||
         commonLengths[oldIndex * width + newIndex + 1]! >
           commonLengths[(oldIndex + 1) * width + newIndex]!)
     ) {
       allLines.push({
         kind: 'addition',
-        content: after[newIndex]!,
+        content: afterLines[newIndex]!,
         oldLine: null,
         newLine: newIndex + 1,
       });
@@ -277,7 +474,7 @@ export function getDiffLines(diff: FileDiff): UnifiedDiffLine[] {
     } else {
       allLines.push({
         kind: 'deletion',
-        content: before[oldIndex]!,
+        content: beforeLines[oldIndex]!,
         oldLine: oldIndex + 1,
         newLine: null,
       });
@@ -285,7 +482,15 @@ export function getDiffLines(diff: FileDiff): UnifiedDiffLine[] {
     }
   }
 
-  return addDiffHunks(allLines);
+  return { status: 'ready', lines: addDiffHunks(allLines) };
+}
+
+export function getDiffLines(diff: FileDiff): UnifiedDiffLine[] {
+  return getDiffPreview(diff, {
+    textBytes: MAX_DIFF_VIEW_TEXT_BYTES,
+    textLines: MAX_DIFF_VIEW_TEXT_LINES,
+    lcsCells: MAX_DIFF_VIEW_LCS_CELLS,
+  }).lines;
 }
 
 function splitFileLines(content: string) {
@@ -328,17 +533,42 @@ function addDiffHunks(lines: UnifiedDiffLine[]): UnifiedDiffLine[] {
   });
 }
 
-export function DiffView(props: { diffs: FileDiff[]; showChanges?: boolean; stateKey?: string }) {
+function getDiffLineAriaLabel(line: UnifiedDiffLine) {
+  if (line.kind !== 'addition' && line.kind !== 'deletion') return undefined;
+  const lineNumber = line.kind === 'addition' ? line.newLine : line.oldLine;
+  const label = line.kind === 'addition' ? 'Added' : 'Deleted';
+  return `${label}${lineNumber === null ? ' line' : ` line ${lineNumber}`}: ${line.content}`;
+}
+
+export function DiffView(props: {
+  diffs: readonly DiffViewFile[];
+  showChanges?: boolean;
+  stateKey?: string;
+}) {
+  const preparedDiffs = createMemo<PreparedDiff[]>(() => {
+    if (!props.showChanges) {
+      return props.diffs.map((diff) => ({ diff, preview: null }));
+    }
+
+    const budget: DiffWorkBudget = {
+      textBytes: MAX_DIFF_VIEW_TEXT_BYTES,
+      textLines: MAX_DIFF_VIEW_TEXT_LINES,
+      lcsCells: MAX_DIFF_VIEW_LCS_CELLS,
+    };
+    return props.diffs.map((diff) => ({ diff, preview: getDiffPreview(diff, budget) }));
+  });
+
   return (
     <div class={`diff-view-widget${props.showChanges ? ' diff-view-widget-inline' : ''}`}>
-      <Index each={props.diffs}>
-        {(diff, index) => (
+      <Index each={preparedDiffs()}>
+        {(prepared, index) => (
           <DiffItem
-            diff={diff()}
+            diff={prepared().diff}
+            preview={prepared().preview}
             showChanges={props.showChanges}
             stateKey={
               props.stateKey
-                ? `${props.stateKey}\u0000${diff().file || `unknown:${index}`}`
+                ? `${props.stateKey}\u0000${prepared().diff.file || `unknown:${index}`}`
                 : undefined
             }
           />
@@ -348,8 +578,14 @@ export function DiffView(props: { diffs: FileDiff[]; showChanges?: boolean; stat
   );
 }
 
-function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: string }) {
+function DiffItem(props: {
+  diff: DiffViewFile;
+  preview: DiffPreviewResult | null;
+  showChanges?: boolean;
+  stateKey?: string;
+}) {
   let linesViewport: HTMLDivElement | undefined;
+  const [viewportElement, setViewportElement] = createSignal<HTMLDivElement>();
   let scrollDrag: DiffScrollDrag | null = null;
   let scrollbarActivityTimer: ReturnType<typeof setTimeout> | undefined;
   let renderedFile = props.diff.file;
@@ -357,26 +593,45 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
   let previewStateReady = !props.stateKey;
   const initialPreviewState = props.stateKey ? getToolDiffPreviewState(props.stateKey) : null;
   const file = () => props.diff.file;
+  const fromFile = () => props.diff.fromFile;
   const displayName = () => {
     const path = file();
     if (!path) return 'Unknown file';
-    return props.showChanges ? getLeafPathName(path) : path;
+    const sourcePath = fromFile();
+    const formatPath = props.showChanges ? getLeafPathName : (value: string) => value;
+    return sourcePath && sourcePath !== path
+      ? `${formatPath(sourcePath)} -> ${formatPath(path)}`
+      : formatPath(path);
   };
   const fileType = createMemo(() => getDiffFileType(file()));
-  const lines = createMemo(() => getDiffLines(props.diff));
+  const lines = createMemo(() => props.preview?.lines ?? []);
   const displayLines = createMemo(() => getDisplayDiffLines(lines()));
   const firstChangeIndex = createMemo(() =>
     displayLines().findIndex((line) => line.kind === 'addition' || line.kind === 'deletion')
   );
-  const scrollAnchorIndex = createMemo(() => Math.max(0, firstChangeIndex()));
-  const canExpand = createMemo(() => displayLines().length > COLLAPSED_DIFF_LINE_COUNT);
+  const canExpand = createMemo(
+    () => displayLines().length > COLLAPSED_DIFF_LINE_COUNT || firstChangeIndex() > 0
+  );
   const [expanded, setExpanded] = createSignal(initialPreviewState?.expanded ?? false);
   const [scrollbarsActive, setScrollbarsActive] = createSignal(false);
   const [verticalThumb, setVerticalThumb] = createSignal<DiffScrollThumb | null>(null);
   const [horizontalThumb, setHorizontalThumb] = createSignal<DiffScrollThumb | null>(null);
+  const renderedDisplayLines = createMemo(() => {
+    const allLines = displayLines();
+    if (expanded()) {
+      return allLines.map((line, index) => ({ line, index }));
+    }
+
+    const start = Math.max(0, firstChangeIndex());
+    return allLines
+      .slice(start, start + COLLAPSED_DIFF_LINE_COUNT)
+      .map((line, index) => ({ line, index: start + index }));
+  });
   const hasLineNumbers = createMemo(() =>
-    displayLines().some((line) => line.oldLine !== null || line.newLine !== null)
+    renderedDisplayLines().some(({ line }) => line.oldLine !== null || line.newLine !== null)
   );
+  const previewNotice = () =>
+    props.showChanges && props.preview?.status !== 'ready' ? props.preview : null;
   const savePreviewState = () => {
     if (!props.stateKey || !previewStateReady || !linesViewport) return;
     setToolDiffPreviewState(props.stateKey, {
@@ -415,12 +670,15 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
     const nextExpanded = !expanded();
     setExpanded(nextExpanded);
     queueMicrotask(() => {
-      if (!nextExpanded) scrollToFirstChange();
+      if (!nextExpanded && linesViewport) {
+        linesViewport.scrollTop = 0;
+        linesViewport.scrollLeft = 0;
+      }
       updateScrollThumbs();
     });
   };
   const showScrollbarsTemporarily = () => {
-    if (!expanded() && document.activeElement !== linesViewport) return;
+    if (!expanded()) return;
     setScrollbarsActive(true);
     if (scrollbarActivityTimer !== undefined) clearTimeout(scrollbarActivityTimer);
     scrollbarActivityTimer = setTimeout(() => {
@@ -516,16 +774,6 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
       const state = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
       previewStateReady = !nextStateKey;
       setExpanded(state?.expanded ?? false);
-      queueMicrotask(() => {
-        if (state && linesViewport) {
-          linesViewport.scrollTop = state.scrollTop;
-          linesViewport.scrollLeft = state.scrollLeft;
-        } else {
-          scrollToFirstChange();
-        }
-        previewStateReady = true;
-        updateScrollThumbs();
-      });
       return;
     }
     queueMicrotask(() => {
@@ -533,21 +781,30 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
     });
   });
 
-  onMount(() => {
+  createEffect(() => {
+    const viewport = viewportElement();
+    const stateKey = props.stateKey;
+    if (!viewport) return;
+    const state = stateKey ? getToolDiffPreviewState(stateKey) : null;
+
     queueMicrotask(() => {
-      if (initialPreviewState && linesViewport) {
-        linesViewport.scrollTop = initialPreviewState.scrollTop;
-        linesViewport.scrollLeft = initialPreviewState.scrollLeft;
-      } else {
+      if (viewport !== linesViewport || !viewport.isConnected) return;
+      if (state?.expanded) {
+        viewport.scrollTop = state.scrollTop;
+        viewport.scrollLeft = state.scrollLeft;
+      } else if (expanded()) {
         scrollToFirstChange();
+      } else {
+        viewport.scrollTop = 0;
+        viewport.scrollLeft = 0;
       }
       previewStateReady = true;
       updateScrollThumbs();
     });
 
-    if (!linesViewport || typeof ResizeObserver === 'undefined') return;
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(updateScrollThumbs);
-    observer.observe(linesViewport);
+    observer.observe(viewport);
     onCleanup(() => observer.disconnect());
   });
 
@@ -557,12 +814,11 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
 
   return (
     <div class="diff-view-file">
-      <button
-        type="button"
-        class="diff-view-item diff-view-item-button"
-        onClick={openFile}
-        disabled={!file()}
-        title={file() ? `Open full diff: ${file()}` : undefined}
+      <div
+        class={`diff-view-item${canExpand() ? ' diff-view-item-expandable' : ''}`}
+        onClick={() => {
+          if (canExpand()) toggleExpanded();
+        }}
       >
         <Show
           when={fileType()}
@@ -585,7 +841,24 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
             </span>
           )}
         </Show>
-        <span class="diff-view-filename">{displayName()}</span>
+        <span class="diff-view-filename-slot">
+          <button
+            type="button"
+            class="diff-view-filename"
+            onClick={(event) => {
+              event.stopPropagation();
+              openFile();
+            }}
+            disabled={!file()}
+            title={
+              file()
+                ? `Open full diff: ${fromFile() ? `${fromFile()} -> ${file()}` : file()}`
+                : undefined
+            }
+          >
+            {displayName()}
+          </button>
+        </span>
         <Show when={props.diff.additions > 0 || props.diff.deletions > 0}>
           <span class="diff-view-stats">
             <Show when={props.diff.additions > 0}>
@@ -596,49 +869,88 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
             </Show>
           </span>
         </Show>
-      </button>
+        <Show when={canExpand()}>
+          <button
+            type="button"
+            class="diff-view-toggle"
+            aria-expanded={expanded()}
+            aria-label={`${expanded() ? 'Collapse' : 'Expand'} changes in ${displayName()}`}
+            title={`${expanded() ? 'Collapse' : 'Expand'} diff preview`}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d={expanded() ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} />
+            </svg>
+          </button>
+        </Show>
+      </div>
+      <Show when={previewNotice()}>
+        {(notice) => (
+          <div class={`diff-view-preview-state diff-view-preview-${notice().status}`} role="note">
+            {notice().message}
+          </div>
+        )}
+      </Show>
       <Show when={props.showChanges && displayLines().length > 0}>
         <div
-          class={`diff-view-lines-shell${expanded() ? ' diff-view-lines-shell-expanded' : ''}${scrollbarsActive() ? ' diff-view-lines-shell-scrolling' : ''}`}
+          class={`diff-view-lines-shell${canExpand() ? ' diff-view-lines-shell-expandable' : ''}${expanded() ? ' diff-view-lines-shell-expanded' : ''}${scrollbarsActive() ? ' diff-view-lines-shell-scrolling' : ''}`}
         >
           <div
-            ref={(element) => (linesViewport = element)}
+            ref={(element) => {
+              linesViewport = element;
+              setViewportElement(element);
+            }}
             class={`diff-view-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}${expanded() ? ' diff-view-lines-expanded' : ''}`}
-            role="table"
+            role="region"
             tabIndex={0}
             aria-label={`Changes in ${file() || 'file'}`}
-            onClick={() => {
-              if (!expanded()) linesViewport?.focus({ preventScroll: true });
-            }}
+            onClick={() => linesViewport?.focus({ preventScroll: true })}
             onFocus={updateScrollThumbs}
             onScroll={updateScrollThumbs}
             onTouchMove={showScrollbarsTemporarily}
             onWheel={showScrollbarsTemporarily}
           >
-            <div class="diff-view-lines-content">
-              <For each={displayLines()}>
-                {(line, index) =>
-                  line.kind === 'gap' ? (
+            <div class="diff-view-lines-content" role="list">
+              <For each={renderedDisplayLines()}>
+                {(entry) =>
+                  entry.line.kind === 'gap' ? (
                     <div
-                      class={`diff-view-gap${index() === scrollAnchorIndex() ? ' diff-view-scroll-anchor' : ''}`}
-                      role="row"
+                      class={`diff-view-gap${entry.index === Math.max(0, firstChangeIndex()) ? ' diff-view-scroll-anchor' : ''}`}
+                      role="listitem"
                     >
-                      {line.content}
+                      {entry.line.content}
                     </div>
                   ) : (
                     <div
-                      class={`diff-view-line diff-view-line-${line.kind}${index() === scrollAnchorIndex() ? ' diff-view-scroll-anchor' : ''}`}
-                      role="row"
+                      class={`diff-view-line diff-view-line-${entry.line.kind}${entry.index === Math.max(0, firstChangeIndex()) ? ' diff-view-scroll-anchor' : ''}`}
+                      role="listitem"
+                      aria-label={getDiffLineAriaLabel(entry.line)}
                     >
                       <span class="diff-view-line-number" aria-hidden="true">
-                        {line.newLine ?? line.oldLine ?? ''}
+                        {entry.line.newLine ?? entry.line.oldLine ?? ''}
                       </span>
                       <span class="diff-view-line-marker" aria-hidden="true">
-                        {line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '-' : ' '}
+                        {entry.line.kind === 'addition'
+                          ? '+'
+                          : entry.line.kind === 'deletion'
+                            ? '-'
+                            : ' '}
                       </span>
                       <span
                         class="diff-view-line-content hljs"
-                        innerHTML={renderHighlightedCodeHtml(line.content, fileType()?.language)}
+                        innerHTML={renderHighlightedCodeHtml(
+                          entry.line.content,
+                          fileType()?.language
+                        )}
                       />
                     </div>
                   )
@@ -687,32 +999,6 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
                 />
               </div>
             )}
-          </Show>
-          <Show when={canExpand()}>
-            <div class="diff-view-toggle-overlay">
-              <button
-                type="button"
-                class="diff-view-toggle"
-                aria-expanded={expanded()}
-                aria-label={`${expanded() ? 'Collapse' : 'Expand'} changes in ${displayName()}`}
-                title={`${expanded() ? 'Collapse' : 'Expand'} diff preview`}
-                onClick={toggleExpanded}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d={expanded() ? 'M4 10l4-4 4 4' : 'M4 6l4 4 4-4'} />
-                </svg>
-              </button>
-            </div>
           </Show>
         </div>
       </Show>

@@ -22,6 +22,7 @@ import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state
 import { applyWebviewTheme } from '../../lib/theme';
 import type { MessageEntry, Permission, Session, SessionStatus } from '../../types';
 import {
+  clearQueuedMessagesForSession,
   getSessionTreeIds,
   getSessionTreeRootId,
   isSessionAwaitingInput,
@@ -88,6 +89,7 @@ import { SessionMcpOperations } from '../session/session-mcp';
 import {
   ensureSessionPermissionWithDependencies,
   SessionSendOperations,
+  type QueuedAttachmentSnapshot,
 } from '../session/session-send';
 import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
@@ -128,7 +130,7 @@ export interface OpenCodeRuntime {
   editMessage(
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean }
+    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
   ): Promise<boolean>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
@@ -284,7 +286,9 @@ async function fetchSessionMessages(
       void loadSessionBoundaryPrompts(sessionId, incoming.nextCursor);
     }
   }
-  return mergeWindowedHistory(current, incoming);
+  const messages = mergeWindowedHistory(current, incoming);
+  appStore.setState('sessionMessageCounts', sessionId, messages.length);
+  return messages;
 }
 
 const promptHistoryLoads = new Map<string, Promise<boolean>>();
@@ -427,6 +431,7 @@ function resolvePermissionJudgeModel(sessionId: string) {
 
 async function deleteSessionImmediately(id: string) {
   await client.varro.session.deleteImmediately(id);
+  clearQueuedMessagesForSession(id);
 }
 
 export function createOpenCodeRuntime(): OpenCodeRuntime {
@@ -999,6 +1004,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSessionMessages,
     recheckSessionStatus,
     setSessionStatusEntry,
+    getMessageCount: (sessionId) => {
+      const loadedCount = appStore.state.messages.filter(
+        (entry) => entry.info.sessionID === sessionId
+      ).length;
+      return appStore.state.activeSessionId === sessionId || loadedCount > 0
+        ? loadedCount
+        : (appStore.state.sessionMessageCounts[sessionId] ?? 0);
+    },
     continueInterruptedSession,
     logError,
   });
@@ -1109,10 +1122,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     logError,
     getMessages: () => appStore.state.messages,
     startLoading: uiStore.startLoading,
-    invalidateMessageSync: () => {
-      const sessionId = appStore.state.activeSessionId;
-      if (sessionId) messageSyncGenerations.invalidate(sessionId);
-    },
+    invalidateMessageSync: (sessionId) => messageSyncGenerations.invalidate(sessionId),
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
     deleteMessage: (sessionId, messageId) => client.session.deleteMessage(sessionId, messageId),
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
@@ -1120,7 +1130,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSessionMessages,
     setError: uiStore.setError,
     isSessionWorking: (sessionId) => isSessionTreeStatusWorking(sessionId),
-    sendEditedMessage: (text) => sendMessage(text),
+    sendEditedMessage: (text, sessionId, queuedAttachments) =>
+      sessionSendOperations.sendMessage(text, { targetSessionId: sessionId, queuedAttachments }),
+    prepareEditedMessageSend: (text, sessionId, queuedAttachments) =>
+      sessionSendOperations.prepareSendMessage(text, {
+        targetSessionId: sessionId,
+        queuedAttachments,
+      }),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
     clearPendingAbort,
@@ -1376,7 +1392,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function editMessage(
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean }
+    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
   ) {
     return await sessionControlOperations.editMessage(messageId, text, options);
   }

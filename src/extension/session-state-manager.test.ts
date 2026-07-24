@@ -1274,6 +1274,62 @@ describe('SessionStateManager notifications', () => {
     expect(manager.isPlanSession('session-249')).toBe(true);
   });
 
+  it('refreshes session metadata recency on access and update', () => {
+    const manager = createManager(() => false);
+    for (let i = 0; i < 200; i += 1) {
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: `session-${i}`, title: `Session ${i}` } },
+      });
+    }
+
+    expect(manager.titleFor('session-0')).toBe('Session 0');
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', title: 'Updated session 1' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-200', title: 'Session 200' } },
+    });
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-201', title: 'Session 201' } },
+    });
+
+    expect(manager.titleFor('session-0')).toBe('Session 0');
+    expect(manager.titleFor('session-1')).toBe('Updated session 1');
+    expect(manager.titleFor('session-2')).toBeUndefined();
+    expect(manager.titleFor('session-3')).toBeUndefined();
+  });
+
+  it('pins busy and pending session directories during metadata eviction', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'busy-session', directory: '/repo' } },
+    });
+    manager.markSessionBusy('busy-session');
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'pending-session', directory: '/repo' } },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-1', sessionID: 'pending-session', title: 'Use Bash' },
+    });
+
+    for (let i = 0; i < 250; i += 1) {
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: `other-${i}`, directory: `/other-${i}` } },
+      });
+    }
+
+    expect(manager.isSessionInWorkspace('busy-session', '/repo')).toBe(true);
+    expect(manager.isSessionInWorkspace('pending-session', '/repo')).toBe(true);
+  });
+
   it('scopes pending session state to the current workspace directory', () => {
     const manager = createManager(() => false);
 

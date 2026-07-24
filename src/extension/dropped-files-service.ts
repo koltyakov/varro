@@ -58,6 +58,7 @@ export class DroppedFilesService {
   private disposePromise: Promise<void> | null = null;
   private dropsDirGeneration = 0;
   private staleSweepPromise: Promise<void> | null = null;
+  private readonly activeContentWrites = new Set<Promise<unknown>>();
   private readonly ownedContentFiles = new Map<string, number>();
   private readonly ownedRemovalPromises = new Map<string, Promise<boolean>>();
   private ownedContentBytes = 0;
@@ -69,6 +70,17 @@ export class DroppedFilesService {
   ) {}
 
   async fromContent(files: Array<{ name: string; content: string; size: number }>) {
+    if (this.disposePromise) await this.disposePromise;
+    const operation = this.fromContentNow(files);
+    this.activeContentWrites.add(operation);
+    try {
+      return await operation;
+    } finally {
+      this.activeContentWrites.delete(operation);
+    }
+  }
+
+  private async fromContentNow(files: Array<{ name: string; content: string; size: number }>) {
     const candidates = files.slice(0, MAX_DROPPED_CONTENT_FILES);
     if (files.length > candidates.length) {
       logger.warn(
@@ -296,6 +308,7 @@ export class DroppedFilesService {
     const dropsDir = this.tempDropsDir;
     this.tempDropsDir = null;
     await this.dropsDirCreation;
+    await Promise.allSettled(this.activeContentWrites);
     if (dropsDir && (await this.removeDropsDir(dropsDir))) {
       this.ownedContentFiles.clear();
       this.ownedContentBytes = 0;

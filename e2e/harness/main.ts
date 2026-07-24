@@ -2065,6 +2065,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         [session.id]: {
           config: {
             managerSessionId: session.id,
+            workspaceDirectory: state.workspacePath,
             planDocPath: 'plan-abc123.md',
             iterations: 5,
             promptTemplate: 'You are iteration {{iteration}} of {{totalIterations}}.',
@@ -2983,7 +2984,12 @@ function sendApiResponse(id: number, payload: { data?: unknown; error?: string }
 const RALPH_RUNS_KEY = 'varro.ralph.runs';
 
 type HarnessRalphRun = {
-  config: { managerSessionId: string; iterations: number; model?: unknown };
+  config: {
+    managerSessionId: string;
+    workspaceDirectory: string | null;
+    iterations: number;
+    model?: unknown;
+  };
   status: string;
   stopReason?: string;
   currentIteration: number;

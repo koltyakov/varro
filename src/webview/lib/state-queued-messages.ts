@@ -4,7 +4,33 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 
 function commitQueuedMessages(messages: QueuedMessage[]) {
   setState('queuedMessages', messages);
+  const ids = new Set(messages.map((message) => message.id));
+  if (state.queuedMessageDispatchingId && !ids.has(state.queuedMessageDispatchingId)) {
+    setState('queuedMessageDispatchingId', null);
+  }
+  if (state.queuedMessageEdit && !ids.has(state.queuedMessageEdit.id)) {
+    setState('queuedMessageEdit', null);
+  }
+  const failedIds = state.failedQueuedMessageIds.filter((id) => ids.has(id));
+  if (failedIds.length !== state.failedQueuedMessageIds.length) {
+    setState('failedQueuedMessageIds', failedIds);
+  }
   writeStored(STORAGE_KEYS.queuedMessages, messages);
+}
+
+export function setQueuedMessageDispatchingId(id: string | null) {
+  setState('queuedMessageDispatchingId', id);
+}
+
+export function setQueuedMessageFailed(id: string, failed: boolean) {
+  const ids = new Set(state.failedQueuedMessageIds);
+  if (failed) ids.add(id);
+  else ids.delete(id);
+  setState('failedQueuedMessageIds', [...ids]);
+}
+
+export function setQueuedMessageEdit(edit: { id: string; sessionId: string } | null) {
+  setState('queuedMessageEdit', edit);
 }
 
 export function enqueueMessage(message: QueuedMessage) {

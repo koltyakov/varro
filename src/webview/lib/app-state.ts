@@ -124,7 +124,11 @@ export interface AppState {
   skippedPlanSessions: Record<string, number>;
   compactingSessionIds: string[];
   queuedMessages: QueuedMessage[];
+  queuedMessageDispatchingId: string | null;
+  failedQueuedMessageIds: string[];
+  queuedMessageEdit: { id: string; sessionId: string } | null;
   failedSessionIds: string[];
+  sessionMessageCounts: Record<string, number>;
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
   providerAuthMethods: ProviderAuthMethodsByProvider;
@@ -164,6 +168,7 @@ export interface AppStateInstance {
   setProviderLimitThresholdPercent: Setter<number>;
   inputText: Accessor<string>;
   setInputText: Setter<string>;
+  inputTextMutationVersion: Accessor<number>;
   nextPastedImageIndex: Accessor<number>;
   setNextPastedImageIndex: Setter<number>;
   isLoading: Accessor<boolean>;
@@ -277,7 +282,11 @@ export function createAppState(): AppStateInstance {
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
     queuedMessages: readStoredQueuedMessages(),
+    queuedMessageDispatchingId: null,
+    failedQueuedMessageIds: [],
+    queuedMessageEdit: null,
     failedSessionIds: [],
+    sessionMessageCounts: {},
     sessionUsageLimits: {},
     interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],
     providerAuthMethods: {},
@@ -307,7 +316,12 @@ export function createAppState(): AppStateInstance {
   const [providerLimitThresholdPercent, setProviderLimitThresholdPercent] = createSignal(
     readProviderLimitThresholdPercent(initialWebviewState)
   );
-  const [inputText, setInputText] = createSignal('');
+  const [inputText, setInputTextValue] = createSignal('');
+  const [inputTextMutationVersion, setInputTextMutationVersion] = createSignal(0);
+  const setInputText: Setter<string> = (value) => {
+    setInputTextMutationVersion((version) => version + 1);
+    return setInputTextValue(value);
+  };
   const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
   const [isLoading, setIsLoading] = createSignal(false);
   const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
@@ -371,6 +385,7 @@ export function createAppState(): AppStateInstance {
     setProviderLimitThresholdPercent,
     inputText,
     setInputText,
+    inputTextMutationVersion,
     nextPastedImageIndex,
     setNextPastedImageIndex,
     isLoading,
@@ -446,6 +461,7 @@ export const providerLimitThresholdPercent = defaultAppState.providerLimitThresh
 export const setProviderLimitThresholdPercent = defaultAppState.setProviderLimitThresholdPercent;
 export const inputText = defaultAppState.inputText;
 export const setInputText = defaultAppState.setInputText;
+export const inputTextMutationVersion = defaultAppState.inputTextMutationVersion;
 export const nextPastedImageIndex = defaultAppState.nextPastedImageIndex;
 export const setNextPastedImageIndex = defaultAppState.setNextPastedImageIndex;
 export const isLoading = defaultAppState.isLoading;

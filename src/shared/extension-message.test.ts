@@ -102,6 +102,7 @@ describe('parseExtensionMessage', () => {
     const run = {
       config: {
         managerSessionId: 'manager-1',
+        workspaceDirectory: '/workspace',
         planDocPath: 'RALPH.md',
         iterations: 1,
         promptTemplate: 'Prompt',

@@ -122,7 +122,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
     });
   });
 
-  it('disables auto-scroll for a large upward pull from the expected target without a wheel event', () => {
+  it('keeps auto-scroll active for a large layout shift without a wheel event', () => {
     expect(
       resolveAutoScrollOnUserScroll({
         top: 24_000,
@@ -139,12 +139,12 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScrollThresholdPx: 60,
       })
     ).toEqual({
-      nextAutoScroll: false,
-      nextExpectedScrollTop: -1,
-      nextIgnoreScrollUntil: 0,
+      nextAutoScroll: null,
+      nextExpectedScrollTop: 48_000,
+      nextIgnoreScrollUntil: 1000,
       nextLastObservedScrollTop: 24_000,
       nextFollowModeLocked: false,
-      shouldCancelPendingScroll: true,
+      shouldCancelPendingScroll: false,
     });
   });
 
@@ -200,7 +200,7 @@ describe('resolveAutoScrollOnUserScroll', () => {
     });
   });
 
-  it('disables auto-scroll near bottom when the user scrolls upward and the bottom target is stable', () => {
+  it('keeps auto-scroll active when stable bottom geometry moves without user input', () => {
     expect(
       resolveAutoScrollOnUserScroll({
         top: 460,
@@ -217,12 +217,38 @@ describe('resolveAutoScrollOnUserScroll', () => {
         autoScrollThresholdPx: 60,
       })
     ).toEqual({
-      nextAutoScroll: false,
+      nextAutoScroll: true,
       nextExpectedScrollTop: -1,
       nextIgnoreScrollUntil: 0,
       nextLastObservedScrollTop: 460,
       nextFollowModeLocked: false,
-      shouldCancelPendingScroll: true,
+      shouldCancelPendingScroll: false,
+    });
+  });
+
+  it('keeps following after an unprompted upward layout shift away from bottom', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 800,
+        distanceFromBottom: 200,
+        nearBottom: false,
+        autoScroll: true,
+        userScrolledUp: false,
+        bottomTargetStable: true,
+        followModeLocked: false,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 1000,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: null,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 800,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: false,
     });
   });
 

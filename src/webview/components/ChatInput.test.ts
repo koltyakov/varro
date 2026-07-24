@@ -157,6 +157,9 @@ afterEach(() => {
     diagnostics: [],
   });
   setState('queuedMessages', []);
+  setState('queuedMessageDispatchingId', null);
+  setState('failedQueuedMessageIds', []);
+  setState('queuedMessageEdit', null);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   setSessionHistoryPrompts('session-1', []);
@@ -1048,6 +1051,81 @@ describe('ChatInput', () => {
     });
   });
 
+  it('preserves text entered while a normal send is pending', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('original prompt');
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    expect(inputText()).toBe('');
+
+    setInputText('new draft while sending');
+    resolveSend?.(false);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('new draft while sending');
+  });
+
+  it('does not restore a failed snapshot after the user edits the pending draft back to empty', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('original prompt');
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    cleanup = render(() => ChatInput(), container!);
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    editor!.textContent = 'temporary draft';
+    editor?.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    editor!.textContent = '';
+    editor?.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    expect(inputText()).toBe('');
+
+    resolveSend?.(false);
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('');
+  });
+
+  it('restores a failed draft even when consecutive errors have identical text', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('retry this prompt');
+    sendMessageMock.mockResolvedValue(false);
+    cleanup = render(() => ChatInput(), container!);
+
+    const send = () =>
+      container
+        ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    send();
+    await flushAsyncWork();
+    expect(inputText()).toBe('retry this prompt');
+
+    send();
+    await flushAsyncWork();
+    expect(inputText()).toBe('retry this prompt');
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+  });
+
   it('right-aligns the provider limit popup when no context is shown', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
@@ -1506,6 +1584,84 @@ describe('ChatInput', () => {
     expect(
       container?.querySelector<HTMLButtonElement>('[aria-label="Retry queued message"]')?.disabled
     ).toBe(false);
+  });
+
+  it('does not duplicate an in-flight queued dispatch after remounting', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'pending follow-up' }]);
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    sendMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(state.queuedMessageDispatchingId).toBe('q1');
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    resolveSend?.(true);
+    await flushAsyncWork();
+    expect(state.queuedMessages).toEqual([]);
+    expect(state.queuedMessageDispatchingId).toBeNull();
+  });
+
+  it('preserves a failed queued dispatch and allows retry after remounting', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'retry me' }]);
+    sendMessageMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(state.failedQueuedMessageIds).toEqual(['q1']);
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsyncWork();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Retry queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(state.queuedMessages).toEqual([]);
+    expect(state.failedQueuedMessageIds).toEqual([]);
+  });
+
+  it('preserves queued-message editing after remounting', async () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'edit this follow-up' }]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
+    expect(inputText()).toBe('edit this follow-up');
+
+    cleanup();
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(state.queuedMessageEdit).toEqual({ id: 'q1', sessionId: 'session-1' });
+    expect(container?.querySelector('.chat-queue-item.is-editing')).not.toBeNull();
+    expect(inputText()).toBe('edit this follow-up');
   });
 
   it('sends queued rows as steers and removes them on success', async () => {
@@ -2256,6 +2412,7 @@ describe('ChatInput', () => {
     });
     ralphStore.startRun({
       managerSessionId: 'manager-1',
+      workspaceDirectory: '/workspace',
       planDocPath: 'RALPH.md',
       iterations: 5,
       promptTemplate: 'Prompt',

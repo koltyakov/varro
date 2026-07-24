@@ -64,6 +64,23 @@ export type QueuedAttachmentSnapshot = Pick<
   'droppedFiles' | 'clipboardImages' | 'terminalSelection'
 >;
 
+type SessionSendOptions = SendFlowOptions & {
+  queuedAttachments?: QueuedAttachmentSnapshot;
+  preserveComposer?: boolean;
+  targetSessionId?: string;
+};
+
+type CapturedComposerAttachments = {
+  snapshot: {
+    droppedFiles: DroppedFile[];
+    clipboardImages: ClipboardImage[];
+    terminalSelection: { text: string; terminalName: string } | null;
+  };
+  droppedFileIdentities: Map<string, DroppedFile>;
+  clipboardImageIdentities: Map<string, ClipboardImage>;
+  terminalSelectionIdentity: { text: string; terminalName: string } | null;
+};
+
 type StateBoundSendDependencies = {
   createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
   ensureSessionPermission?(sessionId: string): Promise<boolean>;
@@ -75,6 +92,7 @@ type StateBoundSendDependencies = {
   syncSessionMessages(sessionId: string): Promise<void>;
   recheckSessionStatus(sessionId: string): Promise<void>;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
+  getMessageCount(sessionId: string): number;
   continueInterruptedSession(sessionId: string): Promise<void>;
   logError?(context: string, err: unknown): void;
 };
@@ -193,7 +211,7 @@ export function buildSessionSendBody(
 
   for (const attachment of orderedAttachments) {
     if (attachment.kind === 'file') {
-      if (isSamePath(attachment.file.path, activeFile?.path)) continue;
+      if (currentDocumentEnabled && isSamePath(attachment.file.path, activeFile?.path)) continue;
       const fileReference = getAttachmentReference(attachment.file, workspacePath);
       parts.push({
         type: 'text',
@@ -259,6 +277,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       mime: image.mime,
       filename: image.filename,
       size: image.size,
+      ...(image.contentKey ? { contentKey: image.contentKey } : {}),
       attachmentSequence: image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
     })),
     terminalSelection: composerState.terminalSelection
@@ -270,76 +289,227 @@ export function getQueuedAttachmentSnapshot(composerState: {
   };
 }
 
+function captureComposerAttachments(
+  queuedAttachments: QueuedAttachmentSnapshot | undefined
+): CapturedComposerAttachments {
+  const liveDroppedFiles = [...appStore.state.droppedFiles];
+  const liveClipboardImages = [...appStore.state.clipboardImages];
+  const liveTerminalSelection = appStore.state.terminalSelection;
+  const source = queuedAttachments
+    ? {
+        droppedFiles: queuedAttachments.droppedFiles ?? [],
+        clipboardImages: queuedAttachments.clipboardImages ?? [],
+        terminalSelection: queuedAttachments.terminalSelection ?? null,
+      }
+    : {
+        droppedFiles: liveDroppedFiles,
+        clipboardImages: liveClipboardImages,
+        terminalSelection: liveTerminalSelection,
+      };
+  const queuedSnapshot = getQueuedAttachmentSnapshot(source);
+  const snapshot = {
+    droppedFiles: queuedSnapshot.droppedFiles ?? [],
+    clipboardImages: queuedSnapshot.clipboardImages ?? [],
+    terminalSelection: queuedSnapshot.terminalSelection ?? null,
+  };
+  const droppedFileIdentities = new Map<string, DroppedFile>();
+  for (const sent of snapshot.droppedFiles) {
+    const live = liveDroppedFiles.find(
+      (file) => file.path === sent.path && areDroppedFilesEqual(file, sent)
+    );
+    if (live) droppedFileIdentities.set(sent.path, live);
+  }
+  const clipboardImageIdentities = new Map<string, ClipboardImage>();
+  for (const sent of snapshot.clipboardImages) {
+    const live = liveClipboardImages.find(
+      (image) => image.id === sent.id && areClipboardImagesEqual(image, sent)
+    );
+    if (live) clipboardImageIdentities.set(sent.id, live);
+  }
+
+  return {
+    snapshot,
+    droppedFileIdentities,
+    clipboardImageIdentities,
+    terminalSelectionIdentity:
+      snapshot.terminalSelection &&
+      liveTerminalSelection &&
+      areTerminalSelectionsEqual(snapshot.terminalSelection, liveTerminalSelection)
+        ? liveTerminalSelection
+        : null,
+  };
+}
+
+function clearCapturedComposerAttachments(captured: CapturedComposerAttachments) {
+  const removedFilePaths: string[] = [];
+  for (const sent of captured.snapshot.droppedFiles) {
+    const current = appStore.state.droppedFiles.find((file) => file.path === sent.path);
+    if (
+      !current ||
+      current !== captured.droppedFileIdentities.get(sent.path) ||
+      !areDroppedFilesEqual(current, sent)
+    ) {
+      continue;
+    }
+    removedFilePaths.push(current.path);
+    composerStore.removeContextFile(current.path);
+  }
+
+  for (const sent of captured.snapshot.clipboardImages) {
+    const current = appStore.state.clipboardImages.find((image) => image.id === sent.id);
+    if (
+      !current ||
+      current !== captured.clipboardImageIdentities.get(sent.id) ||
+      !areClipboardImagesEqual(current, sent)
+    ) {
+      continue;
+    }
+    composerStore.removeSentClipboardImage(current.id);
+  }
+
+  const currentTerminalSelection = appStore.state.terminalSelection;
+  const terminalSelectionCleared =
+    !!captured.snapshot.terminalSelection &&
+    currentTerminalSelection === captured.terminalSelectionIdentity &&
+    areTerminalSelectionsEqual(currentTerminalSelection, captured.snapshot.terminalSelection);
+  if (terminalSelectionCleared) composerStore.clearTerminalSelection();
+
+  if (removedFilePaths.length > 0) {
+    if (appStore.state.droppedFiles.length === 0) {
+      postMessage({ type: 'files/clear' });
+    } else {
+      for (const path of removedFilePaths) {
+        postMessage({ type: 'files/remove', payload: { path } });
+      }
+    }
+  }
+  if (terminalSelectionCleared) postMessage({ type: 'terminal-selection/clear' });
+}
+
+function areDroppedFilesEqual(left: DroppedFile, right: DroppedFile) {
+  if (
+    left.path !== right.path ||
+    left.relativePath !== right.relativePath ||
+    left.type !== right.type ||
+    (left.attachmentSequence ?? getContextFileAttachmentSequence(left.path)) !==
+      (right.attachmentSequence ?? getContextFileAttachmentSequence(right.path))
+  ) {
+    return false;
+  }
+  const leftRanges = left.lineRanges ?? [];
+  const rightRanges = right.lineRanges ?? [];
+  return (
+    leftRanges.length === rightRanges.length &&
+    leftRanges.every(
+      (range, index) =>
+        range.startLine === rightRanges[index]?.startLine &&
+        range.endLine === rightRanges[index]?.endLine
+    )
+  );
+}
+
+function areClipboardImagesEqual(left: ClipboardImage, right: ClipboardImage) {
+  return (
+    left.id === right.id &&
+    left.url === right.url &&
+    left.mime === right.mime &&
+    left.filename === right.filename &&
+    left.size === right.size &&
+    left.contentKey === right.contentKey &&
+    (left.attachmentSequence ?? getClipboardImageAttachmentSequence(left.id)) ===
+      (right.attachmentSequence ?? getClipboardImageAttachmentSequence(right.id))
+  );
+}
+
+function areTerminalSelectionsEqual(
+  left: { text: string; terminalName: string } | null,
+  right: { text: string; terminalName: string } | null
+) {
+  return !!left && !!right && left.text === right.text && left.terminalName === right.terminalName;
+}
+
 export class SessionSendOperations {
   constructor(private readonly deps: StateBoundSendDependencies) {}
 
-  readonly sendMessage = async (
-    text: string,
-    options?: SendFlowOptions & {
-      queuedAttachments?: QueuedAttachmentSnapshot;
-      preserveComposer?: boolean;
-    }
-  ) => {
-    const ensureSessionPermission = this.deps.ensureSessionPermission;
-    return await sendMessageWithDependencies(
-      {
-        getActiveSessionId: () => appStore.state.activeSessionId,
-        getDefaultPermissionMode: () => permissionsStore.getPermissionModeForSession(null),
-        getSelectedAgent: () => appStore.state.selectedAgent,
-        applySelectedAgentForSession: (agent, sessionId) =>
-          routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
-        createSession: this.deps.createSession,
-        ensureSessionPermission,
-        clearPendingAbort: this.deps.clearPendingAbort,
-        syncSessionMcps: this.deps.syncSessionMcps,
-        buildSendPayload: (sessionId, nextText, nextOptions) =>
-          buildSessionSendBody(
-            {
-              selectedAgent: appStore.state.selectedAgent,
-              selectedModel: appStore.state.selectedModel,
-              providers: appStore.state.providers,
-              providerDefaults: appStore.state.providerDefaults,
-              editorContext: appStore.state.editorContext,
-              terminalSelection:
-                nextOptions?.queuedAttachments?.terminalSelection ??
-                appStore.state.terminalSelection,
-              droppedFiles:
-                nextOptions?.queuedAttachments?.droppedFiles ?? appStore.state.droppedFiles,
-              clipboardImages:
-                nextOptions?.queuedAttachments?.clipboardImages ?? appStore.state.clipboardImages,
-            },
-            sessionId,
-            nextText,
-            composerStore.getCurrentDocumentEnabled,
-            nextOptions
-          ),
-        requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
-        startLoading: uiStore.startLoading,
-        setError: uiStore.setError,
-        applyEffectiveModel: (model, sessionId) =>
-          routingStore.setSelectedModel(model, { sessionId }),
-        resetTodoSync: this.deps.resetTodoSync,
-        clearTodos: composerStore.clearTodos,
-        clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
-        appendOptimisticMessage: appendOptimisticMessageToActiveSession,
-        removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
-        sendAsync: this.deps.sendAsync,
-        getMessageCount: () => appStore.state.messages.length,
-        clearDroppedFiles: composerStore.clearDroppedFiles,
-        clearTerminalSelection: composerStore.clearTerminalSelection,
-        clearClipboardImages: composerStore.clearClipboardImages,
-        postFilesClear: () => postMessage({ type: 'files/clear' }),
-        postTerminalSelectionClear: () => postMessage({ type: 'terminal-selection/clear' }),
-        syncSession: this.deps.syncSession,
-        syncSessionMessages: this.deps.syncSessionMessages,
-        recheckSessionStatus: this.deps.recheckSessionStatus,
-        setSessionStatusEntry: this.deps.setSessionStatusEntry,
-        stopLoading: uiStore.stopLoading,
-        shouldClearComposerAfterSend: () => !options?.preserveComposer,
+  readonly prepareSendMessage = (text: string, options?: SessionSendOptions) => {
+    const activeSessionId = appStore.state.activeSessionId;
+    const targetSessionId = options?.targetSessionId ?? activeSessionId;
+    const defaultPermissionMode = permissionsStore.getPermissionModeForSession(null);
+    const selectedAgent = appStore.state.selectedAgent;
+    const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
+    const capturedComposerState: ComposerState = {
+      selectedAgent,
+      selectedModel: appStore.state.selectedModel ? { ...appStore.state.selectedModel } : null,
+      providers: [...appStore.state.providers],
+      providerDefaults: { ...appStore.state.providerDefaults },
+      editorContext: {
+        ...appStore.state.editorContext,
+        activeFile: appStore.state.editorContext.activeFile
+          ? { ...appStore.state.editorContext.activeFile }
+          : null,
+        selection: appStore.state.editorContext.selection
+          ? { ...appStore.state.editorContext.selection }
+          : null,
+        diagnostics: appStore.state.editorContext.diagnostics.map((diagnostic) => ({
+          ...diagnostic,
+        })),
       },
-      text,
-      options
-    );
+      ...capturedAttachments.snapshot,
+    };
+    const currentDocumentEnabled = composerStore.getCurrentDocumentEnabled(targetSessionId);
+    const ensureSessionPermission = this.deps.ensureSessionPermission;
+    return () =>
+      sendMessageWithDependencies(
+        {
+          getActiveSessionId: () => appStore.state.activeSessionId,
+          getDefaultPermissionMode: () => defaultPermissionMode,
+          getSelectedAgent: () => selectedAgent,
+          applySelectedAgentForSession: (agent, sessionId) =>
+            routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
+          createSession: this.deps.createSession,
+          ensureSessionPermission,
+          clearPendingAbort: this.deps.clearPendingAbort,
+          syncSessionMcps: this.deps.syncSessionMcps,
+          buildSendPayload: (sessionId, nextText, nextOptions) =>
+            buildSessionSendBody(
+              capturedComposerState,
+              sessionId,
+              nextText,
+              () => currentDocumentEnabled,
+              nextOptions
+            ),
+          requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
+          startLoading: uiStore.startLoading,
+          setError: uiStore.setError,
+          applyEffectiveModel: (model, sessionId) =>
+            routingStore.setSelectedModel(model, { sessionId }),
+          resetTodoSync: this.deps.resetTodoSync,
+          clearTodos: composerStore.clearTodos,
+          clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
+          appendOptimisticMessage: appendOptimisticMessageToActiveSession,
+          removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
+          sendAsync: this.deps.sendAsync,
+          getMessageCount: this.deps.getMessageCount,
+          clearDroppedFiles: composerStore.clearDroppedFiles,
+          clearTerminalSelection: composerStore.clearTerminalSelection,
+          clearClipboardImages: composerStore.clearClipboardImages,
+          postFilesClear: () => postMessage({ type: 'files/clear' }),
+          postTerminalSelectionClear: () => postMessage({ type: 'terminal-selection/clear' }),
+          clearSentComposerAttachments: () => clearCapturedComposerAttachments(capturedAttachments),
+          syncSession: this.deps.syncSession,
+          syncSessionMessages: this.deps.syncSessionMessages,
+          recheckSessionStatus: this.deps.recheckSessionStatus,
+          setSessionStatusEntry: this.deps.setSessionStatusEntry,
+          stopLoading: uiStore.stopLoading,
+          shouldClearComposerAfterSend: () => !options?.preserveComposer,
+        },
+        text,
+        options
+      );
+  };
+
+  readonly sendMessage = async (text: string, options?: SessionSendOptions) => {
+    return await this.prepareSendMessage(text, options)();
   };
 
   readonly retryMessage = async (messageId: string, sessionId = appStore.state.activeSessionId) => {
@@ -377,10 +547,7 @@ export async function sendMessageWithDependencies(
     buildSendPayload(
       sessionId: string,
       text: string,
-      options?: SendFlowOptions & {
-        queuedAttachments?: QueuedAttachmentSnapshot;
-        preserveComposer?: boolean;
-      }
+      options?: SessionSendOptions
     ): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null;
     requestMessageListScrollToBottom(): void;
     startLoading(): void;
@@ -392,12 +559,13 @@ export async function sendMessageWithDependencies(
     appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
     removeOptimisticMessage?(messageId: string): void;
     sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
-    getMessageCount(): number;
+    getMessageCount(sessionId: string): number;
     clearDroppedFiles(): void;
     clearTerminalSelection(): void;
     clearClipboardImages(): void;
     postFilesClear(): void;
     postTerminalSelectionClear(): void;
+    clearSentComposerAttachments?(): void;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     recheckSessionStatus(sessionId: string): Promise<void>;
@@ -407,12 +575,9 @@ export async function sendMessageWithDependencies(
     logError?(context: string, err: unknown): void;
   },
   text: string,
-  options?: SendFlowOptions & {
-    queuedAttachments?: QueuedAttachmentSnapshot;
-    preserveComposer?: boolean;
-  }
+  options?: SessionSendOptions
 ): Promise<boolean> {
-  let sessionId = deps.getActiveSessionId();
+  let sessionId = options?.targetSessionId ?? deps.getActiveSessionId();
   if (!sessionId) {
     // Creating a session resets the active agent to the session default (e.g. build),
     // so capture the agent the user selected in the composer and re-apply it to the new
@@ -422,11 +587,6 @@ export async function sendMessageWithDependencies(
     if (!createdId) return false;
     sessionId = createdId;
     if (intendedAgent) deps.applySelectedAgentForSession?.(intendedAgent, sessionId);
-  }
-
-  const currentSessionId = deps.getActiveSessionId();
-  if (currentSessionId && currentSessionId !== sessionId) {
-    sessionId = currentSessionId;
   }
 
   if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId)))
@@ -443,16 +603,15 @@ export async function sendMessageWithDependencies(
   if (expectsAssistantReply) {
     deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
   }
-  if (expectsAssistantReply) {
+  if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
     deps.startLoading();
   }
-  deps.setError(null);
-  if (effectiveModel) {
+  if (deps.getActiveSessionId() === sessionId) deps.setError(null);
+  if (effectiveModel && deps.getActiveSessionId() === sessionId) {
     deps.applyEffectiveModel(effectiveModel, sessionId);
   }
 
   deps.clearSessionUsageLimit(sessionId);
-  const preSendMessageCount = deps.getMessageCount();
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
     body,
@@ -462,23 +621,27 @@ export async function sendMessageWithDependencies(
   if (optimisticMessage) {
     deps.appendOptimisticMessage?.(optimisticMessage);
   }
-  deps.requestMessageListScrollToBottom();
+  if (deps.getActiveSessionId() === sessionId) deps.requestMessageListScrollToBottom();
 
   try {
     await deps.sendAsync(sessionId, body);
     if (deps.shouldClearComposerAfterSend()) {
-      deps.clearDroppedFiles();
-      deps.clearTerminalSelection();
-      deps.clearClipboardImages();
-      deps.postFilesClear();
-      deps.postTerminalSelectionClear();
+      if (deps.clearSentComposerAttachments) {
+        deps.clearSentComposerAttachments();
+      } else if (deps.getActiveSessionId() === sessionId) {
+        deps.clearDroppedFiles();
+        deps.clearTerminalSelection();
+        deps.clearClipboardImages();
+        deps.postFilesClear();
+        deps.postTerminalSelectionClear();
+      }
     }
     const syncResults = await Promise.allSettled([
       deps.syncSession(sessionId),
       deps.syncSessionMessages(sessionId),
       deps.recheckSessionStatus(sessionId),
     ]);
-    if (deps.getActiveSessionId() === sessionId && deps.getMessageCount() <= preSendMessageCount) {
+    if (deps.getMessageCount(sessionId) === 0) {
       if (optimisticMessage) deps.appendOptimisticMessage?.(optimisticMessage);
       await retryPostSendMessageSync(deps, sessionId);
     }
@@ -489,7 +652,11 @@ export async function sendMessageWithDependencies(
       for (const failure of failures) {
         deps.logError?.('postSendSync', failure.reason);
       }
-      if (expectsAssistantReply && failures.length === syncResults.length) {
+      if (
+        expectsAssistantReply &&
+        failures.length === syncResults.length &&
+        deps.getActiveSessionId() === sessionId
+      ) {
         deps.stopLoading();
       }
     }
@@ -498,9 +665,10 @@ export async function sendMessageWithDependencies(
     if (optimisticMessage) deps.removeOptimisticMessage?.(optimisticMessage.info.id);
     if (expectsAssistantReply) {
       deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
-      deps.stopLoading();
+      if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
     }
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
+    if (deps.getActiveSessionId() !== sessionId) return false;
     if (body.model) {
       deps.setError(
         `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
@@ -640,8 +808,7 @@ function hasPermissionRules(current: PermissionRule[] | undefined, required: Per
 
 async function retryPostSendMessageSync(
   deps: {
-    getActiveSessionId(): string | null;
-    getMessageCount(): number;
+    getMessageCount(sessionId: string): number;
     syncSessionMessages(sessionId: string): Promise<void>;
     logError?(context: string, err: unknown): void;
   },
@@ -649,7 +816,7 @@ async function retryPostSendMessageSync(
 ) {
   for (const delayMs of [250, 750]) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (deps.getActiveSessionId() !== sessionId || deps.getMessageCount() > 0) return;
+    if (deps.getMessageCount(sessionId) > 0) return;
     try {
       await deps.syncSessionMessages(sessionId);
     } catch (err) {

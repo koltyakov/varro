@@ -9,6 +9,7 @@ import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
+import { clearQueuedMessagesForSession } from '../../lib/state-queued-messages';
 import type { Session } from '../../types';
 
 type LifecycleState = {
@@ -33,6 +34,7 @@ type LifecycleDependencies = {
   clearSessionSeen(sessionId: string): void;
   setSessionUsageLimit(sessionId: string, notice: null): void;
   setSessionFailed(sessionId: string, failed: boolean): void;
+  clearQueuedMessagesForSession(sessionId: string): void;
   filterQuestions(predicate: (sessionId: string) => boolean): void;
   filterPermissions(predicate: (sessionId: string) => boolean): void;
   clearActiveSessionState(): void;
@@ -71,6 +73,7 @@ export class SessionLifecycleOperations {
       clearSessionSeen: sessionStore.clearSessionSeen,
       setSessionUsageLimit: sessionStore.setSessionUsageLimit,
       setSessionFailed: sessionStore.setSessionFailed,
+      clearQueuedMessagesForSession,
       filterQuestions: (predicate: (sessionId: string) => boolean) =>
         appStore.setState('questions', (items) =>
           items.filter((item) => predicate(item.sessionID))
@@ -188,6 +191,7 @@ export function clearDeletedSessionState(deps: LifecycleDependencies, id: string
     deps.clearSessionStatusEntry(id);
     deps.setSessionUsageLimit(id, null);
     deps.setSessionFailed(id, false);
+    deps.clearQueuedMessagesForSession(id);
     deps.filterQuestions((sessionId) => sessionId !== id);
     deps.filterPermissions((sessionId) => sessionId !== id);
 

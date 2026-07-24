@@ -19,6 +19,8 @@ const WORKSPACE_FILE_GLOB = '**/*';
 const WORKSPACE_FILE_EXCLUDE_GLOB =
   '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}';
 
+class WorkspaceFileCacheInvalidatedError extends Error {}
+
 /**
  * Owns workspace-file discovery and fuzzy ranking for the `@file` picker.
  *
@@ -144,7 +146,17 @@ export class FileSearchService {
     onResult: (result: FileSearchResult) => void
   ): Promise<void> {
     try {
-      const files = await this.getWorkspaceFiles(token);
+      let files: WorkspaceFileSearchEntry[];
+      while (true) {
+        try {
+          files = await this.getWorkspaceFiles();
+          break;
+        } catch (err) {
+          if (token.isCancellationRequested) return;
+          if (err instanceof WorkspaceFileCacheInvalidatedError) continue;
+          throw err;
+        }
+      }
       if (token.isCancellationRequested) return;
       const normalizedQuery = query.trim().toLowerCase();
       const ranked = rankWorkspaceFiles(
@@ -160,9 +172,7 @@ export class FileSearchService {
     }
   }
 
-  private async getWorkspaceFiles(
-    token?: vscode.CancellationToken
-  ): Promise<WorkspaceFileSearchEntry[]> {
+  private async getWorkspaceFiles(): Promise<WorkspaceFileSearchEntry[]> {
     const now = Date.now();
     if (
       this.hasWorkspaceFileCache &&
@@ -177,11 +187,13 @@ export class FileSearchService {
       vscode.workspace.findFiles(
         WORKSPACE_FILE_GLOB,
         WORKSPACE_FILE_EXCLUDE_GLOB,
-        FileSearchService.MAX_CANDIDATES,
-        token
+        FileSearchService.MAX_CANDIDATES
       )
     )
       .then((files) => {
+        if (cacheGeneration !== this.workspaceFileCacheGeneration) {
+          throw new WorkspaceFileCacheInvalidatedError();
+        }
         const workspaceFolders = (vscode.workspace.workspaceFolders || []).map((folder) => ({
           folder,
           normalizedPath: normalizeWorkspacePath(folder.uri.fsPath),
@@ -197,11 +209,9 @@ export class FileSearchService {
             leafLower: basename(relativePath).toLowerCase(),
           };
         });
-        if (cacheGeneration === this.workspaceFileCacheGeneration) {
-          this.workspaceFileCache = entries;
-          this.hasWorkspaceFileCache = true;
-          this.workspaceFileCacheAt = Date.now();
-        }
+        this.workspaceFileCache = entries;
+        this.hasWorkspaceFileCache = true;
+        this.workspaceFileCacheAt = Date.now();
         return entries;
       })
       .finally(() => {

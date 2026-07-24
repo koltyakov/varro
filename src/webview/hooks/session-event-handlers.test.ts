@@ -1427,7 +1427,7 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
-  it('resyncs active messages before applying deltas for missing parts', async () => {
+  it('treats synchronized message parts as canonical when a delta targets a missing part', async () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const logError = vi.fn();
@@ -1456,38 +1456,35 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
 
-    await Promise.resolve();
+    await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
 
-    expect(applyMessagePartDelta).toHaveBeenCalledWith(
-      'assistant-1',
-      'part-1',
-      'still working',
-      'session-1',
-      'text'
-    );
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it('queues missing-part deltas and replays them in event order after sync', async () => {
+  it('uses only one bounded follow-up sync for deltas queued during recovery', async () => {
     const handlers = installHandlers();
-    let resolveSync: (() => void) | undefined;
-    const syncSessionMessages = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveSync = resolve;
-        })
-    );
-    const messages = [
-      {
-        info: createAssistantEntry({ id: 'assistant-1', sessionID: 'session-1' }).info,
-        parts: [] as Part[],
-      },
-    ];
+    let resolveInitialSync: (() => void) | undefined;
+    let resolveFollowUpSync: (() => void) | undefined;
+    const syncSessionMessages = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInitialSync = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFollowUpSync = resolve;
+          })
+      );
 
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => messages,
+        getMessages: () => [],
         syncSessionMessages,
       })
     );
@@ -1503,15 +1500,6 @@ describe('registerSessionEventHandlers', () => {
         field: 'text',
       },
     });
-    messages[0]!.parts = [
-      {
-        id: 'part-1',
-        sessionID: 'session-1',
-        messageID: 'assistant-1',
-        type: 'text',
-        text: '',
-      } as Part,
-    ];
     handlers.get('message.part.delta')?.({
       properties: {
         sessionID: 'session-1',
@@ -1525,25 +1513,26 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledTimes(1);
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
 
-    resolveSync?.();
+    resolveInitialSync?.();
+    await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: 'third',
+        field: 'text',
+      },
+    });
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+
+    resolveFollowUpSync?.();
+    await Promise.resolve();
     await Promise.resolve();
 
-    expect(applyMessagePartDelta).toHaveBeenNthCalledWith(
-      1,
-      'assistant-1',
-      'part-1',
-      'first ',
-      'session-1',
-      'text'
-    );
-    expect(applyMessagePartDelta).toHaveBeenNthCalledWith(
-      2,
-      'assistant-1',
-      'part-1',
-      'second',
-      'session-1',
-      'text'
-    );
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    expect(applyMessagePartDelta).not.toHaveBeenCalled();
   });
 
   it('creates and streams reasoning parts from session.next reasoning events', () => {

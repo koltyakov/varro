@@ -6,13 +6,18 @@ import type {
   RalphStopReason,
   RalphVerificationVerdict,
 } from './ralph';
-import { RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT } from './ralph';
+import {
+  RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
+  RALPH_WORKSPACE_MISSING_NOTE,
+  normalizeRalphWorkspaceDirectory,
+} from './ralph';
 import { getSessionPermissionRulesForMode } from './permission-rules';
 import {
   buildIterationPrompt,
   buildRepairSubAgentPrompt,
   buildVerificationPrompt,
 } from './ralph-prompts';
+import { asRecord } from './type-utils';
 
 /**
  * Host-agnostic Ralph orchestration loop. All environment access goes
@@ -29,7 +34,8 @@ export type RalphRunnerStore = {
   setStatus(
     managerSessionId: string,
     status: RalphRun['status'],
-    stopReason?: RalphStopReason
+    stopReason?: RalphStopReason,
+    note?: string
   ): void;
   addIterations(managerSessionId: string, count: number): void;
   upsertIteration(managerSessionId: string, iteration: RalphIteration): void;
@@ -39,6 +45,8 @@ export type RalphSessionSummary = { id: string; parentID?: string | null };
 
 export type RalphSessionStatus =
   | { type: 'active' }
+  | { type: 'admitted'; messageID?: string }
+  | { type: 'completed'; messageID?: string; error?: string }
   | { type: 'idle' }
   | { type: 'missing' }
   | { type: 'error'; message: string }
@@ -46,7 +54,10 @@ export type RalphSessionStatus =
 
 export type RalphMessageEntry = {
   info: {
+    id?: string;
+    parentID?: string;
     role?: string;
+    error?: unknown;
     cost?: number;
     time?: { created?: number; completed?: number };
     tokens?: {
@@ -60,6 +71,7 @@ export type RalphMessageEntry = {
 };
 
 export type RalphSendBody = {
+  messageID: string;
   parts: Array<{ type: 'text'; text: string }>;
   model?: { providerID: string; modelID: string };
   agent?: string;
@@ -74,22 +86,43 @@ export type RalphRunnerPorts = {
       permission: ReturnType<typeof getSessionPermissionRulesForMode>;
       parentID: string;
     },
-    signal: AbortSignal
+    signal: AbortSignal,
+    workspaceDirectory: string
   ): Promise<string>;
-  sendPrompt(sessionId: string, body: RalphSendBody, signal: AbortSignal): Promise<void>;
-  abortSession(sessionId: string, signal: AbortSignal): Promise<void>;
-  listSessions(signal: AbortSignal): Promise<RalphSessionSummary[]>;
-  listMessages(sessionId: string, signal: AbortSignal): Promise<RalphMessageEntry[]>;
-  getSessionStatus(sessionId: string, signal: AbortSignal): Promise<RalphSessionStatus>;
+  sendPrompt(
+    sessionId: string,
+    body: RalphSendBody,
+    signal: AbortSignal,
+    workspaceDirectory: string
+  ): Promise<void>;
+  abortSession(sessionId: string, signal: AbortSignal, workspaceDirectory: string): Promise<void>;
+  listSessions(signal: AbortSignal, workspaceDirectory: string): Promise<RalphSessionSummary[]>;
+  listMessages(
+    sessionId: string,
+    signal: AbortSignal,
+    workspaceDirectory: string
+  ): Promise<RalphMessageEntry[]>;
+  getSessionStatus(
+    sessionId: string,
+    signal: AbortSignal,
+    workspaceDirectory: string
+  ): Promise<RalphSessionStatus>;
   /** Subscribe to session status signals; returns an unsubscribe function. */
-  onSessionStatus(listener: (sessionID: string, status: RalphSessionStatus) => void): () => void;
+  onSessionStatus(
+    listener: (sessionID: string, status: RalphSessionStatus) => void,
+    workspaceDirectory: string
+  ): () => void;
   /** Maximum idle wait per prompt. Defaults to 30 minutes. */
   idleTimeoutMs?: number;
   /** Authoritative status polling interval. Defaults to one second. */
   idlePollIntervalMs?: number;
-  /** Grace before poll-only idle/missing states are trusted. Defaults to 250ms. */
-  idleAdmissionGraceMs?: number;
-  readWorkspaceFile(path: string, signal: AbortSignal): Promise<string | null>;
+  /** Maximum time to await cancellation cleanup. Defaults to 250ms per phase. */
+  cleanupTimeoutMs?: number;
+  readWorkspaceFile(
+    path: string,
+    signal: AbortSignal,
+    workspaceDirectory: string
+  ): Promise<string | null>;
   /** Normalize a model variant name for a model id; null drops the variant. */
   normalizeVariant(modelID: string, variant: string): string | null;
   logError(context: string, err: unknown): void;
@@ -108,9 +141,12 @@ export type RalphRunner = {
 
 type ActiveRunState = {
   managerSessionId: string;
+  workspaceDirectory: string;
   abortController: AbortController;
   currentChildId: string | null;
   childAbortRequests: Map<string, Promise<void>>;
+  cleanupTasks: Set<Promise<void>>;
+  pendingPortOperations: Set<Promise<unknown>>;
   cleanupAbortController: AbortController;
   cancelIdleWait: (() => void) | null;
   shutdownRequested: boolean;
@@ -119,7 +155,45 @@ type ActiveRunState = {
 const MAX_ITERATION_REPAIR_ATTEMPTS = 2;
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_IDLE_POLL_INTERVAL_MS = 1_000;
-const DEFAULT_IDLE_ADMISSION_GRACE_MS = 250;
+const DEFAULT_CLEANUP_TIMEOUT_MS = 250;
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+let lastPromptMessageTimestamp = 0;
+let fallbackPromptRandomSequence = 0;
+
+function createPromptMessageID(): string {
+  // OpenCode 1.18.x orders messages lexicographically by its ascending ID
+  // format: a 12-character timestamp/counter hex prefix plus 14 base62 chars.
+  // Move at least one millisecond forward per local prompt so rapid sends and
+  // the preceding server-generated assistant cannot sort after this user turn.
+  const timestamp = Math.max(Date.now() + 1, lastPromptMessageTimestamp + 1);
+  lastPromptMessageTimestamp = timestamp;
+  const encoded = BigInt.asUintN(48, BigInt(timestamp) * 0x1000n + 1n);
+  return `msg_${encoded.toString(16).padStart(12, '0')}${randomBase62(14)}`;
+}
+
+function randomBase62(length: number): string {
+  const bytes = new Uint8Array(length);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    fallbackPromptRandomSequence += 1;
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = (fallbackPromptRandomSequence + index * 31) % 256;
+    }
+  }
+  return Array.from(bytes, (value) => BASE62_CHARS[value % BASE62_CHARS.length]).join('');
+}
+
+function waitForCleanup(tasks: Set<Promise<unknown>>, timeoutMs: number): Promise<void> {
+  if (tasks.size === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, timeoutMs);
+    void Promise.allSettled(tasks).then(() => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
 
 class RalphRunCancelledError extends Error {
   constructor(managerSessionId: string) {
@@ -160,9 +234,20 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       ) {
         return;
       }
-      ports.store.startRun(config);
+      const workspaceDirectory = normalizeRalphWorkspaceDirectory(config.workspaceDirectory);
+      const normalizedConfig = { ...config, workspaceDirectory };
+      ports.store.startRun(normalizedConfig);
       if (!ports.store.getRun(config.managerSessionId)) return;
-      await trackRunLoop(config);
+      if (!workspaceDirectory) {
+        ports.store.setStatus(
+          config.managerSessionId,
+          'failed',
+          'iteration_error',
+          RALPH_WORKSPACE_MISSING_NOTE
+        );
+        return;
+      }
+      await trackRunLoop(normalizedConfig);
     },
 
     stop(managerSessionId: string): void {
@@ -183,20 +268,42 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       const run = ports.store.getRun(managerSessionId);
       if (!run) return;
       if (run.status !== 'paused' && run.status !== 'failed' && run.status !== 'incomplete') return;
+      const workspaceDirectory = normalizeRalphWorkspaceDirectory(run.config.workspaceDirectory);
+      if (!workspaceDirectory) {
+        ports.store.setStatus(
+          managerSessionId,
+          'failed',
+          'iteration_error',
+          RALPH_WORKSPACE_MISSING_NOTE
+        );
+        return;
+      }
       if (run.status === 'incomplete') {
         ports.store.addIterations(managerSessionId, RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT);
       }
       const resumedRun = ports.store.getRun(managerSessionId);
       if (!resumedRun) return;
       ports.store.setStatus(managerSessionId, 'running');
-      await trackRunLoop(resumedRun.config);
+      await trackRunLoop({ ...resumedRun.config, workspaceDirectory });
     },
 
     reattachAll(): void {
       if (shuttingDown) return;
       for (const run of ports.store.getAllRuns()) {
         if (run.status === 'running' && !activeRuns.has(run.config.managerSessionId)) {
-          void trackRunLoop(run.config).catch((err) => {
+          const workspaceDirectory = normalizeRalphWorkspaceDirectory(
+            run.config.workspaceDirectory
+          );
+          if (!workspaceDirectory) {
+            ports.store.setStatus(
+              run.config.managerSessionId,
+              'paused',
+              undefined,
+              RALPH_WORKSPACE_MISSING_NOTE
+            );
+            continue;
+          }
+          void trackRunLoop({ ...run.config, workspaceDirectory }).catch((err) => {
             ports.logError('reattach failed', err);
           });
         }
@@ -230,7 +337,8 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   function awaitPort<T>(
     state: ActiveRunState,
     operation: (signal: AbortSignal) => Promise<T>,
-    onLateValue?: (value: T) => void
+    onLateValue?: (value: T) => void,
+    onLateError?: (error: unknown) => void
   ): Promise<T> {
     throwIfRunCancelled(state);
     let operationPromise: Promise<T>;
@@ -239,6 +347,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     } catch (err) {
       return Promise.reject(err);
     }
+    state.pendingPortOperations.add(operationPromise);
 
     return new Promise<T>((resolve, reject) => {
       const signal = state.abortController.signal;
@@ -251,6 +360,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       signal.addEventListener('abort', cancel, { once: true });
       operationPromise.then(
         (value) => {
+          state.pendingPortOperations.delete(operationPromise);
           if (settled) {
             onLateValue?.(value);
             return;
@@ -260,7 +370,11 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
           resolve(value);
         },
         (err) => {
-          if (settled) return;
+          state.pendingPortOperations.delete(operationPromise);
+          if (settled) {
+            onLateError?.(err);
+            return;
+          }
           settled = true;
           signal.removeEventListener('abort', cancel);
           reject(err);
@@ -272,12 +386,17 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
 
   async function runLoop(initialConfig: RalphConfig): Promise<void> {
     const managerSessionId = initialConfig.managerSessionId;
+    const workspaceDirectory = normalizeRalphWorkspaceDirectory(initialConfig.workspaceDirectory);
+    if (!workspaceDirectory) return;
     if (activeRuns.has(managerSessionId)) return;
     const state: ActiveRunState = {
       managerSessionId,
+      workspaceDirectory,
       abortController: new AbortController(),
       currentChildId: null,
       childAbortRequests: new Map(),
+      cleanupTasks: new Set(),
+      pendingPortOperations: new Set(),
       cleanupAbortController: new AbortController(),
       cancelIdleWait: null,
       shutdownRequested: false,
@@ -360,7 +479,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             iterationIndex: nextIndex,
             previousIteration,
             readFile: async (path) => {
-              return awaitPort(state, (signal) => ports.readWorkspaceFile(path, signal));
+              return awaitPort(state, (signal) =>
+                ports.readWorkspaceFile(path, signal, state.workspaceDirectory)
+              );
             },
           });
           throwIfRunCancelled(state);
@@ -411,33 +532,47 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         abortChildSession(state, state.currentChildId);
       }
     } finally {
-      cleanupActive(managerSessionId);
+      await cleanupActive(managerSessionId, state);
     }
   }
 
-  function cleanupActive(managerSessionId: string) {
-    const state = activeRuns.get(managerSessionId);
-    if (!state) return;
+  async function cleanupActive(managerSessionId: string, state: ActiveRunState): Promise<void> {
+    if (activeRuns.get(managerSessionId) !== state) return;
     state.cancelIdleWait?.();
     state.cancelIdleWait = null;
+    await waitForCleanup(state.pendingPortOperations, cleanupTimeoutMs);
+    await waitForCleanup(state.cleanupTasks, cleanupTimeoutMs);
     state.currentChildId = null;
     state.cleanupAbortController.abort();
     activeRuns.delete(managerSessionId);
   }
 
-  function abortChildSession(state: ActiveRunState, childId: string): void {
+  function abortChildSession(state: ActiveRunState, childId: string, force = false): void {
     const existing = state.childAbortRequests.get(childId);
-    if (existing) return;
+    if (existing && !force) return;
 
+    let failed = false;
     let request: Promise<void>;
     try {
       request = Promise.resolve(
-        ports.abortSession(childId, state.cleanupAbortController.signal)
-      ).catch(() => {});
-    } catch {
+        ports.abortSession(childId, state.cleanupAbortController.signal, state.workspaceDirectory)
+      ).catch((err) => {
+        failed = true;
+        ports.logError(`session ${childId} abort failed`, err);
+      });
+    } catch (err) {
+      failed = true;
+      ports.logError(`session ${childId} abort failed`, err);
       request = Promise.resolve();
     }
     state.childAbortRequests.set(childId, request);
+    state.cleanupTasks.add(request);
+    void request.then(() => {
+      state.cleanupTasks.delete(request);
+      if (failed && state.childAbortRequests.get(childId) === request) {
+        state.childAbortRequests.delete(childId);
+      }
+    });
   }
 
   function failIteration(managerSessionId: string, iteration: RalphIteration, err: unknown): void {
@@ -496,7 +631,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   ): Promise<string | null> {
     let content: string | null = null;
     try {
-      content = await awaitPort(state, (signal) => ports.readWorkspaceFile(planDocPath, signal));
+      content = await awaitPort(state, (signal) =>
+        ports.readWorkspaceFile(planDocPath, signal, state.workspaceDirectory)
+      );
     } catch {
       throwIfRunCancelled(state);
       // Plan reads are best-effort for stop-condition checks.
@@ -519,7 +656,8 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             permission: getSessionPermissionRulesForMode(config.permissionMode, 'create'),
             parentID: config.managerSessionId,
           },
-          signal
+          signal,
+          state.workspaceDirectory
         ),
       (childId) => abortChildSession(state, childId)
     );
@@ -529,9 +667,11 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     state: ActiveRunState,
     childId: string,
     prompt: string,
-    config: RalphConfig
+    config: RalphConfig,
+    messageID: string
   ): Promise<void> {
     const body: RalphSendBody = {
+      messageID,
       parts: [{ type: 'text', text: prompt }],
     };
     if (config.model) {
@@ -542,7 +682,12 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       }
     }
     if (config.agent) body.agent = config.agent;
-    await awaitPort(state, (signal) => ports.sendPrompt(childId, body, signal));
+    await awaitPort(
+      state,
+      (signal) => ports.sendPrompt(childId, body, signal, state.workspaceDirectory),
+      () => abortChildSession(state, childId, true),
+      () => abortChildSession(state, childId, true)
+    );
   }
 
   async function sendPromptAndWaitForIdle(
@@ -553,19 +698,22 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   ): Promise<void> {
     // Arm idle listeners before sending so a fast child can't emit `idle`
     // between the send resolving and the wait subscription being attached.
+    const messageID = createPromptMessageID();
     const pollingReady = createDeferred<void>();
-    const idlePromise = waitForIdle(state, childId, pollingReady.promise);
+    const idlePromise = waitForIdle(state, childId, {
+      pollingReady: pollingReady.promise,
+      promptMessageID: messageID,
+    });
     try {
-      await sendPrompt(state, childId, prompt, config);
+      await sendPrompt(state, childId, prompt, config, messageID);
       pollingReady.resolve();
       throwIfRunCancelled(state);
       const idleResult = await idlePromise;
       throwIfRunCancelled(state);
       if (idleResult.type === 'timeout') {
-        abortChildSession(state, childId);
         throwIfRunCancelled(state);
         throw new Error(
-          `Ralph session ${childId} did not become idle within ${idleTimeoutMs}ms after a prompt; check whether the child is still running or idle event delivery was interrupted`
+          `Ralph session ${childId} did not provide confirmed prompt completion within ${idleTimeoutMs}ms; the child was aborted because admission, activity, or idle event delivery may have been interrupted`
         );
       }
       if (idleResult.type === 'error') {
@@ -574,6 +722,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     } catch (err) {
       pollingReady.resolve();
       state.cancelIdleWait?.();
+      abortChildSession(state, childId, !isRunCancelled(state, err));
       throw err;
     }
   }
@@ -709,7 +858,8 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             permission: getSessionPermissionRulesForMode(config.permissionMode, 'create'),
             parentID: config.managerSessionId,
           },
-          signal
+          signal,
+          state.workspaceDirectory
         ),
       (childId) => abortChildSession(state, childId)
     );
@@ -728,7 +878,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   ): Promise<string[]> {
     let sessions: RalphSessionSummary[];
     try {
-      sessions = await awaitPort(state, (signal) => ports.listSessions(signal));
+      sessions = await awaitPort(state, (signal) =>
+        ports.listSessions(signal, state.workspaceDirectory)
+      );
     } catch {
       throwIfRunCancelled(state);
       return [childId];
@@ -746,14 +898,13 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
 
   const idleTimeoutMs = ports.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const idlePollIntervalMs = ports.idlePollIntervalMs ?? DEFAULT_IDLE_POLL_INTERVAL_MS;
-  const idleAdmissionGraceMs = ports.idleAdmissionGraceMs ?? DEFAULT_IDLE_ADMISSION_GRACE_MS;
+  const cleanupTimeoutMs = ports.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS;
 
   function finishFromSessionStatus(
     childId: string,
     status: RalphSessionStatus,
     finish: (result: IdleWaitResult) => void
   ): void {
-    if (status.type === 'idle') finish({ type: 'idle' });
     if (status.type === 'missing') {
       finish({ type: 'error', error: sessionMissingError(childId) });
     }
@@ -765,15 +916,22 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   function waitForIdle(
     state: ActiveRunState,
     childId: string,
-    pollingReady: Promise<void> = Promise.resolve()
+    options: {
+      pollingReady?: Promise<void>;
+      promptMessageID?: string;
+      initiallyActive?: boolean;
+    } = {}
   ): Promise<IdleWaitResult> {
     return new Promise<IdleWaitResult>((resolve) => {
       let settled = false;
       let unsubscribe: (() => void) | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
       let pollTimer: ReturnType<typeof setTimeout> | null = null;
-      let pollingStartedAt: number | null = null;
-      let observedActive = false;
+      let observedActive = options.initiallyActive === true;
+      let observedAdmission = false;
+      let observedIdle = false;
+      let observedMatchingCompletion = false;
+      let evidenceCheckInFlight = false;
       const signal = state.abortController.signal;
       const finish = (result: IdleWaitResult) => {
         if (settled) return;
@@ -787,6 +945,40 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         resolve(result);
       };
       const cancel = () => finish({ type: 'cancelled' });
+      const observeMatchingCompletion = (
+        status: Extract<RalphSessionStatus, { type: 'completed' }>
+      ) => {
+        if (!options.promptMessageID || status.messageID !== options.promptMessageID) return;
+        if (status.error) {
+          finish({
+            type: 'error',
+            error: promptAssistantError(childId, status.error),
+          });
+          return;
+        }
+        observedMatchingCompletion = true;
+        if (observedIdle) finish({ type: 'idle' });
+      };
+      const checkPromptEvidence = async () => {
+        if (settled || evidenceCheckInFlight || !options.promptMessageID) return;
+        evidenceCheckInFlight = true;
+        try {
+          const evidence = await getPromptCompletionEvidence(
+            state,
+            childId,
+            options.promptMessageID
+          );
+          if (settled || evidence.type === 'none') return;
+          if (evidence.type === 'error') {
+            finish({ type: 'error', error: promptAssistantError(childId, evidence.message) });
+            return;
+          }
+          observedMatchingCompletion = true;
+          if (observedIdle) finish({ type: 'idle' });
+        } finally {
+          evidenceCheckInFlight = false;
+        }
+      };
       state.cancelIdleWait = cancel;
       signal.addEventListener('abort', cancel, { once: true });
       timeout = setTimeout(() => finish({ type: 'timeout' }), idleTimeoutMs);
@@ -798,10 +990,26 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             observedActive = true;
             return;
           }
-          // SSE completion is direct evidence from the running session and
-          // remains the zero-delay path for genuinely fast turns.
+          if (status.type === 'admitted') {
+            if (options.promptMessageID && status.messageID === options.promptMessageID) {
+              observedAdmission = true;
+            }
+            return;
+          }
+          if (status.type === 'completed') {
+            observeMatchingCompletion(status);
+            return;
+          }
+          if (status.type === 'idle') {
+            observedIdle = true;
+            if (!options.promptMessageID && observedActive) finish({ type: 'idle' });
+            else if (observedMatchingCompletion) finish({ type: 'idle' });
+            else void checkPromptEvidence();
+            return;
+          }
+          if (status.type === 'missing' && !observedActive && !observedAdmission) return;
           finishFromSessionStatus(childId, status, finish);
-        });
+        }, state.workspaceDirectory);
         if (settled) {
           unsubscribe();
           unsubscribe = null;
@@ -810,10 +1018,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         finish({ type: 'error', error });
       }
 
-      void pollingReady.then(
+      void (options.pollingReady ?? Promise.resolve()).then(
         () => {
           if (!settled) {
-            pollingStartedAt = Date.now();
             void poll();
           }
         },
@@ -826,20 +1033,35 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         if (settled) return;
         try {
           const status = await awaitPort(state, (portSignal) =>
-            ports.getSessionStatus(childId, portSignal)
+            ports.getSessionStatus(childId, portSignal, state.workspaceDirectory)
           );
           if (settled) return;
           if (status.type === 'active') {
             observedActive = true;
-          } else if (status.type === 'idle' || status.type === 'missing') {
-            const elapsed = Date.now() - (pollingStartedAt ?? Date.now());
-            if (observedActive || elapsed >= idleAdmissionGraceMs) {
+          } else if (status.type === 'idle') {
+            observedIdle = true;
+            if (!options.promptMessageID && observedActive) {
+              finish({ type: 'idle' });
+              return;
+            }
+            if (observedMatchingCompletion) {
+              finish({ type: 'idle' });
+              return;
+            }
+            await checkPromptEvidence();
+            if (settled) return;
+          } else if (status.type === 'missing') {
+            if (observedActive || observedAdmission) {
               finishFromSessionStatus(childId, status, finish);
               return;
             }
-            const remainingGrace = idleAdmissionGraceMs - elapsed;
-            pollTimer = setTimeout(() => void poll(), Math.min(idlePollIntervalMs, remainingGrace));
-            return;
+          } else if (status.type === 'admitted') {
+            if (options.promptMessageID && status.messageID === options.promptMessageID) {
+              observedAdmission = true;
+            }
+          } else if (status.type === 'completed') {
+            observeMatchingCompletion(status);
+            if (settled) return;
           } else {
             finishFromSessionStatus(childId, status, finish);
             return;
@@ -855,6 +1077,36 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         if (!settled) pollTimer = setTimeout(() => void poll(), idlePollIntervalMs);
       }
     });
+  }
+
+  async function getPromptCompletionEvidence(
+    state: ActiveRunState,
+    childId: string,
+    promptMessageID: string
+  ): Promise<{ type: 'none' } | { type: 'completed' } | { type: 'error'; message: string }> {
+    try {
+      const messages = await awaitPort(state, (signal) =>
+        ports.listMessages(childId, signal, state.workspaceDirectory)
+      );
+      const assistantIndex = findLatestMessageIndex(
+        messages,
+        (message) =>
+          message.info.role === 'assistant' &&
+          message.info.parentID === promptMessageID &&
+          typeof message.info.time?.completed === 'number' &&
+          Number.isFinite(message.info.time.completed)
+      );
+      if (assistantIndex < 0) return { type: 'none' };
+      const assistant = messages[assistantIndex];
+      if (assistant?.info.error !== undefined) {
+        return { type: 'error', message: getRalphMessageError(assistant.info.error) };
+      }
+      return { type: 'completed' };
+    } catch (err) {
+      throwIfRunCancelled(state);
+      ports.logError(`session ${childId} prompt evidence read failed`, err);
+      return { type: 'none' };
+    }
   }
 
   async function settlePersistedIteration(
@@ -879,14 +1131,14 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
 
     state.currentChildId = activeSessionId;
     const status = await awaitPort(state, (signal) =>
-      ports.getSessionStatus(activeSessionId, signal)
+      ports.getSessionStatus(activeSessionId, signal, state.workspaceDirectory)
     );
     if (status.type === 'missing') throw sessionMissingError(activeSessionId);
     if (status.type === 'error' || status.type === 'unknown') {
       throw sessionTerminalError(activeSessionId, status.message);
     }
     if (status.type === 'active') {
-      const idleResult = await waitForIdle(state, activeSessionId);
+      const idleResult = await waitForIdle(state, activeSessionId, { initiallyActive: true });
       throwIfRunCancelled(state);
       if (idleResult.type === 'timeout') {
         abortChildSession(state, activeSessionId);
@@ -961,7 +1213,9 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     const messagesPerSession = await Promise.all(
       sessionIds.map(async (sid) => {
         try {
-          return await awaitPort(state, (signal) => ports.listMessages(sid, signal));
+          return await awaitPort(state, (signal) =>
+            ports.listMessages(sid, signal, state.workspaceDirectory)
+          );
         } catch (err) {
           throwIfRunCancelled(state);
           throw new Error(`Failed to read Ralph session ${sid} messages`, { cause: err });
@@ -1152,6 +1406,22 @@ function findUnsettledIteration(run: RalphRun): RalphIteration | null {
 
 function sessionTerminalError(childId: string, message: string): Error {
   return new Error(`Ralph session ${childId} failed while waiting for idle: ${message}`);
+}
+
+function promptAssistantError(childId: string, message: string): Error {
+  return new Error(`Ralph session ${childId} assistant failed for the current prompt: ${message}`);
+}
+
+function getRalphMessageError(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  const error = asRecord(value);
+  const data = asRecord(error?.data);
+  return (
+    (typeof data?.message === 'string' && data.message) ||
+    (typeof error?.message === 'string' && error.message) ||
+    (typeof error?.name === 'string' && error.name) ||
+    'The assistant completed with an unknown error'
+  );
 }
 
 function sessionMissingError(childId: string): Error {

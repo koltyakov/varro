@@ -118,17 +118,25 @@ export class SessionStateManager {
   }
 
   titleFor(sessionID: string): string | undefined {
-    return this.sessionTitles.get(sessionID);
+    return this.getSessionMetadata(this.sessionTitles, sessionID);
   }
 
   isPlanSession(sessionID: string): boolean {
-    return this.sessionAgents.get(sessionID) === 'plan';
+    return this.getSessionMetadata(this.sessionAgents, sessionID) === 'plan';
   }
 
   isSessionInWorkspace(sessionID: string, workspacePath: string | null | undefined): boolean {
+    return this.getSessionWorkspaceMatch(sessionID, workspacePath) ?? false;
+  }
+
+  getSessionWorkspaceMatch(
+    sessionID: string,
+    workspacePath: string | null | undefined
+  ): boolean | undefined {
     const normalizedWorkspace = normalizeWorkspaceIdentity(workspacePath);
     if (!normalizedWorkspace) return true;
-    return isSameWorkspacePath(this.sessionDirectories.get(sessionID), workspacePath);
+    const directory = this.getSessionMetadata(this.sessionDirectories, sessionID);
+    return directory ? isSameWorkspacePath(directory, workspacePath) : undefined;
   }
 
   removeSessions(sessionIDs: Iterable<string>): void {
@@ -159,6 +167,7 @@ export class SessionStateManager {
    */
   markSessionBusy(sessionID: string): SessionBusyAttempt | undefined {
     if (!sessionID) return undefined;
+    this.touchSessionMetadata(sessionID);
     const attempt = { sessionID, id: ++this.nextBusyAttemptID };
     const attempts = this.busyAttempts.get(sessionID) ?? new Set<number>();
     attempts.add(attempt.id);
@@ -265,14 +274,12 @@ export class SessionStateManager {
 
         const agent = getString(info?.agent);
         if (agent) {
-          this.sessionAgents.set(sessionID, agent);
-          this.evictOldestSessionMetadata(this.sessionAgents);
+          this.setSessionMetadata(this.sessionAgents, sessionID, agent);
         }
 
         const mode = getString(info?.mode);
         if (mode) {
-          this.sessionModes.set(sessionID, mode);
-          this.evictOldestSessionMetadata(this.sessionModes);
+          this.setSessionMetadata(this.sessionModes, sessionID, mode);
         }
 
         if (getString(info?.role) !== 'assistant') break;
@@ -440,8 +447,7 @@ export class SessionStateManager {
       });
       const directory = trimOptionalString(item.directory);
       if (directory) {
-        this.sessionDirectories.set(item.sessionID, directory);
-        this.evictOldestSessionMetadata(this.sessionDirectories);
+        this.setSessionMetadata(this.sessionDirectories, item.sessionID, directory);
       }
     }
   }
@@ -545,7 +551,7 @@ export class SessionStateManager {
   }
 
   describeSessionSuffix(sessionID: string): string {
-    const title = this.sessionTitles.get(sessionID)?.trim();
+    const title = this.getSessionMetadata(this.sessionTitles, sessionID)?.trim();
     return title ? ` for "${title}"` : '';
   }
 
@@ -556,7 +562,9 @@ export class SessionStateManager {
       .slice(0, MAX_PERSISTED_INTERRUPTED_SESSIONS)
       .map((id) => ({
         id,
-        title: trimOptionalString(this.sessionTitles.get(id)?.trim() || undefined),
+        title: trimOptionalString(
+          this.getSessionMetadata(this.sessionTitles, id)?.trim() || undefined
+        ),
       }));
   }
 
@@ -569,7 +577,7 @@ export class SessionStateManager {
         props: this.serializeBlockingRequestProps(request.kind, request.props),
         ...(request.eventType ? { eventType: request.eventType } : {}),
         directory: trimOptionalString(
-          request.directory || this.sessionDirectories.get(request.sessionID)
+          request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
         ),
       }))
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -585,7 +593,7 @@ export class SessionStateManager {
         props: this.serializeBlockingRequestProps(request.kind, request.props),
         ...(request.eventType ? { eventType: request.eventType } : {}),
         directory: trimOptionalString(
-          request.directory || this.sessionDirectories.get(request.sessionID)
+          request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
         ),
       }))
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -606,31 +614,60 @@ export class SessionStateManager {
     fallbackSessionID?: string
   ) {
     const sessionID = getString(info?.id) || fallbackSessionID;
+    if (sessionID) this.touchSessionMetadata(sessionID);
     const title = normalizeSessionTitle(getString(info?.title));
     if (sessionID && title) {
-      this.sessionTitles.set(sessionID, title);
-      this.evictOldestSessionMetadata(this.sessionTitles);
+      this.setSessionMetadata(this.sessionTitles, sessionID, title);
     }
 
     const directory = trimOptionalString(getString(info?.directory));
     if (sessionID && directory) {
-      this.sessionDirectories.set(sessionID, directory);
-      this.evictOldestSessionMetadata(this.sessionDirectories);
+      this.setSessionMetadata(this.sessionDirectories, sessionID, directory);
     }
 
     const parentID = getString(info?.parentID);
     if (sessionID && parentID) {
-      this.sessionParentIDs.set(sessionID, parentID);
-      this.evictOldestSessionMetadata(this.sessionParentIDs);
+      this.setSessionMetadata(this.sessionParentIDs, sessionID, parentID);
     }
+  }
+
+  private getSessionMetadata(map: Map<string, string>, sessionID: string) {
+    const value = map.get(sessionID);
+    if (value === undefined) return undefined;
+    map.delete(sessionID);
+    map.set(sessionID, value);
+    return value;
+  }
+
+  private touchSessionMetadata(sessionID: string) {
+    this.getSessionMetadata(this.sessionAgents, sessionID);
+    this.getSessionMetadata(this.sessionTitles, sessionID);
+    this.getSessionMetadata(this.sessionDirectories, sessionID);
+    this.getSessionMetadata(this.sessionParentIDs, sessionID);
+    this.getSessionMetadata(this.sessionModes, sessionID);
+  }
+
+  private setSessionMetadata(map: Map<string, string>, sessionID: string, value: string) {
+    map.delete(sessionID);
+    map.set(sessionID, value);
+    this.evictOldestSessionMetadata(map);
   }
 
   private evictOldestSessionMetadata(map: Map<string, string>) {
     while (map.size > MAX_SESSION_METADATA_ENTRIES) {
-      const oldestKey = map.keys().next().value;
-      if (!oldestKey) break;
-      map.delete(oldestKey);
+      let evicted = false;
+      for (const sessionID of map.keys()) {
+        if (this.isPinnedSessionMetadata(sessionID)) continue;
+        map.delete(sessionID);
+        evicted = true;
+        break;
+      }
+      if (!evicted) break;
     }
+  }
+
+  private isPinnedSessionMetadata(sessionID: string) {
+    return this.busySessions.has(sessionID) || this.hasPendingAttentionForSession(sessionID);
   }
 
   private trackBlockingRequest(
@@ -653,7 +690,7 @@ export class SessionStateManager {
       kind,
       label,
       props: { ...props },
-      directory: this.sessionDirectories.get(sessionID),
+      directory: this.getSessionMetadata(this.sessionDirectories, sessionID),
       ...(eventType ? { eventType } : {}),
     });
     this.completedSessions.delete(sessionID);
@@ -743,9 +780,9 @@ export class SessionStateManager {
 
   private isIgnoredBackgroundSession(sessionID: string): boolean {
     return (
-      this.sessionParentIDs.has(sessionID) ||
-      this.sessionModes.get(sessionID) === 'subagent' ||
-      isSubagentSessionTitle(this.sessionTitles.get(sessionID))
+      this.getSessionMetadata(this.sessionParentIDs, sessionID) !== undefined ||
+      this.getSessionMetadata(this.sessionModes, sessionID) === 'subagent' ||
+      isSubagentSessionTitle(this.getSessionMetadata(this.sessionTitles, sessionID))
     );
   }
 

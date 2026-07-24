@@ -4,6 +4,29 @@ import type { Permission, QuestionRequest, Session } from '../../types';
 
 type PermissionResponse = 'once' | 'always' | 'reject';
 type PermissionResponseTarget = { id: string; sessionID: string };
+type PermissionModeFreshness = {
+  isSessionCurrent(): boolean;
+  isDraftCurrent(): boolean;
+  applyOptimistic?: boolean;
+  getConfirmedMode?(): PermissionMode;
+  onConfirmed?(session: Session): void;
+};
+
+function applyPermissionModeSelection(
+  deps: {
+    setPermissionModeForSession(sessionId: string | null | undefined, mode: PermissionMode): void;
+    setDraftPermissionMode(mode: PermissionMode): void;
+    saveProjectPermissionMode(mode: PermissionMode): void;
+  },
+  sessionId: string | null | undefined,
+  mode: PermissionMode
+) {
+  batch(() => {
+    deps.setPermissionModeForSession(sessionId, mode);
+    deps.setDraftPermissionMode(mode);
+    deps.saveProjectPermissionMode(mode);
+  });
+}
 
 export async function respondPermissionWithDependencies(
   deps: {
@@ -111,36 +134,50 @@ export async function updatePermissionModeForSessionWithDependencies(
   },
   mode: PermissionMode,
   permissionRules: Session['permission'],
-  sessionId: string | null | undefined
+  sessionId: string | null | undefined,
+  freshness: PermissionModeFreshness = {
+    isSessionCurrent: () => true,
+    isDraftCurrent: () => true,
+  }
 ) {
   const previousMode = deps.getPermissionModeForSession(sessionId);
   const previousDraft = deps.getDraftPermissionMode();
-  batch(() => {
-    deps.setPermissionModeForSession(sessionId, mode);
-    deps.setDraftPermissionMode(mode);
-    deps.saveProjectPermissionMode(mode);
-  });
+  if (freshness.applyOptimistic !== false) applyPermissionModeSelection(deps, sessionId, mode);
   if (!sessionId) return;
 
   try {
     const session = await deps.updateSessionPermission(sessionId, { permission: permissionRules });
+    freshness.onConfirmed?.(session);
+    if (!freshness.isSessionCurrent()) return;
     deps.upsertSession(session);
   } catch (err) {
+    const sessionCurrent = freshness.isSessionCurrent();
+    const draftCurrent = freshness.isDraftCurrent();
+    if (!sessionCurrent && !draftCurrent) return;
+    const confirmedMode = freshness.getConfirmedMode?.();
     batch(() => {
-      deps.setPermissionModeForSession(sessionId, previousMode);
-      deps.setDraftPermissionMode(previousDraft);
-      deps.saveProjectPermissionMode(previousDraft);
+      if (sessionCurrent) {
+        deps.setPermissionModeForSession(sessionId, confirmedMode ?? previousMode);
+      }
+      if (draftCurrent) {
+        const rollbackMode = confirmedMode ?? previousDraft;
+        deps.setDraftPermissionMode(rollbackMode);
+        deps.saveProjectPermissionMode(rollbackMode);
+      }
     });
     deps.setError(err instanceof Error ? err.message : 'Failed to update permissions');
     return;
   }
 
   if (mode === 'full') {
+    if (!freshness.isSessionCurrent()) return;
     await deps.autoApprovePermissionsForSession(deps.getPermissionsForSession(sessionId));
+    if (!freshness.isSessionCurrent()) return;
     await deps.syncPendingPermissions?.();
     return;
   }
   if (mode === 'auto') {
+    if (!freshness.isSessionCurrent()) return;
     await deps.syncPendingPermissions?.();
   }
 }
@@ -174,7 +211,18 @@ type SessionApprovalDependencies = {
   syncPendingPermissions?(): Promise<void>;
 };
 
+type PermissionModeQueue = {
+  confirmedMode: PermissionMode;
+  pending: number;
+  tail: Promise<void>;
+};
+
 export class SessionApprovalOperations {
+  private nextPermissionModeGeneration = 0;
+  private draftPermissionModeGeneration = 0;
+  private readonly permissionModeGenerationBySession = new Map<string, number>();
+  private readonly permissionModeQueues = new Map<string, PermissionModeQueue>();
+
   constructor(private readonly deps: SessionApprovalDependencies) {}
 
   readonly respondPermission = async (
@@ -239,23 +287,61 @@ export class SessionApprovalOperations {
     permissionRules: Session['permission'],
     sessionId: string | null | undefined
   ) => {
-    await updatePermissionModeForSessionWithDependencies(
-      {
-        getPermissionModeForSession: this.deps.getPermissionModeForSession,
-        getDraftPermissionMode: this.deps.getDraftPermissionMode,
-        setPermissionModeForSession: this.deps.setPermissionModeForSession,
-        setDraftPermissionMode: this.deps.setDraftPermissionMode,
-        saveProjectPermissionMode: this.deps.saveProjectPermissionMode,
-        updateSessionPermission: this.deps.updateSessionPermission,
-        upsertSession: this.deps.upsertSession,
-        setError: this.deps.setError,
-        getPermissionsForSession: this.deps.getPermissionsForSession,
-        autoApprovePermissionsForSession: this.autoApprovePermissionsForSession,
-        syncPendingPermissions: this.deps.syncPendingPermissions,
-      },
-      mode,
-      permissionRules,
-      sessionId
+    const generation = ++this.nextPermissionModeGeneration;
+    const sessionKey = sessionId ?? '';
+    this.permissionModeGenerationBySession.set(sessionKey, generation);
+    this.draftPermissionModeGeneration = generation;
+    const queue = sessionId
+      ? (this.permissionModeQueues.get(sessionId) ?? {
+          confirmedMode: this.deps.getPermissionModeForSession(sessionId),
+          pending: 0,
+          tail: Promise.resolve(),
+        })
+      : null;
+    if (sessionId && queue) this.permissionModeQueues.set(sessionId, queue);
+
+    applyPermissionModeSelection(this.deps, sessionId, mode);
+    if (!sessionId || !queue) return;
+
+    queue.pending += 1;
+    const request = queue.tail.then(() =>
+      updatePermissionModeForSessionWithDependencies(
+        {
+          getPermissionModeForSession: this.deps.getPermissionModeForSession,
+          getDraftPermissionMode: this.deps.getDraftPermissionMode,
+          setPermissionModeForSession: this.deps.setPermissionModeForSession,
+          setDraftPermissionMode: this.deps.setDraftPermissionMode,
+          saveProjectPermissionMode: this.deps.saveProjectPermissionMode,
+          updateSessionPermission: this.deps.updateSessionPermission,
+          upsertSession: this.deps.upsertSession,
+          setError: this.deps.setError,
+          getPermissionsForSession: this.deps.getPermissionsForSession,
+          autoApprovePermissionsForSession: this.autoApprovePermissionsForSession,
+          syncPendingPermissions: this.deps.syncPendingPermissions,
+        },
+        mode,
+        permissionRules,
+        sessionId,
+        {
+          applyOptimistic: false,
+          isSessionCurrent: () =>
+            this.permissionModeGenerationBySession.get(sessionKey) === generation,
+          isDraftCurrent: () => this.draftPermissionModeGeneration === generation,
+          getConfirmedMode: () => queue.confirmedMode,
+          onConfirmed: () => {
+            queue.confirmedMode = mode;
+          },
+        }
+      )
     );
+    queue.tail = request.catch(() => {});
+    try {
+      await request;
+    } finally {
+      queue.pending -= 1;
+      if (queue.pending === 0 && this.permissionModeQueues.get(sessionId) === queue) {
+        this.permissionModeQueues.delete(sessionId);
+      }
+    }
   };
 }

@@ -208,6 +208,31 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('POST', '/session', {});
   });
 
+  it('scopes session creation and prompts to an explicit workspace directory', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({ id: 'session-1' });
+
+    await client.session.create({ title: 'Ralph' }, { directory: '/workspace with spaces' });
+    await client.session.sendAsync(
+      'session-1',
+      { parts: [{ type: 'text', text: 'Anchor' }], noReply: true },
+      { directory: '/workspace with spaces' }
+    );
+
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      1,
+      'POST',
+      '/session?directory=%2Fworkspace+with+spaces',
+      { title: 'Ralph' }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      2,
+      'POST',
+      '/session/session-1/prompt_async?directory=%2Fworkspace+with+spaces',
+      { parts: [{ type: 'text', text: 'Anchor' }], noReply: true }
+    );
+  });
+
   it('builds provider limit query parameters only when a model is selected', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ status: 'available' });
@@ -399,7 +424,7 @@ describe('client', () => {
     };
     bridgeMocks.apiCall.mockResolvedValue([
       {
-        rootID: 'root-1',
+        rootID: 'sess-1',
         deletedAt: 1000,
         expiresAt: 2000,
         root: session,
@@ -427,7 +452,7 @@ describe('client', () => {
     };
     bridgeMocks.apiCall.mockResolvedValue([
       {
-        rootID: 'root-1',
+        rootID: 'sess-1',
         deletedAt: 1000,
         expiresAt: 2000,
         root: session,
@@ -461,7 +486,7 @@ describe('client', () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue([
       {
-        rootID: 'root-1',
+        rootID: 'sess-1',
         deletedAt: 1000,
         expiresAt: 2000,
         root: { id: 'sess-1' }, // missing required fields
@@ -686,7 +711,7 @@ describe('client', () => {
     );
   });
 
-  it('filters out entries with partial summary (missing fields)', async () => {
+  it('rejects entries with a malformed partial summary', async () => {
     const { client } = await loadClient();
     const session = {
       id: 'sess-1',
@@ -699,7 +724,7 @@ describe('client', () => {
     };
     bridgeMocks.apiCall.mockResolvedValue([
       {
-        rootID: 'root-1',
+        rootID: 'sess-1',
         deletedAt: 1000,
         expiresAt: 2000,
         root: session,
@@ -709,8 +734,6 @@ describe('client', () => {
 
     const result = await client.varro.recycleBin.list();
 
-    expect(result).toHaveLength(1);
-    // summary should be omitted when fields are invalid
-    expect(result[0].root.summary).toBeUndefined();
+    expect(result).toEqual([]);
   });
 });

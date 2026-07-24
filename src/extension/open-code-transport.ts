@@ -39,8 +39,8 @@ export class OpenCodeTransport {
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_STABILITY_WINDOW_MS = 15_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
-  private static readonly EVENT_MAX_BUFFER_CHARS = 1_000_000;
-  private static readonly EVENT_MAX_PAYLOAD_CHARS = 250_000;
+  private static readonly EVENT_MAX_BUFFER_CHARS = 8_000_000;
+  private static readonly EVENT_MAX_PAYLOAD_CHARS = 8_000_000;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private static readonly RESCOPE_WAIT_TIMEOUT_MS = 3000;

@@ -173,7 +173,7 @@ export function addClipboardImage(image: ClipboardImage) {
   return true;
 }
 
-export function removeClipboardImage(id: string) {
+export function removeClipboardImage(id: string, replacePlaceholder = true) {
   const image = state.clipboardImages.find((item) => item.id === id);
   removeClipboardImageAttachmentSequence(id);
   setState(
@@ -183,7 +183,7 @@ export function removeClipboardImage(id: string) {
       if (idx !== -1) images.splice(idx, 1);
     })
   );
-  if (image) replaceClipboardImagePlaceholder(image.filename);
+  if (image && replacePlaceholder) replaceClipboardImagePlaceholder(image.filename);
 }
 
 export function clearClipboardImages() {

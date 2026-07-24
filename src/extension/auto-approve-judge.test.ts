@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { PermissionRule } from '../shared/opencode-types';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -17,11 +22,45 @@ const cargoBuildPermission = (id: string) => ({
   metadata: { command: 'cargo build' },
 });
 
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function createTemporaryWorkspace() {
+  const root = mkdtempSync(join(tmpdir(), 'varro-auto-approve-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  temporaryDirectories.push(root);
+  return { root, workspace };
+}
+
+function createAskJudgeRequest() {
+  return vi.fn(async (method: string, path: string) => {
+    if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+    if (method === 'GET' && path === '/config') return {};
+    if (method === 'POST' && path === '/session/judge-session-1/message') {
+      return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
+    }
+    if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+    throw new Error(`Unexpected request: ${method} ${path}`);
+  });
+}
+
+function resolveToolAction(rules: PermissionRule[], tool: string) {
+  return rules.findLast((rule) => rule.permission === '*' || rule.permission === tool)?.action;
+}
+
 describe('AutoApproveJudge', () => {
   it('allows workspace file edits without creating a judge session', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    const filePath = join(workspace, 'src', 'app.ts');
     const request = vi.fn();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
@@ -33,9 +72,9 @@ describe('AutoApproveJudge', () => {
           sessionID: 'session-1',
           title: 'edit src/app.ts',
           metadata: {
-            filepath: '/repo/src/app.ts',
+            filepath: filePath,
             relativePath: 'src/app.ts',
-            files: [{ filePath: '/repo/src/app.ts', relativePath: 'src/app.ts', type: 'update' }],
+            files: [{ filePath, relativePath: 'src/app.ts', type: 'update' }],
           },
         },
       })
@@ -44,17 +83,10 @@ describe('AutoApproveJudge', () => {
   });
 
   it('does not locally allow edit permissions outside the workspace or file deletion', async () => {
-    const request = vi.fn(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
-      if (method === 'GET' && path === '/config') return {};
-      if (method === 'POST' && path === '/session/judge-session-1/message') {
-        return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
-      }
-      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
-      throw new Error(`Unexpected request: ${method} ${path}`);
-    });
+    const { root, workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
@@ -64,8 +96,8 @@ describe('AutoApproveJudge', () => {
           id: 'perm-outside',
           type: 'edit',
           sessionID: 'session-1',
-          title: 'edit /tmp/file.ts',
-          metadata: { filepath: '/tmp/file.ts' },
+          title: 'edit outside.ts',
+          metadata: { filepath: join(root, 'outside.ts') },
         },
       })
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
@@ -76,7 +108,7 @@ describe('AutoApproveJudge', () => {
           type: 'edit',
           sessionID: 'session-1',
           title: 'edit src/old.ts',
-          metadata: { files: [{ filePath: '/repo/src/old.ts', type: 'delete' }] },
+          metadata: { files: [{ filePath: join(workspace, 'src', 'old.ts'), type: 'delete' }] },
         },
       })
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
@@ -84,17 +116,10 @@ describe('AutoApproveJudge', () => {
   });
 
   it('does not locally allow relative edit paths that escape the workspace', async () => {
-    const request = vi.fn(async (method: string, path: string) => {
-      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
-      if (method === 'GET' && path === '/config') return {};
-      if (method === 'POST' && path === '/session/judge-session-1/message') {
-        return { info: { structured_output: { decision: 'ask', reason: 'Needs user review.' } } };
-      }
-      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
-      throw new Error(`Unexpected request: ${method} ${path}`);
-    });
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
@@ -113,9 +138,10 @@ describe('AutoApproveJudge', () => {
   });
 
   it('still locally allows relative edit paths that stay inside the workspace', async () => {
+    const { workspace } = createTemporaryWorkspace();
     const request = vi.fn();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
@@ -134,31 +160,15 @@ describe('AutoApproveJudge', () => {
   });
 
   it('allows safe local bash commands without creating a judge session', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'tmp', 'opencode'), { recursive: true });
     const request = vi.fn();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
     const permissions = [
-      {
-        id: 'perm-npm',
-        type: 'bash',
-        sessionID: 'session-1',
-        title: 'bash rtk npm run test -- src/webview/components/PermissionPrompt.test.ts',
-      },
-      {
-        id: 'perm-custom-npm',
-        type: 'bash',
-        sessionID: 'session-1',
-        title: 'bash npm run preview:webview',
-      },
-      {
-        id: 'perm-version',
-        type: 'bash',
-        sessionID: 'session-1',
-        title: 'bash opencode --version',
-      },
       {
         id: 'perm-git-status',
         type: 'bash',
@@ -199,6 +209,94 @@ describe('AutoApproveJudge', () => {
       });
     }
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('defers arbitrary npm scripts and executable version commands to the judge', async () => {
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => '/repo' } as never,
+      new HiddenSessionManager()
+    );
+
+    for (const permission of [
+      {
+        id: 'perm-npm',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash npm run project-defined-script',
+      },
+      {
+        id: 'perm-version',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash ./project-defined-tool --version',
+      },
+    ]) {
+      await expect(judge.judge({ permission })).resolves.toEqual({
+        decision: 'ask',
+        reason: 'Needs user review.',
+      });
+    }
+
+    expect(
+      request.mock.calls.filter(([method, path]) => method === 'POST' && path === '/session')
+    ).toHaveLength(2);
+  });
+
+  it('does not locally allow git -C outside the canonical workspace', async () => {
+    const { root, workspace } = createTemporaryWorkspace();
+    const outside = join(root, 'outside');
+    const linkedOutside = join(workspace, 'linked-outside');
+    mkdirSync(outside);
+    symlinkSync(outside, linkedOutside, process.platform === 'win32' ? 'junction' : 'dir');
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    for (const [id, directory] of [
+      ['perm-external-git', outside],
+      ['perm-symlinked-external-git', linkedOutside],
+    ]) {
+      await expect(
+        judge.judge({
+          permission: {
+            id,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash git -C "${directory}" status --short`,
+          },
+        })
+      ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    }
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('does not locally allow new files through a symlink outside the workspace', async () => {
+    const { root, workspace } = createTemporaryWorkspace();
+    const outside = join(root, 'outside');
+    const linkedDirectory = join(workspace, 'linked');
+    mkdirSync(outside);
+    symlinkSync(outside, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-symlink-escape',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit linked/new-file.ts',
+          metadata: { filepath: join(linkedDirectory, 'new-file.ts') },
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
   it('does not locally allow chained local bash commands', async () => {
@@ -358,6 +456,33 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
   });
 
+  it('allows only the StructuredOutput synthetic tool in deny-all judge sessions', async () => {
+    let permissionRules: PermissionRule[] = [];
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'POST' && path === '/session') {
+        permissionRules = (body as { permission: PermissionRule[] }).permission;
+        return { id: 'judge-session-1' };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        return { info: { structured: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await judge.judge({ permission: cargoBuildPermission('perm-structured-permission') });
+
+    expect(resolveToolAction(permissionRules, 'StructuredOutput')).toBe('allow');
+    expect(resolveToolAction(permissionRules, 'unknown_custom_tool')).toBe('deny');
+    expect(permissionRules.at(-1)).toEqual({
+      permission: 'StructuredOutput',
+      pattern: '*',
+      action: 'allow',
+    });
+  });
+
   it('reads structured judge output from current OpenCode responses', async () => {
     const request = vi.fn(async (method: string, path: string) => {
       if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
@@ -490,9 +615,11 @@ describe('AutoApproveJudge', () => {
 
   it('writes an audit line for every auto-approve decision', async () => {
     mocks.logger.info.mockClear();
+    const { workspace } = createTemporaryWorkspace();
+    const filePath = join(workspace, 'src', 'app.ts');
     const request = vi.fn();
     const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => '/repo' } as never,
+      { request, getWorkspaceCwd: () => workspace } as never,
       new HiddenSessionManager()
     );
 
@@ -502,14 +629,12 @@ describe('AutoApproveJudge', () => {
         type: 'edit',
         sessionID: 'session-1',
         title: 'edit src/app.ts',
-        metadata: { filepath: '/repo/src/app.ts' },
+        metadata: { filepath: filePath },
       },
     });
 
     expect(mocks.logger.info).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /\[auto-approve\] allow \(local-rule\) edit ".*\/repo\/src\/app\.ts.*" session=session-1/
-      )
+      expect.stringContaining(`[auto-approve] allow (local-rule) edit "${filePath}`)
     );
   });
 });

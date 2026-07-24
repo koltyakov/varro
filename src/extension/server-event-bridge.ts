@@ -24,7 +24,7 @@ export class ServerEventBridge {
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
     private readonly sessionState: Pick<
       SessionStateManager,
-      'handleServerEvent' | 'isSessionInWorkspace' | 'persist' | 'flush'
+      'getSessionWorkspaceMatch' | 'handleServerEvent' | 'persist' | 'flush'
     >,
     private readonly hiddenSessions: Pick<HiddenSessionManager, 'isHidden' | 'observeEvent'>,
     private readonly providerLimitService: {
@@ -128,7 +128,7 @@ export class ServerEventBridge {
     const sessionIDs = getSessionIdsForEvent(event);
     if (sessionIDs.length === 0) return false;
     return sessionIDs.some(
-      (sessionID) => !this.sessionState.isSessionInWorkspace(sessionID, workspacePath)
+      (sessionID) => this.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath) === false
     );
   }
 }

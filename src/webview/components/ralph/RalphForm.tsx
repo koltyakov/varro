@@ -6,6 +6,7 @@ import { getStoredVariantForModel, isSessionAwaitingInput, state } from '../../l
 import { deleteSession, selectSession } from '../../hooks/useOpenCode';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import type { RalphConfig, RalphSelectedModel } from '../../../shared/ralph';
+import { normalizeRalphWorkspaceDirectory } from '../../../shared/ralph';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
 import { buildAnchorMessage, getDefaultPromptTemplate } from '../../../shared/ralph-prompts';
@@ -77,6 +78,7 @@ function close() {
 
 export function RalphForm() {
   const [planPath, setPlanPath] = createSignal('');
+  const [planWorkspaceDirectory, setPlanWorkspaceDirectory] = createSignal<string | null>(null);
   const [iterations, setIterations] = createSignal(DEFAULT_ITERATIONS);
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [promptTemplate, setPromptTemplate] = createSignal(getDefaultPromptTemplate());
@@ -122,7 +124,10 @@ export function RalphForm() {
     const visible = ralphStore.showRalphForm();
     if (visible && !wasVisible) {
       const activeFilePath = state.editorContext.activeFile?.relativePath;
-      if (activeFilePath) setPlanPath(activeFilePath);
+      setPlanPath(activeFilePath ?? '');
+      setPlanWorkspaceDirectory(
+        normalizeRalphWorkspaceDirectory(state.editorContext.workspacePath)
+      );
       setModel(getInitialRalphModelSelection());
       setErrorMessage(null);
     }
@@ -135,7 +140,13 @@ export function RalphForm() {
     setIsPickingPlan(true);
     try {
       const pickedPath = await client.varro.pickWorkspaceFile();
-      if (pickedPath) setPlanPath(pickedPath);
+      if (pickedPath) {
+        setPlanPath(pickedPath.path);
+        setPlanWorkspaceDirectory(
+          normalizeRalphWorkspaceDirectory(pickedPath.workspaceDirectory) ??
+            normalizeRalphWorkspaceDirectory(state.editorContext.workspacePath)
+        );
+      }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to pick plan document');
     } finally {
@@ -154,6 +165,13 @@ export function RalphForm() {
       setErrorMessage('Iterations must be at least 1');
       return;
     }
+    const workspaceDirectory =
+      planWorkspaceDirectory() ??
+      normalizeRalphWorkspaceDirectory(state.editorContext.workspacePath);
+    if (!workspaceDirectory) {
+      setErrorMessage('Open the plan from a workspace folder before starting Ralph');
+      return;
+    }
     setErrorMessage(null);
     setIsSubmitting(true);
 
@@ -166,10 +184,13 @@ export function RalphForm() {
         state,
         previousSessionId ? isSessionAwaitingInput(previousSessionId) : false
       );
-      const session = await client.session.create({
-        title: `Ralph: ${planLabel}`,
-        permission: getSessionPermissionRulesForMode(permissionMode, 'create'),
-      });
+      const session = await client.session.create(
+        {
+          title: `Ralph: ${planLabel}`,
+          permission: getSessionPermissionRulesForMode(permissionMode, 'create'),
+        },
+        { directory: workspaceDirectory }
+      );
 
       const selectedModel = model();
       const reasoningLevel = effectiveVariant();
@@ -183,6 +204,7 @@ export function RalphForm() {
 
       const config: RalphConfig = {
         managerSessionId: session.id,
+        workspaceDirectory,
         planDocPath: path,
         iterations: iterations(),
         promptTemplate: promptTemplate(),
@@ -205,9 +227,11 @@ export function RalphForm() {
           (anchorBody.model as { variant?: string }).variant = config.model.variant;
         }
       }
-      await client.session.sendAsync(session.id, anchorBody).catch((err) => {
-        logError('ralph-form:sendAsync', err);
-      });
+      await client.session
+        .sendAsync(session.id, anchorBody, { directory: workspaceDirectory })
+        .catch((err) => {
+          logError('ralph-form:sendAsync', err);
+        });
 
       await selectSession(session.id);
       if (previousSessionId && shouldDeletePreviousSession && previousSessionId !== session.id) {

@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro for OpenCode",
-  "version": "0.22.3",
+  "version": "0.22.4",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",

@@ -204,6 +204,8 @@ export function MessageList() {
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
+  let diffFocusPauseActive = false;
+  let resumeAutoScrollAfterDiffFocus = false;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
@@ -406,12 +408,42 @@ export function MessageList() {
   const [enteringMessageIds, setEnteringMessageIds] = createSignal<ReadonlySet<string>>(new Set());
   let entranceSessionId: string | null = null;
   let previousEntranceMessageIds: readonly string[] = [];
+  let awaitingInitialTranscriptPopulation = false;
+  let assistantItemRevealReady = false;
+  let assistantItemRevealReadyVersion = 0;
+
+  function scheduleAssistantItemRevealReady(sessionId: string | null) {
+    const version = ++assistantItemRevealReadyVersion;
+    queueMicrotask(() => {
+      if (version !== assistantItemRevealReadyVersion || state.activeSessionId !== sessionId)
+        return;
+      assistantItemRevealReady = true;
+    });
+  }
+
   createComputed(() => {
     const sessionId = state.activeSessionId;
     const currentMessageIds = messageIds();
     if (sessionId !== entranceSessionId) {
       entranceSessionId = sessionId;
       previousEntranceMessageIds = currentMessageIds;
+      awaitingInitialTranscriptPopulation = currentMessageIds.length === 0;
+      claimedEntranceMessageIds.clear();
+      revealedFlowItemKeys.clear();
+      assistantItemRevealReady = false;
+      assistantItemRevealReadyVersion += 1;
+      if (!awaitingInitialTranscriptPopulation) {
+        scheduleAssistantItemRevealReady(sessionId);
+      }
+      setEnteringMessageIds(new Set<string>());
+      return;
+    }
+
+    if (awaitingInitialTranscriptPopulation && currentMessageIds.length > 0) {
+      awaitingInitialTranscriptPopulation = false;
+      previousEntranceMessageIds = currentMessageIds;
+      assistantItemRevealReady = false;
+      scheduleAssistantItemRevealReady(sessionId);
       setEnteringMessageIds(new Set<string>());
       return;
     }
@@ -423,15 +455,6 @@ export function MessageList() {
       : [];
     previousEntranceMessageIds = currentMessageIds;
     setEnteringMessageIds(new Set(appendedIds));
-  });
-
-  let clearedEntranceSessionId: string | null = null;
-  createEffect(() => {
-    const sessionId = state.activeSessionId;
-    if (sessionId === clearedEntranceSessionId) return;
-    clearedEntranceSessionId = sessionId;
-    claimedEntranceMessageIds.clear();
-    revealedFlowItemKeys.clear();
   });
 
   createEffect(() => {
@@ -460,7 +483,7 @@ export function MessageList() {
     }
     if (keys.has(renderKey)) return false;
     keys.add(renderKey);
-    return true;
+    return assistantItemRevealReady;
   }
 
   const inlinePreviewLayoutSignatures = createMemo(() =>
@@ -970,6 +993,11 @@ export function MessageList() {
       return;
     }
 
+    if (diffFocusPauseActive) {
+      setMeasurementVersion((version) => version + 1);
+      return;
+    }
+
     const capturedAutoScroll = autoScroll();
     if (capturedAutoScroll || userScrollRecentlyActive()) {
       setMeasurementVersion((version) => version + 1);
@@ -1255,6 +1283,15 @@ export function MessageList() {
     }
   }
 
+  function disengageBottomFollow() {
+    followModeLocked = false;
+    pinnedToBottom = false;
+    expectedScrollTop = -1;
+    ignoreScrollUntil = 0;
+    cancelPendingScroll();
+    if (autoScroll()) setAutoScroll(false);
+  }
+
   function startFollowLoop(sessionId: string, options?: { immediate?: boolean }) {
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
@@ -1362,16 +1399,20 @@ export function MessageList() {
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
     const scrollDelta = top - lastObservedScrollTop;
-    // Delayed events from height anchoring have zero delta and must not revive bottom follow.
+    const userScrolledUp = now - lastWheelUpAt <= 160;
+    if (userScrolledUp && distance > REATTACH_THRESHOLD_PX) {
+      lastWheelUpAt = Number.NEGATIVE_INFINITY;
+    }
+    // Resize corrections can look like downward movement after an upward wheel.
     const shouldReattachToBottom =
-      !autoScrollEnabled && distance <= REATTACH_THRESHOLD_PX && scrollDelta > 1;
+      !autoScrollEnabled && !userScrolledUp && distance <= REATTACH_THRESHOLD_PX && scrollDelta > 1;
     const decision = resolveAutoScrollOnUserScroll({
       top,
       distanceFromBottom: distance,
       nearBottom:
         distance < AUTO_SCROLL_THRESHOLD_PX && (autoScrollEnabled || shouldReattachToBottom),
       autoScroll: autoScroll(),
-      userScrolledUp: now - lastWheelUpAt <= 160,
+      userScrolledUp,
       bottomTargetStable,
       followModeLocked,
       expectedScrollTop,
@@ -1427,27 +1468,68 @@ export function MessageList() {
       if (distanceFromBottom() <= 1) return;
     }
     lastWheelAt = performance.now();
+    if (event.deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
     }
     if (event.deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
-      followModeLocked = false;
-      pinnedToBottom = false;
-      expectedScrollTop = -1;
-      ignoreScrollUntil = 0;
-      cancelPendingScroll();
-      if (autoScroll()) setAutoScroll(false);
+      if (diffFocusPauseActive) resumeAutoScrollAfterDiffFocus = false;
+      disengageBottomFollow();
     }
+  }
+
+  function handleFocusIn(event: FocusEvent) {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('.diff-view-lines')) return;
+
+    if (!diffFocusPauseActive) {
+      resumeAutoScrollAfterDiffFocus = autoScroll() || followModeLocked || pinnedToBottom;
+    }
+    diffFocusPauseActive = true;
+    pendingExpansionScrollAnchor = null;
+    disengageBottomFollow();
+  }
+
+  function handleFocusOut(event: FocusEvent) {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('.diff-view-lines')) return;
+
+    queueMicrotask(() => {
+      const activeElement = document.activeElement;
+      if (
+        containerRef &&
+        activeElement instanceof Element &&
+        containerRef.contains(activeElement) &&
+        activeElement.closest('.diff-view-lines')
+      ) {
+        return;
+      }
+
+      diffFocusPauseActive = false;
+      const shouldResume = resumeAutoScrollAfterDiffFocus;
+      resumeAutoScrollAfterDiffFocus = false;
+      if (shouldResume) requestMessageListScrollToBottom();
+    });
   }
 
   function handleClickCapture(event: MouseEvent) {
     if (!containerRef) return;
     const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const anchor = target.closest<HTMLElement>('[aria-expanded]');
-    if (!anchor || !containerRef.contains(anchor)) return;
+    if (!(target instanceof Element)) return;
+    if (target.closest('.diff-view-filename')) return;
+    const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
+    if (!control || !containerRef.contains(control)) return;
+    const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
+    const anchor = isDiffToggle
+      ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
+      : control;
+
+    if (isDiffToggle) {
+      resumeAutoScrollAfterDiffFocus = false;
+      disengageBottomFollow();
+    }
 
     pendingExpansionScrollAnchor = captureExpansionScrollAnchor({
       anchor,
@@ -1460,6 +1542,8 @@ export function MessageList() {
   onMount(() => {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
+    containerRef.addEventListener('focusin', handleFocusIn);
+    containerRef.addEventListener('focusout', handleFocusOut);
     lastContainerClientWidth = containerRef.clientWidth;
     lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
     updateScrollbarInset();
@@ -1539,6 +1623,8 @@ export function MessageList() {
     observer.observe(trackRef);
     onCleanup(() => {
       containerRef?.removeEventListener('click', handleClickCapture as EventListener, true);
+      containerRef?.removeEventListener('focusin', handleFocusIn);
+      containerRef?.removeEventListener('focusout', handleFocusOut);
       observer.disconnect();
       firstVisibleMessageObserver?.disconnect();
       firstVisibleMessageObserver = null;
@@ -1654,6 +1740,8 @@ export function MessageList() {
     ignoreScrollUntil = 0;
     followModeLocked = false;
     pinnedToBottom = true;
+    diffFocusPauseActive = false;
+    resumeAutoScrollAfterDiffFocus = false;
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
@@ -1705,6 +1793,10 @@ export function MessageList() {
     const requestKey = messageListScrollRequestKey();
     if (previousRequestKey === undefined) return requestKey;
     if (!sessionId || !containerRef) return requestKey;
+    if (diffFocusPauseActive) {
+      resumeAutoScrollAfterDiffFocus = true;
+      return requestKey;
+    }
 
     pendingScrollToBottomRequest = true;
     followModeLocked = true;
@@ -1910,12 +2002,8 @@ export function MessageList() {
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
     if (loadingStickyPreviewId()) return;
-    followModeLocked = false;
-    pinnedToBottom = false;
-    expectedScrollTop = -1;
-    ignoreScrollUntil = 0;
-    cancelPendingScroll();
-    if (autoScroll()) setAutoScroll(false);
+    resumeAutoScrollAfterDiffFocus = false;
+    disengageBottomFollow();
     if (messages().some((entry) => entry.info.id === preview.id)) {
       scrollMessageIntoView(preview);
       return;

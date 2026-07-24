@@ -110,8 +110,24 @@ interface LaunchCallbacks {
   getWorkspaceCwd: () => string | undefined;
   onStdout: (data: Buffer) => void;
   onStderr: (data: Buffer) => void;
-  onExit: (code: number | null, signal: NodeJS.Signals | null) => void;
-  onError: (err: Error) => void;
+  onExit: (proc: ChildProcess, code: number | null, signal: NodeJS.Signals | null) => void;
+  onError: (proc: ChildProcess, err: Error) => void;
+}
+
+interface ProcessListeners {
+  stdout: (data: Buffer) => void;
+  stderr: (data: Buffer) => void;
+  exit: (code: number | null, signal: NodeJS.Signals | null) => void;
+  error: (err: Error) => void;
+}
+
+interface ProcessLaunch {
+  configPath: string | null;
+  listenerPid: number | null;
+  owner: string;
+  ownershipConfirmed: boolean;
+  port: number;
+  processGroupId: number | null;
 }
 
 type CommandResult = {
@@ -323,18 +339,33 @@ async function isProcessOrDescendant(pid: number, ancestorPid: number) {
   return false;
 }
 
+async function readProcessGroupId(pid: number) {
+  if (process.platform === 'win32') return null;
+  const value = (await runProcess('ps', ['-p', String(pid), '-o', 'pgid='])).stdout.trim();
+  const processGroupId = Number.parseInt(value, 10);
+  return Number.isSafeInteger(processGroupId) && processGroupId > 0 ? processGroupId : null;
+}
+
+function isProcessGroupAlive(processGroupId: number) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+function signalProcessGroup(processGroupId: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') throw err;
+  }
+}
+
 function normalizeExecutableIdentity(value: string) {
   const normalized = value.trim();
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-async function waitForPortListenersToExit(port: number, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await findListeningPids(port)).length === 0) return true;
-    await delay(100);
-  }
-  return (await findListeningPids(port)).length === 0;
 }
 
 function getManagedServerOwnershipLeasePath(port: number) {
@@ -466,6 +497,10 @@ export class OpenCodeProcess {
     | ((code: number | null, signal: NodeJS.Signals | null) => void)
     | null = null;
   private _processErrorHandler: ((err: Error) => void) | null = null;
+  private readonly processListeners = new WeakMap<ChildProcess, ProcessListeners>();
+  private readonly processLaunches = new WeakMap<ChildProcess, ProcessLaunch>();
+  private readonly processCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
+  private readonly processResourceCleanupOperations = new WeakMap<ChildProcess, Promise<void>>();
   private compactionSettings: OpenCodeCompactionSettings;
   private injectedConfigPath: string | null = null;
   private injectedConfigOwnerPid: number | null = null;
@@ -778,11 +813,11 @@ export class OpenCodeProcess {
     }
   }
 
-  async confirmManagedServerOwnership(): Promise<boolean> {
-    const proc = this._process;
-    const owner = this.ownershipOwner;
-    if (!proc?.pid || !owner) {
-      this._managedProcess = false;
+  async confirmManagedServerOwnership(proc = this._process): Promise<boolean> {
+    const launch = proc ? this.processLaunches.get(proc) : undefined;
+    const owner = launch?.owner;
+    if (!proc?.pid || !owner || this._process !== proc) {
+      this.markOwnershipConfirmationFailed(proc);
       return false;
     }
 
@@ -794,7 +829,7 @@ export class OpenCodeProcess {
       listenerPid = undefined;
       executable = '';
       birthIdentity = '';
-      const listeners = await findListeningPids(this._port);
+      const listeners = await findListeningPids(launch.port);
       for (const pid of listeners) {
         if (await isProcessOrDescendant(pid, proc.pid)) {
           listenerPid = pid;
@@ -810,38 +845,42 @@ export class OpenCodeProcess {
       }
       if (attempt + 1 < attempts) await delay(WINDOWS_OWNERSHIP_CONFIRM_RETRY_MS);
     }
+    if (this._process !== proc || this.processLaunches.get(proc)?.owner !== owner) {
+      return false;
+    }
     if (!listenerPid) {
-      this._managedProcess = false;
-      logger.warn(`Could not bind managed OpenCode ownership to port ${this._port}`);
+      this.markOwnershipConfirmationFailed(proc);
+      logger.warn(`Could not bind managed OpenCode ownership to port ${launch.port}`);
       return false;
     }
     if (!executable) {
-      this._managedProcess = false;
+      this.markOwnershipConfirmationFailed(proc);
       logger.warn(`Could not read executable identity for managed OpenCode PID ${listenerPid}`);
       return false;
     }
     if (!birthIdentity) {
-      this._managedProcess = false;
+      this.markOwnershipConfirmationFailed(proc);
       logger.warn(`Could not read process birth identity for managed OpenCode PID ${listenerPid}`);
       return false;
     }
+    launch.listenerPid = listenerPid;
 
     const lease: ManagedServerOwnershipLease = {
       version: 1,
       pid: listenerPid,
-      port: this._port,
+      port: launch.port,
       executable,
       birthIdentity,
       owner,
       host: this.hostOwner,
       state: 'active',
       createdAt: Date.now(),
-      ...(this.injectedConfigPath ? { configPath: this.injectedConfigPath } : {}),
+      ...(launch.configPath ? { configPath: launch.configPath } : {}),
     };
     try {
       if (lease.configPath) {
         if (!(await isSafeInjectedConfigPath(lease.configPath))) {
-          this._managedProcess = false;
+          this.markOwnershipConfirmationFailed(proc);
           logger.warn(
             `Refusing to persist untrusted temporary OpenCode config path: ${lease.configPath}`
           );
@@ -856,15 +895,25 @@ export class OpenCodeProcess {
       }
       await this.writeOwnershipLease(lease);
     } catch (err) {
-      this._managedProcess = false;
+      this.markOwnershipConfirmationFailed(proc);
       logger.warn(
         `Failed to persist managed OpenCode ownership: ${err instanceof Error ? err.message : String(err)}`
       );
       return false;
     }
+    if (this._process !== proc || this.processLaunches.get(proc)?.owner !== owner) {
+      await this.removeOwnershipLease(owner, this.hostOwner);
+      return false;
+    }
     this.ownershipLease = lease;
+    this.ownershipOwner = owner;
+    launch.ownershipConfirmed = true;
     this._managedProcess = true;
     return true;
+  }
+
+  private markOwnershipConfirmationFailed(proc: ChildProcess | null) {
+    if (proc && this._process === proc) this._managedProcess = false;
   }
 
   resetPortRetryState() {
@@ -1013,7 +1062,15 @@ export class OpenCodeProcess {
     }
   }
 
-  launchServer(callbacks: LaunchCallbacks) {
+  launchServer(callbacks: LaunchCallbacks): ChildProcess {
+    const trackedProcess = this._process;
+    if (trackedProcess) {
+      if (trackedProcess.exitCode === null && trackedProcess.signalCode === null) {
+        throw new Error('Cannot launch OpenCode while a managed child is still running');
+      }
+      throw new Error('Cannot launch OpenCode before the previous managed process tree is cleaned');
+    }
+
     const command = this.resolveCommand();
     const args = ['serve', '--port', String(this._port)];
     const launch = resolveServerLaunch(command, args);
@@ -1021,52 +1078,68 @@ export class OpenCodeProcess {
 
     const configPath = this.injectedConfigPath;
     const owner = randomBytes(16).toString('hex');
+    const launchPort = this._port;
+    const useProcessGroup = process.platform !== 'win32';
     this.ownershipOwner = owner;
     this.foreignActiveOwnership = false;
+    let proc: ChildProcess;
     try {
-      this._process = spawn(launch.command, launch.args, {
+      proc = spawn(launch.command, launch.args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
+        // Keep POSIX wrappers and descendants in a group that survives the wrapper PID.
+        detached: useProcessGroup,
         cwd: callbacks.getWorkspaceCwd(),
         env: this.buildServerEnv(configPath, owner),
         windowsHide: true,
         ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       });
     } catch (err) {
-      this.ownershipOwner = null;
+      if (this.ownershipOwner === owner) this.ownershipOwner = null;
       void this.cleanupInjectedConfigFile(configPath);
       throw err;
     }
+
+    this._process = proc;
+    this.processLaunches.set(proc, {
+      configPath,
+      listenerPid: null,
+      owner,
+      ownershipConfirmed: false,
+      port: launchPort,
+      processGroupId: useProcessGroup ? (proc.pid ?? null) : null,
+    });
+    let bindError: Error | null = null;
     try {
-      this.bindInjectedConfigOwner(configPath, this._process, owner);
+      this.bindInjectedConfigOwner(configPath, proc, owner);
     } catch (err) {
-      const proc = this._process;
-      this._process = null;
-      this.ownershipOwner = null;
-      if (proc && proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
-      void this.cleanupInjectedConfigFile(configPath);
-      throw err;
+      bindError = err instanceof Error ? err : new Error(String(err));
     }
     this._managedProcess = true;
 
-    this._processStdoutHandler = callbacks.onStdout;
-    this._processStderrHandler = callbacks.onStderr;
-    this._process.once?.('exit', () => {
-      if (configPath) void this.cleanupInjectedConfigFile(configPath);
-      void this.clearManagedServerOwnership(owner, this.hostOwner);
-    });
-    this._processExitHandler = callbacks.onExit;
-    this._processErrorHandler = (err) => {
-      if (!configPath) {
-        callbacks.onError(err);
-        return;
-      }
-      void this.cleanupInjectedConfigFile(configPath).then(() => callbacks.onError(err));
+    const listeners: ProcessListeners = {
+      stdout: callbacks.onStdout,
+      stderr: callbacks.onStderr,
+      exit: (code, signal) => callbacks.onExit(proc, code, signal),
+      error: (err) => callbacks.onError(proc, err),
     };
-    this._process.stdout?.on('data', this._processStdoutHandler);
-    this._process.stderr?.on('data', this._processStderrHandler);
-    this._process.on('exit', this._processExitHandler);
-    this._process.on('error', this._processErrorHandler);
+    this.processListeners.set(proc, listeners);
+    this._processStdoutHandler = listeners.stdout;
+    this._processStderrHandler = listeners.stderr;
+    this._processExitHandler = listeners.exit;
+    this._processErrorHandler = listeners.error;
+    proc.once?.('exit', () => {
+      void this.releaseExitedProcess(proc).catch((err: unknown) => {
+        logger.warn(
+          `Failed to clean up exited OpenCode process tree: ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
+    });
+    proc.stdout?.on('data', listeners.stdout);
+    proc.stderr?.on('data', listeners.stderr);
+    proc.on('exit', listeners.exit);
+    proc.on('error', listeners.error);
+    if (bindError) queueMicrotask(() => listeners.error(bindError));
+    return proc;
   }
 
   private bindInjectedConfigOwner(configPath: string | null, proc: ChildProcess, owner: string) {
@@ -1084,75 +1157,270 @@ export class OpenCodeProcess {
 
   detachProcessListeners(proc: ChildProcess | null) {
     if (!proc) return;
-    if (this._processStdoutHandler) {
-      proc.stdout?.off('data', this._processStdoutHandler);
-    }
-    if (this._processStderrHandler) {
-      proc.stderr?.off('data', this._processStderrHandler);
-    }
-    if (this._processExitHandler) {
-      proc.off('exit', this._processExitHandler);
-    }
-    if (this._processErrorHandler) {
-      proc.off('error', this._processErrorHandler);
-    }
+    const listeners = this.processListeners.get(proc);
+    const stdout =
+      listeners?.stdout ?? (this._process === proc ? this._processStdoutHandler : null);
+    const stderr =
+      listeners?.stderr ?? (this._process === proc ? this._processStderrHandler : null);
+    const exit = listeners?.exit ?? (this._process === proc ? this._processExitHandler : null);
+    const error = listeners?.error ?? (this._process === proc ? this._processErrorHandler : null);
+    if (stdout) proc.stdout?.off('data', stdout);
+    if (stderr) proc.stderr?.off('data', stderr);
+    if (exit) proc.off('exit', exit);
+    if (error) proc.off('error', error);
+    this.processListeners.delete(proc);
+    if (this._process !== proc) return;
     this._processStdoutHandler = null;
     this._processStderrHandler = null;
     this._processExitHandler = null;
     this._processErrorHandler = null;
   }
 
+  releaseExitedProcess(proc: ChildProcess): Promise<void> {
+    return this.cleanupLaunchProcess(proc);
+  }
+
+  terminateLaunchAttempt(proc: ChildProcess): Promise<void> {
+    return this.cleanupLaunchProcess(proc);
+  }
+
+  private cleanupLaunchProcess(proc: ChildProcess): Promise<void> {
+    const existing = this.processCleanupOperations.get(proc);
+    if (existing) return existing;
+
+    this.detachProcessListeners(proc);
+    const launch = this.processLaunches.get(proc);
+    const operation = (async () => {
+      await this.terminateManagedProcess(proc, launch);
+      await this.cleanupLaunchResources(proc);
+      if (this._process === proc) {
+        this._process = null;
+        this._managedProcess = false;
+      }
+    })();
+    this.processCleanupOperations.set(proc, operation);
+    void operation.catch(() => {
+      if (this.processCleanupOperations.get(proc) === operation) {
+        this.processCleanupOperations.delete(proc);
+      }
+    });
+    return operation;
+  }
+
+  private cleanupLaunchResources(proc: ChildProcess): Promise<void> {
+    const existing = this.processResourceCleanupOperations.get(proc);
+    if (existing) return existing;
+    const launch = this.processLaunches.get(proc);
+    if (!launch) return Promise.resolve();
+
+    if (!launch.ownershipConfirmed) {
+      this.clearLocalOwnership(launch.owner, this.hostOwner);
+    }
+    const operation = Promise.all([
+      launch.configPath ? this.cleanupInjectedConfigFile(launch.configPath) : Promise.resolve(),
+      launch.ownershipConfirmed
+        ? this.clearManagedServerOwnership(launch.owner, this.hostOwner)
+        : Promise.resolve(),
+    ]).then(() => undefined);
+    this.processResourceCleanupOperations.set(proc, operation);
+    void operation.catch(() => {
+      if (this.processResourceCleanupOperations.get(proc) === operation) {
+        this.processResourceCleanupOperations.delete(proc);
+      }
+    });
+    return operation;
+  }
+
   async stopManagedProcessForRestart() {
     const proc = this._process;
-    const configPath = this.injectedConfigPath;
     const lease = this.ownershipLease;
-    this._process = null;
-    this._managedProcess = false;
     if (!proc && !lease) {
-      await this.cleanupInjectedConfigFile(configPath);
+      await this.cleanupInjectedConfigFile();
       return;
     }
+
+    if (proc && this.processLaunches.has(proc)) {
+      await this.cleanupLaunchProcess(proc);
+      return;
+    }
+    if (proc && !lease) {
+      await this.cleanupLaunchProcess(proc);
+      await this.cleanupInjectedConfigFile();
+      return;
+    }
+
     this.detachProcessListeners(proc);
-    try {
-      if (lease) {
-        if (!(await this.terminateOwnedLease(lease))) {
-          throw new Error(
-            `Managed OpenCode ownership lease no longer matches the listener on port ${lease.port}`
-          );
-        }
-      } else if (proc) {
-        await this.terminateManagedProcess(proc);
-      }
-      await this.cleanupInjectedConfigFile(configPath);
-    } catch (err) {
-      this._managedProcess = !!this.ownershipLease;
-      throw err;
+    if (lease && !(await this.terminateOwnedLease(lease))) {
+      throw new Error(
+        `Managed OpenCode ownership lease no longer matches the listener on port ${lease.port}`
+      );
+    }
+    if (proc && this._process === proc) this._process = null;
+    this._managedProcess = false;
+    await Promise.all([
+      this.cleanupInjectedConfigFile(lease?.configPath ?? this.injectedConfigPath),
+      ...(proc ? [this.cleanupLaunchResources(proc)] : []),
+    ]);
+  }
+
+  private async terminateManagedProcess(proc: ChildProcess, launch?: ProcessLaunch) {
+    if (!proc.pid) {
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
+      return;
+    }
+    if (process.platform === 'win32') {
+      await this.terminateWindowsProcessTree(proc, launch);
+      return;
+    }
+    if (launch?.processGroupId) {
+      await this.terminatePosixProcessTree(proc, launch);
+      return;
+    }
+
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
+    const exited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
+    if (!exited && proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    if (!exited && !(await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS))) {
+      throw new Error(`Managed OpenCode process ${proc.pid} did not exit after SIGKILL`);
     }
   }
 
-  private async terminateManagedProcess(proc: ChildProcess) {
-    if (proc.exitCode === null && proc.signalCode === null) {
-      proc.kill('SIGTERM');
-    }
-    const exited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
-    if (process.platform !== 'win32') {
-      if (!exited && proc.exitCode === null && proc.signalCode === null) {
-        proc.kill('SIGKILL');
-      }
+  private async terminatePosixProcessTree(proc: ChildProcess, launch: ProcessLaunch) {
+    const processGroupId = launch.processGroupId!;
+    const knownListenerPids = new Set<number>();
+    if (launch.listenerPid) knownListenerPids.add(launch.listenerPid);
+    await this.findManagedListeningPids(proc, launch, knownListenerPids);
+
+    signalProcessGroup(processGroupId, 'SIGTERM');
+    if (
+      await this.waitForManagedProcessTreeExit(
+        proc,
+        launch,
+        knownListenerPids,
+        PROCESS_STOP_TIMEOUT_MS
+      )
+    ) {
       return;
     }
 
-    if (!exited && proc.pid) {
+    signalProcessGroup(processGroupId, 'SIGKILL');
+    const remainingListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+    for (const pid of remainingListeners) {
+      if ((await readProcessGroupId(pid)) === processGroupId) continue;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') throw err;
+      }
+    }
+    if (
+      !(await this.waitForManagedProcessTreeExit(
+        proc,
+        launch,
+        knownListenerPids,
+        PROCESS_STOP_TIMEOUT_MS
+      ))
+    ) {
+      throw new Error(`Managed OpenCode process tree ${proc.pid} did not exit after SIGKILL`);
+    }
+  }
+
+  private async terminateWindowsProcessTree(proc: ChildProcess, launch?: ProcessLaunch) {
+    const knownListenerPids = new Set<number>();
+    if (launch?.listenerPid) knownListenerPids.add(launch.listenerPid);
+    const wrapperAlreadyExited = proc.exitCode !== null || proc.signalCode !== null;
+    let managedListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+    if (!wrapperAlreadyExited) proc.kill('SIGTERM');
+    let wrapperExited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
+    managedListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+
+    if (wrapperAlreadyExited || !wrapperExited || managedListeners.length > 0) {
       await runProcess(
         'taskkill.exe',
         ['/PID', String(proc.pid), '/T', '/F'],
         PROCESS_STOP_TIMEOUT_MS
       );
+      managedListeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+      for (const pid of managedListeners) {
+        if (pid === proc.pid) continue;
+        await runProcess(
+          'taskkill.exe',
+          ['/PID', String(pid), '/T', '/F'],
+          PROCESS_STOP_TIMEOUT_MS
+        );
+      }
+      if (!wrapperExited) {
+        wrapperExited = await waitForProcessExit(proc, PROCESS_STOP_TIMEOUT_MS);
+      }
     }
 
-    if (!(await waitForPortListenersToExit(this._port, PROCESS_STOP_TIMEOUT_MS))) {
-      throw new Error(`Port ${this._port} is still occupied after stopping managed OpenCode`);
+    if (!wrapperExited) {
+      throw new Error(`Managed OpenCode process ${proc.pid} did not exit after taskkill`);
     }
+    if (
+      !(await this.waitForManagedListenersToExit(
+        proc,
+        launch,
+        knownListenerPids,
+        PROCESS_STOP_TIMEOUT_MS
+      ))
+    ) {
+      throw new Error(
+        `Managed OpenCode listener on port ${launch?.port ?? this._port} did not exit after taskkill`
+      );
+    }
+  }
+
+  private async waitForManagedProcessTreeExit(
+    proc: ChildProcess,
+    launch: ProcessLaunch,
+    knownListenerPids: Set<number>,
+    timeoutMs: number
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const listeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+      if (!isProcessGroupAlive(launch.processGroupId!) && listeners.length === 0) return true;
+      await delay(100);
+    }
+    const listeners = await this.findManagedListeningPids(proc, launch, knownListenerPids);
+    return !isProcessGroupAlive(launch.processGroupId!) && listeners.length === 0;
+  }
+
+  private async waitForManagedListenersToExit(
+    proc: ChildProcess,
+    launch: ProcessLaunch | undefined,
+    knownListenerPids: Set<number>,
+    timeoutMs: number
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if ((await this.findManagedListeningPids(proc, launch, knownListenerPids)).length === 0) {
+        return true;
+      }
+      await delay(100);
+    }
+    return (await this.findManagedListeningPids(proc, launch, knownListenerPids)).length === 0;
+  }
+
+  private async findManagedListeningPids(
+    proc: ChildProcess,
+    launch: ProcessLaunch | undefined,
+    knownListenerPids: Set<number>
+  ) {
+    const listeners = await findListeningPids(launch?.port ?? this._port);
+    const managedListeners: number[] = [];
+    for (const pid of listeners) {
+      let managed = knownListenerPids.has(pid) || launch?.listenerPid === pid;
+      if (!managed && launch?.processGroupId) {
+        managed = (await readProcessGroupId(pid)) === launch.processGroupId;
+      }
+      if (!managed && proc.pid) managed = await isProcessOrDescendant(pid, proc.pid);
+      if (!managed) continue;
+      knownListenerPids.add(pid);
+      managedListeners.push(pid);
+    }
+    return managedListeners;
   }
 
   private async terminateOwnedLease(lease: ManagedServerOwnershipLease): Promise<boolean> {
@@ -1330,39 +1598,46 @@ export class OpenCodeProcess {
   }
 
   private async removeOwnershipLease(expectedOwner?: string, expectedHost?: string) {
-    const ownsLocalLease =
-      !expectedOwner ||
-      ((this.ownershipOwner === expectedOwner ||
-        this.ownershipLease?.owner === expectedOwner ||
-        this.ownershipLeaseCandidate?.owner === expectedOwner) &&
-        (!expectedHost ||
-          this.hostOwner === expectedHost ||
-          this.ownershipLease?.host === expectedHost ||
-          this.ownershipLeaseCandidate?.host === expectedHost));
     if (expectedOwner) {
       const current = await this.readOwnershipLease();
       if (
         current &&
         (current.owner !== expectedOwner || (expectedHost && current.host !== expectedHost))
       ) {
-        if (ownsLocalLease) {
-          this.ownershipLease = null;
-          this.ownershipLeaseCandidate = null;
-          this.ownershipOwner = null;
-          this.foreignActiveOwnership = false;
-          this._managedProcess = false;
-        }
+        this.clearLocalOwnership(expectedOwner, expectedHost);
         return;
       }
     }
     await rm(this.ownershipLeasePath, { force: true });
-    if (ownsLocalLease) {
+    this.clearLocalOwnership(expectedOwner, expectedHost);
+  }
+
+  private clearLocalOwnership(expectedOwner?: string, expectedHost?: string) {
+    const matches = (lease: ManagedServerOwnershipLease | null) =>
+      !!lease &&
+      (!expectedOwner || lease.owner === expectedOwner) &&
+      (!expectedHost || lease.host === expectedHost);
+    const currentLaunchOwner = this._process
+      ? this.processLaunches.get(this._process)?.owner
+      : undefined;
+    let cleared = false;
+
+    if (!expectedOwner || matches(this.ownershipLease)) {
+      cleared ||= this.ownershipLease !== null;
       this.ownershipLease = null;
+    }
+    if (!expectedOwner || matches(this.ownershipLeaseCandidate)) {
+      cleared ||= this.ownershipLeaseCandidate !== null;
       this.ownershipLeaseCandidate = null;
+    }
+    if (!expectedOwner || this.ownershipOwner === expectedOwner) {
+      cleared ||= this.ownershipOwner !== null;
       this.ownershipOwner = null;
-      this.foreignActiveOwnership = false;
+    }
+    if (!expectedOwner || currentLaunchOwner === expectedOwner || (!this._process && cleared)) {
       this._managedProcess = false;
     }
+    if (cleared) this.foreignActiveOwnership = false;
   }
 
   private async clearManagedServerOwnership(expectedOwner: string, expectedHost: string) {
@@ -1372,12 +1647,8 @@ export class OpenCodeProcess {
   async stopServerForRestart() {
     const ports = [...new Set([this._port, this.originalPort])];
     if (this.foreignActiveOwnership) await this.refreshManagedServerOwnership();
-    if (this._managedProcess && (this._process || this.ownershipLease)) {
+    if (this._process || (this._managedProcess && this.ownershipLease)) {
       await this.stopManagedProcessForRestart();
-    } else if (this._process) {
-      this.detachProcessListeners(this._process);
-      this._process = null;
-      this._managedProcess = false;
     }
 
     for (const port of ports) {
@@ -1410,12 +1681,8 @@ export class OpenCodeProcess {
       await this.cleanupInjectedConfigFile();
       return;
     }
-    if (options.stopProcess && this._managedProcess && (this._process || this.ownershipLease)) {
+    if (options.stopProcess && (this._process || (this._managedProcess && this.ownershipLease))) {
       await this.stopManagedProcessForRestart();
-    } else if (options.stopProcess && this._process) {
-      this.detachProcessListeners(this._process);
-      this._process = null;
-      this._managedProcess = false;
     } else {
       await this.cleanupInjectedConfigFile();
     }

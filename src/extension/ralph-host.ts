@@ -1,7 +1,19 @@
+import { isAbsolute, resolve as resolvePath } from 'path';
 import type { RalphConfig, RalphIteration, RalphRun, RalphStopReason } from '../shared/ralph';
-import { MAX_RALPH_ITERATIONS } from '../shared/ralph';
-import { isPermissionMode, type RalphStatePayload, type WebviewMessage } from '../shared/protocol';
+import {
+  MAX_RALPH_ITERATIONS,
+  RALPH_WORKSPACE_MISSING_NOTE,
+  normalizeRalphWorkspaceDirectory,
+} from '../shared/ralph';
+import {
+  isPermissionMode,
+  parseServerEvent,
+  type RalphStatePayload,
+  type ServerEvent,
+  type WebviewMessage,
+} from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 import { normalizeModelVariant } from '../shared/model-variant';
 import {
   createRalphRunner,
@@ -56,6 +68,7 @@ export class HostRalphStore implements RalphRunnerStore {
   ) {
     const stored = this.persistence.get<unknown>(RALPH_RUNS_KEY);
     this.runs = normalizePersistedRalphRuns(stored);
+    if (stored !== undefined) void this.enqueuePersistence(this.snapshot());
   }
 
   snapshot(): Record<string, RalphRun> {
@@ -139,7 +152,12 @@ export class HostRalphStore implements RalphRunnerStore {
     return acknowledged;
   }
 
-  setStatus(managerSessionId: string, status: RalphRun['status'], stopReason?: RalphStopReason) {
+  setStatus(
+    managerSessionId: string,
+    status: RalphRun['status'],
+    stopReason?: RalphStopReason,
+    note?: string
+  ) {
     const run = this.getRun(managerSessionId);
     if (!run) return;
     const next: RalphRun = { ...run, status, updatedAt: Date.now() };
@@ -149,6 +167,8 @@ export class HostRalphStore implements RalphRunnerStore {
       // Clear any prior terminal stop reason when leaving a terminal state.
       delete next.stopReason;
     }
+    if (note !== undefined) next.note = note;
+    else if (status === 'running') delete next.note;
     this.runs[managerSessionId] = next;
     this.commit();
   }
@@ -242,6 +262,7 @@ export class RalphHost {
   private readonly store: HostRalphStore;
   private readonly runner: RalphRunner;
   private readonly commandGenerations = new Map<string, number>();
+  private readonly pendingSyncs = new Set<Promise<void>>();
   private disposePromise: Promise<void> | null = null;
   private disposed = false;
 
@@ -257,7 +278,9 @@ export class RalphHost {
     this.store = new HostRalphStore(deps.persistence, () => this.broadcast());
     this.runner = createRalphRunner({
       store: this.store,
-      createSession: async ({ title, permission, parentID }, signal) => {
+      createSession: async ({ title, permission, parentID }, _signal, workspaceDirectory) => {
+        // Core retains this promise after cancellation so a late successful
+        // creation can still be identified and aborted.
         const session = await this.request(
           'POST',
           '/session',
@@ -266,30 +289,39 @@ export class RalphHost {
             parentID,
             ...(permission.length > 0 ? { permission } : {}),
           },
-          signal
+          workspaceDirectory
         );
         const sessionID = getString(asRecord(session)?.id);
         if (!sessionID) throw new Error('Ralph child session was not created');
         return sessionID;
       },
-      sendPrompt: async (sessionId, body, signal) => {
+      sendPrompt: async (sessionId, body, _signal, workspaceDirectory) => {
+        // Core observes this promise after cancellation so a prompt admitted
+        // late can trigger a second abort.
         await this.request(
           'POST',
           `/session/${encodeURIComponent(sessionId)}/prompt_async`,
           body,
-          signal
+          workspaceDirectory
         );
       },
-      abortSession: async (sessionId, signal) => {
+      abortSession: async (sessionId, signal, workspaceDirectory) => {
         await this.request(
           'POST',
           `/session/${encodeURIComponent(sessionId)}/abort`,
           undefined,
+          workspaceDirectory,
           signal
         );
       },
-      listSessions: async (signal) => {
-        const sessions = await this.request('GET', '/session', undefined, signal);
+      listSessions: async (signal, workspaceDirectory) => {
+        const sessions = await this.request(
+          'GET',
+          '/session',
+          undefined,
+          workspaceDirectory,
+          signal
+        );
         if (!Array.isArray(sessions)) return [];
         return sessions
           .map((item): RalphSessionSummary | null => {
@@ -300,20 +332,29 @@ export class RalphHost {
           })
           .filter((item): item is RalphSessionSummary => item !== null);
       },
-      listMessages: async (sessionId, signal) => {
+      listMessages: async (sessionId, signal, workspaceDirectory) => {
         const messages = await this.request(
           'GET',
           `/session/${encodeURIComponent(sessionId)}/message`,
           undefined,
+          workspaceDirectory,
           signal
         );
         return Array.isArray(messages) ? (messages as RalphMessageEntry[]) : [];
       },
-      getSessionStatus: async (sessionId, signal) => {
-        const statuses = asRecord(await this.request('GET', '/session/status', undefined, signal));
+      getSessionStatus: async (sessionId, signal, workspaceDirectory) => {
+        const statuses = asRecord(
+          await this.request('GET', '/session/status', undefined, workspaceDirectory, signal)
+        );
         if (!statuses) throw new Error('OpenCode returned an invalid session status snapshot');
         if (!Object.prototype.hasOwnProperty.call(statuses, sessionId)) {
-          const sessions = await this.request('GET', '/session', undefined, signal);
+          const sessions = await this.request(
+            'GET',
+            '/session',
+            undefined,
+            workspaceDirectory,
+            signal
+          );
           if (!Array.isArray(sessions)) {
             throw new Error(
               'OpenCode returned an invalid session list while confirming idle status'
@@ -331,33 +372,24 @@ export class RalphHost {
         }
         return parseRalphSessionStatus(status, sessionId);
       },
-      onSessionStatus: (listener) => {
-        const handler = (event: { type?: string; properties?: unknown }) => {
-          const props = asRecord(event?.properties);
-          const sessionID = getString(props?.sessionID);
-          if (!sessionID) return;
-          if (event.type === 'session.idle') {
-            listener(sessionID, { type: 'idle' });
-            return;
-          }
-          if (event.type === 'session.status') {
-            listener(sessionID, parseRalphSessionStatus(asRecord(props?.status), sessionID));
-            return;
-          }
-          if (event.type === 'session.error') {
-            listener(sessionID, {
-              type: 'error',
-              message: getRalphSessionErrorMessage(props?.error),
-            });
-          }
+      onSessionStatus: (listener, workspaceDirectory) => {
+        const handler = (rawEvent: unknown) => {
+          if (!isRalphEventInWorkspace(rawEvent, workspaceDirectory)) return;
+          const event = parseServerEvent(rawEvent);
+          if (!event) return;
+          const signal = getRalphSessionSignal(event);
+          if (signal) listener(signal.sessionID, signal.status);
         };
         this.deps.server.on('event', handler);
         return () => {
           this.deps.server.off('event', handler);
         };
       },
-      readWorkspaceFile: (path, signal) =>
-        raceAgainstAbort(this.deps.contextProvider.readFile(path), signal),
+      readWorkspaceFile: (path, signal, workspaceDirectory) =>
+        raceAgainstAbort(
+          this.deps.contextProvider.readFile(resolveRalphPlanPath(path, workspaceDirectory)),
+          signal
+        ),
       normalizeVariant: (modelID, variant) => normalizeModelVariant(modelID, variant),
       logError: (context, err) => {
         logger.error(`ralph-host:${context}: ${err instanceof Error ? err.message : String(err)}`);
@@ -407,6 +439,16 @@ export class RalphHost {
         break;
       case 'ralph/resume': {
         const managerSessionId = msg.payload.managerSessionId;
+        const run = this.store.getRun(managerSessionId);
+        if (run && !normalizeRalphWorkspaceDirectory(run.config.workspaceDirectory)) {
+          this.store.setStatus(
+            managerSessionId,
+            'failed',
+            'iteration_error',
+            RALPH_WORKSPACE_MISSING_NOTE
+          );
+          break;
+        }
         const generation = this.advanceCommandGeneration(managerSessionId);
         void this.withServer(
           () => this.runner.resume(managerSessionId),
@@ -419,7 +461,7 @@ export class RalphHost {
         this.store.updateRunModel(msg.payload.managerSessionId, msg.payload.model);
         break;
       case 'ralph/sync': {
-        void this.handleSync(msg.payload.legacyRuns);
+        this.trackSync(this.handleSync(msg.payload.legacyRuns));
         break;
       }
     }
@@ -433,6 +475,7 @@ export class RalphHost {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
     this.disposePromise = (async () => {
+      await Promise.allSettled(this.pendingSyncs);
       await this.runner.shutdown();
       await this.store.flush();
     })();
@@ -472,8 +515,24 @@ export class RalphHost {
     this.broadcast(acknowledgedIds);
   }
 
-  private request(method: string, path: string, body?: unknown, signal?: AbortSignal) {
-    const request = this.deps.server.request(method, path, body);
+  private trackSync(sync: Promise<void>): void {
+    this.pendingSyncs.add(sync);
+    const remove = () => this.pendingSyncs.delete(sync);
+    void sync.then(remove, remove);
+  }
+
+  private request(
+    method: string,
+    path: string,
+    body: unknown,
+    workspaceDirectory: string,
+    signal?: AbortSignal
+  ) {
+    const request = this.deps.server.request(
+      method,
+      scopeRalphRequestPath(path, workspaceDirectory),
+      body
+    );
     return signal ? raceAgainstAbort(request, signal) : request;
   }
 
@@ -485,6 +544,76 @@ export class RalphHost {
     }
     this.deps.broadcastState(payload);
   }
+}
+
+function scopeRalphRequestPath(path: string, workspaceDirectory: string): string {
+  const url = new URL(path, 'http://ralph.local');
+  url.searchParams.set('directory', workspaceDirectory);
+  return `${url.pathname}${url.search}`;
+}
+
+function resolveRalphPlanPath(planDocPath: string, workspaceDirectory: string): string {
+  return isAbsolute(planDocPath) ? planDocPath : resolvePath(workspaceDirectory, planDocPath);
+}
+
+function isRalphEventInWorkspace(rawEvent: unknown, workspaceDirectory: string): boolean {
+  const event = asRecord(rawEvent);
+  const location = asRecord(event?.location);
+  const directory = getString(event?.directory) || getString(location?.directory);
+  return !directory || isSameWorkspacePath(directory, workspaceDirectory);
+}
+
+function getRalphSessionSignal(
+  event: ServerEvent
+): { sessionID: string; status: RalphSessionStatus } | null {
+  const props = asRecord(event.properties);
+  const info = asRecord(props?.info);
+  const sessionID = getString(props?.sessionID) || getString(info?.sessionID);
+  if (!sessionID) return null;
+
+  if (event.type === 'session.idle') return { sessionID, status: { type: 'idle' } };
+  if (event.type === 'session.status') {
+    return {
+      sessionID,
+      status: parseRalphSessionStatus(asRecord(props?.status), sessionID),
+    };
+  }
+  if (event.type === 'session.error') {
+    return {
+      sessionID,
+      status: {
+        type: 'error',
+        message: getRalphSessionErrorMessage(props?.error),
+      },
+    };
+  }
+  if (event.type === 'session.next.prompt.admitted') {
+    return {
+      sessionID,
+      status: { type: 'admitted', messageID: getString(props?.messageID) },
+    };
+  }
+  if (event.type !== 'message.updated') return null;
+
+  if (info?.role === 'user') {
+    return {
+      sessionID,
+      status: { type: 'admitted', messageID: getString(info.id) },
+    };
+  }
+  const completed = asRecord(info?.time)?.completed;
+  if (info?.role === 'assistant' && typeof completed === 'number' && Number.isFinite(completed)) {
+    const error = info.error === undefined ? undefined : getRalphSessionErrorMessage(info.error);
+    return {
+      sessionID,
+      status: {
+        type: 'completed',
+        messageID: getString(info.parentID),
+        ...(error ? { error } : {}),
+      },
+    };
+  }
+  return null;
 }
 
 function getString(value: unknown): string | undefined {
@@ -621,30 +750,44 @@ function normalizePersistedRalphRun(
   }
   iterations.sort((left, right) => left.index - right.index);
 
-  if (record.stopReason === undefined) {
-    return {
-      config,
-      status: record.status,
-      currentIteration: record.currentIteration,
-      iterations,
-      updatedAt: record.updatedAt,
-    };
+  let note: string | undefined;
+  if (record.note !== undefined) {
+    note = getBoundedString(record.note, MAX_RALPH_NOTE_LENGTH) || undefined;
+    if (!note) return null;
   }
-  if (!isRalphStopReason(record.stopReason)) return null;
-  return {
+  const status =
+    !config.workspaceDirectory && record.status === 'running' ? 'paused' : record.status;
+  if (!config.workspaceDirectory) note = RALPH_WORKSPACE_MISSING_NOTE;
+
+  const run: RalphRun = {
     config,
-    status: record.status,
+    status,
     currentIteration: record.currentIteration,
     iterations,
     updatedAt: record.updatedAt,
-    stopReason: record.stopReason,
   };
+  if (record.stopReason !== undefined) {
+    if (!isRalphStopReason(record.stopReason)) return null;
+    run.stopReason = record.stopReason;
+  }
+  if (note) run.note = note;
+  return run;
 }
 
 function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
   const record = asRecord(value);
   if (!record) return null;
   const managerSessionId = getBoundedString(record.managerSessionId, MAX_RALPH_ID_LENGTH);
+  const rawWorkspaceDirectory = record.workspaceDirectory ?? record.workspacePath;
+  let workspaceDirectory: string | null = null;
+  if (rawWorkspaceDirectory !== undefined && rawWorkspaceDirectory !== null) {
+    const boundedWorkspaceDirectory = getBoundedString(
+      rawWorkspaceDirectory,
+      MAX_RALPH_PATH_LENGTH
+    );
+    workspaceDirectory = normalizeRalphWorkspaceDirectory(boundedWorkspaceDirectory);
+    if (!workspaceDirectory) return null;
+  }
   const planDocPath = getBoundedString(record.planDocPath, MAX_RALPH_PATH_LENGTH);
   const promptTemplate = getBoundedString(record.promptTemplate, MAX_RALPH_PROMPT_LENGTH);
   if (
@@ -666,6 +809,7 @@ function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
   if (model === undefined || agent === undefined) return null;
   return {
     managerSessionId,
+    workspaceDirectory,
     planDocPath,
     iterations: record.iterations,
     promptTemplate,
@@ -677,7 +821,13 @@ function normalizePersistedRalphConfig(value: unknown): RalphConfig | null {
 }
 
 function normalizeRalphConfigForMutation(config: RalphConfig): RalphConfig | null {
-  if (!Number.isSafeInteger(config.iterations) || config.iterations < 1) return null;
+  if (
+    !normalizeRalphWorkspaceDirectory(config.workspaceDirectory) ||
+    !Number.isSafeInteger(config.iterations) ||
+    config.iterations < 1
+  ) {
+    return null;
+  }
   return normalizePersistedRalphConfig({
     ...config,
     iterations: Math.min(config.iterations, MAX_RALPH_ITERATIONS),

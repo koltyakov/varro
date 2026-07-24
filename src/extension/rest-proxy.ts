@@ -12,6 +12,7 @@ import type {
   SessionTokenBreakdown,
   SessionTokenUsage,
   WebviewMessage,
+  WorkspaceFilePick,
 } from '../shared/protocol';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { AutoApproveJudge } from './auto-approve-judge';
@@ -64,6 +65,7 @@ export interface RestProxyCallbacks {
   sessionState: Pick<
     SessionStateManager,
     | 'handleServerEvent'
+    | 'getSessionWorkspaceMatch'
     | 'isSessionInWorkspace'
     | 'markSessionBusy'
     | 'deferPromptFailure'
@@ -102,6 +104,10 @@ export interface RestProxyCallbacks {
 }
 
 export class RestProxy {
+  private sessionDirectories = new Map<string, string>();
+  private hasSessionDirectorySnapshot = false;
+  private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
+
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
   async handleRequest(payload: ApiRequestPayload) {
@@ -259,24 +265,34 @@ export class RestProxy {
         : undefined;
 
       const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
-      let response: unknown;
+      let responsePromise: Promise<unknown>;
       try {
-        response = paginatedMessages
-          ? await this.callbacks.server.request(method, payload.path, payload.body, {
+        responsePromise = paginatedMessages
+          ? this.callbacks.server.request(method, payload.path, payload.body, {
               captureNextCursor: true,
             })
-          : await this.callbacks.server.request(method, payload.path, payload.body);
+          : this.callbacks.server.request(method, payload.path, payload.body);
+        if (this.isSessionListRequest(method, payload.path)) {
+          this.trackSessionDirectoryBootstrap(responsePromise, false);
+        }
+      } catch (err) {
+        if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
+        throw err;
+      }
+      let response: unknown;
+      try {
+        response = await responsePromise;
       } catch (err) {
         if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
         throw err;
       }
       const data = paginatedMessages
-        ? this.formatPaginatedMessagesResponse(
+        ? await this.formatPaginatedMessagesResponse(
             method,
             payload.path,
             response as OpenCodeResponseMetadata
           )
-        : this.filterApiResponse(method, payload.path, response);
+        : await this.filterApiResponse(method, payload.path, response);
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
         data,
@@ -354,13 +370,13 @@ export class RestProxy {
     return /^\/session\/[^/]+\/message$/.test(url.pathname) && url.searchParams.has('limit');
   }
 
-  private formatPaginatedMessagesResponse(
+  private async formatPaginatedMessagesResponse(
     method: string,
     path: string,
     response: OpenCodeResponseMetadata
   ) {
     return {
-      items: this.filterApiResponse(method, path, response.data),
+      items: await this.filterApiResponse(method, path, response.data),
       ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
     };
   }
@@ -449,7 +465,7 @@ export class RestProxy {
     return this.isHiddenSession(sessionID) ? sessionID : null;
   }
 
-  private filterApiResponse(method: string, path: string, data: unknown) {
+  private async filterApiResponse(method: string, path: string, data: unknown) {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
       this.rememberSessionList(data);
@@ -474,21 +490,21 @@ export class RestProxy {
     ) {
       return this.callbacks.sessionTrash.filterVisibleSessionStatuses(
         this.callbacks.hiddenSessions.filterVisibleSessionStatuses(
-          this.filterSessionStatusesForCurrentWorkspace(data as Record<string, unknown>)
+          await this.filterSessionStatusesForCurrentWorkspace(data as Record<string, unknown>)
         )
       );
     }
     if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
       return this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
+          await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
     }
     if (method === 'GET' && url.pathname === '/permission' && Array.isArray(data)) {
       return this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
-          this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
+          await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
     }
@@ -496,6 +512,7 @@ export class RestProxy {
   }
 
   private rememberSessionList(sessions: unknown[]) {
+    this.recordSessionDirectories(sessions);
     for (const session of sessions) {
       const info = asRecord(session);
       if (!info) continue;
@@ -512,22 +529,103 @@ export class RestProxy {
     return sessions.filter((session) => isDirectoryInWorkspace(session.directory, workspacePath));
   }
 
-  private filterSessionStatusesForCurrentWorkspace<T>(statuses: Record<string, T>) {
+  private async filterSessionStatusesForCurrentWorkspace<T>(statuses: Record<string, T>) {
     const workspacePath = this.getCurrentWorkspacePath();
-    if (!normalizeWorkspaceIdentity(workspacePath)) return statuses;
+    const normalizedWorkspacePath = normalizeWorkspaceIdentity(workspacePath);
+    if (!normalizedWorkspacePath) return statuses;
+    const visibleSessionIDs = await this.getVisibleWorkspaceSessionIDs(
+      Object.keys(statuses),
+      normalizedWorkspacePath
+    );
     return Object.fromEntries(
-      Object.entries(statuses).filter(([sessionID]) =>
-        this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)
-      )
+      Object.entries(statuses).filter(([sessionID]) => visibleSessionIDs.has(sessionID))
     );
   }
 
-  private filterSessionRequestsForCurrentWorkspace<T extends { sessionID: string }>(requests: T[]) {
+  private async filterSessionRequestsForCurrentWorkspace<T extends { sessionID: string }>(
+    requests: T[]
+  ) {
     const workspacePath = this.getCurrentWorkspacePath();
-    if (!normalizeWorkspaceIdentity(workspacePath)) return requests;
-    return requests.filter((request) =>
-      this.callbacks.sessionState.isSessionInWorkspace(request.sessionID, workspacePath)
+    const normalizedWorkspacePath = normalizeWorkspaceIdentity(workspacePath);
+    if (!normalizedWorkspacePath) return requests;
+    const visibleSessionIDs = await this.getVisibleWorkspaceSessionIDs(
+      requests.map((request) => request.sessionID),
+      normalizedWorkspacePath
     );
+    return requests.filter((request) => visibleSessionIDs.has(request.sessionID));
+  }
+
+  private async getVisibleWorkspaceSessionIDs(
+    sessionIDs: string[],
+    workspacePath: string
+  ): Promise<Set<string>> {
+    const visible = new Set<string>();
+    const unknown: string[] = [];
+    for (const sessionID of new Set(sessionIDs)) {
+      const match = this.callbacks.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath);
+      if (match === true) visible.add(sessionID);
+      if (match === undefined) unknown.push(sessionID);
+    }
+    if (unknown.length === 0) return visible;
+
+    const directories = await this.loadSessionDirectorySnapshot();
+    for (const sessionID of unknown) {
+      const directory = directories.get(sessionID);
+      if (!directory || isSameWorkspacePath(directory, workspacePath)) visible.add(sessionID);
+    }
+    return visible;
+  }
+
+  private loadSessionDirectorySnapshot(): Promise<ReadonlyMap<string, string>> {
+    if (this.sessionDirectoryBootstrapPromise) return this.sessionDirectoryBootstrapPromise;
+    if (this.hasSessionDirectorySnapshot) {
+      return Promise.resolve(new Map(this.sessionDirectories));
+    }
+    return this.trackSessionDirectoryBootstrap(
+      this.callbacks.server.request('GET', '/session'),
+      true
+    );
+  }
+
+  private trackSessionDirectoryBootstrap(
+    request: Promise<unknown>,
+    rememberSessions: boolean
+  ): Promise<ReadonlyMap<string, string>> {
+    const bootstrap = request.then(
+      (sessions) => {
+        if (Array.isArray(sessions)) {
+          if (rememberSessions) this.rememberSessionList(sessions);
+          else this.recordSessionDirectories(sessions);
+        }
+        return new Map(this.sessionDirectories);
+      },
+      () => new Map(this.sessionDirectories)
+    );
+    this.sessionDirectoryBootstrapPromise = bootstrap;
+    void bootstrap
+      .finally(() => {
+        if (this.sessionDirectoryBootstrapPromise === bootstrap) {
+          this.sessionDirectoryBootstrapPromise = null;
+        }
+      })
+      .catch(() => undefined);
+    return bootstrap;
+  }
+
+  private recordSessionDirectories(sessions: unknown[]) {
+    const directories = new Map<string, string>();
+    for (const session of sessions) {
+      const info = asRecord(session);
+      if (typeof info?.id !== 'string' || typeof info.directory !== 'string') continue;
+      if (!normalizeWorkspaceIdentity(info.directory)) continue;
+      directories.set(info.id, info.directory);
+    }
+    this.sessionDirectories = directories;
+    this.hasSessionDirectorySnapshot = true;
+  }
+
+  private isSessionListRequest(method: string, path: string) {
+    return method === 'GET' && new URL(path, 'http://localhost').pathname === '/session';
   }
 
   private getCurrentWorkspacePath() {
@@ -753,7 +851,7 @@ export class RestProxy {
     return { path: filePath };
   }
 
-  private async pickWorkspaceFile(): Promise<string | null> {
+  private async pickWorkspaceFile(): Promise<WorkspaceFilePick | null> {
     const result = await vscode.window.showOpenDialog({
       canSelectMany: false,
       canSelectFiles: true,
@@ -764,7 +862,10 @@ export class RestProxy {
     if (!selected) return null;
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(selected);
-    return workspaceFolder ? getRelativePath(selected, workspaceFolder) : selected.fsPath;
+    return {
+      path: workspaceFolder ? getRelativePath(selected, workspaceFolder) : selected.fsPath,
+      workspaceDirectory: workspaceFolder?.uri.fsPath ?? null,
+    };
   }
 
   private parsePlanOpenRequest(method: string, path: string, body: unknown) {
