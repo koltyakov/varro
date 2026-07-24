@@ -802,17 +802,22 @@ function mergeFileChange(
     inputChange.patch !== undefined ||
     inputChange.before !== undefined ||
     inputChange.after !== undefined;
+  const preferredPatch = getPreferredPatch(metadataChange.patch, inputChange.patch);
+  const patch = preferredPatch.patch;
   const previewStateSource =
-    metadataHasPreview && !metadataChange.previewStatus
+    preferredPatch.source === 'metadata'
       ? metadataChange
-      : inputHasPreview
+      : preferredPatch.source === 'input'
         ? inputChange
-        : metadataChange.previewStatus
+        : metadataHasPreview && !metadataChange.previewStatus
           ? metadataChange
-          : inputChange;
-  const patch = getPreferredPatch(metadataChange.patch, inputChange.patch);
+          : inputHasPreview
+            ? inputChange
+            : metadataChange.previewStatus
+              ? metadataChange
+              : inputChange;
   const patchFormat =
-    patch !== undefined && patch === inputChange.patch && inputChange.patchFormat
+    preferredPatch.source === 'input' && inputChange.patchFormat
       ? inputChange.patchFormat
       : metadataChange.patchFormat;
 
@@ -833,9 +838,14 @@ function mergeFileChange(
 }
 
 function getPreferredPatch(metadataPatch: string | undefined, inputPatch: string | undefined) {
-  if (!metadataPatch || !inputPatch) return metadataPatch ?? inputPatch;
-  if (!hasChangedPatchLine(metadataPatch) && hasChangedPatchLine(inputPatch)) return inputPatch;
-  return metadataPatch;
+  if (metadataPatch === undefined) {
+    return { patch: inputPatch, source: inputPatch === undefined ? undefined : ('input' as const) };
+  }
+  if (inputPatch === undefined) return { patch: metadataPatch, source: 'metadata' as const };
+  if (!hasChangedPatchLine(metadataPatch) && hasChangedPatchLine(inputPatch)) {
+    return { patch: inputPatch, source: 'input' as const };
+  }
+  return { patch: metadataPatch, source: 'metadata' as const };
 }
 
 function hasChangedPatchLine(patch: string) {

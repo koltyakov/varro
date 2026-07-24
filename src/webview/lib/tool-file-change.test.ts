@@ -570,6 +570,44 @@ describe('tool file change helpers', () => {
     expect(merged[0]?.previewStatus).toBeUndefined();
   });
 
+  it('keeps truncated input state when its patch replaces metadata context', () => {
+    const merged = getToolFileChanges(
+      'apply_patch',
+      completedState(
+        {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++${'x'.repeat(300 * 1024)}
+*** End Patch`,
+        },
+        {
+          metadata: {
+            files: [
+              {
+                type: 'update',
+                relativePath: 'src/app.ts',
+                patch: '@@ -1 +1 @@\n context only',
+                before: 'old',
+                after: 'new',
+              },
+            ],
+          },
+        }
+      )
+    );
+
+    expect(merged[0]).toMatchObject({
+      path: 'src/app.ts',
+      patch: '@@\n-old',
+      before: 'old',
+      after: 'new',
+      previewStatus: 'truncated',
+    });
+    expect(merged[0]?.previewMessage).toContain('file patch section exceeds');
+  });
+
   it('caps file count and total stored section work', () => {
     const manyFilesPatch = [
       '*** Begin Patch',

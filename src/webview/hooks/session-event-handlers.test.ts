@@ -1462,8 +1462,10 @@ describe('registerSessionEventHandlers', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
-  it('uses only one bounded follow-up sync for deltas queued during recovery', async () => {
+  it('starts another bounded recovery when a delta arrives after the follow-up snapshot', async () => {
     const handlers = installHandlers();
+    let messages: ReturnType<typeof createAssistantEntry>[] = [];
+    let serverText = 'first second';
     let resolveInitialSync: (() => void) | undefined;
     let resolveFollowUpSync: (() => void) | undefined;
     const syncSessionMessages = vi
@@ -1474,17 +1476,37 @@ describe('registerSessionEventHandlers', () => {
             resolveInitialSync = resolve;
           })
       )
-      .mockImplementationOnce(
+      .mockImplementationOnce(() => {
+        const snapshot = serverText;
+        return new Promise<void>((resolve) => {
+          resolveFollowUpSync = () => {
+            messages = [
+              {
+                ...createAssistantEntry(),
+                parts: [{ id: 'part-1', type: 'text', text: snapshot } as Part],
+              },
+            ];
+            resolve();
+          };
+        });
+      })
+      .mockImplementation(
         () =>
           new Promise<void>((resolve) => {
-            resolveFollowUpSync = resolve;
+            messages = [
+              {
+                ...createAssistantEntry(),
+                parts: [{ id: 'part-1', type: 'text', text: serverText } as Part],
+              },
+            ];
+            resolve();
           })
       );
 
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [],
+        getMessages: () => messages,
         syncSessionMessages,
       })
     );
@@ -1516,6 +1538,7 @@ describe('registerSessionEventHandlers', () => {
     resolveInitialSync?.();
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
 
+    serverText = 'first second third';
     handlers.get('message.part.delta')?.({
       properties: {
         sessionID: 'session-1',
@@ -1528,11 +1551,29 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledTimes(2);
 
     resolveFollowUpSync?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(4));
 
-    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    expect(messages[0]?.parts[0]).toMatchObject({ text: 'first second third' });
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
+
+    handlers.get('message.part.delta')?.({
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'assistant-1',
+        partID: 'part-1',
+        delta: ' fourth',
+        field: 'text',
+      },
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(4);
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'part-1',
+      ' fourth',
+      'session-1',
+      'text'
+    );
   });
 
   it('creates and streams reasoning parts from session.next reasoning events', () => {

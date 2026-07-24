@@ -350,11 +350,13 @@ export function AssistantMessageContent(props: {
       <div
         ref={(element) => {
           if (revealClass) {
-            prepareMeasuredEntrance(element, {
-              animationName: 'streamed-assistant-item-in',
-              heightProperty: '--streamed-assistant-item-height',
-              skipWithin: '.interactive-item-entering',
-            });
+            onCleanup(
+              prepareMeasuredEntrance(element, {
+                animationName: 'streamed-assistant-item-in',
+                heightProperty: '--streamed-assistant-item-height',
+                skipWithin: '.interactive-item-entering',
+              })
+            );
           }
         }}
         class={`assistant-message-flow-item${revealClass}`}
@@ -387,11 +389,13 @@ export function AssistantMessageContent(props: {
       <div
         ref={(element) => {
           if (revealClass) {
-            prepareMeasuredEntrance(element, {
-              animationName: 'streamed-assistant-item-in',
-              heightProperty: '--streamed-assistant-item-height',
-              skipWithin: '.interactive-item-entering',
-            });
+            onCleanup(
+              prepareMeasuredEntrance(element, {
+                animationName: 'streamed-assistant-item-in',
+                heightProperty: '--streamed-assistant-item-height',
+                skipWithin: '.interactive-item-entering',
+              })
+            );
           }
         }}
         data-assistant-render-key={item.key}

@@ -1,12 +1,14 @@
 import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import type { Dirent } from 'fs';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import {
   lstat,
   mkdtemp,
   open as openFile,
   readFile,
+  readlink,
   readdir,
   realpath,
   rename,
@@ -210,7 +212,73 @@ function runProcess(
   });
 }
 
-async function findListeningPids(port: number) {
+async function findLinuxListeningPids(port: number, procRoot: string) {
+  const socketInodes = new Set<string>();
+  await Promise.all(
+    [join(procRoot, 'net/tcp'), join(procRoot, 'net/tcp6')].map(async (path) => {
+      let table: string;
+      try {
+        table = await readFile(path, 'utf-8');
+      } catch {
+        return;
+      }
+      for (const line of table.split(/\r?\n/)) {
+        const fields = line.trim().split(/\s+/);
+        const localAddress = fields[1];
+        const state = fields[3];
+        const inode = fields[9];
+        const encodedPort = localAddress?.slice(localAddress.lastIndexOf(':') + 1);
+        if (
+          state === '0A' &&
+          encodedPort &&
+          Number.parseInt(encodedPort, 16) === port &&
+          inode &&
+          /^\d+$/.test(inode)
+        ) {
+          socketInodes.add(inode);
+        }
+      }
+    })
+  );
+  if (socketInodes.size === 0) return [];
+
+  let processes: Dirent[];
+  try {
+    processes = await readdir(procRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const pids = new Set<number>();
+  const candidates = processes.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name));
+  for (let offset = 0; offset < candidates.length; offset += 32) {
+    await Promise.all(
+      candidates.slice(offset, offset + 32).map(async (entry) => {
+        const pid = Number.parseInt(entry.name, 10);
+        if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return;
+        let descriptors: string[];
+        try {
+          descriptors = await readdir(join(procRoot, String(pid), 'fd'));
+        } catch {
+          return;
+        }
+        for (const descriptor of descriptors) {
+          try {
+            const target = await readlink(join(procRoot, String(pid), 'fd', descriptor));
+            const match = /^socket:\[(\d+)\]$/.exec(target);
+            if (match?.[1] && socketInodes.has(match[1])) {
+              pids.add(pid);
+              return;
+            }
+          } catch {}
+        }
+      })
+    );
+  }
+  return [...pids];
+}
+
+async function findListeningPids(port: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
     const script = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`;
     const result = await runProcess(
@@ -241,14 +309,14 @@ async function findListeningPids(port: number) {
       if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid) fallbackPids.add(pid);
     }
   }
-  return [...fallbackPids];
+  return fallbackPids.size > 0 ? [...fallbackPids] : findLinuxListeningPids(port, procRoot);
 }
 
 function isCommandUnavailable(result: CommandResult) {
   return result.code === null && /(?:ENOENT|not found|not recognized)/i.test(result.stderr);
 }
 
-async function readProcessExecutable(pid: number) {
+async function readProcessExecutable(pid: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
     const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ExecutablePath`;
     return (
@@ -261,7 +329,13 @@ async function readProcessExecutable(pid: number) {
   }
 
   if (process.platform === 'linux') {
-    const executable = (await runProcess('readlink', [`/proc/${pid}/exe`])).stdout.trim();
+    try {
+      const executable = (await readlink(join(procRoot, String(pid), 'exe'))).trim();
+      if (executable) return executable;
+    } catch {}
+    const executable = (
+      await runProcess('readlink', [join(procRoot, String(pid), 'exe')])
+    ).stdout.trim();
     if (executable) return executable;
   }
 
@@ -277,7 +351,21 @@ async function readProcessExecutable(pid: number) {
   return (await runProcess('ps', ['-p', String(pid), '-o', 'comm='])).stdout.trim();
 }
 
-async function readProcessBirthIdentity(pid: number) {
+async function readLinuxProcessStat(pid: number, procRoot: string) {
+  try {
+    const stat = await readFile(join(procRoot, String(pid), 'stat'), 'utf-8');
+    const commandEnd = stat.lastIndexOf(') ');
+    if (commandEnd < 0) return null;
+    return stat
+      .slice(commandEnd + 2)
+      .trim()
+      .split(/\s+/);
+  } catch {
+    return null;
+  }
+}
+
+async function readProcessBirthIdentity(pid: number, procRoot = '/proc') {
   if (process.platform === 'win32') {
     const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CreationDate.ToUniversalTime().Ticks }`;
     const value = (
@@ -291,15 +379,8 @@ async function readProcessBirthIdentity(pid: number) {
   }
 
   if (process.platform === 'linux') {
-    try {
-      const stat = await readFile(`/proc/${pid}/stat`, 'utf-8');
-      const fields = stat
-        .slice(stat.lastIndexOf(') ') + 2)
-        .trim()
-        .split(/\s+/);
-      const startTime = fields[19];
-      if (startTime && /^\d+$/.test(startTime)) return `linux:${startTime}`;
-    } catch {}
+    const startTime = (await readLinuxProcessStat(pid, procRoot))?.[19];
+    if (startTime && /^\d+$/.test(startTime)) return `linux:${startTime}`;
   }
 
   const value = (await runProcess('ps', ['-p', String(pid), '-o', 'lstart='])).stdout
@@ -308,7 +389,11 @@ async function readProcessBirthIdentity(pid: number) {
   return value ? `${process.platform}:${value}` : '';
 }
 
-async function readParentPid(pid: number) {
+async function readParentPid(pid: number, procRoot = '/proc') {
+  if (process.platform === 'linux') {
+    const parentPid = Number.parseInt((await readLinuxProcessStat(pid, procRoot))?.[1] ?? '', 10);
+    if (Number.isSafeInteger(parentPid) && parentPid > 0) return parentPid;
+  }
   const result =
     process.platform === 'win32'
       ? await runProcess(
@@ -325,16 +410,26 @@ async function readParentPid(pid: number) {
   return Number.isSafeInteger(parentPid) && parentPid > 0 ? parentPid : null;
 }
 
-async function readProcessCommand(pid: number) {
+async function readProcessCommand(pid: number, procRoot = '/proc') {
   if (process.platform === 'win32') return '';
+  if (process.platform === 'linux') {
+    try {
+      const command = (await readFile(join(procRoot, String(pid), 'cmdline'), 'utf-8'))
+        .split('\0')
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      if (command) return command;
+    } catch {}
+  }
   return (await runProcess('ps', ['-p', String(pid), '-o', 'command='])).stdout.trim();
 }
 
-async function isProcessOrDescendant(pid: number, ancestorPid: number) {
+async function isProcessOrDescendant(pid: number, ancestorPid: number, procRoot = '/proc') {
   let currentPid: number | null = pid;
   for (let depth = 0; currentPid && depth < 32; depth += 1) {
     if (currentPid === ancestorPid) return true;
-    currentPid = await readParentPid(currentPid);
+    currentPid = await readParentPid(currentPid, procRoot);
   }
   return false;
 }
@@ -519,7 +614,8 @@ export class OpenCodeProcess {
     command?: string,
     simulateMissingCli = false,
     compactionSettings?: Partial<OpenCodeCompactionSettings>,
-    ownershipLeasePath = getManagedServerOwnershipLeasePath(port)
+    ownershipLeasePath = getManagedServerOwnershipLeasePath(port),
+    private readonly linuxProcRoot = '/proc'
   ) {
     this._port = port;
     this.originalPort = port;
@@ -687,15 +783,15 @@ export class OpenCodeProcess {
     if (process.platform === 'win32' || this._managedProcess || this._process) return false;
     if (await this.readOwnershipLease()) return false;
 
-    const listeners = await findListeningPids(this._port);
+    const listeners = await findListeningPids(this._port, this.linuxProcRoot);
     if (listeners.length !== 1) return false;
     const pid = listeners[0]!;
     const configuredExecutable = this.resolveCommand();
     const [executable, parentPid, command, birthIdentity] = await Promise.all([
-      readProcessExecutable(pid),
-      readParentPid(pid),
-      readProcessCommand(pid),
-      readProcessBirthIdentity(pid),
+      readProcessExecutable(pid, this.linuxProcRoot),
+      readParentPid(pid, this.linuxProcRoot),
+      readProcessCommand(pid, this.linuxProcRoot),
+      readProcessBirthIdentity(pid, this.linuxProcRoot),
     ]);
     if (
       !executable ||
@@ -732,8 +828,8 @@ export class OpenCodeProcess {
       };
       if (
         !(await this.matchesOwnershipLease(lease)) ||
-        (await readParentPid(pid)) !== 1 ||
-        (await readProcessCommand(pid)) !== command
+        (await readParentPid(pid, this.linuxProcRoot)) !== 1 ||
+        (await readProcessCommand(pid, this.linuxProcRoot)) !== command
       ) {
         return false;
       }
@@ -829,17 +925,17 @@ export class OpenCodeProcess {
       listenerPid = undefined;
       executable = '';
       birthIdentity = '';
-      const listeners = await findListeningPids(launch.port);
+      const listeners = await findListeningPids(launch.port, this.linuxProcRoot);
       for (const pid of listeners) {
-        if (await isProcessOrDescendant(pid, proc.pid)) {
+        if (await isProcessOrDescendant(pid, proc.pid, this.linuxProcRoot)) {
           listenerPid = pid;
           break;
         }
       }
       if (listenerPid) {
         [executable, birthIdentity] = await Promise.all([
-          readProcessExecutable(listenerPid),
-          readProcessBirthIdentity(listenerPid),
+          readProcessExecutable(listenerPid, this.linuxProcRoot),
+          readProcessBirthIdentity(listenerPid, this.linuxProcRoot),
         ]);
         if (executable && birthIdentity) break;
       }
@@ -1408,14 +1504,16 @@ export class OpenCodeProcess {
     launch: ProcessLaunch | undefined,
     knownListenerPids: Set<number>
   ) {
-    const listeners = await findListeningPids(launch?.port ?? this._port);
+    const listeners = await findListeningPids(launch?.port ?? this._port, this.linuxProcRoot);
     const managedListeners: number[] = [];
     for (const pid of listeners) {
       let managed = knownListenerPids.has(pid) || launch?.listenerPid === pid;
       if (!managed && launch?.processGroupId) {
         managed = (await readProcessGroupId(pid)) === launch.processGroupId;
       }
-      if (!managed && proc.pid) managed = await isProcessOrDescendant(pid, proc.pid);
+      if (!managed && proc.pid) {
+        managed = await isProcessOrDescendant(pid, proc.pid, this.linuxProcRoot);
+      }
       if (!managed) continue;
       knownListenerPids.add(pid);
       managedListeners.push(pid);
@@ -1469,16 +1567,16 @@ export class OpenCodeProcess {
   }
 
   private async matchesOwnershipLease(lease: ManagedServerOwnershipLease): Promise<boolean> {
-    const listeners = await findListeningPids(lease.port);
+    const listeners = await findListeningPids(lease.port, this.linuxProcRoot);
     if (!listeners.includes(lease.pid)) return false;
-    const executable = await readProcessExecutable(lease.pid);
+    const executable = await readProcessExecutable(lease.pid, this.linuxProcRoot);
     if (
       !executable ||
       normalizeExecutableIdentity(executable) !== normalizeExecutableIdentity(lease.executable)
     ) {
       return false;
     }
-    return (await readProcessBirthIdentity(lease.pid)) === lease.birthIdentity;
+    return (await readProcessBirthIdentity(lease.pid, this.linuxProcRoot)) === lease.birthIdentity;
   }
 
   private async matchesInjectedConfigOwner(lease: ManagedServerOwnershipLease): Promise<boolean> {
@@ -1652,7 +1750,7 @@ export class OpenCodeProcess {
     }
 
     for (const port of ports) {
-      if ((await findListeningPids(port)).length > 0) {
+      if ((await findListeningPids(port, this.linuxProcRoot)).length > 0) {
         throw new Error(
           `Port ${port} is occupied by a process Varro does not own; stop it explicitly before restarting`
         );

@@ -44,7 +44,6 @@ const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 's
 const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
 const MAX_FILE_ERROR_DISPLAY_CHARS = 4000;
-type ToolPreview = { text: string; key: string };
 
 export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
@@ -115,18 +114,6 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   }
 
   return title || toolName;
-}
-
-export function shouldShowToolPreview(title: string, preview: ToolPreview | null) {
-  if (!preview) return false;
-
-  const normalizedTitle = title.trim().toLowerCase();
-  const normalizedPreview = preview.text.trim().toLowerCase();
-
-  if (!normalizedPreview) return false;
-  if (normalizedTitle === normalizedPreview) return false;
-  if (normalizedTitle.endsWith(`: ${normalizedPreview}`)) return false;
-  return true;
 }
 
 function formatVisibleToolDuration(ms: number | null | undefined) {
@@ -295,16 +282,6 @@ export function ToolCall(props: {
     return formatToolTitle(tool().tool, state());
   };
 
-  const preview = createMemo<ToolPreview | null>(() => {
-    const s = state();
-    const input: Record<string, unknown> = (s.input || {}) as Record<string, unknown>;
-    const keys = ['file_path', 'pattern', 'query', 'command', 'path'];
-    for (const k of keys) {
-      if (typeof input[k] === 'string') return { text: input[k], key: k };
-    }
-    return null;
-  });
-
   const inputEntries = createMemo(() => {
     const input = (state().input || {}) as Record<string, unknown>;
     const normalizedTitle = normalizedComparableText(title());
@@ -370,7 +347,6 @@ export function ToolCall(props: {
         state={state()}
         statusClass={statusClass()}
         title={title()}
-        preview={preview()}
         expanded={expanded() && !props.lightweight}
         toggleExpand={toggleExpand}
         inputEntries={inputEntries()}
@@ -838,7 +814,6 @@ function GenericToolCall(props: {
   state: ToolPart['state'];
   statusClass: string;
   title: string;
-  preview: { text: string; key: string } | null;
   expanded: boolean;
   toggleExpand: () => void;
   inputEntries: Array<[string, unknown]>;
@@ -1035,28 +1010,6 @@ function GenericToolCall(props: {
           </svg>
         </Show>
       </button>
-      <Show when={!isExpanded() && shouldShowToolPreview(props.title, props.preview)}>
-        <div class="tool-invocation-preview">
-          {(() => {
-            const p = props.preview!;
-            return isPathKey(p.key) ? (
-              <a
-                href="#"
-                class="file-path-link"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openGenericToolFile(p.text);
-                }}
-              >
-                {formatDisplayPath(p.text, appState.editorContext.workspacePath)}
-              </a>
-            ) : (
-              formatPreviewValue(p.key, p.text)
-            );
-          })()}
-        </div>
-      </Show>
-
       <Show when={isExpanded()}>
         <div id={bodyId} class="tool-invocation-detail animate-fade-in">
           <Show
@@ -1220,12 +1173,6 @@ function StructuredToolCard(props: {
       </Show>
     </div>
   );
-}
-
-function formatPreviewValue(key: string, value: string): string {
-  return key === 'command'
-    ? formatCommandDisplay(value, appState.editorContext.workspacePath)
-    : value;
 }
 
 function shouldShowStructuredToolValueAsBlock(key: string, value: unknown): boolean {

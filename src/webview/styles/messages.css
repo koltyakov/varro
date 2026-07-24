@@ -819,14 +819,12 @@ body.vscode-light
 }
 
 .rendered-markdown a.file-path-link,
-.tool-invocation-preview a.file-path-link,
 .tool-input-value.file-path-link {
   color: var(--color-vscode-link);
   text-decoration: none;
   cursor: pointer;
 }
 .rendered-markdown a.file-path-link:hover,
-.tool-invocation-preview a.file-path-link:hover,
 .tool-input-value.file-path-link:hover {
   text-decoration: underline;
 }

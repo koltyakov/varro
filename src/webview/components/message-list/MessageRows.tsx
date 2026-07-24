@@ -81,6 +81,7 @@ function InlineEditComposerSlot() {
 
 export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
   let rowRef: HTMLDivElement | undefined;
+  let disposeEntrance: (() => void) | undefined;
   const animateEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
   const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
@@ -122,7 +123,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
 
   onMount(() => {
     if (rowRef && animateEntrance) {
-      prepareMeasuredEntrance(rowRef, {
+      disposeEntrance = prepareMeasuredEntrance(rowRef, {
         animationName: 'streamed-message-row-in',
         heightProperty: '--streamed-message-row-height',
         onFinish: () => setEntrancePending(false),
@@ -131,6 +132,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
   });
   onCleanup(() => {
+    disposeEntrance?.();
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, false);
   });
 

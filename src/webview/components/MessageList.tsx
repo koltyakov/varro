@@ -201,6 +201,7 @@ export function MessageList() {
   let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastUserScrollAt = Number.NEGATIVE_INFINITY;
   let lastWheelUpAt = Number.NEGATIVE_INFINITY;
+  let lastScrollInputAt = Number.NEGATIVE_INFINITY;
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
@@ -210,6 +211,7 @@ export function MessageList() {
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
   const ACTIVE_WHEEL_WINDOW_MS = 180;
+  const SCROLL_INPUT_WINDOW_MS = 500;
   const USER_SCROLL_IDLE_MS = 240;
 
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -1388,7 +1390,11 @@ export function MessageList() {
     const currentViewportHeight = containerRef.clientHeight;
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
-    if (!autoScrollEnabled || now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS) {
+    const scrollDelta = top - lastObservedScrollTop;
+    const userScrolledUp =
+      now - lastWheelUpAt <= 160 ||
+      (scrollDelta < -1 && now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS);
+    if (!autoScrollEnabled || now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS || userScrolledUp) {
       lastUserScrollAt = now;
     }
     if (!suppressSyncScrollTop) {
@@ -1398,10 +1404,9 @@ export function MessageList() {
       });
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
-    const scrollDelta = top - lastObservedScrollTop;
-    const userScrolledUp = now - lastWheelUpAt <= 160;
     if (userScrolledUp && distance > REATTACH_THRESHOLD_PX) {
       lastWheelUpAt = Number.NEGATIVE_INFINITY;
+      lastScrollInputAt = Number.NEGATIVE_INFINITY;
     }
     // Resize corrections can look like downward movement after an upward wheel.
     const shouldReattachToBottom =
@@ -1480,6 +1485,31 @@ export function MessageList() {
     }
   }
 
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+    ) {
+      return;
+    }
+    if (
+      event.key !== 'ArrowUp' &&
+      event.key !== 'PageUp' &&
+      event.key !== 'Home' &&
+      !(event.key === ' ' && event.shiftKey)
+    ) {
+      return;
+    }
+    lastScrollInputAt = performance.now();
+  }
+
+  function handlePointerDown(event: PointerEvent) {
+    if (event.button !== 0) return;
+    lastScrollInputAt = performance.now();
+  }
+
   function handleFocusIn(event: FocusEvent) {
     const target = event.target;
     if (!(target instanceof Element) || !target.closest('.diff-view-lines')) return;
@@ -1544,6 +1574,8 @@ export function MessageList() {
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     containerRef.addEventListener('focusin', handleFocusIn);
     containerRef.addEventListener('focusout', handleFocusOut);
+    containerRef.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
     lastContainerClientWidth = containerRef.clientWidth;
     lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
     updateScrollbarInset();
@@ -1625,6 +1657,8 @@ export function MessageList() {
       containerRef?.removeEventListener('click', handleClickCapture as EventListener, true);
       containerRef?.removeEventListener('focusin', handleFocusIn);
       containerRef?.removeEventListener('focusout', handleFocusOut);
+      containerRef?.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
       observer.disconnect();
       firstVisibleMessageObserver?.disconnect();
       firstVisibleMessageObserver = null;
@@ -1739,6 +1773,7 @@ export function MessageList() {
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
     followModeLocked = false;
+    lastScrollInputAt = Number.NEGATIVE_INFINITY;
     pinnedToBottom = true;
     diffFocusPauseActive = false;
     resumeAutoScrollAfterDiffFocus = false;
@@ -1803,6 +1838,7 @@ export function MessageList() {
     lastWheelAt = Number.NEGATIVE_INFINITY;
     lastUserScrollAt = Number.NEGATIVE_INFINITY;
     lastWheelUpAt = Number.NEGATIVE_INFINITY;
+    lastScrollInputAt = Number.NEGATIVE_INFINITY;
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;

@@ -7,9 +7,33 @@ type MeasuredEntranceOptions = {
 
 const ACTIVE_CLASS = 'measured-entrance-active';
 
-export function prepareMeasuredEntrance(element: HTMLElement, options: MeasuredEntranceOptions) {
+export function prepareMeasuredEntrance(
+  element: HTMLElement,
+  options: MeasuredEntranceOptions
+): () => void {
+  let observer: ResizeObserver | null = null;
+  let finish: ((event: AnimationEvent) => void) | null = null;
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    observer?.disconnect();
+    observer = null;
+    if (finish) {
+      element.removeEventListener('animationend', finish);
+      element.removeEventListener('animationcancel', finish);
+    }
+    element.classList.remove(ACTIVE_CLASS);
+    element.style.removeProperty(options.heightProperty);
+  };
+
   queueMicrotask(() => {
-    if (!element.isConnected || (options.skipWithin && element.closest(options.skipWithin))) return;
+    if (cleanedUp) return;
+    if (!element.isConnected || (options.skipWithin && element.closest(options.skipWithin))) {
+      cleanedUp = true;
+      return;
+    }
 
     let targetHeight = -1;
     const updateTargetHeight = () => {
@@ -22,20 +46,14 @@ export function prepareMeasuredEntrance(element: HTMLElement, options: MeasuredE
     };
     updateTargetHeight();
 
-    const observer =
+    observer =
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => updateTargetHeight());
     observer?.observe(element);
 
-    let finished = false;
-    const finish = (event: AnimationEvent) => {
+    finish = (event: AnimationEvent) => {
       if (event.target !== element || event.animationName !== options.animationName) return;
-      if (finished) return;
-      finished = true;
-      observer?.disconnect();
-      element.classList.remove(ACTIVE_CLASS);
-      element.style.removeProperty(options.heightProperty);
-      element.removeEventListener('animationend', finish);
-      element.removeEventListener('animationcancel', finish);
+      if (cleanedUp) return;
+      cleanup();
       options.onFinish?.();
     };
 
@@ -43,4 +61,6 @@ export function prepareMeasuredEntrance(element: HTMLElement, options: MeasuredE
     element.addEventListener('animationcancel', finish);
     element.classList.add(ACTIVE_CLASS);
   });
+
+  return cleanup;
 }

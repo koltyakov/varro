@@ -213,6 +213,20 @@ beforeEach(() => {
 });
 
 describe('ralph runner stop conditions', () => {
+  it('persists a failed iteration without a note for an empty error message', async () => {
+    const harness = createHarness();
+    const config = createConfig({ iterations: 1 });
+    harness.createSession.mockRejectedValueOnce(new Error(''));
+
+    await harness.runner.start(config);
+
+    const run = harness.store.getRun(config.managerSessionId);
+    expect(run?.status).toBe('failed');
+    expect(run?.stopReason).toBe('iteration_error');
+    expect(run?.iterations[0]?.status).toBe('failed');
+    expect(run?.iterations[0]).not.toHaveProperty('note');
+  });
+
   it('stops cleanly when the iteration limit is reached and the plan is complete', async () => {
     const harness = createHarness();
     const config = createConfig({ iterations: 1 });

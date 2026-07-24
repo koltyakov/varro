@@ -4061,6 +4061,144 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('stops following after keyboard-originated upward scrolling', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    scrollTopValue = 500;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(500);
+    animationFrames.restore();
+  });
+
+  it('stops following after scrollbar pointer-originated upward scrolling', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    list?.firstElementChild?.dispatchEvent(
+      new MouseEvent('pointerdown', { button: 0, bubbles: true })
+    );
+    scrollTopValue = 500;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(500);
+    animationFrames.restore();
+  });
+
   it('does not rewrite scrollTop when resize leaves the list already at bottom', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];

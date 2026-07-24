@@ -13,7 +13,6 @@ import {
   getVisibleInputEntries,
   getToolCallExpansionKey,
   resetToolCallExpansionState,
-  shouldShowToolPreview,
 } from './ToolCall';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import { client } from '../lib/client';
@@ -172,18 +171,6 @@ describe('formatToolTitle', () => {
         time: { start: 0, end: 1 },
       })
     ).toBe('bash');
-  });
-});
-
-describe('shouldShowToolPreview', () => {
-  it('hides previews already included in the title', () => {
-    expect(shouldShowToolPreview('Search: Thinking:', { key: 'pattern', text: 'Thinking:' })).toBe(
-      false
-    );
-  });
-
-  it('shows previews when they add new information', () => {
-    expect(shouldShowToolPreview('bash', { key: 'command', text: 'git status' })).toBe(true);
   });
 });
 
@@ -372,8 +359,7 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
   });
 
-  it('renders a collapsed path preview as an open-file link', () => {
-    const sendSpy = setExtensionSender();
+  it('does not render a second line for collapsed generic tool input', () => {
     setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -393,16 +379,33 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    const previewLink = container?.querySelector<HTMLAnchorElement>('.tool-invocation-preview a');
+    expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
+    expect(container?.textContent).not.toContain('docs/spec.md');
+  });
 
-    expect(previewLink?.textContent).toBe('docs/spec.md');
+  it('does not render a second line for collapsed subagent input', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: completedState(
+        {
+          description: 'Research test suite improvements',
+          command: 'hidden subagent summary',
+          subagent_type: 'explore',
+          prompt: 'Thoroughly explore the test suite for this project',
+        },
+        'Research test suite improvements'
+      ),
+    };
 
-    previewLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(sendSpy).toHaveBeenCalledWith({
-      type: 'vscode/open',
-      payload: { path: '/repo/docs/spec.md', kind: 'file' },
-    });
+    expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
+    expect(container?.textContent).not.toContain('hidden subagent summary');
   });
 
   it('hides a duplicated description from expanded task details', () => {

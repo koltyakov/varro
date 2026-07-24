@@ -461,7 +461,11 @@ export class RalphHost {
         this.store.updateRunModel(msg.payload.managerSessionId, msg.payload.model);
         break;
       case 'ralph/sync': {
-        this.trackSync(this.handleSync(msg.payload.legacyRuns));
+        void this.handleSync(msg.payload.legacyRuns).catch((err) => {
+          logger.error(
+            `ralph-host:sync failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
         break;
       }
     }
@@ -509,10 +513,14 @@ export class RalphHost {
   }
 
   private async handleSync(legacyRuns?: Record<string, RalphRun>): Promise<void> {
-    const acknowledgedIds = legacyRuns ? await this.store.adoptLegacyRuns(legacyRuns) : [];
+    const adoption = legacyRuns
+      ? this.store.adoptLegacyRuns(legacyRuns)
+      : Promise.resolve<string[]>([]);
+    this.trackSync(adoption.then(() => {}));
+    const acknowledgedIds = await adoption;
     if (this.disposed) return;
     await this.withServer(async () => this.runner.reattachAll(), 'reattach');
-    this.broadcast(acknowledgedIds);
+    if (!this.disposed) this.broadcast(acknowledgedIds);
   }
 
   private trackSync(sync: Promise<void>): void {
@@ -752,8 +760,8 @@ function normalizePersistedRalphRun(
 
   let note: string | undefined;
   if (record.note !== undefined) {
-    note = getBoundedString(record.note, MAX_RALPH_NOTE_LENGTH) || undefined;
-    if (!note) return null;
+    if (typeof record.note !== 'string' || record.note.length > MAX_RALPH_NOTE_LENGTH) return null;
+    note = record.note || undefined;
   }
   const status =
     !config.workspaceDirectory && record.status === 'running' ? 'paused' : record.status;
@@ -887,9 +895,8 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
     iteration.cost = record.cost;
   }
   if (record.note !== undefined) {
-    const note = getBoundedString(record.note, MAX_RALPH_NOTE_LENGTH);
-    if (!note) return null;
-    iteration.note = note;
+    if (typeof record.note !== 'string' || record.note.length > MAX_RALPH_NOTE_LENGTH) return null;
+    if (record.note) iteration.note = record.note;
   }
   if (record.repairSessionIds !== undefined) {
     if (

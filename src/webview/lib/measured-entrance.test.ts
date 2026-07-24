@@ -23,7 +23,7 @@ describe('prepareMeasuredEntrance', () => {
     document.body.appendChild(element);
     const onFinish = vi.fn();
 
-    prepareMeasuredEntrance(element, {
+    const dispose = prepareMeasuredEntrance(element, {
       animationName: 'test-entrance',
       heightProperty: '--test-entrance-height',
       onFinish,
@@ -41,6 +41,81 @@ describe('prepareMeasuredEntrance', () => {
     expect(element.style.getPropertyValue('--test-entrance-height')).toBe('');
     expect(disconnect).toHaveBeenCalledOnce();
     expect(onFinish).toHaveBeenCalledOnce();
+
+    dispose();
+    element.dispatchEvent(event);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(onFinish).toHaveBeenCalledOnce();
+  });
+
+  it('can be disposed idempotently before deferred setup', async () => {
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {
+          observe();
+        }
+        disconnect() {
+          disconnect();
+        }
+      }
+    );
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    const onFinish = vi.fn();
+
+    const dispose = prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+      onFinish,
+    });
+    dispose();
+    dispose();
+    await Promise.resolve();
+
+    expect(observe).not.toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(element.classList).not.toContain('measured-entrance-active');
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('');
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it('cleans up setup exactly once when manually disposed', async () => {
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {
+          disconnect();
+        }
+      }
+    );
+    const element = document.createElement('div');
+    document.body.appendChild(element);
+    const removeEventListener = vi.spyOn(element, 'removeEventListener');
+    const onFinish = vi.fn();
+    const dispose = prepareMeasuredEntrance(element, {
+      animationName: 'test-entrance',
+      heightProperty: '--test-entrance-height',
+      onFinish,
+    });
+    await Promise.resolve();
+
+    dispose();
+    dispose();
+    const event = new Event('animationcancel') as AnimationEvent;
+    Object.defineProperty(event, 'animationName', { value: 'test-entrance' });
+    element.dispatchEvent(event);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(removeEventListener).toHaveBeenCalledTimes(2);
+    expect(element.classList).not.toContain('measured-entrance-active');
+    expect(element.style.getPropertyValue('--test-entrance-height')).toBe('');
+    expect(onFinish).not.toHaveBeenCalled();
   });
 
   it('does not start a nested entrance when its row is already entering', async () => {

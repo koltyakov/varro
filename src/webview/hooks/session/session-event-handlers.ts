@@ -192,8 +192,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     string,
     {
       sessionID: string;
-      deltas: Array<{ messageID: string; partID: string; delta: string; field: string }>;
+      generation: number;
       syncing: boolean;
+      retryTimer?: ReturnType<typeof setTimeout>;
     }
   >();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
@@ -619,42 +620,66 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         (message) =>
           message.info.id === messageID && message.parts.some((part) => part.id === partID)
       );
-  const queueMissingPartDelta = (
-    sessionID: string,
-    messageID: string,
-    partID: string,
-    delta: string,
-    field: string
+  const recoverMissingPartDeltas = (
+    key: string,
+    pending: {
+      sessionID: string;
+      generation: number;
+      syncing: boolean;
+      retryTimer?: ReturnType<typeof setTimeout>;
+    }
   ) => {
-    const key = getPartDeltaQueueKey(messageID, partID);
-    const existing = pendingMissingPartDeltas.get(key);
-    const pending = existing || { sessionID, deltas: [], syncing: false };
-    pending.sessionID = sessionID;
-    pending.deltas.push({ messageID, partID, delta, field });
-    pendingMissingPartDeltas.set(key, pending);
-
-    if (pending.syncing) return;
+    if (pending.syncing || pendingMissingPartDeltas.get(key) !== pending) return;
 
     pending.syncing = true;
     void deps
-      .syncSessionMessages(sessionID)
+      .syncSessionMessages(pending.sessionID)
       .then(async () => {
-        const queued = pendingMissingPartDeltas.get(key);
-        if (!queued) return;
-        // The synchronized part is canonical. A second bounded sync closes the
-        // race where queued deltas arrived after the first snapshot was read.
-        await deps.syncSessionMessages(queued.sessionID);
-        if (pendingMissingPartDeltas.get(key) === queued) pendingMissingPartDeltas.delete(key);
+        if (pendingMissingPartDeltas.get(key) !== pending) return;
+
+        // The synchronized part is canonical. Record which arrivals the bounded
+        // follow-up is intended to cover rather than replaying queued fragments.
+        const followUpGeneration = pending.generation;
+        await deps.syncSessionMessages(pending.sessionID);
+        if (pendingMissingPartDeltas.get(key) !== pending) return;
+        if (pending.generation === followUpGeneration) {
+          pendingMissingPartDeltas.delete(key);
+          return;
+        }
+
+        // A delta arrived after the follow-up read its snapshot. Yield before
+        // another bounded pass so sustained traffic cannot create a tight loop.
+        pending.retryTimer = setTimeout(() => {
+          pending.retryTimer = undefined;
+          if (pendingMissingPartDeltas.get(key) !== pending) return;
+          pending.syncing = false;
+          recoverMissingPartDeltas(key, pending);
+        }, 0);
       })
       .catch((err) => {
-        pendingMissingPartDeltas.delete(key);
+        if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
+        if (pendingMissingPartDeltas.get(key) === pending) {
+          pendingMissingPartDeltas.delete(key);
+        }
         deps.logError('syncSessionMessages', err);
       });
+  };
+  const queueMissingPartDelta = (sessionID: string, messageID: string, partID: string) => {
+    const key = getPartDeltaQueueKey(messageID, partID);
+    const existing = pendingMissingPartDeltas.get(key);
+    const pending = existing || { sessionID, generation: 0, syncing: false };
+    pending.sessionID = sessionID;
+    pending.generation += 1;
+    pendingMissingPartDeltas.set(key, pending);
+    recoverMissingPartDeltas(key, pending);
   };
 
   cleanups.push(() => {
     activeMessageSyncs.clear();
     pendingTerminalStepSettles.clear();
+    for (const pending of pendingMissingPartDeltas.values()) {
+      if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
+    }
     pendingMissingPartDeltas.clear();
     lastSeqBySession.clear();
     for (const timer of streamedCompletionTimers.values()) clearTimeout(timer);
@@ -927,7 +952,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         pendingMissingPartDeltas.has(getPartDeltaQueueKey(messageID, partID)) ||
         !hasMessagePart(messageID, partID)
       ) {
-        queueMissingPartDelta(sessionID, messageID, partID, delta, field);
+        queueMissingPartDelta(sessionID, messageID, partID);
         return;
       }
       sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);

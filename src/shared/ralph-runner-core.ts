@@ -514,15 +514,8 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
             }
             break;
           }
-          ports.logError(`iteration ${nextIndex} failed`, err);
           const latestIteration = getIteration(managerSessionId, nextIndex) ?? iteration;
-          ports.store.upsertIteration(managerSessionId, {
-            ...latestIteration,
-            status: 'failed',
-            endedAt: Date.now(),
-            note: err instanceof Error ? err.message : String(err),
-          });
-          ports.store.setStatus(managerSessionId, 'failed', 'iteration_error');
+          failIteration(managerSessionId, latestIteration, err);
           break;
         }
       }
@@ -577,11 +570,12 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
 
   function failIteration(managerSessionId: string, iteration: RalphIteration, err: unknown): void {
     ports.logError(`iteration ${iteration.index} failed`, err);
+    const note = err instanceof Error ? err.message : String(err);
     ports.store.upsertIteration(managerSessionId, {
       ...iteration,
       status: 'failed',
       endedAt: Date.now(),
-      note: err instanceof Error ? err.message : String(err),
+      ...(note ? { note } : {}),
     });
     ports.store.setStatus(managerSessionId, 'failed', 'iteration_error');
   }

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -451,6 +451,93 @@ describe('OpenCodeProcess startup termination', () => {
 });
 
 describe('OpenCodeProcess server ownership leases', () => {
+  it('confirms a spawned Linux descendant through procfs when inspection tools are unavailable', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const procRoot = join(directory, 'proc');
+    const wrapperPid = 43_210;
+    const listenerPid = 43_211;
+    const socketInode = '987654';
+    const child = Object.assign(new EventEmitter(), {
+      pid: wrapperPid,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    });
+    const statFields = Array.from({ length: 20 }, () => '0');
+    statFields[0] = 'S';
+    statFields[1] = String(wrapperPid);
+    statFields[2] = String(wrapperPid);
+    statFields[19] = '123456';
+    await Promise.all([
+      mkdir(join(procRoot, 'net'), { recursive: true }),
+      mkdir(join(procRoot, String(wrapperPid), 'fd'), { recursive: true }),
+      mkdir(join(procRoot, String(listenerPid), 'fd'), { recursive: true }),
+    ]);
+    await writeFile(
+      join(procRoot, 'net/tcp'),
+      `sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n0: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 ${socketInode}\n`
+    );
+    await Promise.all([
+      writeFile(join(procRoot, 'net/tcp6'), ''),
+      writeFile(
+        join(procRoot, String(listenerPid), 'stat'),
+        `${listenerPid} (opencode) ${statFields.join(' ')}`
+      ),
+      symlink(`socket:[${socketInode}]`, join(procRoot, String(listenerPid), 'fd/3')),
+      symlink('/usr/bin/opencode', join(procRoot, String(listenerPid), 'exe')),
+    ]);
+    spawnMock.mockImplementation((command: string) => {
+      if (command === '/usr/bin/opencode') return child;
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() =>
+        result.emit(
+          'error',
+          Object.assign(new Error(`spawn ${command} ENOENT`), { code: 'ENOENT' })
+        )
+      );
+      return result;
+    });
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      '/usr/bin/opencode',
+      false,
+      undefined,
+      leasePath,
+      procRoot
+    );
+    manager.launchServer({
+      getWorkspaceCwd: () => '/repo',
+      onStdout: vi.fn(),
+      onStderr: vi.fn(),
+      onExit: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await expect(manager.confirmManagedServerOwnership()).resolves.toBe(true);
+
+    expect(spawnMock).toHaveBeenCalledWith('lsof', expect.anything(), expect.anything());
+    expect(spawnMock).toHaveBeenCalledWith('ss', expect.anything(), expect.anything());
+    expect(spawnMock).not.toHaveBeenCalledWith('ps', expect.anything(), expect.anything());
+    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toMatchObject({
+      pid: listenerPid,
+      port: 4096,
+      executable: '/usr/bin/opencode',
+      birthIdentity: 'linux:123456',
+      state: 'active',
+    });
+
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('lets an attached host claim after the owner relinquishes without reloading', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));

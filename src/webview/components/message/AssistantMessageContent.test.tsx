@@ -152,6 +152,7 @@ afterEach(() => {
   markdownRendererMock.mockClear();
   messagePartMock.mockClear();
   resetDefaultAppState();
+  vi.unstubAllGlobals();
 });
 
 function createManyTextParts(count: number): Part[] {
@@ -218,6 +219,49 @@ describe('AssistantMessageContent', () => {
     expect(
       container?.querySelector('[data-assistant-render-key="part:text-2"]')?.classList
     ).toContain('assistant-message-flow-item-streamed');
+  });
+
+  it('disposes a streamed item entrance when Solid removes the item', async () => {
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {
+          disconnect();
+        }
+      }
+    );
+    const info = createAssistantMessage({ time: { created: 0 } });
+    const initialPart = textPart('text-1', 'Streaming');
+    const streamedPart = textPart('text-2', 'Temporary block');
+    const [parts, setParts] = createSignal<Part[]>([initialPart]);
+
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={info}
+          parts={parts()}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+        />
+      ),
+      container!
+    );
+
+    setParts([initialPart, streamedPart]);
+    await Promise.resolve();
+    const element = container?.querySelector<HTMLElement>(
+      '[data-assistant-render-key="part:text-2"]'
+    );
+    expect(element?.classList).toContain('measured-entrance-active');
+
+    setParts([initialPart]);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(element?.classList).not.toContain('measured-entrance-active');
+    expect(element?.style.getPropertyValue('--streamed-assistant-item-height')).toBe('');
   });
 
   it('does not reveal parts when mounting completed history', () => {

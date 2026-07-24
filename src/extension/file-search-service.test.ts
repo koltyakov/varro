@@ -308,6 +308,42 @@ describe('FileSearchService', () => {
     service.dispose();
   });
 
+  it('stops retrying after repeated in-flight invalidations', async () => {
+    vi.useFakeTimers();
+    const firstFiles = deferred<Array<{ fsPath: string }>>();
+    const secondFiles = deferred<Array<{ fsPath: string }>>();
+    vscodeMock.workspace.findFiles
+      .mockReturnValueOnce(firstFiles.promise)
+      .mockReturnValueOnce(secondFiles.promise);
+    const { FileSearchService } = await loadModule();
+    const service = new FileSearchService();
+    const onResult = vi.fn();
+
+    service.search(1, '', 10, onResult);
+    const watcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as {
+      fireCreate: () => void;
+      fireDelete: () => void;
+    };
+
+    watcher.fireCreate();
+    firstFiles.resolve([{ fsPath: '/repo/src/first-stale.ts' }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+
+    watcher.fireDelete();
+    await vi.advanceTimersByTimeAsync(100);
+    secondFiles.resolve([{ fsPath: '/repo/src/second-stale.ts' }]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vscodeMock.workspace.findFiles).toHaveBeenCalledTimes(2);
+    expect(onResult).toHaveBeenCalledOnce();
+    expect(onResult).toHaveBeenCalledWith({ requestId: 1, query: '', files: [] });
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'searchFiles failed: Workspace file cache was repeatedly invalidated during discovery'
+    );
+    service.dispose();
+  });
+
   it('debounces repeated workspace cache invalidations', async () => {
     vscodeMock.workspace.findFiles
       .mockResolvedValueOnce([{ fsPath: '/repo/src/first.ts' }])

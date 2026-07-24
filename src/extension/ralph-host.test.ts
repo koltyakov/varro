@@ -327,6 +327,44 @@ describe('HostRalphStore', () => {
     expect(Object.prototype.hasOwnProperty.call(store.snapshot(), 'toString')).toBe(false);
   });
 
+  it('normalizes empty persisted run and iteration notes as absent', () => {
+    const config = createConfig();
+    const persistence: Persistence = {
+      get: () => ({
+        [config.managerSessionId]: {
+          config,
+          status: 'failed',
+          stopReason: 'iteration_error',
+          note: '',
+          currentIteration: 1,
+          iterations: [
+            {
+              index: 1,
+              childSessionId: null,
+              status: 'failed',
+              startedAt: null,
+              endedAt: 1,
+              filesChanged: [],
+              verification: {},
+              note: '',
+            },
+          ],
+          updatedAt: 1,
+        },
+      }),
+      set: () => undefined,
+      remove: () => undefined,
+    };
+
+    const store = new HostRalphStore(persistence, vi.fn());
+    const run = store.getRun(config.managerSessionId);
+
+    expect(run?.status).toBe('failed');
+    expect(run?.note).toBeUndefined();
+    expect(run?.iterations[0]?.status).toBe('failed');
+    expect(run?.iterations[0]?.note).toBeUndefined();
+  });
+
   it('normalizes a legacy workspacePath into the persisted workspace identity', async () => {
     const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = createConfig();
     const { persistence, storage } = createMemoryPersistence();
@@ -1053,6 +1091,33 @@ describe('RalphHost', () => {
     expect(persistence.set).toHaveBeenCalledTimes(2);
     expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
     expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for sync server startup during disposal', async () => {
+    const never = new Promise<never>(() => {});
+    const { host, ensureServerStarted } = createHost({
+      ensureServerStarted: () => never,
+    });
+    const config = createConfig({ managerSessionId: 'manager-blocked-sync' });
+
+    host.handleMessage({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          [config.managerSessionId]: {
+            config,
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 1,
+          },
+        },
+      },
+    });
+    await vi.waitFor(() => expect(ensureServerStarted).toHaveBeenCalledTimes(1));
+
+    await expect(host.dispose()).resolves.toBeUndefined();
+    expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('paused');
   });
 
   it('does not acknowledge or retain a legacy run when persistence fails', async () => {

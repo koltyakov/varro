@@ -31,6 +31,7 @@ class WorkspaceFileCacheInvalidatedError extends Error {}
 export class FileSearchService {
   private static readonly CACHE_TTL_MS = 15_000;
   private static readonly CACHE_INVALIDATION_DEBOUNCE_MS = 100;
+  private static readonly MAX_CACHE_INVALIDATION_RETRIES = 1;
   private static readonly MAX_CANDIDATES = 4_000;
   private static readonly RESULT_LIMIT = 30;
 
@@ -147,13 +148,22 @@ export class FileSearchService {
   ): Promise<void> {
     try {
       let files: WorkspaceFileSearchEntry[];
+      let cacheInvalidationRetries = 0;
       while (true) {
         try {
           files = await this.getWorkspaceFiles();
           break;
         } catch (err) {
           if (token.isCancellationRequested) return;
-          if (err instanceof WorkspaceFileCacheInvalidatedError) continue;
+          if (err instanceof WorkspaceFileCacheInvalidatedError) {
+            if (cacheInvalidationRetries >= FileSearchService.MAX_CACHE_INVALIDATION_RETRIES) {
+              throw new Error('Workspace file cache was repeatedly invalidated during discovery', {
+                cause: err,
+              });
+            }
+            cacheInvalidationRetries += 1;
+            continue;
+          }
           throw err;
         }
       }
