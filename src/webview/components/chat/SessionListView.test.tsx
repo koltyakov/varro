@@ -590,6 +590,29 @@ describe('SessionListView selection', () => {
 });
 
 describe('SessionListView ordering', () => {
+  it('preserves a running indicator across same-session updates', () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    const now = Date.now();
+    setSessions([session('session-1', now)]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+
+    cleanup = render(() => <SessionListView />, container);
+
+    const indicator = container.querySelector('.session-item-indicator.is-running');
+    expect(indicator).not.toBeNull();
+
+    setSessions([session('session-1', now + 1, { title: 'Updated title' })]);
+
+    expect(container.querySelector('.session-item-indicator.is-running')).toBe(indicator);
+  });
+
   it('keeps similarly updated sessions in newest-created-first order', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,

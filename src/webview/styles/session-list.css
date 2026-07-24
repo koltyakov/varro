@@ -461,6 +461,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   border-top-color: var(--color-vscode-fg);
   background: transparent;
   animation: spin 0.85s linear infinite;
+  will-change: transform;
 }
 
 .session-item-indicator.is-attention,

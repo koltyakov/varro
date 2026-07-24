@@ -676,8 +676,16 @@ export function SessionListView(props: {
   class?: string;
 }) {
   const diffSummaryOwner = Symbol('session-list');
-  const [now, setNow] = createSignal(Date.now());
-  const clock = setInterval(() => setNow(Date.now()), 1_000);
+  const initialNow = Date.now();
+  const [activeNow, setActiveNow] = createSignal(initialNow);
+  const [ageNow, setAgeNow] = createSignal(initialNow);
+  const clock = setInterval(() => {
+    const nextNow = Date.now();
+    setActiveNow(nextNow);
+    setAgeNow((current) =>
+      Math.floor(current / 60_000) === Math.floor(nextNow / 60_000) ? current : nextNow
+    );
+  }, 1_000);
   onCleanup(() => clearInterval(clock));
 
   const [focusedIndex, setFocusedIndex] = createSignal(-1);
@@ -761,7 +769,7 @@ export function SessionListView(props: {
       (sessionId) => sessionIndicators().failedIds.has(sessionId),
       (session) => sessionIndicators().planReadyIds.has(session.id),
       (session) => sessionIndicators().newlyCompletedIds.has(session.id),
-      now(),
+      ageNow(),
       (sessionId) => state.pinnedSessionIds.includes(sessionId)
     )
   );
@@ -801,7 +809,7 @@ export function SessionListView(props: {
         ...newlyCompletedSessions(),
         ...surfacedOtherSessions(),
       ],
-      now()
+      ageNow()
     )
   );
   const surfacedSessions = createMemo(() => {
@@ -834,7 +842,7 @@ export function SessionListView(props: {
   });
   const searchableSessions = createMemo(() => {
     if (props.subagentParentId) return directSessions();
-    if (props.sessionFilter) return sortSessionsForDisplay(directSessions(), now());
+    if (props.sessionFilter) return sortSessionsForDisplay(directSessions(), ageNow());
     if (defaultSurfacedSessions().length === 0) return overflowOtherSessions();
     return [...surfacedSessions(), ...overflowOtherSessions()];
   });
@@ -941,61 +949,71 @@ export function SessionListView(props: {
     setActiveGroupedSection((current) => (current === section ? null : section));
   };
 
-  const renderSessionItems = (sessions: typeof state.sessions, indexOffset = 0) => (
-    <For
-      each={(() => {
-        const frozenOrder = frozenSessionOrder();
-        if (!frozenOrder) return sessions;
-        const positions = new Map(frozenOrder.map((sessionId, index) => [sessionId, index]));
-        return sessions.toSorted((a, b) => {
-          const aPosition = positions.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-          const bPosition = positions.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-          return aPosition - bPosition;
-        });
-      })()}
-    >
-      {(session, index) => (
-        <SessionListItem
-          session={session}
-          diffSummary={sessionDiffSummaryCache()[session.id]?.stats ?? null}
-          isSummaryLoading={
-            sessionDiffSummaryCache()[session.id]?.status === 'loading' &&
-            sessionDiffSummaryCache()[session.id]?.stats === null
-          }
-          tokens={sessionDiffSummaryCache()[session.id]?.stats?.tokens ?? null}
-          durationMs={sessionDiffSummaryCache()[session.id]?.stats?.durationMs ?? null}
-          activeStartedAt={sessionDiffSummaryCache()[session.id]?.stats?.activeStartedAt ?? null}
-          itemIndex={() => indexOffset + index()}
-          focusedIndex={focusedIndex}
-          setFocusedIndex={setFocusedIndex}
-          actions={sessionActions}
-          now={now}
-          subagentCount={sessionIndicators().subagentCounts.get(session.id) || 0}
-          hasPermissionRequest={sessionIndicators().permissionIds.has(session.id)}
-          hasQuestionRequest={sessionIndicators().questionIds.has(session.id)}
-          isRunning={sessionIndicators().runningIds.has(session.id)}
-          isFailed={sessionIndicators().failedIds.has(session.id)}
-          needsAttention={sessionIndicators().attentionIds.has(session.id)}
-          isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(session.id)}
-          isCompletedPlanSession={sessionIndicators().planReadyIds.has(session.id)}
-          isPinned={state.pinnedSessionIds.includes(session.id)}
-          onTogglePinned={async () => {
-            try {
-              const pinnedSessionIds = await client.varro.session.setPinned(
-                session.id,
-                !state.pinnedSessionIds.includes(session.id)
-              );
-              setState('pinnedSessionIds', pinnedSessionIds);
-            } catch (error) {
-              setError(error instanceof Error ? error.message : String(error));
-            }
-          }}
-          onOpenSubagents={props.onOpenSubagents}
-          embedded={props.embedded}
-        />
-      )}
-    </For>
-  );
+  const renderSessionItems = (sessions: () => typeof state.sessions, indexOffset = 0) => {
+    const orderedSessions = createMemo(() => {
+      const items = sessions();
+      const frozenOrder = frozenSessionOrder();
+      if (!frozenOrder) return items;
+      const positions = new Map(frozenOrder.map((sessionId, index) => [sessionId, index]));
+      return items.toSorted((a, b) => {
+        const aPosition = positions.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bPosition = positions.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        return aPosition - bPosition;
+      });
+    });
+    const sessionsById = createMemo(
+      () => new Map(orderedSessions().map((session) => [session.id, session]))
+    );
+
+    return (
+      <For each={orderedSessions().map((session) => session.id)}>
+        {(sessionId, index) => {
+          const session = () => sessionsById().get(sessionId)!;
+          return (
+            <SessionListItem
+              session={session()}
+              diffSummary={sessionDiffSummaryCache()[sessionId]?.stats ?? null}
+              isSummaryLoading={
+                sessionDiffSummaryCache()[sessionId]?.status === 'loading' &&
+                sessionDiffSummaryCache()[sessionId]?.stats === null
+              }
+              tokens={sessionDiffSummaryCache()[sessionId]?.stats?.tokens ?? null}
+              durationMs={sessionDiffSummaryCache()[sessionId]?.stats?.durationMs ?? null}
+              activeStartedAt={sessionDiffSummaryCache()[sessionId]?.stats?.activeStartedAt ?? null}
+              itemIndex={() => indexOffset + index()}
+              focusedIndex={focusedIndex}
+              setFocusedIndex={setFocusedIndex}
+              actions={sessionActions}
+              ageNow={ageNow}
+              activeNow={activeNow}
+              subagentCount={sessionIndicators().subagentCounts.get(sessionId) || 0}
+              hasPermissionRequest={sessionIndicators().permissionIds.has(sessionId)}
+              hasQuestionRequest={sessionIndicators().questionIds.has(sessionId)}
+              isRunning={sessionIndicators().runningIds.has(sessionId)}
+              isFailed={sessionIndicators().failedIds.has(sessionId)}
+              needsAttention={sessionIndicators().attentionIds.has(sessionId)}
+              isNewlyCompleted={sessionIndicators().newlyCompletedIds.has(sessionId)}
+              isCompletedPlanSession={sessionIndicators().planReadyIds.has(sessionId)}
+              isPinned={state.pinnedSessionIds.includes(sessionId)}
+              onTogglePinned={async () => {
+                try {
+                  const pinnedSessionIds = await client.varro.session.setPinned(
+                    sessionId,
+                    !state.pinnedSessionIds.includes(sessionId)
+                  );
+                  setState('pinnedSessionIds', pinnedSessionIds);
+                } catch (error) {
+                  setError(error instanceof Error ? error.message : String(error));
+                }
+              }}
+              onOpenSubagents={props.onOpenSubagents}
+              embedded={props.embedded}
+            />
+          );
+        }}
+      </For>
+    );
+  };
 
   const renderBottomGroups = () => (
     <div class="session-list-bottom-groups">
@@ -1031,12 +1049,12 @@ export function SessionListView(props: {
   const renderScrollableContent = () => (
     <div class="session-list-scroll">
       <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
-        {renderSessionItems(visibleSessions())}
+        {renderSessionItems(visibleSessions)}
       </Show>
       <Show
         when={isDefaultGroupedView() && !activeGroupedSection() && surfacedSessions().length > 0}
       >
-        {renderSessionItems(surfacedSessions())}
+        {renderSessionItems(surfacedSessions)}
       </Show>
       <Show when={isDefaultGroupedView() && !!activeGroupedSection()}>
         <For each={availableGroupedSections()}>{(section) => renderGroupedSection(section)}</For>
@@ -1060,7 +1078,7 @@ export function SessionListView(props: {
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('recent')}
             />
-            <Show when={expanded()}>{renderSessionItems(surfacedSessions())}</Show>
+            <Show when={expanded()}>{renderSessionItems(surfacedSessions)}</Show>
           </>
         );
       case 'archive':
@@ -1075,7 +1093,7 @@ export function SessionListView(props: {
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('archive')}
             />
-            <Show when={expanded()}>{renderSessionItems(overflowOtherSessions())}</Show>
+            <Show when={expanded()}>{renderSessionItems(overflowOtherSessions)}</Show>
           </>
         );
       case 'recycle-bin':
@@ -1094,7 +1112,7 @@ export function SessionListView(props: {
             />
             <Show when={expanded()}>
               <For each={recycleBinEntries()}>
-                {(entry) => <RecycleBinListItem entry={entry} now={now} />}
+                {(entry) => <RecycleBinListItem entry={entry} now={ageNow} />}
               </For>
             </Show>
           </>
@@ -1244,7 +1262,7 @@ export function SessionListView(props: {
           <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
             <div class="session-list-layout">
               <div class="session-list-scroll session-list-scroll-primary">
-                {renderSessionItems(surfacedSessions())}
+                {renderSessionItems(surfacedSessions)}
               </div>
               {renderBottomGroups()}
             </div>
@@ -1315,7 +1333,8 @@ function SessionListItem(props: {
   focusedIndex: () => number;
   setFocusedIndex: (index: number) => void;
   actions: SessionActionsState;
-  now: () => number;
+  ageNow: () => number;
+  activeNow: () => number;
   subagentCount: number;
   hasPermissionRequest: boolean;
   hasQuestionRequest: boolean;
@@ -1363,7 +1382,7 @@ function SessionListItem(props: {
     if (props.durationMs === null) return null;
     const activeDuration =
       props.isRunning && props.activeStartedAt !== null
-        ? Math.max(0, props.now() - props.activeStartedAt)
+        ? Math.max(0, props.activeNow() - props.activeStartedAt)
         : 0;
     return props.durationMs + activeDuration;
   };
@@ -1657,7 +1676,7 @@ function SessionListItem(props: {
           class="session-item-age"
           title={new Date(props.session.time.updated).toLocaleString()}
         >
-          {formatRelativeAge(props.session.time.updated, props.now())}
+          {formatRelativeAge(props.session.time.updated, props.ageNow())}
         </span>
       </div>
       <Show when={showActions()}>
