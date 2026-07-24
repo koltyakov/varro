@@ -115,6 +115,7 @@ export const client = {
     async sendAsync(
       id: string,
       body: {
+        messageID?: string;
         parts: Array<{
           type: string;
           text?: string;

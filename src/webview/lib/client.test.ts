@@ -69,6 +69,7 @@ describe('client', () => {
     await client.session.deleteMessage('session-1', 'message-1');
     await client.session.todos('session-1');
     await client.session.sendAsync('session-1', {
+      messageID: 'msg-1',
       parts: [{ type: 'text', text: 'Hello' }],
       model: { providerID: 'openai', modelID: 'gpt-4.1' },
       agent: 'build',
@@ -133,6 +134,7 @@ describe('client', () => {
         'POST',
         '/session/session-1/prompt_async',
         {
+          messageID: 'msg-1',
           parts: [{ type: 'text', text: 'Hello' }],
           model: { providerID: 'openai', modelID: 'gpt-4.1' },
           agent: 'build',

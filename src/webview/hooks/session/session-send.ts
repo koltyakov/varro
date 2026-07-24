@@ -6,6 +6,7 @@ import {
   subtractContextLineRanges,
 } from '../../../shared/context-files';
 import { normalizeModelVariant } from '../../../shared/model-variant';
+import { createOpenCodeMessageID } from '../../../shared/opencode-id';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -43,6 +44,7 @@ type ComposerState = {
 };
 
 export type SessionSendBody = {
+  messageID?: string;
   parts: Array<{
     type: string;
     text?: string;
@@ -98,8 +100,6 @@ type StateBoundSendDependencies = {
 };
 
 type OptimisticMessageEntry = MessageEntry;
-
-let optimisticMessageSequence = 0;
 
 export function getAttachmentReference(
   file: { path: string; type: 'file' | 'directory' },
@@ -598,8 +598,9 @@ export async function sendMessageWithDependencies(
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
   if (!sendPayload) return false;
   const { body, effectiveModel } = sendPayload;
+  const sendBody = { ...body, messageID: createOpenCodeMessageID() };
 
-  const expectsAssistantReply = !body.noReply && body.delivery !== 'steer';
+  const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';
   if (expectsAssistantReply) {
     deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
   }
@@ -614,8 +615,8 @@ export async function sendMessageWithDependencies(
   deps.clearSessionUsageLimit(sessionId);
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
-    body,
-    body.agent ?? deps.getSelectedAgent?.() ?? 'build',
+    sendBody,
+    sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
     effectiveModel
   );
   if (optimisticMessage) {
@@ -624,7 +625,7 @@ export async function sendMessageWithDependencies(
   if (deps.getActiveSessionId() === sessionId) deps.requestMessageListScrollToBottom();
 
   try {
-    await deps.sendAsync(sessionId, body);
+    await deps.sendAsync(sessionId, sendBody);
     if (deps.shouldClearComposerAfterSend()) {
       if (deps.clearSentComposerAttachments) {
         deps.clearSentComposerAttachments();
@@ -669,9 +670,9 @@ export async function sendMessageWithDependencies(
     }
     const baseMessage = err instanceof Error ? err.message : 'Failed to send message';
     if (deps.getActiveSessionId() !== sessionId) return false;
-    if (body.model) {
+    if (sendBody.model) {
       deps.setError(
-        `Failed to send with ${body.model.providerID}/${body.model.modelID}: ${baseMessage}`
+        `Failed to send with ${sendBody.model.providerID}/${sendBody.model.modelID}: ${baseMessage}`
       );
       return false;
     }
@@ -710,9 +711,9 @@ function createOptimisticUserMessage(
   const model = body.model ?? effectiveModel;
   if (!model) return null;
 
-  const sequence = optimisticMessageSequence++;
   const created = Date.now();
-  const messageId = `optimistic-user-${created}-${sequence}`;
+  const messageId = body.messageID;
+  if (!messageId) return null;
   const parts = body.parts.flatMap((part, index): Part[] => {
     const id = `${messageId}-part-${index}`;
     if (part.type === 'text') {

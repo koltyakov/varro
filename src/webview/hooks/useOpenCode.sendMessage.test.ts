@@ -75,6 +75,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('See [img-1.png] later');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [{ type: 'text', text: 'See later' }],
       model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
     });
@@ -111,6 +112,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review this [img-1.png]');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review this [img-1.png]' },
         { type: 'file', mime: 'image/png', filename: 'img-1.png', url: 'blob:1' },
@@ -253,6 +255,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review this');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review this' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -304,6 +307,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review active file');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review active file' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -362,6 +366,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review overlap');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review overlap' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -407,6 +412,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review active file');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review active file' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -459,6 +465,7 @@ describe('sendMessage', () => {
     await hookModule.sendMessage('Review this image');
 
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'Review this image' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -811,6 +818,7 @@ describe('sendMessage', () => {
     expect(stateModule.getSelectedAgentForSession('session-1')).toBe('build');
     expect(stateModule.getPersistedSelectedAgent()).toBe('plan');
     expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [{ type: 'text', text: 'Implement the approved plan.' }],
       agent: 'build',
     });

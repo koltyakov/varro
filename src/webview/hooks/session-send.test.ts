@@ -413,6 +413,7 @@ describe('session-send helpers', () => {
       'session-2'
     );
     expect(sendAsync).toHaveBeenCalledWith('session-2', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [{ type: 'text', text: 'hello' }],
     });
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-2', { type: 'busy' });
@@ -495,6 +496,10 @@ describe('session-send helpers', () => {
       { type: 'text', text: 'hello' },
       { type: 'text', text: '[Working directory: /repo]' },
     ]);
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ messageID: optimisticEntry?.info.id })
+    );
 
     resolveSend?.();
     await promise;

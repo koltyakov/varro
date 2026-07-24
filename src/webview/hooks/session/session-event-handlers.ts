@@ -24,6 +24,7 @@ import {
   ACTIVE_SESSION_PROGRESS_EVENTS,
   PROJECTED_SESSION_EVENTS,
   STREAMED_COMPLETION_SETTLE_DELAY_MS,
+  TRANSCRIPT_SYNC_SESSION_EVENTS,
   currentStreamingSnapshot,
   getAssistantFinishedMessageId,
   getAssistantUsagePatchFromStepEvent,
@@ -191,6 +192,7 @@ export class SessionEventHandlerOperations {
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
   const activeMessageSyncs = new Set<string>();
+  const pendingTranscriptMessageSyncs = new Set<string>();
   const pendingMissingPartDeltas = new Map<
     string,
     {
@@ -240,8 +242,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
-  const scheduleActiveMessageSync = (sessionId: string) => {
-    if (!isSessionInActiveTree(sessionId) || activeMessageSyncs.has(sessionId)) return;
+  const scheduleActiveMessageSync = (sessionId: string, ensureLatest = false) => {
+    if (!isSessionInActiveTree(sessionId)) return;
+    if (activeMessageSyncs.has(sessionId)) {
+      if (ensureLatest) pendingTranscriptMessageSyncs.add(sessionId);
+      return;
+    }
 
     activeMessageSyncs.add(sessionId);
     void deps
@@ -256,6 +262,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .catch((err) => deps.logError('syncSessionMessages', err))
       .finally(() => {
         activeMessageSyncs.delete(sessionId);
+        if (!pendingTranscriptMessageSyncs.delete(sessionId)) return;
+        scheduleActiveMessageSync(sessionId);
       });
   };
   const refreshSettledTodos = (sessionId: string) => {
@@ -1018,9 +1026,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           if (!projected || seqStatus === 'gap') scheduleActiveMessageSync(sessionID);
         } else {
           // Synchronized events arrive in durable order, so a contiguous seq means we have
-          // not missed anything and can skip the refetch. We still resync when a gap proves
-          // a durable event was missed, or when the event carries no seq (ephemeral delta).
-          if (seqStatus !== 'ok') scheduleActiveMessageSync(sessionID);
+          // not missed anything. Events that create transcript records still need a fetch
+          // because Varro does not project those record types directly.
+          const transcriptSync = TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName);
+          if (transcriptSync || seqStatus !== 'ok') {
+            scheduleActiveMessageSync(sessionID, transcriptSync);
+          }
         }
         if (eventName === 'session.next.text.ended') {
           scheduleStreamedCompletionSettle(sessionID);

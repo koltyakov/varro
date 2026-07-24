@@ -51,6 +51,15 @@ export function upsertMessageInfo(info: Message) {
     produce((msgs) => {
       const idx = messageIndex.findMessageIndex(msgs, info.id);
       if (idx !== -1) {
+        if (isOptimisticUserMessage(msgs[idx]!) && info.role === 'user') {
+          const optimisticEntry = msgs[idx]!;
+          msgs[idx] = {
+            info,
+            parts: getOptimisticImageFilePartsForServerMessage(optimisticEntry, info),
+          };
+          messageIndex.invalidate();
+          return;
+        }
         if (msgs[idx]!.info === info) return;
         msgs[idx]!.info = info;
         messageIndex.invalidate();
@@ -116,11 +125,19 @@ function removeReconciledOptimisticUserMessage(msgs: MessageEntry[], incoming: M
 }
 
 function isOptimisticUserMessage(entry: MessageEntry) {
-  return entry.info.role === 'user' && isOptimisticUserMessageId(entry.info.id);
+  return (
+    entry.info.role === 'user' &&
+    (isOptimisticUserMessageId(entry.info.id) ||
+      entry.parts.some((part) => isLocalOptimisticPartId(part.id, entry.info.id)))
+  );
 }
 
 function isOptimisticUserMessageId(id: string) {
   return id.startsWith(OPTIMISTIC_USER_MESSAGE_ID_PREFIX);
+}
+
+function isLocalOptimisticPartId(partId: string, messageId: string) {
+  return partId.startsWith(`${messageId}-part-`);
 }
 
 function getUserMessageTextSignature(parts: Part[]) {
@@ -149,6 +166,13 @@ export function upsertPart(part: Part) {
       produce((msgs) => {
         const idx = messageIndex.findMessageIndex(msgs, msgId);
         if (idx === -1) return;
+        if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
+          msgs[idx]!.parts = getOptimisticImageFilePartsForServerMessage(
+            msgs[idx]!,
+            msgs[idx]!.info
+          );
+          messageIndex.invalidate();
+        }
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
           msgs[idx]!.parts[location.partIdx] = mergePartUpdate(

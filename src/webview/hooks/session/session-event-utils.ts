@@ -175,6 +175,15 @@ export const PROJECTED_SESSION_EVENTS = new Set<string>([
   'session.next.reasoning.ended',
 ]);
 
+export const TRANSCRIPT_SYNC_SESSION_EVENTS = new Set<string>([
+  'session.next.agent.switched',
+  'session.next.model.switched',
+  'session.next.prompted',
+  'session.next.synthetic',
+  'session.next.shell.started',
+  'session.next.shell.ended',
+]);
+
 // After the final assistant text finishes streaming with no tools in flight, we
 // optimistically settle the turn this long after the last progress event. Any
 // genuine continuation (a tool call, more text/reasoning) arrives well within

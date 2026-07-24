@@ -228,12 +228,12 @@ async function readFirstSsePayload(response) {
 }
 
 async function checkEventStream() {
-  const name = 'GET /api/event provides direct server.connected SSE payload';
+  const name = 'GET /global/event provides wrapped server.connected SSE payload';
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(scopedUrl('/api/event'), {
+    const response = await fetch(scopedUrl('/global/event'), {
       headers: {
         accept: 'text/event-stream',
         'x-opencode-directory': DIRECTORY,
@@ -246,17 +246,13 @@ async function checkEventStream() {
       throw new Error(`unexpected content-type: ${contentType || 'missing'}`);
     }
     const payload = await readFirstSsePayload(response);
-    const properties = isRecord(payload?.properties)
-      ? payload.properties
-      : isRecord(payload?.data)
-        ? payload.data
-        : null;
+    const event = isRecord(payload?.payload) ? payload.payload : null;
     if (
       !isRecord(payload) ||
-      typeof payload.id !== 'string' ||
-      payload.type !== 'server.connected' ||
-      !properties ||
-      'payload' in payload
+      !event ||
+      typeof event.id !== 'string' ||
+      event.type !== 'server.connected' ||
+      !isRecord(event.properties)
     ) {
       throw new Error(`unexpected SSE payload: ${JSON.stringify(payload).slice(0, 300)}`);
     }

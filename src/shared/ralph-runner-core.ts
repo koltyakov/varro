@@ -6,6 +6,7 @@ import type {
   RalphStopReason,
   RalphVerificationVerdict,
 } from './ralph';
+import { createOpenCodeMessageID } from './opencode-id';
 import {
   RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
   RALPH_WORKSPACE_MISSING_NOTE,
@@ -156,34 +157,6 @@ const MAX_ITERATION_REPAIR_ATTEMPTS = 2;
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_IDLE_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_CLEANUP_TIMEOUT_MS = 250;
-const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-let lastPromptMessageTimestamp = 0;
-let fallbackPromptRandomSequence = 0;
-
-function createPromptMessageID(): string {
-  // OpenCode 1.18.x orders messages lexicographically by its ascending ID
-  // format: a 12-character timestamp/counter hex prefix plus 14 base62 chars.
-  // Move at least one millisecond forward per local prompt so rapid sends and
-  // the preceding server-generated assistant cannot sort after this user turn.
-  const timestamp = Math.max(Date.now() + 1, lastPromptMessageTimestamp + 1);
-  lastPromptMessageTimestamp = timestamp;
-  const encoded = BigInt.asUintN(48, BigInt(timestamp) * 0x1000n + 1n);
-  return `msg_${encoded.toString(16).padStart(12, '0')}${randomBase62(14)}`;
-}
-
-function randomBase62(length: number): string {
-  const bytes = new Uint8Array(length);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    fallbackPromptRandomSequence += 1;
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = (fallbackPromptRandomSequence + index * 31) % 256;
-    }
-  }
-  return Array.from(bytes, (value) => BASE62_CHARS[value % BASE62_CHARS.length]).join('');
-}
-
 function waitForCleanup(tasks: Set<Promise<unknown>>, timeoutMs: number): Promise<void> {
   if (tasks.size === 0) return Promise.resolve();
   return new Promise((resolve) => {
@@ -692,7 +665,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
   ): Promise<void> {
     // Arm idle listeners before sending so a fast child can't emit `idle`
     // between the send resolving and the wait subscription being attached.
-    const messageID = createPromptMessageID();
+    const messageID = createOpenCodeMessageID();
     const pollingReady = createDeferred<void>();
     const idlePromise = waitForIdle(state, childId, {
       pollingReady: pollingReady.promise,

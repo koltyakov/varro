@@ -113,6 +113,7 @@ describe('SessionSendOperations', () => {
     await operations.sendMessage('hello');
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [
         { type: 'text', text: 'hello' },
         {
@@ -318,6 +319,7 @@ describe('SessionSendOperations', () => {
     });
 
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       parts: [{ type: 'text', text: 'queued prompt' }],
     });
     expect(appStore.state.terminalSelection).toEqual({

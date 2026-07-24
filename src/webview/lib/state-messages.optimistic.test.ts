@@ -124,6 +124,34 @@ describe('optimistic user message reconciliation', () => {
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['optimistic-user-1', 'msg-1']);
   });
+
+  it('acknowledges exact optimistic message ids out of order', () => {
+    upsertMessage({
+      info: userMessage('msg-older'),
+      parts: [textPart('msg-older-part-0', 'msg-older', 'older prompt')],
+    });
+    upsertMessage({
+      info: userMessage('msg-newer'),
+      parts: [textPart('msg-newer-part-0', 'msg-newer', 'newer prompt')],
+    });
+
+    upsertMessageInfo(userMessage('msg-older'));
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-newer']);
+    expect(state.messages[0]!.parts).toEqual([]);
+    expect(state.messages[1]!.parts).toHaveLength(1);
+  });
+
+  it('drops optimistic text when a server part arrives before message metadata', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [textPart('msg-1-part-0', 'msg-1', 'optimistic text')],
+    });
+
+    upsertPart(textPart('part-server', 'msg-1', 'server text'));
+
+    expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
+  });
 });
 
 describe('optimistic image parts carried onto the server message', () => {

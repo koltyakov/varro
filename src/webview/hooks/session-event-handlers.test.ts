@@ -1810,6 +1810,68 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });
 
+  it.each(['session.next.prompted', 'session.next.synthetic', 'session.next.shell.started'])(
+    'resyncs transcript records for an in-order %s event',
+    async (eventName) => {
+      const handlers = installHandlers();
+      const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          syncSessionMessages,
+        })
+      );
+
+      handlers.get(eventName)?.({
+        properties: {
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          callID: 'call-1',
+        },
+        seq: 1,
+      });
+
+      await vi.waitFor(() => {
+        expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+      });
+    }
+  );
+
+  it('runs a trailing transcript sync when shell completion arrives during a sync', async () => {
+    const handlers = installHandlers();
+    let resolveFirstSync: (() => void) | undefined;
+    const syncSessionMessages = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstSync = resolve;
+          })
+      )
+      .mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+      seq: 1,
+    });
+    handlers.get('session.next.shell.ended')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', output: 'done' },
+      seq: 2,
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+    resolveFirstSync?.();
+    await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
+  });
+
   it('resyncs active messages when a v2 sequence gap reveals a missed event', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
