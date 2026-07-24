@@ -403,6 +403,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
+    if (error) {
+      const messages = deps.getMessages();
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const entry = messages[index];
+        if (!entry || entry.info.sessionID !== sessionId) continue;
+        if (entry.info.role === 'assistant') {
+          sessionStore.upsertMessageInfo({ ...entry.info, error });
+          sessionStore.finishMessageStreaming(entry.info.id);
+        }
+        break;
+      }
+    }
     deps.setSessionStatusEntry(sessionId, { type: 'idle' });
     deps.clearPendingAbort(sessionId);
     if (error && isAbortedAssistantError(error)) {

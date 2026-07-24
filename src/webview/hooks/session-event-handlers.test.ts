@@ -592,6 +592,33 @@ describe('registerSessionEventHandlers', () => {
     expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('shows session.error on a completed assistant before message resync finishes', () => {
+    const handlers = installHandlers();
+    const assistant = createCompletedAssistantEntry(1, 2);
+    const syncSessionMessages = vi.fn(() => new Promise<void>(() => {}));
+    const deps = createDefaultDeps({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [assistant],
+      syncSessionMessages,
+    });
+    const error = {
+      name: 'APIError',
+      data: { message: 'The API Key appears to be invalid or may have expired.' },
+    };
+
+    upsertMessageInfo.mockClear();
+    finishMessageStreaming.mockClear();
+    registerSessionEventHandlers(deps);
+
+    handlers.get('session.error')?.({
+      properties: { sessionID: 'session-1', error },
+    });
+
+    expect(upsertMessageInfo).toHaveBeenCalledWith({ ...assistant.info, error });
+    expect(finishMessageStreaming).toHaveBeenCalledWith('assistant-1');
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
   it('reconciles inactive session.error events against persisted messages', () => {
     const handlers = installHandlers();
     const deps = createDefaultDeps({ getActiveSessionId: () => 'session-2' });
