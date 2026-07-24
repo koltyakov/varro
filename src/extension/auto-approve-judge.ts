@@ -471,7 +471,9 @@ function parseLiteralShellArgument(value: string) {
     (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
       ? value.slice(1, -1)
       : value;
-  if (!unquoted || /[$~*?[\]{}\\]/.test(unquoted)) return null;
+  // Backslash is a path separator on Windows, not a shell escape, so allow it there.
+  const metacharPattern = process.platform === 'win32' ? /[$~*?[\]{}]/ : /[$~*?[\]{}\\]/;
+  if (!unquoted || metacharPattern.test(unquoted)) return null;
   return unquoted;
 }
 

@@ -315,31 +315,29 @@ export function getToolInlineFileChangesLayoutSignature(
 function getLayoutContentSignature(content: string) {
   let hash = 2_166_136_261;
   let lineCount = 1;
-  const sampleLength = Math.min(content.length, MAX_LAYOUT_CONTENT_SCAN_CHARS);
-  const firstSampleEnd =
-    content.length <= MAX_LAYOUT_CONTENT_SCAN_CHARS ? sampleLength : Math.floor(sampleLength / 2);
-  const lastSampleStart =
-    content.length <= MAX_LAYOUT_CONTENT_SCAN_CHARS
-      ? firstSampleEnd
-      : content.length - (sampleLength - firstSampleEnd);
+  const length = content.length;
 
-  const scan = (start: number, end: number) => {
-    for (let index = start; index < end; index += 1) {
-      const code = content.charCodeAt(index);
-      if (code === 10) lineCount += 1;
-      hash ^= code;
-      hash = Math.imul(hash, 16_777_619);
-    }
+  const fold = (code: number) => {
+    if (code === 10) lineCount += 1;
+    hash ^= code;
+    hash = Math.imul(hash, 16_777_619);
   };
 
-  scan(0, firstSampleEnd);
-  if (lastSampleStart > firstSampleEnd) {
-    hash ^= lastSampleStart;
-    hash = Math.imul(hash, 16_777_619);
-    scan(lastSampleStart, content.length);
+  if (length <= MAX_LAYOUT_CONTENT_SCAN_CHARS) {
+    for (let index = 0; index < length; index += 1) fold(content.charCodeAt(index));
+    return `${length}:${lineCount}:${hash >>> 0}`;
   }
 
-  return `${content.length}:${content.length > sampleLength ? 'sampled' : lineCount}:${hash >>> 0}`;
+  // Sample evenly across the whole content so a change anywhere — including the
+  // middle — still perturbs the signature, at a bounded cost.
+  const step = length / MAX_LAYOUT_CONTENT_SCAN_CHARS;
+  for (let sample = 0; sample < MAX_LAYOUT_CONTENT_SCAN_CHARS; sample += 1) {
+    const index = Math.floor(sample * step);
+    hash ^= index;
+    hash = Math.imul(hash, 16_777_619);
+    fold(content.charCodeAt(index));
+  }
+  return `${length}:sampled:${hash >>> 0}`;
 }
 
 function computeToolFileChanges(toolName: string, toolState: ToolState): FileChange[] {
@@ -665,10 +663,13 @@ function measureBoundedText(
   if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
 
   for (let index = 0; index < content.length; index += 1) {
+    const code = content.charCodeAt(index);
     const width = getUtf8Width(content, index);
     bytes += width.bytes;
     if (bytes > maxBytes) return { bytes, lines, exceeded: 'bytes' };
-    if (content.charCodeAt(index) === 10) {
+    // Count LF and lone CR as line breaks (matching DiffView's measureText), so a
+    // CRLF pair counts once while old-Mac CR line endings still advance the count.
+    if (code === 10 || (code === 13 && content.charCodeAt(index + 1) !== 10)) {
       lines += 1;
       if (lines > maxLines) return { bytes, lines, exceeded: 'lines' };
     }
