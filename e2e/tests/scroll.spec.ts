@@ -186,27 +186,32 @@ async function updateDiffPreviewWithPatch(
 
   await page.evaluate(
     ({ id, part, patch }) => {
+      const nextPart = {
+        id: part,
+        sessionID: 'session-diff-preview-large-transcript',
+        messageID: id,
+        type: 'tool' as const,
+        callID: `${part}-call`,
+        tool: 'apply_patch',
+        state: {
+          status: 'running' as const,
+          input: { patchText: patch },
+          title: 'apply_patch',
+          metadata: {},
+          time: { start: 1 },
+        },
+      };
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(nextPart);
       window.postMessage(
         {
           type: 'server/event',
           payload: {
             type: 'message.part.updated',
             properties: {
-              part: {
-                id: part,
-                sessionID: 'session-diff-preview-large-transcript',
-                messageID: id,
-                type: 'tool',
-                callID: `${part}-call`,
-                tool: 'apply_patch',
-                state: {
-                  status: 'running',
-                  input: { patchText: patch },
-                  title: 'apply_patch',
-                  metadata: {},
-                  time: { start: 1 },
-                },
-              },
+              part: nextPart,
             },
           },
         },

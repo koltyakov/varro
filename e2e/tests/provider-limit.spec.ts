@@ -28,12 +28,19 @@ test('provider limit chip is absent for scenarios without a rate-limited provide
   await expect(page.locator('.toolbar-limit-chip')).toHaveCount(0);
 });
 
-test('narrow toolbar compacts provider limit before leaving controls overflowed', async ({
+test('narrow toolbar keeps provider limit and composer controls within their rows', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 348, height: 260 });
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
-  await expect(page.locator('.toolbar-limit-chip')).toHaveCount(0);
-  await expect(page.locator('.toolbar-picker.stop-button')).toBeVisible();
+  await expect(page.locator('.toolbar-limit-chip')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send (Enter)' })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.locator('.chat-input-toolbars').evaluateAll((rows) =>
+        rows.every((row) => row.scrollWidth <= row.clientWidth + 1)
+      )
+    )
+    .toBe(true);
 });

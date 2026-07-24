@@ -237,14 +237,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const desktopSessionPaneSide = getDesktopSessionPaneSide(payload?.desktopSessionPaneSide);
       const defaultPermissionMode = getPermissionMode(payload?.defaultPermissionMode);
       return typeof payload?.expandThinkingByDefault === 'boolean' &&
-        typeof payload?.showStickyUserPrompt === 'boolean' &&
         desktopSessionPaneSide &&
         defaultPermissionMode
         ? {
             type,
             payload: {
               expandThinkingByDefault: payload.expandThinkingByDefault,
-              showStickyUserPrompt: payload.showStickyUserPrompt,
               desktopSessionPaneSide,
               defaultPermissionMode,
             },

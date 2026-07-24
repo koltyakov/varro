@@ -13,6 +13,8 @@ import {
   seedClipboardImageAttachmentSequences,
   seedContextFileAttachmentSequences,
 } from './attachment-order';
+import { STORAGE_KEYS, writeStored } from './state-storage';
+import { readStoredBooleanRecord } from './state-stored-values';
 
 export const MAX_CLIPBOARD_IMAGES = 5;
 const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -21,19 +23,27 @@ export function getCurrentDocumentEnabled(
   sessionId: string | null | undefined = state.activeSessionId
 ) {
   return sessionId
-    ? (state.currentDocumentEnabledBySession[sessionId] ?? true)
-    : (state.draftCurrentDocumentEnabled ?? true);
+    ? (state.currentDocumentEnabledBySession[sessionId] ?? state.currentDocumentEnabled)
+    : (state.draftCurrentDocumentEnabled ?? state.currentDocumentEnabled);
 }
 
 export function setCurrentDocumentEnabled(
   enabled: boolean,
   sessionId: string | null | undefined = state.activeSessionId
 ) {
+  setState('currentDocumentEnabled', enabled);
+  setState('currentDocumentEnabledBySession', (sessions) =>
+    Object.fromEntries(Object.keys(sessions).map((id) => [id, enabled]))
+  );
+  if (state.draftCurrentDocumentEnabled !== null) {
+    setState('draftCurrentDocumentEnabled', enabled);
+  }
   if (sessionId) {
     setState('currentDocumentEnabledBySession', sessionId, enabled);
-    return;
+  } else {
+    setState('draftCurrentDocumentEnabled', enabled);
   }
-  setState('draftCurrentDocumentEnabled', enabled);
+  saveProjectCurrentDocumentEnabled(enabled);
 }
 
 export function toggleCurrentDocumentEnabled(
@@ -50,6 +60,29 @@ export function rememberCurrentDocumentNavigation(
   if (!previousPath || !nextPath || previousPath === nextPath) return;
   if (getCurrentDocumentEnabled(sessionId)) return;
   setCurrentDocumentEnabled(false, sessionId);
+}
+
+export function syncCurrentDocumentForWorkspace(workspacePath: string | null) {
+  const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+  const projectValues = readStoredBooleanRecord(STORAGE_KEYS.projectCurrentDocumentEnabled);
+  setState(
+    'currentDocumentEnabled',
+    normalizedWorkspace ? (projectValues[normalizedWorkspace] ?? true) : true
+  );
+  setState('draftCurrentDocumentEnabled', null);
+  setState('currentDocumentEnabledBySession', {});
+}
+
+function saveProjectCurrentDocumentEnabled(enabled: boolean) {
+  const workspacePath = normalizeWorkspacePath(state.editorContext.workspacePath);
+  if (!workspacePath) return;
+  const projectValues = readStoredBooleanRecord(STORAGE_KEYS.projectCurrentDocumentEnabled);
+  projectValues[workspacePath] = enabled;
+  writeStored(STORAGE_KEYS.projectCurrentDocumentEnabled, projectValues);
+}
+
+function normalizeWorkspacePath(path: string | null | undefined): string | null {
+  return path?.replace(/\\/g, '/').replace(/\/+$/, '') || null;
 }
 
 export function adoptDraftCurrentDocumentState(sessionId: string) {

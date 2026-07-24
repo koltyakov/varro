@@ -552,8 +552,16 @@ describe('state helpers', () => {
     expect(stateModule.getPermissionModeForSession('child-1')).toBe('default');
   });
 
-  it('tracks current document auto-context state by session in memory', async () => {
-    const stateModule = await loadState();
+  it('persists current document auto-context by project', async () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      editorContext: {
+        workspacePath: '/repo/',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+    };
+    let stateModule = await loadState();
 
     stateModule.setState('activeSessionId', null);
     stateModule.rememberCurrentDocumentNavigation(null, '/repo/a.ts');
@@ -561,25 +569,43 @@ describe('state helpers', () => {
 
     stateModule.toggleCurrentDocumentEnabled();
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
+    expect(
+      JSON.parse(window.localStorage.getItem('varro.projectCurrentDocumentEnabled') || '{}')
+    ).toEqual({ '/repo': false });
 
     stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts');
     expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     stateModule.adoptDraftCurrentDocumentState('session-1');
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
-    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
 
     stateModule.setCurrentDocumentEnabled(true, 'session-1');
     stateModule.rememberCurrentDocumentNavigation('/repo/a.ts', '/repo/b.ts', 'session-1');
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
 
     stateModule.setCurrentDocumentEnabled(false, 'session-1');
     stateModule.rememberCurrentDocumentNavigation('/repo/b.ts', '/repo/c.ts', 'session-1');
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
 
     stateModule.clearCurrentDocumentStateForSession('session-1');
+    expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(false);
+
+    stateModule.syncCurrentDocumentForWorkspace('/other');
     expect(stateModule.getCurrentDocumentEnabled('session-1')).toBe(true);
-    expect(stateModule.getCurrentDocumentEnabled('session-2')).toBe(true);
+
+    stateModule.syncCurrentDocumentForWorkspace('/repo');
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
+
+    vi.resetModules();
+    stateModule = await loadState();
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(false);
+
+    stateModule.toggleCurrentDocumentEnabled();
+    vi.resetModules();
+    stateModule = await loadState();
+    expect(stateModule.getCurrentDocumentEnabled()).toBe(true);
   });
 
   it('deduplicates context files and manages clipboard image placeholders', async () => {
@@ -1332,7 +1358,6 @@ describe('state helpers', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.expandThinkingByDefault()).toBe(false);
-    expect(stateModule.showStickyUserPrompt()).toBe(true);
     expect(stateModule.showChangedFiles()).toBe(false);
 
     stateModule.requestComposerFocus();
@@ -1340,7 +1365,6 @@ describe('state helpers', () => {
     stateModule.requestMessageListScrollToBottom();
     stateModule.toggleThinking();
     stateModule.setExpandThinkingByDefaultPreference(true);
-    stateModule.setShowStickyUserPromptPreference(false);
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
@@ -1348,11 +1372,9 @@ describe('state helpers', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.showThinking()).toBe(false);
     expect(stateModule.expandThinkingByDefault()).toBe(true);
-    expect(stateModule.showStickyUserPrompt()).toBe(false);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));
     expect(window.localStorage.getItem('varro.expandThinkingByDefault')).toBe(JSON.stringify(true));
-    expect(window.localStorage.getItem('varro.showStickyUserPrompt')).toBe(JSON.stringify(false));
   });
 
   it('updates incremental message entries when only metadata changes', async () => {

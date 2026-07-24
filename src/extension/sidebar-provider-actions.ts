@@ -104,13 +104,6 @@ export function createSidebarProviderActions(
       await vscode.workspace
         .getConfiguration('varro')
         .update(
-          'chat.showStickyUserPrompt',
-          payload.showStickyUserPrompt as boolean,
-          vscode.ConfigurationTarget.Global
-        );
-      await vscode.workspace
-        .getConfiguration('varro')
-        .update(
           'chat.desktopSessionPaneSide',
           payload.desktopSessionPaneSide as 'left' | 'right',
           vscode.ConfigurationTarget.Global

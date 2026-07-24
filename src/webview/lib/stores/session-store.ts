@@ -50,6 +50,13 @@ export type SessionStatusSnapshotOptions = {
 };
 
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
+// Once a snapshot acknowledges local markers, older snapshots must not apply after they are pruned.
+let latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
+
+export function resetSessionStatusSnapshotTracking() {
+  sessionStatusLocalUpdatedAt.clear();
+  latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
+}
 
 export const sessionStore = {
   persistActiveSessionId,
@@ -101,30 +108,46 @@ export const sessionStore = {
     statuses: Record<string, SessionStatus>,
     options?: SessionStatusSnapshotOptions
   ) {
+    const snapshotStartedAt = options?.snapshotStartedAt;
+    if (
+      snapshotStartedAt !== undefined &&
+      snapshotStartedAt < latestAppliedSessionStatusSnapshotStartedAt
+    ) {
+      return;
+    }
+    if (snapshotStartedAt !== undefined) {
+      latestAppliedSessionStatusSnapshotStartedAt = snapshotStartedAt;
+    }
+
     setState('sessionStatus', (current) => {
-      if (options?.snapshotStartedAt === undefined) {
+      if (snapshotStartedAt === undefined) {
         return areEqualSessionStatusRecords(current, statuses) ? current : statuses;
       }
 
       const next = { ...statuses };
-      for (const sessionId of sessionStatusLocalUpdatedAt.keys()) {
-        const updatedAt = sessionStatusLocalUpdatedAt.get(sessionId) || 0;
-        const currentStatus = current[sessionId];
-        const incomingStatus = next[sessionId];
-        const hasNewerLocalUpdate = updatedAt > options.snapshotStartedAt;
-        const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
-        const sessionRootId = getSessionTreeRootId(sessionId) || sessionId;
-        const hasLocalRunningWithoutSettledMessage =
-          !!activeRootId &&
-          sessionRootId === activeRootId &&
-          isRunningSessionStatus(currentStatus) &&
-          (!incomingStatus || incomingStatus.type === 'idle') &&
-          !hasSettledLatestAssistantMessage(sessionId);
-        if (!hasNewerLocalUpdate && !hasLocalRunningWithoutSettledMessage) {
+      for (const [sessionId, updatedAt] of sessionStatusLocalUpdatedAt) {
+        if (updatedAt <= snapshotStartedAt) {
+          sessionStatusLocalUpdatedAt.delete(sessionId);
           continue;
         }
+
+        const currentStatus = current[sessionId];
         if (currentStatus) next[sessionId] = currentStatus;
         else delete next[sessionId];
+      }
+
+      const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
+      for (const sessionId of getSessionTreeIds(activeRootId)) {
+        const currentStatus = current[sessionId];
+        const incomingStatus = next[sessionId];
+        if (
+          currentStatus &&
+          isRunningSessionStatus(currentStatus) &&
+          (!incomingStatus || incomingStatus.type === 'idle') &&
+          !hasSettledLatestAssistantMessage(sessionId)
+        ) {
+          next[sessionId] = currentStatus;
+        }
       }
       return areEqualSessionStatusRecords(current, next) ? current : next;
     });

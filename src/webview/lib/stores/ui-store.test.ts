@@ -16,17 +16,14 @@ describe('uiStore', () => {
 
     uiStore.toggleThinking();
     uiStore.setExpandThinkingByDefaultPreference(true);
-    uiStore.setShowStickyUserPromptPreference(false);
     uiStore.requestComposerFocus();
     uiStore.requestOpenAttentionSessions();
     uiStore.requestMessageListScrollToBottom();
 
     expect(uiStore.showThinking()).toBe(false);
     expect(uiStore.expandThinkingByDefault()).toBe(true);
-    expect(uiStore.showStickyUserPrompt()).toBe(false);
     expect(window.localStorage.getItem(STORAGE_KEYS.showThinking)).toBe('false');
     expect(window.localStorage.getItem(STORAGE_KEYS.expandThinkingByDefault)).toBe('true');
-    expect(window.localStorage.getItem(STORAGE_KEYS.showStickyUserPrompt)).toBe('false');
     expect(uiStore.composerFocusKey()).toBe(composerFocusKey + 1);
     expect(uiStore.openAttentionSessionsKey()).toBe(openAttentionSessionsKey + 1);
     expect(uiStore.messageListScrollRequestKey()).toBe(messageListScrollRequestKey + 1);

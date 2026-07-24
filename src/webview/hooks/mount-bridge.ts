@@ -37,7 +37,6 @@ export function createMountBridgeOperations(deps: {
         },
         setConfig: (payload) => {
           uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
-          uiStore.setShowStickyUserPromptPreference(payload.showStickyUserPrompt);
           if (payload.showInlineFileChanges !== undefined) {
             uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
           }
@@ -69,6 +68,7 @@ export function createMountBridgeOperations(deps: {
         rememberCurrentDocumentNavigation: composerStore.rememberCurrentDocumentNavigation,
         syncWorkspaceState: (path) => {
           sessionStore.syncWorkspaceState(path);
+          composerStore.syncCurrentDocumentForWorkspace(path);
           syncSessionMarkersForWorkspace(path);
         },
         reloadSessionsForWorkspaceChange: deps.reloadSessionsForWorkspaceChange,
@@ -157,13 +157,13 @@ export function handleExtensionMessageWithDependencies(
       const workspaceChanged = nextWorkspacePath !== deps.getCurrentWorkspacePath();
       deps.setCurrentWorkspacePath(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
+      if (workspaceChanged) {
+        deps.syncWorkspaceState(nextWorkspacePath);
+      }
       deps.rememberCurrentDocumentNavigation(
         previousActiveFilePath,
         msg.payload.activeFile?.path ?? null
       );
-      if (workspaceChanged) {
-        deps.syncWorkspaceState(nextWorkspacePath);
-      }
       if (workspaceChanged && deps.isInitialized()) {
         deps.reloadSessionsForWorkspaceChange();
       }

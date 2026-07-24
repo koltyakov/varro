@@ -19,6 +19,7 @@ import {
   setInputText,
   setNextPastedImageIndex,
   setState,
+  syncCurrentDocumentForWorkspace,
   toggleCurrentDocumentEnabled,
 } from '../state';
 
@@ -41,6 +42,7 @@ export const composerStore = {
   getCurrentDocumentEnabled,
   setCurrentDocumentEnabled,
   toggleCurrentDocumentEnabled,
+  syncCurrentDocumentForWorkspace,
   rememberCurrentDocumentNavigation,
   adoptDraftCurrentDocumentState,
   clearDraftCurrentDocumentState,

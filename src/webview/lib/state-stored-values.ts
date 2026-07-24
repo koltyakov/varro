@@ -79,6 +79,12 @@ export function readStoredStringArrayRecord(key: string): SessionSelectedMcps {
   return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredStringArray);
 }
 
+export function readStoredBooleanRecord(key: string): Record<string, boolean> {
+  return normalizeStoredRecord(readStored<unknown>(key), (value) =>
+    typeof value === 'boolean' ? value : null
+  );
+}
+
 export function readStoredPermissionModes(key: string): Record<string, PermissionMode> {
   return normalizeStoredRecord(readStored<unknown>(key), (value) =>
     isPermissionMode(value) ? value : null
@@ -219,16 +225,6 @@ export function readExpandThinkingByDefault(
     initialWebviewState.expandThinkingByDefault ??
     readStoredBoolean(STORAGE_KEYS.expandThinkingByDefault) ??
     false
-  );
-}
-
-export function readShowStickyUserPrompt(
-  initialWebviewState: Partial<InitialWebviewState> = readInitialWebviewState()
-): boolean {
-  return (
-    initialWebviewState.showStickyUserPrompt ??
-    readStoredBoolean(STORAGE_KEYS.showStickyUserPrompt) ??
-    true
   );
 }
 

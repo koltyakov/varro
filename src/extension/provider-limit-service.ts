@@ -1,7 +1,6 @@
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ServerStatus } from '../shared/protocol';
-import { readProviderLimitConfig } from './provider-limit-config';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
 import type { OpenCodeServer } from './server';
 import {
@@ -178,18 +177,14 @@ export class ProviderLimitService {
       );
     }
 
-    const providerLimitConfig = readProviderLimitConfig();
     let providerLimit: ProviderLimitStatus | null;
     try {
-      providerLimit = await fetchProviderLimitFromAdapter(
-        {
-          provider,
-          authStore,
-          modelID,
-          checkedAt,
-        },
-        { enabledAdapterIDs: providerLimitConfig.enabledAdapters }
-      );
+      providerLimit = await fetchProviderLimitFromAdapter({
+        provider,
+        authStore,
+        modelID,
+        checkedAt,
+      });
     } catch (err) {
       providerLimit = {
         providerID,

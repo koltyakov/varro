@@ -74,8 +74,7 @@ describe('provider limit adapters', () => {
         id: 'google',
         models: { 'gemini-2.5-pro': { api: { url: 'https://cloudcode-pa.googleapis.com' } } },
       },
-      { gemini: { type: 'oauth', access: 'token-1' } },
-      { enabledAdapterIDs: new Set(['gemini']) }
+      { gemini: { type: 'oauth', access: 'token-1' } }
     );
 
     expect(adapter?.id).toBe('gemini');
@@ -120,18 +119,13 @@ describe('provider limit adapters', () => {
     expect(adapter?.id).toBe('kimi');
   });
 
-  it('matches the Antigravity adapter only when explicitly enabled', () => {
+  it('matches the Antigravity adapter', () => {
     const provider: ProviderMetadata = {
       id: 'antigravity',
       models: { 'claude-4-5-sonnet': { api: { url: 'https://127.0.0.1:42100' } } },
     };
 
-    expect(
-      findProviderLimitAdapter(provider, {}, { enabledAdapterIDs: new Set(['openai']) })
-    ).toBeNull();
-    expect(
-      findProviderLimitAdapter(provider, {}, { enabledAdapterIDs: new Set(['antigravity']) })?.id
-    ).toBe('antigravity');
+    expect(findProviderLimitAdapter(provider, {})?.id).toBe('antigravity');
   });
 
   it('does not match unknown providers', () => {
@@ -141,20 +135,6 @@ describe('provider limit adapters', () => {
         models: { model: { api: { url: 'https://provider.example.test/v1' } } },
       } as ProviderMetadata,
       { custom: { type: 'api', key: 'secret-token' } }
-    );
-
-    expect(adapter).toBeNull();
-  });
-
-  it('skips adapters disabled by configuration', () => {
-    const adapter = findProviderLimitAdapter(
-      {
-        id: 'openrouter',
-        options: { apiKey: 'sk-or-v1-test' },
-        models: { 'qwen3-coder-30b': { api: { url: 'https://openrouter.ai/api/v1' } } },
-      },
-      { openrouter: { type: 'api', key: 'sk-or-v1-test' } },
-      { enabledAdapterIDs: new Set(['openai']) }
     );
 
     expect(adapter).toBeNull();

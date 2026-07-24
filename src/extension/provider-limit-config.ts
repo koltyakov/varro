@@ -7,26 +7,10 @@ import {
   resolveProviderLimitPollIntervalSeconds,
 } from '../shared/provider-limit-config';
 
-const DEFAULT_ENABLED_PROVIDER_LIMIT_ADAPTERS = [
-  'anthropic',
-  'github-copilot',
-  'openrouter',
-  'zai',
-  'minimax',
-  'kimi',
-  'openai',
-] as const;
-
 export function readProviderLimitConfig(
   config: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration('varro')
 ) {
-  const rawEnabledAdapters = config.get<unknown>('providerLimits.enabledAdapters');
-  const enabledAdapters = Array.isArray(rawEnabledAdapters)
-    ? rawEnabledAdapters.filter(isNonEmptyString)
-    : [...DEFAULT_ENABLED_PROVIDER_LIMIT_ADAPTERS];
-
   return {
-    enabledAdapters: new Set(enabledAdapters),
     pollIntervalSeconds: resolveProviderLimitPollIntervalSeconds(
       config.get<boolean>('providerLimits.disabled') === true ||
         config.get<number>('providerLimits.pollIntervalSeconds') ===
@@ -45,7 +29,6 @@ export function readExtensionConfigState(
 
   return {
     expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
-    showStickyUserPrompt: config.get<boolean>('chat.showStickyUserPrompt', true),
     showInlineFileChanges: config.get<boolean>('chat.showInlineFileChanges', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),
@@ -58,8 +41,4 @@ export function readExtensionConfigState(
 function readDefaultPermissionMode(config: vscode.WorkspaceConfiguration) {
   const value = config.get<unknown>('chat.defaultPermissionMode');
   return isPermissionMode(value) ? value : 'default';
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
 }

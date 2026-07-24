@@ -276,7 +276,6 @@ describe('useOpenCode permission and config flows', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: 90,
@@ -322,7 +321,6 @@ describe('useOpenCode permission and config flows', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           providerLimitsDisabled: true,
@@ -364,7 +362,6 @@ describe('useOpenCode permission and config flows', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
@@ -406,7 +403,6 @@ describe('useOpenCode permission and config flows', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
@@ -418,7 +414,6 @@ describe('useOpenCode permission and config flows', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'right',
           defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: 120,

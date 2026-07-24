@@ -58,7 +58,6 @@ export class WebviewSession {
       ensureServerStarted(): Promise<unknown>;
       readConfig(): {
         expandThinkingByDefault: boolean;
-        showStickyUserPrompt: boolean;
         showInlineFileChanges?: boolean;
         showChangedFiles?: boolean;
         desktopSessionPaneSide: 'left' | 'right';
@@ -246,7 +245,6 @@ export class WebviewSession {
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
       expandThinkingByDefault: config.expandThinkingByDefault,
-      showStickyUserPrompt: config.showStickyUserPrompt,
       showInlineFileChanges: config.showInlineFileChanges,
       showChangedFiles: config.showChangedFiles,
       desktopSessionPaneSide: config.desktopSessionPaneSide,

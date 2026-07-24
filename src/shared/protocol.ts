@@ -392,7 +392,6 @@ export type InitialWebviewState = {
   emptyStateLogoUri: string;
   remoteExtensionHost?: boolean;
   expandThinkingByDefault?: boolean;
-  showStickyUserPrompt?: boolean;
   showInlineFileChanges?: boolean;
   showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;

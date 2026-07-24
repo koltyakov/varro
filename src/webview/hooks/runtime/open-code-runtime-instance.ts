@@ -868,8 +868,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit,
     loadSessions,
     loadRecycleBin,
-    hydrateSessionStatuses,
   } = dataLoaders;
+  const hydrateSessionStatuses = hydratePolledSessionStatuses;
 
   async function refreshRoutingState() {
     await dataLoaders.refreshRoutingState();

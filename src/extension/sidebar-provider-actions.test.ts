@@ -215,12 +215,11 @@ describe('createSidebarProviderActions', () => {
 
     await actions.updateConfig({
       expandThinkingByDefault: true,
-      showStickyUserPrompt: false,
       desktopSessionPaneSide: 'right',
       defaultPermissionMode: 'full',
     });
 
-    expect(mocks.vscode.workspace.getConfiguration).toHaveBeenCalledTimes(4);
+    expect(mocks.vscode.workspace.getConfiguration).toHaveBeenCalledTimes(3);
     expect(mocks.vscode.workspace.getConfiguration).toHaveBeenNthCalledWith(1, 'varro');
     expect(mocks.config.update).toHaveBeenNthCalledWith(
       1,
@@ -230,18 +229,12 @@ describe('createSidebarProviderActions', () => {
     );
     expect(mocks.config.update).toHaveBeenNthCalledWith(
       2,
-      'chat.showStickyUserPrompt',
-      false,
-      'global'
-    );
-    expect(mocks.config.update).toHaveBeenNthCalledWith(
-      3,
       'chat.desktopSessionPaneSide',
       'right',
       'global'
     );
     expect(mocks.config.update).toHaveBeenNthCalledWith(
-      4,
+      3,
       'chat.defaultPermissionMode',
       'full',
       'global'

@@ -16,7 +16,6 @@ const {
   syncDraftPermissionForWorkspace,
   syncSessionMarkersForWorkspace,
   setExpandThinkingByDefaultPreference,
-  setShowStickyUserPromptPreference,
   setShowInlineFileChanges,
   setShowChangedFiles,
   setDesktopSessionPaneSide,
@@ -38,7 +37,6 @@ const {
   syncDraftPermissionForWorkspace: vi.fn(),
   syncSessionMarkersForWorkspace: vi.fn(),
   setExpandThinkingByDefaultPreference: vi.fn(),
-  setShowStickyUserPromptPreference: vi.fn(),
   setShowInlineFileChanges: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
@@ -69,7 +67,6 @@ vi.mock('../lib/state', async () => {
     syncDraftPermissionForWorkspace,
     syncSessionMarkersForWorkspace,
     setExpandThinkingByDefaultPreference,
-    setShowStickyUserPromptPreference,
     setShowInlineFileChanges,
     setShowChangedFiles,
     setDesktopSessionPaneSide,
@@ -233,6 +230,9 @@ describe('mount bridge helpers', () => {
     expect(setEditorContext).toHaveBeenCalledWith(payload);
     expect(rememberNavigation).toHaveBeenCalledWith('/repo/src/old.ts', '/repo-next/src/app.ts');
     expect(syncWorkspaceState).toHaveBeenCalledWith('/repo-next');
+    expect(syncWorkspaceState.mock.invocationCallOrder[0]).toBeLessThan(
+      rememberNavigation.mock.invocationCallOrder[0] ?? Infinity
+    );
     expect(reloadSessionsForWorkspaceChange).toHaveBeenCalledTimes(1);
   });
 
@@ -338,7 +338,6 @@ describe('mount bridge helpers', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
-        showStickyUserPrompt: true,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'right',

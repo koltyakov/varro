@@ -138,7 +138,6 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       if (
         !payload ||
         typeof payload.expandThinkingByDefault !== 'boolean' ||
-        typeof payload.showStickyUserPrompt !== 'boolean' ||
         !isDesktopSessionPaneSide(payload.desktopSessionPaneSide) ||
         !isPermissionMode(payload.defaultPermissionMode)
       ) {
@@ -148,7 +147,6 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         type,
         payload: {
           expandThinkingByDefault: payload.expandThinkingByDefault,
-          showStickyUserPrompt: payload.showStickyUserPrompt,
           ...(typeof payload.showInlineFileChanges === 'boolean'
             ? { showInlineFileChanges: payload.showInlineFileChanges }
             : {}),

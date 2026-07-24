@@ -286,9 +286,6 @@ Context:
 
 Provider limits:
 
-- `varro.providerLimits.enabledAdapters` - allowlist of provider-limit adapters Varro may poll
-- Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `kimi` (Kimi For Coding), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity)
-- Default enabled IDs: `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `kimi`, `openai`
 - `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use
 - `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
 
@@ -296,7 +293,6 @@ Chat view:
 
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `default`
 - `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default
-- `varro.chat.showStickyUserPrompt` - show a sticky preview of the latest user prompt while scrolling long assistant responses
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`
 - `varro.chat.autoCompact` - enable automatic OpenCode session compaction when context is full unless project `opencode.json` overrides it
 - `varro.chat.autoCompactionReservedTokens` - reserved token headroom before automatic compaction triggers; set to `null` to use OpenCode defaults

@@ -599,7 +599,6 @@ describe('webview message validation', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: true,
           desktopSessionPaneSide: 'bottom',
           defaultPermissionMode: 'full',
         },

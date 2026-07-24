@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   sessionPermissionModes: 'varro.sessionPermissionModes',
   sessionSelectedMcps: 'varro.sessionSelectedMcps',
   projectPermissionModes: 'varro.projectPermissionModes',
+  projectCurrentDocumentEnabled: 'varro.projectCurrentDocumentEnabled',
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
   lastSeenSessions: 'varro.lastSeenSessions',
@@ -20,7 +21,6 @@ export const STORAGE_KEYS = {
   lastOpenedView: 'varro.lastOpenedView',
   showThinking: 'varro.showThinking',
   expandThinkingByDefault: 'varro.expandThinkingByDefault',
-  showStickyUserPrompt: 'varro.showStickyUserPrompt',
 } as const;
 
 const browserPersistence = new BrowserPersistence();

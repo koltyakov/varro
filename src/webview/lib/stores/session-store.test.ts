@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEffect, createRoot } from 'solid-js';
 import type { FileDiff, Message, Part, Session } from '../../types';
-import { sessionStore } from './session-store';
+import { resetSessionStatusSnapshotTracking, sessionStore } from './session-store';
 import {
   resetDefaultAppState,
   setMessagesIncremental,
@@ -79,6 +79,7 @@ describe('sessionStore', () => {
   beforeEach(() => {
     window.localStorage.clear();
     resetDefaultAppState();
+    resetSessionStatusSnapshotTracking();
   });
 
   it('updates active session, diffs, and session status entries', () => {
@@ -145,6 +146,49 @@ describe('sessionStore', () => {
       'session-1': { type: 'idle' },
       'session-2': { type: 'idle' },
     });
+    nowSpy.mockRestore();
+  });
+
+  it('prunes acknowledged local markers and ignores older snapshots afterward', () => {
+    const localUpdateTime = Date.now() + 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(localUpdateTime);
+    const deleteSpy = vi.spyOn(Map.prototype, 'delete');
+    sessionStore.setSessionStatusEntry('acknowledged-session', { type: 'idle' });
+
+    sessionStore.setSessionStatuses(
+      { 'acknowledged-session': { type: 'idle' } },
+      { snapshotStartedAt: localUpdateTime + 1 }
+    );
+
+    expect(deleteSpy).toHaveBeenCalledWith('acknowledged-session');
+
+    sessionStore.setSessionStatuses(
+      { 'acknowledged-session': { type: 'busy' } },
+      { snapshotStartedAt: localUpdateTime - 1 }
+    );
+
+    expect(state.sessionStatus['acknowledged-session']).toEqual({ type: 'idle' });
+    deleteSpy.mockRestore();
+    nowSpy.mockRestore();
+  });
+
+  it('preserves active running status after its local marker is acknowledged', () => {
+    const localUpdateTime = Date.now() + 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(localUpdateTime);
+    sessionStore.setSessions([createSession('session-1')]);
+    sessionStore.setActiveSessionId('session-1');
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+
+    sessionStore.setSessionStatuses(
+      { 'session-1': { type: 'idle' } },
+      { snapshotStartedAt: localUpdateTime + 1 }
+    );
+    sessionStore.setSessionStatuses(
+      { 'session-1': { type: 'idle' } },
+      { snapshotStartedAt: localUpdateTime + 2 }
+    );
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     nowSpy.mockRestore();
   });
 

@@ -9,7 +9,6 @@ import {
   setMessageListScrollRequestKey,
   setOpenAttentionSessionsKey,
   setSessionSearchFocusKey,
-  setShowStickyUserPrompt,
   setShowThinking,
   showThinking,
 } from './app-state';
@@ -28,11 +27,6 @@ export function setShowThinkingPreference(next: boolean) {
 export function setExpandThinkingByDefaultPreference(next: boolean) {
   setExpandThinkingByDefault(next);
   writeStored(STORAGE_KEYS.expandThinkingByDefault, next);
-}
-
-export function setShowStickyUserPromptPreference(next: boolean) {
-  setShowStickyUserPrompt(next);
-  writeStored(STORAGE_KEYS.showStickyUserPrompt, next);
 }
 
 export function startLoading(now = Date.now()) {

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromisesModule from 'fs/promises';
-import type * as ProviderLimitConfigModule from './provider-limit-config';
 import type * as ProviderLimitsModule from './provider-limits';
 import type * as ProviderLimitModule from './util/provider-limit';
 import type { ProviderLimitStatus } from '../shared/protocol';
@@ -12,10 +11,6 @@ const mocks = vi.hoisted(() => ({
   fetchProviderLimitFromAdapterMock: vi.fn(),
   getOpenCodeAuthFilePathMock: vi.fn(() => '/tmp/opencode/auth.json'),
   parseProviderAuthStoreMock: vi.fn((_raw: string) => ({})),
-  readProviderLimitConfigMock: vi.fn(() => ({
-    enabledAdapters: new Set(['github-copilot', 'openrouter', 'zai', 'minimax', 'openai']),
-    pollIntervalSeconds: 120,
-  })),
 }));
 
 vi.mock('fs/promises', async () => {
@@ -42,14 +37,6 @@ vi.mock('./provider-limits', async () => {
   return {
     ...actual,
     fetchProviderLimitFromAdapter: mocks.fetchProviderLimitFromAdapterMock,
-  };
-});
-
-vi.mock('./provider-limit-config', async () => {
-  const actual = await vi.importActual<typeof ProviderLimitConfigModule>('./provider-limit-config');
-  return {
-    ...actual,
-    readProviderLimitConfig: mocks.readProviderLimitConfigMock,
   };
 });
 
@@ -235,8 +222,7 @@ describe('ProviderLimitService', () => {
     expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         authStore: { anthropic: { type: 'oauth', access: 'new-token' } },
-      }),
-      expect.anything()
+      })
     );
   });
 
@@ -537,28 +523,6 @@ describe('ProviderLimitService', () => {
       checkedAt: Date.now(),
       note: 'OpenRouter usage endpoint rejected credentials (401)',
     });
-  });
-
-  it('passes enabled adapter settings to adapter resolution', async () => {
-    const server = createServer();
-    const service = new ProviderLimitService(server);
-    const enabledAdapters = new Set(['openai']);
-    mocks.readProviderLimitConfigMock.mockReturnValue({
-      enabledAdapters,
-      pollIntervalSeconds: 45,
-    });
-
-    await service.get('openai', 'gpt-5.4');
-
-    expect(mocks.fetchProviderLimitFromAdapterMock).toHaveBeenCalledWith(
-      {
-        provider: { id: 'openai', models: { 'gpt-5.4': {} } },
-        authStore: {},
-        modelID: 'gpt-5.4',
-        checkedAt: Date.now(),
-      },
-      { enabledAdapterIDs: enabledAdapters }
-    );
   });
 
   it('prefers provider adapter snapshots over OpenCode metadata when available', async () => {

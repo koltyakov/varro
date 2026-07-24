@@ -71,16 +71,11 @@ test('thinking preference persists across reload', async ({ page }) => {
   await expect(page.locator('.chat-thinking-box')).toBeVisible();
 });
 
-test('sticky prompt preference changes via config/update', async ({ page }) => {
+test('sticky prompt ignores a legacy disabled preference', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('varro.showStickyUserPrompt', 'false');
+  });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
-
-  await expect
-    .poll(() =>
-      getE2EState(page, () => ({
-        showStickyUserPrompt: localStorage.getItem('varro.showStickyUserPrompt'),
-      }))
-    )
-    .toEqual({ showStickyUserPrompt: null });
 
   const list = page.locator('.interactive-list');
   await list.evaluate((el) => {
@@ -88,29 +83,4 @@ test('sticky prompt preference changes via config/update', async ({ page }) => {
     el.dispatchEvent(new Event('scroll'));
   });
   await expect(page.locator('.latest-user-message-sticky')).toBeVisible();
-
-  await page.evaluate(() => {
-    window.postMessage(
-      {
-        type: 'config/update',
-        payload: {
-          expandThinkingByDefault: false,
-          showStickyUserPrompt: false,
-          desktopSessionPaneSide: 'left',
-          defaultPermissionMode: 'default',
-        },
-      },
-      '*'
-    );
-  });
-
-  await expect(page.locator('.latest-user-message-sticky')).toHaveCount(0);
-
-  await expect
-    .poll(() =>
-      getE2EState(page, () => ({
-        showStickyUserPrompt: localStorage.getItem('varro.showStickyUserPrompt'),
-      }))
-    )
-    .toEqual({ showStickyUserPrompt: 'false' });
 });

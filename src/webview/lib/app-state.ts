@@ -67,8 +67,8 @@ import {
   readDesktopSessionPaneSide,
   readExpandThinkingByDefault,
   readInitialWebviewState,
-  readShowStickyUserPrompt,
   readShowThinking,
+  readStoredBooleanRecord,
   readStoredPermissionModes,
   readStoredQueuedMessages,
   readStoredSelectedModel,
@@ -87,6 +87,7 @@ export interface AppState {
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   emptyStateLogoUri: string;
+  currentDocumentEnabled: boolean;
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
@@ -154,8 +155,6 @@ export interface AppStateInstance {
   setShowThinking: Setter<boolean>;
   expandThinkingByDefault: Accessor<boolean>;
   setExpandThinkingByDefault: Setter<boolean>;
-  showStickyUserPrompt: Accessor<boolean>;
-  setShowStickyUserPrompt: Setter<boolean>;
   showInlineFileChanges: Accessor<boolean>;
   setShowInlineFileChanges: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
@@ -216,6 +215,12 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
+  const currentDocumentWorkspace =
+    initialWebviewState.editorContext?.workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') ||
+    null;
+  const projectCurrentDocumentEnabled = readStoredBooleanRecord(
+    STORAGE_KEYS.projectCurrentDocumentEnabled
+  );
   resetAttachmentOrderState();
   seedContextFileAttachmentSequences(initialWebviewState.droppedFiles ?? []);
   seedClipboardImageAttachmentSequences([]);
@@ -245,6 +250,9 @@ export function createAppState(): AppStateInstance {
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: initialWebviewState.terminalSelection ?? null,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
+    currentDocumentEnabled: currentDocumentWorkspace
+      ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)
+      : true,
     draftCurrentDocumentEnabled: null,
     droppedFiles: initialWebviewState.droppedFiles ?? [],
     clipboardImages: [],
@@ -297,9 +305,6 @@ export function createAppState(): AppStateInstance {
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
   const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
     readExpandThinkingByDefault(initialWebviewState)
-  );
-  const [showStickyUserPrompt, setShowStickyUserPrompt] = createSignal(
-    readShowStickyUserPrompt(initialWebviewState)
   );
   const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
     initialWebviewState.showInlineFileChanges ?? false
@@ -371,8 +376,6 @@ export function createAppState(): AppStateInstance {
     setShowThinking,
     expandThinkingByDefault,
     setExpandThinkingByDefault,
-    showStickyUserPrompt,
-    setShowStickyUserPrompt,
     showInlineFileChanges,
     setShowInlineFileChanges,
     showChangedFiles,
@@ -446,8 +449,6 @@ export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
 export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
 export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
-export const showStickyUserPrompt = defaultAppState.showStickyUserPrompt;
-export const setShowStickyUserPrompt = defaultAppState.setShowStickyUserPrompt;
 export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
 export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
 export const showChangedFiles = defaultAppState.showChangedFiles;
@@ -514,7 +515,6 @@ export function resetDefaultAppState() {
   setState(reconcile(next.state));
   setShowThinking(next.showThinking());
   setExpandThinkingByDefault(next.expandThinkingByDefault());
-  setShowStickyUserPrompt(next.showStickyUserPrompt());
   setShowInlineFileChanges(next.showInlineFileChanges());
   setShowChangedFiles(next.showChangedFiles());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());

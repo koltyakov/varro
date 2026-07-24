@@ -143,6 +143,7 @@ type HarnessWindow = Window & {
     filePickCount?: number;
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
     exportSessionIds?: string[];
+    updateMessagePart?: (part: Part) => void;
   };
 };
 
@@ -2921,7 +2922,6 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
-    showStickyUserPrompt: true,
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
@@ -3722,6 +3722,15 @@ function setUpHarness() {
     filePickCount: 0,
     openTargets: [],
     exportSessionIds: [],
+    updateMessagePart: (part) => {
+      const messages = scenarioState.messagesBySessionId[part.sessionID];
+      const message = messages?.find((entry) => entry.info.id === part.messageID);
+      if (!message) return;
+
+      const partIndex = message.parts.findIndex((candidate) => candidate.id === part.id);
+      if (partIndex === -1) message.parts.push(part);
+      else message.parts[partIndex] = part;
+    },
   };
   document.body.dataset.vscodeThemeKind = THEME;
   if (THEME !== 'dark') {

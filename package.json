@@ -233,11 +233,6 @@
           "default": false,
           "description": "Expand thinking blocks by default in the chat view."
         },
-        "varro.chat.showStickyUserPrompt": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the sticky user prompt preview while scrolling long assistant responses."
-        },
         "varro.chat.showInlineFileChanges": {
           "type": "boolean",
           "default": true,
@@ -331,23 +326,6 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start the OpenCode server when Varro first needs it"
-        },
-        "varro.providerLimits.enabledAdapters": {
-          "deprecationMessage": "Debug only setting. Not intended for regular use.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "anthropic",
-            "github-copilot",
-            "openrouter",
-            "zai",
-            "minimax",
-            "kimi",
-            "openai"
-          ],
-          "markdownDescription": "Allowlist of provider-limit adapters Varro may poll. Supported IDs: `anthropic` (Anthropic), `github-copilot` (GitHub Copilot), `openrouter` (OpenRouter), `zai` (Z.ai), `minimax` (MiniMax), `kimi` (Kimi For Coding), `openai` (OpenAI), `gemini` (Gemini/Google), `antigravity` (Antigravity). Defaults to `anthropic`, `github-copilot`, `openrouter`, `zai`, `minimax`, `kimi`, and `openai`."
         }
       }
     }

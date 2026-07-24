@@ -212,7 +212,6 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     const payload = {
       expandThinkingByDefault: true,
-      showStickyUserPrompt: false,
       desktopSessionPaneSide: 'right' as const,
       defaultPermissionMode: 'full' as const,
     };

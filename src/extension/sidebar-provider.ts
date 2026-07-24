@@ -239,12 +239,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.updateStatusBarItem();
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('varro.providerLimits.enabledAdapters')) {
-        this.providerLimitService.clearCache();
-      }
       if (
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
-        event.affectsConfiguration('varro.chat.showStickyUserPrompt') ||
         event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||

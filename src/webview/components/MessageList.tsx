@@ -26,7 +26,6 @@ import {
   getSessionTreeRootId,
   messageStructureVersion,
   messageInfoVersion,
-  showStickyUserPrompt,
   showModelPicker,
   showInlineFileChanges,
 } from '../lib/state';
@@ -212,6 +211,7 @@ export function MessageList() {
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
   const ACTIVE_WHEEL_WINDOW_MS = 180;
   const SCROLL_INPUT_WINDOW_MS = 500;
+  const OVERLAY_SCROLLBAR_HIT_WIDTH_PX = 16;
   const USER_SCROLL_IDLE_MS = 240;
 
   const [scrollTop, setScrollTop] = createSignal(0);
@@ -1506,16 +1506,27 @@ export function MessageList() {
   }
 
   function handlePointerDown(event: PointerEvent) {
-    if (!containerRef || event.button !== 0 || event.isPrimary === false) return;
+    if (
+      !containerRef ||
+      event.button !== 0 ||
+      event.isPrimary === false ||
+      containerRef.scrollHeight <= containerRef.clientHeight
+    ) {
+      return;
+    }
     if (event.pointerType !== 'touch') {
       if (event.target !== containerRef) return;
 
-      const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
-      if (scrollbarInset <= 0) return;
-
       const rect = containerRef.getBoundingClientRect();
-      const scale = containerRef.offsetWidth > 0 ? rect.width / containerRef.offsetWidth : 1;
-      const gutterWidth = scrollbarInset * scale;
+      const layoutWidth = containerRef.offsetWidth;
+      if (layoutWidth <= 0 || rect.width <= 0) return;
+
+      const scale = rect.width / layoutWidth;
+      const scrollbarInset = Math.max(0, layoutWidth - containerRef.clientWidth);
+      const gutterWidth = Math.min(
+        rect.width,
+        (scrollbarInset || OVERLAY_SCROLLBAR_HIT_WIDTH_PX) * scale
+      );
       const inScrollbarGutter =
         getComputedStyle(containerRef).direction === 'rtl'
           ? event.clientX >= rect.left && event.clientX <= rect.left + gutterWidth
@@ -2139,7 +2150,7 @@ export function MessageList() {
           ref={trackRef}
           class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}${showTruncatedHistoryBanner() && scrollTop() <= 24 ? ' history-boundary-visible' : ''}`}
         >
-          <Show when={showStickyUserPrompt() && stickyUserMessagePreview()}>
+          <Show when={stickyUserMessagePreview()}>
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}

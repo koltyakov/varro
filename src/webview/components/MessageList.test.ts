@@ -3997,7 +3997,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('keeps following when an ordinary content pointerdown precedes a layout clamp', async () => {
+  it('keeps following when non-scroll pointer input precedes a layout clamp', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
@@ -4034,6 +4034,8 @@ describe('MessageList auto-scroll', () => {
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 500 });
     Object.defineProperty(list!, 'scrollHeight', {
       configurable: true,
       get: () => scrollHeightValue,
@@ -4050,8 +4052,11 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     expect(scrollTopValue).toBe(800);
 
+    scrollHeightValue = 400;
+    list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
+    scrollHeightValue = 1200;
     list?.firstElementChild?.dispatchEvent(
-      new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 100 })
+      new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 })
     );
     // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
     // event only after the old bottom target has returned.
@@ -4152,7 +4157,10 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('stops following after scrollbar pointer-originated upward scrolling', async () => {
+  it.each([
+    { name: 'classic', clientWidth: 484 },
+    { name: 'overlay', clientWidth: 500 },
+  ])('stops following after $name scrollbar pointer-originated upward scrolling', async (args) => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
@@ -4189,7 +4197,10 @@ describe('MessageList auto-scroll', () => {
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'clientWidth', { configurable: true, value: 484 });
+    Object.defineProperty(list!, 'clientWidth', {
+      configurable: true,
+      value: args.clientWidth,
+    });
     Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 500 });
     Object.defineProperty(list!, 'scrollHeight', {
       configurable: true,

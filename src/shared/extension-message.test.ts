@@ -398,7 +398,6 @@ describe('parseExtensionMessage', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: false,
           showInlineFileChanges: true,
           showChangedFiles: true,
           desktopSessionPaneSide: 'left',
@@ -412,7 +411,6 @@ describe('parseExtensionMessage', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
-        showStickyUserPrompt: false,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'left',
@@ -426,7 +424,7 @@ describe('parseExtensionMessage', () => {
     expect(
       parseExtensionMessage({
         type: 'config/update',
-        payload: { expandThinkingByDefault: true, showStickyUserPrompt: false },
+        payload: { expandThinkingByDefault: true },
       })
     ).toBeNull();
   });
@@ -437,7 +435,6 @@ describe('parseExtensionMessage', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'default',
           providerLimitsDisabled: true,
@@ -447,7 +444,6 @@ describe('parseExtensionMessage', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
-        showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'default',
         providerLimitsDisabled: true,
@@ -461,7 +457,6 @@ describe('parseExtensionMessage', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'auto',
         },
@@ -470,7 +465,6 @@ describe('parseExtensionMessage', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
-        showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'auto',
       },
@@ -483,7 +477,6 @@ describe('parseExtensionMessage', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
-          showStickyUserPrompt: false,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'default',
           providerLimitPollIntervalSeconds: -1,
@@ -493,7 +486,6 @@ describe('parseExtensionMessage', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
-        showStickyUserPrompt: false,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'default',
         providerLimitPollIntervalSeconds: -1,
