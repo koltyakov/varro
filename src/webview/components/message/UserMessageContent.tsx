@@ -130,6 +130,7 @@ function parseUserMessageText(text: string): {
   const messageTexts: string[] = [];
   const attachments: MessageAttachment[] = [];
   const textBuffer: string[] = [];
+  const standaloneReference = isStandaloneFileReference(normalized.trim());
   let inCodeFence = false;
 
   const flushTextBuffer = () => {
@@ -171,7 +172,10 @@ function parseUserMessageText(text: string): {
         continue;
       }
 
-      const attachment = parseUserMessageAttachmentLine(trimmedLine);
+      const attachment = parseUserMessageAttachmentLine(
+        trimmedLine,
+        standaloneReference && trimmedLine === normalized.trim()
+      );
       if (attachment) {
         flushTextBuffer();
         attachments.push(attachment);
@@ -190,7 +194,10 @@ function parseUserMessageText(text: string): {
   return { messageTexts, attachments };
 }
 
-function parseUserMessageAttachmentLine(line: string): MessageAttachment | null {
+function parseUserMessageAttachmentLine(
+  line: string,
+  allowStandaloneFileReference: boolean
+): MessageAttachment | null {
   if (!line) return null;
 
   if (line.startsWith('[Selection from ') && !line.startsWith('[Selection from terminal')) {
@@ -221,7 +228,7 @@ function parseUserMessageAttachmentLine(line: string): MessageAttachment | null 
     return null;
   }
 
-  if (isStandaloneFileReference(line)) {
+  if (allowStandaloneFileReference) {
     return {
       type: 'file-reference',
       path: line,
@@ -673,6 +680,7 @@ function isStandaloneFileReference(text: string): boolean {
   if (trimmed.includes('\n')) return false;
   if (trimmed.length <= 1 || trimmed.length > 300) return false;
   if (/\[\d+\/\d+\]/.test(trimmed)) return false;
+  if (/["'{}[\],<>|]/.test(trimmed) || trimmed.includes('>')) return false;
 
   const normalizedInput = trimmed.replace(/\\/g, '/');
   if (/:\d+(?::\d+)?$/.test(normalizedInput)) return false;

@@ -669,10 +669,10 @@ describe('getUserMessagePreviewText', () => {
 describe('parseUserMessageContent', () => {
   it('treats absolute paths with spaces as attachments', () => {
     const parsed = parseUserMessageContent([
-      textPart('text-1', 'Test\n\n/Users/andrew/Downloads/report final 5397.pdf'),
+      textPart('text-1', '/Users/andrew/Downloads/report final 5397.pdf'),
     ]);
 
-    expect(parsed.messageTexts).toEqual(['Test']);
+    expect(parsed.messageTexts).toEqual([]);
     expect(parsed.attachments).toEqual([
       {
         type: 'file-reference',
@@ -717,20 +717,49 @@ describe('parseUserMessageContent', () => {
     expect(parsed.attachments).toEqual([]);
   });
 
-  it('treats relative folder references as attachments', () => {
-    const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
+  it('keeps file-like lines in audit output as text', () => {
+    const text = [
+      'NPM audit report results:',
+      '{',
+      '  "@eslint/config-array": {',
+      '    "via": [',
+      '      "minimatch"',
+      '    ],',
+      '    "nodes": [',
+      '      "node_modules/@eslint/config-array"',
+      '    ]',
+      '  }',
+      '}',
+    ].join('\n');
+    const parsed = parseUserMessageContent([textPart('text-1', text)]);
 
-    expect(parsed.messageTexts).toEqual(['See that']);
-    expect(parsed.attachments).toEqual([
-      {
-        type: 'file-reference',
-        path: 'src/',
-        isDirectory: true,
-      },
-    ]);
+    expect(parsed.messageTexts).toEqual([text]);
+    expect(parsed.attachments).toEqual([]);
   });
 
-  it('renders extracted attachment lines from mixed user text', () => {
+  it('rejects quoted dependency paths as standalone attachments', () => {
+    const lines = [
+      '"@eslint/config-array": {',
+      '"@typescript-eslint/type-utils",',
+      '"node_modules/@typescript-eslint/parser"',
+      'typescript-eslint>minimatch',
+    ];
+    const parsed = parseUserMessageContent(
+      lines.map((line, index) => textPart(`text-${index}`, line))
+    );
+
+    expect(parsed.messageTexts).toEqual(lines);
+    expect(parsed.attachments).toEqual([]);
+  });
+
+  it('keeps relative folder lines in mixed text', () => {
+    const parsed = parseUserMessageContent([textPart('text-1', 'See that\n\nsrc/')]);
+
+    expect(parsed.messageTexts).toEqual(['See that\n\nsrc/']);
+    expect(parsed.attachments).toEqual([]);
+  });
+
+  it('does not extract attachment lines from mixed user text', () => {
     cleanup = render(
       () =>
         Message({
@@ -745,10 +774,10 @@ describe('parseUserMessageContent', () => {
       container!
     );
 
-    expect(container?.querySelector('.message-attachments .chip-label')?.textContent).toBe(
-      'ПД Оккервиль ЛСТ Квартплата 5397.pdf'
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
     );
-    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Test');
   });
 
   it('keeps inline mentions in message text while hiding duplicated attachment refs', () => {
