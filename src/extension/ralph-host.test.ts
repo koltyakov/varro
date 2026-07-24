@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { resolve as resolvePath } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RalphConfig, RalphRun } from '../shared/ralph';
 import type { RalphStatePayload } from '../shared/protocol';
@@ -752,7 +753,7 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().runs[config.managerSessionId]?.config.workspaceDirectory).toBe(
       '/workspace-a'
     );
-    expect(readFile).toHaveBeenCalledWith('/workspace-a/RALPH.md');
+    expect(readFile).toHaveBeenCalledWith(resolvePath('/workspace-a', 'RALPH.md'));
     expect(server.request.mock.calls.length).toBeGreaterThan(0);
     expect(
       server.request.mock.calls.every(

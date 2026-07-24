@@ -267,7 +267,7 @@ describe('OpenCodeProcess Windows termination', () => {
       signalCode: null as NodeJS.Signals | null,
     });
     spawnMock.mockImplementation((command: string, args: string[]) => {
-      if (command === 'cmd.exe') return wrapper;
+      if (command === (process.env.ComSpec || 'cmd.exe')) return wrapper;
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
         stderr: new EventEmitter(),
