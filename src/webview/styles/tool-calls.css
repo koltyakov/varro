@@ -601,6 +601,12 @@
   padding-bottom: 14px;
 }
 
+.diff-view-lines-shell:not(.diff-view-lines-shell-expanded):has(.diff-view-toggle)
+  .diff-view-lines-content {
+  /* Let the final changed row align with the top of the collapsed viewport. */
+  padding-bottom: calc(128px - 19px);
+}
+
 .diff-view-gap {
   position: sticky;
   z-index: 1;

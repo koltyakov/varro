@@ -368,7 +368,7 @@ function DiffItem(props: { diff: FileDiff; showChanges?: boolean; stateKey?: str
   const firstChangeIndex = createMemo(() =>
     displayLines().findIndex((line) => line.kind === 'addition' || line.kind === 'deletion')
   );
-  const scrollAnchorIndex = createMemo(() => Math.max(0, firstChangeIndex() - 1));
+  const scrollAnchorIndex = createMemo(() => Math.max(0, firstChangeIndex()));
   const canExpand = createMemo(() => displayLines().length > COLLAPSED_DIFF_LINE_COUNT);
   const [expanded, setExpanded] = createSignal(initialPreviewState?.expanded ?? false);
   const [scrollbarsActive, setScrollbarsActive] = createSignal(false);

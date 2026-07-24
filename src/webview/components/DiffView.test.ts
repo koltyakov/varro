@@ -158,7 +158,7 @@ describe('DiffView', () => {
 
     expect(viewport?.scrollTop).toBe(57);
     expect(container?.querySelector('.diff-view-scroll-anchor')?.textContent).toContain(
-      'context before'
+      'const firstChange = true;'
     );
     expect(container?.querySelector('.diff-view-gap')?.textContent).toBe('28 unmodified lines');
     expect(

@@ -3238,7 +3238,23 @@ async function handleApiRequest(
   const messageMatch = path.match(/^\/session\/([^/]+)\/message$/);
   if (messageMatch && method === 'GET') {
     const sessionId = decodeURIComponent(messageMatch[1]!);
-    return state.messagesBySessionId[sessionId] || [];
+    const messages = state.messagesBySessionId[sessionId] || [];
+    const windowed =
+      new URLSearchParams(window.location.search).get('windowed') === '1' &&
+      sessionId === 'session-diff-preview-large-transcript';
+    if (!windowed) return messages;
+
+    const limit = Math.max(1, Number(url.searchParams.get('limit')) || 50);
+    const before = url.searchParams.get('before');
+    const requestedEnd = before === null ? messages.length : Number(before);
+    const end = Number.isFinite(requestedEnd)
+      ? Math.max(0, Math.min(messages.length, requestedEnd))
+      : messages.length;
+    const start = Math.max(0, end - limit);
+    return {
+      items: messages.slice(start, end),
+      ...(start > 0 ? { nextCursor: String(start) } : {}),
+    };
   }
 
   const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/);

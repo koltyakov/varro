@@ -782,15 +782,7 @@ export function MessageList() {
     }
 
     if (containerRef && Math.abs(scrollAdjustment) > 0.5) {
-      suppressSyncScrollTop = true;
-      containerRef.scrollTop = Math.max(0, containerRef.scrollTop + scrollAdjustment);
-      suppressSyncScrollTop = false;
-      lastObservedScrollTop = containerRef.scrollTop;
-      batch(() => {
-        setScrollTop(containerRef!.scrollTop);
-        setViewportHeight(containerRef!.clientHeight);
-      });
-      scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
+      setPreservedScrollTop(containerRef.scrollTop + scrollAdjustment);
     }
 
     return changed;
@@ -847,13 +839,28 @@ export function MessageList() {
         topPad: visibleRange().topPad,
       };
     }
+
+    const metrics = virtualMetrics();
+    const index = getFirstVisibleMessageIndexFromVirtualMetrics({
+      metrics,
+      scrollTop: containerRef.scrollTop,
+    });
+    const messageId = index === null ? null : messageIds()[index];
+    if (index !== null && messageId) {
+      return {
+        messageId,
+        top: (metrics.prefix[index] ?? 0) - containerRef.scrollTop,
+        topPad: visibleRange().topPad,
+      };
+    }
     return null;
   }
 
   function restoreVisibleScrollAnchor(
-    anchor: { messageId: string; top: number; topPad: number } | null
+    anchor: { messageId: string; top: number; topPad: number } | null,
+    options?: { useMessageOffsetFallback?: boolean }
   ) {
-    if (!containerRef || !shouldVirtualize()) return;
+    if (!containerRef) return false;
     let delta: number | null = null;
     if (anchor) {
       const row = containerRef.querySelector<HTMLElement>(
@@ -862,22 +869,23 @@ export function MessageList() {
       if (row) {
         const containerRect = containerRef.getBoundingClientRect();
         delta = row.getBoundingClientRect().top - containerRect.top - anchor.top;
-      } else {
-        delta = visibleRange().topPad - anchor.topPad;
+      } else if (shouldVirtualize()) {
+        if (options?.useMessageOffsetFallback) {
+          const index = messageIndexById().get(anchor.messageId);
+          if (index !== undefined) {
+            delta = (virtualMetrics().prefix[index] ?? 0) - containerRef.scrollTop - anchor.top;
+          }
+        } else {
+          delta = visibleRange().topPad - anchor.topPad;
+        }
       }
     }
 
-    if (delta === null || Math.abs(delta) <= 0.5) return;
-    const container = containerRef;
-    suppressSyncScrollTop = true;
-    container.scrollTop += delta;
-    suppressSyncScrollTop = false;
-    batch(() => {
-      setScrollTop(container.scrollTop);
-      setViewportHeight(container.clientHeight);
-    });
+    if (delta === null) return false;
+    if (Math.abs(delta) > 0.5) setPreservedScrollTop(containerRef.scrollTop + delta);
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
+    return true;
   }
 
   function publishMeasurementVersion() {
@@ -932,6 +940,14 @@ export function MessageList() {
       }
       const previousTrackHeight = lastTrackHeight;
       lastTrackHeight = trackRef?.getBoundingClientRect().height ?? previousTrackHeight;
+      // Follow mode owns the viewport; restoring a collapsing control would scroll away from bottom.
+      if (hadResize && pendingExpansionScrollAnchor && autoScroll()) {
+        pendingExpansionScrollAnchor = null;
+        performScroll({ force: true });
+        const sessionId = state.activeSessionId;
+        if (sessionId) startFollowLoop(sessionId);
+        return;
+      }
       if (hadResize && restoreExpansionScrollAnchor()) {
         return;
       }
@@ -1088,6 +1104,19 @@ export function MessageList() {
 
   function distanceFromBottom() {
     return getDistanceFromBottom(containerRef);
+  }
+
+  function setPreservedScrollTop(nextScrollTop: number) {
+    if (!containerRef) return;
+    suppressSyncScrollTop = true;
+    containerRef.scrollTop = Math.max(0, nextScrollTop);
+    suppressSyncScrollTop = false;
+    lastObservedScrollTop = containerRef.scrollTop;
+    batch(() => {
+      setScrollTop(containerRef!.scrollTop);
+      setViewportHeight(containerRef!.clientHeight);
+    });
+    scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
   }
 
   function bottomScrollTop() {
@@ -1256,12 +1285,15 @@ export function MessageList() {
       });
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
+    const scrollDelta = top - lastObservedScrollTop;
+    // Delayed events from height anchoring have zero delta and must not revive bottom follow.
+    const shouldReattachToBottom =
+      !autoScrollEnabled && distance <= REATTACH_THRESHOLD_PX && scrollDelta > 1;
     const decision = resolveAutoScrollOnUserScroll({
       top,
       distanceFromBottom: distance,
       nearBottom:
-        distance < AUTO_SCROLL_THRESHOLD_PX &&
-        (autoScrollEnabled || distance <= REATTACH_THRESHOLD_PX),
+        distance < AUTO_SCROLL_THRESHOLD_PX && (autoScrollEnabled || shouldReattachToBottom),
       autoScroll: autoScroll(),
       userScrolledUp: now - lastWheelUpAt <= 160,
       bottomTargetStable,
@@ -1272,12 +1304,12 @@ export function MessageList() {
       now,
       autoScrollThresholdPx: AUTO_SCROLL_THRESHOLD_PX,
     });
-    const scrollDelta = top - lastObservedScrollTop;
-    const shouldReattachToBottom =
-      !autoScrollEnabled && distance <= REATTACH_THRESHOLD_PX && scrollDelta >= 0;
     if (decision.shouldCancelPendingScroll) {
       pinnedToBottom = false;
-    } else if (distance < AUTO_SCROLL_THRESHOLD_PX) {
+    } else if (
+      distance < AUTO_SCROLL_THRESHOLD_PX &&
+      (autoScrollEnabled || shouldReattachToBottom)
+    ) {
       pinnedToBottom = true;
     }
     lastObservedScrollTop = decision.nextLastObservedScrollTop;
@@ -1849,23 +1881,26 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const container = containerRef;
     if (!sessionId || !container || loadingOlderHistory()) return;
+    const anchor = captureVisibleScrollAnchor();
     const previousScrollHeight = container.scrollHeight;
     const previousScrollTop = container.scrollTop;
     setLoadingOlderHistory(true);
     try {
       const loaded = await loadOlderSessionHistoryPage(sessionId);
       if (!loaded || state.activeSessionId !== sessionId) return;
-      requestAnimationFrame(() => {
-        if (state.activeSessionId !== sessionId || !containerRef) return;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (state.activeSessionId !== sessionId || !containerRef) return;
+      if (!restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true })) {
         const heightDelta = containerRef.scrollHeight - previousScrollHeight;
-        suppressSyncScrollTop = true;
-        containerRef.scrollTop = previousScrollTop + Math.max(0, heightDelta);
-        suppressSyncScrollTop = false;
-        batch(() => {
-          setScrollTop(containerRef!.scrollTop);
-          setViewportHeight(containerRef!.clientHeight);
+        setPreservedScrollTop(previousScrollTop + Math.max(0, heightDelta));
+      } else if (anchor) {
+        queueMicrotask(() => {
+          const mountedAnchor = containerRef?.querySelector(
+            `[data-msg-id="${CSS.escape(anchor.messageId)}"]`
+          );
+          if (mountedAnchor) restoreVisibleScrollAnchor(anchor);
         });
-      });
+      }
     } finally {
       setLoadingOlderHistory(false);
     }

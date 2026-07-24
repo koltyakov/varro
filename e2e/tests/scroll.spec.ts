@@ -117,6 +117,29 @@ async function updateDiffPreview(
     ),
     '*** End Patch',
   ].join('\n');
+  await updateDiffPreviewWithPatch(page, messageId, patchText);
+}
+
+async function updateExpandableDiffPreview(
+  page: import('@playwright/test').Page,
+  messageId: string
+) {
+  const patchText = [
+    '*** Begin Patch',
+    '*** Update File: src/expanded-report.ts',
+    '@@',
+    ...Array.from({ length: 30 }, (_, index) => `-export const oldValue${index} = ${index};`),
+    ...Array.from({ length: 30 }, (_, index) => `+export const newValue${index} = ${index};`),
+    '*** End Patch',
+  ].join('\n');
+  await updateDiffPreviewWithPatch(page, messageId, patchText);
+}
+
+async function updateDiffPreviewWithPatch(
+  page: import('@playwright/test').Page,
+  messageId: string,
+  patchText: string
+) {
   const partId = `${messageId}-patch`;
 
   await page.evaluate(
@@ -380,7 +403,9 @@ test.describe('auto-scroll', () => {
 
     await list.dispatchEvent('wheel', { deltaY: -1 });
     await updateDiffPreview(page, before.targetId, 20);
-    await expect(page.locator(`[data-msg-id="${before.targetId}"] .diff-view-file`)).toHaveCount(20);
+    await expect(page.locator(`[data-msg-id="${before.targetId}"] .diff-view-file`)).toHaveCount(
+      20
+    );
     await waitForAnimationFrames(page, 4);
 
     const afterMountedResize = await list.evaluate((element) => {
@@ -426,6 +451,203 @@ test.describe('auto-scroll', () => {
       3
     );
     expect(afterOffscreenUpdate.maxRenderedMessageRows).toBeLessThan(50);
+  });
+
+  test('aligns the first changed diff row with the top of the preview', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await expect(page.locator('.interactive-list')).toBeVisible();
+
+    const messageId = 'message-diff-preview-assistant-59';
+    await updateDiffPreviewWithPatch(
+      page,
+      messageId,
+      [
+        '*** Begin Patch',
+        '*** Update File: src/aligned-report.ts',
+        '@@ -10,7 +10,8 @@',
+        ' context 1',
+        ' context 2',
+        ' context 3',
+        ' context 4',
+        ' context 5',
+        ' context 6',
+        ' context 7',
+        '+changed row',
+        '*** End Patch',
+      ].join('\n')
+    );
+
+    const preview = page.locator(`[data-msg-id="${messageId}"] .diff-view-lines`);
+    const firstChange = preview.locator('.diff-view-line-addition').first();
+    await expect(firstChange).toContainText('changed row');
+
+    const topOffset = await firstChange.evaluate((row) => {
+      const viewport = row.closest<HTMLElement>('.diff-view-lines')!;
+      return row.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+    });
+    expect(topOffset).toBeGreaterThanOrEqual(0);
+    expect(topOffset).toBeLessThan(2);
+  });
+
+  test('stays at the bottom when an expanded diff is collapsed', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    const messageId = 'message-diff-preview-assistant-59';
+    await updateExpandableDiffPreview(page, messageId);
+    const toggle = page.locator(`[data-msg-id="${messageId}"] .diff-view-toggle`);
+    await expect(toggle).toBeAttached();
+
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    await toggle.evaluate((button) => (button as HTMLButtonElement).click());
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await waitForAnimationFrames(page, 4);
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    await toggle.evaluate((button) => {
+      const measure = button.getBoundingClientRect.bind(button);
+      button.getBoundingClientRect = () => {
+        const rect = measure();
+        return button.getAttribute('aria-expanded') === 'false'
+          ? new DOMRect(rect.x, rect.y - 800, rect.width, rect.height)
+          : rect;
+      };
+    });
+
+    const collapseDistances = await toggle.evaluate(async (button) => {
+      const list = button.closest<HTMLElement>('.interactive-list')!;
+      const sample = () => list.scrollHeight - list.clientHeight - list.scrollTop;
+      (button as HTMLButtonElement).click();
+      const distances = [sample()];
+      for (let index = 0; index < 6; index += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        distances.push(sample());
+      }
+      return distances;
+    });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    expect(Math.max(...collapseDistances)).toBeLessThan(3);
+  });
+
+  test('does not reattach to bottom after a zero-delta layout scroll event', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(3);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -8, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 8);
+    });
+    await waitForAnimationFrames(page, 3);
+
+    const detachedDistance = (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom;
+    expect(detachedDistance).toBeGreaterThan(3);
+    expect(detachedDistance).toBeLessThan(15);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    const afterDistance = (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom;
+    expect(afterDistance).toBeGreaterThan(3);
+    expect(afterDistance).toBeLessThan(15);
+  });
+
+  test('never resumes bottom follow while scrolling through stale diff heights', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    for (let index = 20; index < 46; index += 1) {
+      await updateDiffPreview(page, `message-diff-preview-assistant-${index}`, 8);
+    }
+    await waitForAnimationFrames(page, 5);
+
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+    const distances: number[] = [];
+    for (let index = 0; index < 36; index += 1) {
+      await page.mouse.wheel(0, -240);
+      await waitForAnimationFrames(page, 2);
+      distances.push((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom);
+    }
+
+    const detachedIndex = distances.findIndex((distance) => distance > 100);
+    expect(detachedIndex).toBeGreaterThanOrEqual(0);
+    for (const distance of distances.slice(detachedIndex)) {
+      expect(distance).toBeGreaterThan(50);
+    }
+  });
+
+  test('keeps the visible message anchored when older diff history loads', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await expect(page.locator('[data-msg-id="message-diff-preview-user-0"]')).toHaveCount(0);
+
+    for (let index = 36; index < 45; index += 1) {
+      await updateDiffPreview(page, `message-diff-preview-assistant-${index}`, 12);
+    }
+    await waitForAnimationFrames(page, 4);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1000, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+
+    await expect
+      .poll(() =>
+        list.evaluate((element) => {
+          const loadedOlderRow = element.querySelector(
+            '[data-msg-id="message-diff-preview-user-10"]'
+          );
+          const topSpacerHeight =
+            element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+              .height ?? 0;
+          return !!loadedOlderRow || topSpacerHeight > 100;
+        })
+      )
+      .toBe(true);
+
+    const boundary = page.locator('[data-msg-id="message-diff-preview-user-35"]');
+    await expect(boundary).toBeAttached();
+    const anchorTop = await boundary.evaluate((row) => {
+      const list = row.closest<HTMLElement>('.interactive-list')!;
+      return row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    });
+    expect(Math.abs(anchorTop)).toBeLessThan(80);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      100
+    );
   });
 
   test('mixed small chat scrolls upward without random jumps', async ({ page }) => {
