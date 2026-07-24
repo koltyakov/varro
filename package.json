@@ -58,7 +58,7 @@
     "solid-js": "1.9.14"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "26.1.1",
     "@types/vscode": "1.120.0",
@@ -68,7 +68,7 @@
     "jsdom": "29.1.1",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
-    "postcss": "8.5.22",
+    "postcss": "8.5.23",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",

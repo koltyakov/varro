@@ -35,6 +35,8 @@ import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
   requestSessionSearchFocus,
+  startLoading,
+  stopLoading,
   setDesktopSessionPaneSide,
   hasActiveUsageLimit,
   state,
@@ -129,6 +131,7 @@ afterEach(() => {
   setDesktopSessionPaneSide('left');
   setShowSessionPicker(false);
   setShowSettings(false);
+  stopLoading();
   clearDirectSessionReturn();
   for (const run of ralphStore.getAllRuns()) {
     ralphStore.removeRun(run.config.managerSessionId);
@@ -1077,6 +1080,30 @@ describe('header status badges', () => {
     expect(container?.querySelector('.chat-header-attention-badge')?.textContent).toBe('');
     expect(container?.querySelector('.chat-header-plan-badge')?.textContent).toBe('');
     expect(container?.querySelector('.chat-header-completed-badge')?.textContent).toBe('');
+  });
+
+  it('shows an actively loading session as running when its status entry is idle', async () => {
+    setState('sessions', [session('active-loading', 500), session('other-running', 400)]);
+    setState('activeSessionId', 'active-loading');
+    setState('sessionStatus', {
+      'active-loading': { type: 'idle' },
+      'other-running': { type: 'busy' },
+    });
+    startLoading();
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const activeRow = Array.from(container!.querySelectorAll<HTMLElement>('.session-item')).find(
+      (row) => row.querySelector('.session-item-title-text')?.textContent === 'active-loading'
+    );
+    expect(activeRow?.querySelector('.session-item-indicator.is-running')).not.toBeNull();
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('2');
+
+    setShowSessionPicker(false);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
   });
 
   it('renders an embedded session sidebar alongside the active chat view', () => {

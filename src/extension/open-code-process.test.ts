@@ -537,7 +537,16 @@ describe('OpenCodeProcess server ownership leases', () => {
 
     expect(spawnMock).toHaveBeenCalledWith('lsof', expect.anything(), expect.anything());
     expect(spawnMock).toHaveBeenCalledWith('ss', expect.anything(), expect.anything());
-    expect(spawnMock).not.toHaveBeenCalledWith('ps', expect.anything(), expect.anything());
+    expect(spawnMock).toHaveBeenCalledWith(
+      'ps',
+      ['-p', String(process.pid), '-o', 'lstart='],
+      expect.anything()
+    );
+    expect(spawnMock).not.toHaveBeenCalledWith(
+      'ps',
+      ['-p', String(listenerPid), '-o', 'lstart='],
+      expect.anything()
+    );
     expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toMatchObject({
       pid: listenerPid,
       port: 4096,
@@ -614,6 +623,8 @@ describe('OpenCodeProcess server ownership leases', () => {
       birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
       owner: expect.stringMatching(/^[a-f0-9]{32}$/),
       host: expect.stringMatching(/^[a-f0-9]{32}$/),
+      hostPid: process.pid,
+      hostBirthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
       state: 'active',
       createdAt: expect.any(Number),
     });
@@ -814,7 +825,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await vi.advanceTimersByTimeAsync(6_000);
 
     await expect(confirmation).resolves.toBe(true);
-    expect(inspectionKills).toHaveLength(3);
+    expect(inspectionKills).toHaveLength(4);
     expect(inspectionKills.every((kill) => kill.mock.calls.length === 0)).toBe(true);
     await rm(directory, { recursive: true, force: true });
   });
@@ -1016,6 +1027,8 @@ describe('OpenCodeProcess server ownership leases', () => {
       birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
       owner: 'active-nonce',
       host: 'active-host',
+      hostPid: process.pid,
+      hostBirthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
       state: 'active',
       createdAt: Date.now(),
     };
@@ -1045,7 +1058,60 @@ describe('OpenCodeProcess server ownership leases', () => {
     await expect(manager.stopServerForRestart()).rejects.toThrow(
       'Port 4096 is occupied by a process Varro does not own'
     );
-    expect(kill).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(process.pid, 0);
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
+
+    kill.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('reclaims an active lease after its extension host exits unexpectedly', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const deadHostPid = MOCK_LINUX_PID - 1;
+    await writeFile(
+      leasePath,
+      JSON.stringify({
+        version: 1,
+        pid: MOCK_LINUX_PID,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        owner: 'active-nonce',
+        host: 'dead-host',
+        hostPid: deadHostPid,
+        hostBirthIdentity: 'linux:old-host-process',
+        state: 'active',
+        createdAt: Date.now(),
+      }),
+      'utf-8'
+    );
+    mockLinuxLeaseProcess();
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === deadHostPid && signal === 0) {
+        throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      }
+      return true;
+    });
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+
+    await expect(manager.recoverManagedServerOwnership()).resolves.toBe(true);
+
+    expect(manager.managedProcess).toBe(true);
+    expect(manager.hasForeignActiveOwnership).toBe(false);
+    expect(manager.managedProcessId).toBe(MOCK_LINUX_PID);
+    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toEqual(
+      expect.objectContaining({
+        owner: 'active-nonce',
+        host: expect.stringMatching(/^[a-f0-9]{32}$/),
+        hostPid: process.pid,
+        hostBirthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        state: 'active',
+      })
+    );
+    expect(kill).toHaveBeenCalledWith(deadHostPid, 0);
+    expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
 
     kill.mockRestore();
     await rm(directory, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import {
   getSessionTreeIds,
   getSessionTreeRootId,
   hasActiveUsageLimit,
+  isLoading,
   isSessionAwaitingInput,
   isSessionCompletedResponseUnread,
   isSessionUnread,
@@ -1854,7 +1855,9 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     const ralphRun = ralphStore.getRun(rootSessionId(sessionId));
     if (ralphRun && ralphRun.status !== 'running') return false;
     const type = state.sessionStatus[sessionId]?.type;
-    return type === 'busy' || type === 'retry';
+    return (
+      type === 'busy' || type === 'retry' || (sessionId === state.activeSessionId && isLoading())
+    );
   };
 
   for (const run of ralphStore.getAllRuns()) {

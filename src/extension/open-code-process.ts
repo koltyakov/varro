@@ -766,7 +766,7 @@ export class OpenCodeProcess {
       this._port = this.originalPort;
       return false;
     }
-    if (lease.state === 'active') {
+    if (lease.state === 'active' && (await this.isOwnershipHostAlive(lease))) {
       this.foreignActiveOwnership = true;
       return false;
     }
@@ -835,6 +835,7 @@ export class OpenCodeProcess {
         birthIdentity,
         owner,
         host: this.hostOwner,
+        ...(await this.readOwnershipHostIdentity()),
         state: 'active',
         createdAt: Date.now(),
       };
@@ -866,7 +867,7 @@ export class OpenCodeProcess {
       this.foreignActiveOwnership = false;
       return false;
     }
-    if (lease.state === 'active') {
+    if (lease.state === 'active' && (await this.isOwnershipHostAlive(lease))) {
       this.foreignActiveOwnership = true;
       return false;
     }
@@ -883,7 +884,7 @@ export class OpenCodeProcess {
     lease: ManagedServerOwnershipLease,
     resetPortOnFailure: boolean
   ) {
-    const claimedLease = await this.claimRelinquishedOwnershipLease(lease);
+    const claimedLease = await this.claimAvailableOwnershipLease(lease);
     if (!claimedLease) {
       const current = await this.readOwnershipLease();
       if (
@@ -932,6 +933,8 @@ export class OpenCodeProcess {
     let listenerPid: number | undefined;
     let executable = '';
     let birthIdentity = '';
+    let ownershipHostIdentity: Pick<ManagedServerOwnershipLease, 'hostPid' | 'hostBirthIdentity'> =
+      {};
     const attempts = process.platform === 'win32' ? WINDOWS_OWNERSHIP_CONFIRM_ATTEMPTS : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       listenerPid = undefined;
@@ -945,9 +948,10 @@ export class OpenCodeProcess {
         }
       }
       if (listenerPid) {
-        [executable, birthIdentity] = await Promise.all([
+        [executable, birthIdentity, ownershipHostIdentity] = await Promise.all([
           readProcessExecutable(listenerPid, this.linuxProcRoot),
           readProcessBirthIdentity(listenerPid, this.linuxProcRoot),
+          this.readOwnershipHostIdentity(),
         ]);
         if (executable && birthIdentity) break;
       }
@@ -981,6 +985,7 @@ export class OpenCodeProcess {
       birthIdentity,
       owner,
       host: this.hostOwner,
+      ...ownershipHostIdentity,
       state: 'active',
       createdAt: Date.now(),
       ...(launch.configPath ? { configPath: launch.configPath } : {}),
@@ -1591,6 +1596,19 @@ export class OpenCodeProcess {
     return (await readProcessBirthIdentity(lease.pid, this.linuxProcRoot)) === lease.birthIdentity;
   }
 
+  private async readOwnershipHostIdentity() {
+    const hostBirthIdentity = await readProcessBirthIdentity(process.pid, this.linuxProcRoot);
+    return hostBirthIdentity ? { hostPid: process.pid, hostBirthIdentity } : {};
+  }
+
+  private async isOwnershipHostAlive(lease: ManagedServerOwnershipLease) {
+    if (lease.host === this.hostOwner) return true;
+    if (!lease.hostPid || !lease.hostBirthIdentity) return true;
+    if (!isProcessAlive(lease.hostPid)) return false;
+    const birthIdentity = await readProcessBirthIdentity(lease.hostPid, this.linuxProcRoot);
+    return !birthIdentity || birthIdentity === lease.hostBirthIdentity;
+  }
+
   private async matchesInjectedConfigOwner(lease: ManagedServerOwnershipLease): Promise<boolean> {
     if (!lease.configPath) return true;
     if (!(await isSafeInjectedConfigPath(lease.configPath))) return false;
@@ -1640,7 +1658,7 @@ export class OpenCodeProcess {
     }
   }
 
-  private async claimRelinquishedOwnershipLease(
+  private async claimAvailableOwnershipLease(
     lease: ManagedServerOwnershipLease
   ): Promise<ManagedServerOwnershipLease | null> {
     const claimPath = `${this.ownershipLeasePath}.claim`;
@@ -1653,15 +1671,20 @@ export class OpenCodeProcess {
 
     try {
       const current = await this.readOwnershipLease();
+      const ownershipAvailable =
+        current?.state === 'relinquished' ||
+        (current?.state === 'active' && !(await this.isOwnershipHostAlive(current)));
       if (
         !current ||
         current.owner !== lease.owner ||
         current.host !== lease.host ||
-        current.state !== 'relinquished' ||
+        !ownershipAvailable ||
         current.pid !== lease.pid ||
         current.port !== lease.port ||
         current.executable !== lease.executable ||
         current.birthIdentity !== lease.birthIdentity ||
+        current.hostPid !== lease.hostPid ||
+        current.hostBirthIdentity !== lease.hostBirthIdentity ||
         current.configPath !== lease.configPath
       ) {
         return null;
@@ -1672,6 +1695,9 @@ export class OpenCodeProcess {
         host: this.hostOwner,
         state: 'active',
       };
+      delete claimed.hostPid;
+      delete claimed.hostBirthIdentity;
+      Object.assign(claimed, await this.readOwnershipHostIdentity());
       await this.writeOwnershipLease(claimed);
       return claimed;
     } finally {
