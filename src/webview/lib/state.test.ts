@@ -122,7 +122,7 @@ describe('state streaming deltas', () => {
     clearStreamingState();
   });
 
-  it('updates existing reasoning parts as deltas arrive', async () => {
+  it('commits reasoning deltas superseded by text in the same frame', async () => {
     upsertMessage({
       info: assistantMessage(),
       parts: [reasoningPart('Planning'), textPart('text-1', '')],
@@ -135,7 +135,7 @@ describe('state streaming deltas', () => {
     expect(state.messages[0]?.parts[0]).toMatchObject({
       id: 'reason-1',
       type: 'reasoning',
-      text: 'Planning',
+      text: 'Planning more',
     });
     expect(state.messages[0]?.parts[1]).toMatchObject({
       id: 'text-1',

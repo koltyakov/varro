@@ -65,14 +65,19 @@ describe('message event collapse helpers', () => {
     expect(getFileEditVisualSignature(part)).toBeNull();
   });
 
-  it('collapses duplicate leading file events only while signatures match', () => {
-    const duplicate = toolPart('p1', completedState('Edited src/app.ts', { path: 'src/app.ts' }));
-    const kept = toolPart('p2', completedState('Edited src/other.ts', { path: 'src/other.ts' }));
+  it('collapses at most one matching leading file event', () => {
+    const first = toolPart('p1', completedState('Edited src/app.ts', { path: 'src/app.ts' }));
+    const representative = toolPart(
+      'p2',
+      completedState('Edited src/app.ts', { path: 'src/app.ts' })
+    );
+    const kept = toolPart('p3', completedState('Edited src/other.ts', { path: 'src/other.ts' }));
     const result = collapseLeadingDuplicateFileEvents(
-      [duplicate, duplicate, kept],
+      [first, representative, kept],
       'edited:src/app.ts'
     );
-    expect(result).toEqual([kept]);
+    expect(result).toEqual([representative, kept]);
+    expect(result[0]).toMatchObject({ id: 'p2', callID: 'call-p2' });
   });
 
   it('keeps leading file events when diff stats change their signature', () => {

@@ -273,6 +273,35 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
+  it('defers backslash git -C paths even when the host reports Windows', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'tmp\\opencode'), { recursive: true });
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+
+    try {
+      await expect(
+        judge.judge({
+          permission: {
+            id: 'perm-native-backslash-git',
+            type: 'bash',
+            sessionID: 'session-1',
+            title: 'bash git -C "tmp\\opencode" status --short',
+          },
+        })
+      ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
   it('does not locally allow new files through a symlink outside the workspace', async () => {
     const { root, workspace } = createTemporaryWorkspace();
     const outside = join(root, 'outside');

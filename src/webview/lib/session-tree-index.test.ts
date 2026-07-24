@@ -128,6 +128,18 @@ describe('createSessionTreeIndex', () => {
     expect(idx.getTreeIds('b', sessions, emptyLimits)).toEqual(['b']);
   });
 
+  it('deduplicates a root-reachable duplicate-ID cycle', () => {
+    const idx = createSessionTreeIndex();
+    const sessions = [
+      makeSession('root'),
+      makeSession('child', { parentID: 'root' }),
+      makeSession('root', { parentID: 'child' }),
+      makeSession('leaf', { parentID: 'child' }),
+    ];
+
+    expect(idx.getTreeIds('root', sessions, emptyLimits)).toEqual(['root', 'child', 'leaf']);
+  });
+
   it('getActiveUsageLimitNotice finds notice from any session in tree', () => {
     const idx = createSessionTreeIndex();
     const sessions = [makeSession('root'), makeSession('c1', { parentID: 'root' })];

@@ -372,7 +372,12 @@ describe('MessageList entrance animation', () => {
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 7200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
 
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    expect(list.scrollTop).toBe(6800);
+
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    list.scrollTop = 6400;
     list.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
@@ -3992,144 +3997,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('keeps following after a delayed scroll event from a layout bounce', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState('activeSessionId', 'session-1');
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-
-    cleanup = render(() => MessageList(), container!);
-
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-
-    await Promise.resolve();
-    animationFrames.flush();
-    expect(scrollTopValue).toBe(800);
-
-    // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
-    // event only after the old bottom target has returned.
-    scrollTopValue = 760;
-    list?.dispatchEvent(new Event('scroll'));
-
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    animationFrames.flush();
-
-    expect(scrollTopValue).toBe(1000);
-    animationFrames.restore();
-  });
-
-  it('stops following after keyboard-originated upward scrolling', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    const resizeCallbacks: ResizeObserverCallback[] = [];
-    let trackHeight = 1200;
-
-    class TestResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resizeCallbacks.push(callback);
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
-    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
-      if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, 500, trackHeight);
-      }
-      return new DOMRect(0, 0, 500, 400);
-    });
-
-    setState('activeSessionId', 'session-1');
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
-    ]);
-
-    cleanup = render(() => MessageList(), container!);
-
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
-    expect(list).toBeInstanceOf(HTMLDivElement);
-
-    let scrollHeightValue = 1200;
-    let scrollTopValue = 0;
-    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list!, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeightValue,
-    });
-    Object.defineProperty(list!, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-
-    await Promise.resolve();
-    animationFrames.flush();
-    expect(scrollTopValue).toBe(800);
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
-    scrollTopValue = 500;
-    list?.dispatchEvent(new Event('scroll'));
-
-    trackHeight = 1400;
-    scrollHeightValue = 1400;
-    for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
-    }
-    animationFrames.flush();
-
-    expect(scrollTopValue).toBe(500);
-    animationFrames.restore();
-  });
-
-  it('stops following after scrollbar pointer-originated upward scrolling', async () => {
+  it('keeps following when an ordinary content pointerdown precedes a layout clamp', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
     let trackHeight = 1200;
@@ -4183,8 +4051,163 @@ describe('MessageList auto-scroll', () => {
     expect(scrollTopValue).toBe(800);
 
     list?.firstElementChild?.dispatchEvent(
-      new MouseEvent('pointerdown', { button: 0, bubbles: true })
+      new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 100 })
     );
+    // The browser can clamp scrollTop while content briefly shrinks, then deliver the scroll
+    // event only after the old bottom target has returned.
+    scrollTopValue = 760;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1000);
+    animationFrames.restore();
+  });
+
+  it('ignores external PageUp but stops following after in-list PageUp movement', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    const externalButton = document.createElement('button');
+    container?.appendChild(externalButton);
+    externalButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    scrollTopValue = 500;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1000);
+
+    list?.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    scrollTopValue = 700;
+    list?.dispatchEvent(new Event('scroll'));
+
+    trackHeight = 1600;
+    scrollHeightValue = 1600;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(700);
+    animationFrames.restore();
+  });
+
+  it('stops following after scrollbar pointer-originated upward scrolling', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'clientWidth', { configurable: true, value: 484 });
+    Object.defineProperty(list!, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    list?.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, clientX: 495 }));
     scrollTopValue = 500;
     list?.dispatchEvent(new Event('scroll'));
 
@@ -4196,6 +4219,100 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
 
     expect(scrollTopValue).toBe(500);
+    animationFrames.restore();
+  });
+
+  it('resumes after nested diff input without outer movement but not after diff keyboard scrolling', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let trackHeight = 1200;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Initial response')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    const diffViewport = document.createElement('div');
+    diffViewport.className = 'diff-view-lines';
+    diffViewport.tabIndex = 0;
+    list?.appendChild(diffViewport);
+    const externalButton = document.createElement('button');
+    container?.appendChild(externalButton);
+
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    diffViewport.focus();
+    diffViewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    externalButton.focus();
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(1000);
+
+    diffViewport.focus();
+    diffViewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+    scrollTopValue = 700;
+    list?.dispatchEvent(new Event('scroll'));
+    externalButton.focus();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    trackHeight = 1600;
+    scrollHeightValue = 1600;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(700);
     animationFrames.restore();
   });
 

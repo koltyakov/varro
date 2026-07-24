@@ -33,13 +33,10 @@ export function collapseLeadingDuplicateFileEvents(
   previousTrailingSignature: string | null
 ): Part[] {
   if (!previousTrailingSignature) return parts;
-  let start = 0;
-  while (start < parts.length) {
-    const signature = getFileEditVisualSignature(parts[start]!);
-    if (signature !== previousTrailingSignature) break;
-    start++;
-  }
-  return start === 0 ? parts : parts.slice(start);
+  const firstPart = parts[0];
+  if (!firstPart || getFileEditVisualSignature(firstPart) !== previousTrailingSignature)
+    return parts;
+  return parts.slice(1);
 }
 
 export function getTrailingFileEventSignature(parts: Part[]): string | null {

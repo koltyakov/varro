@@ -235,26 +235,33 @@ describe('sessionStore', () => {
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
   });
 
-  it('keeps locally finished sessions idle when status snapshots still report running', () => {
-    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+  it('suppresses a snapshot older than local idle and accepts a newer busy snapshot', () => {
+    const localUpdateTime = Date.now() + 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(localUpdateTime);
     sessionStore.setSessionStatusEntry('session-1', { type: 'idle' });
 
     sessionStore.setSessionStatuses(
       {
         'session-1': { type: 'busy' },
       },
-      { snapshotStartedAt: Date.now() + 1000 }
+      { snapshotStartedAt: localUpdateTime - 1 }
     );
 
     expect(state.sessionStatus).toEqual({
       'session-1': { type: 'idle' },
     });
 
-    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+    sessionStore.setSessionStatuses(
+      {
+        'session-1': { type: 'busy' },
+      },
+      { snapshotStartedAt: localUpdateTime + 1 }
+    );
 
     expect(state.sessionStatus).toEqual({
       'session-1': { type: 'busy' },
     });
+    nowSpy.mockRestore();
   });
 
   it('settles stale running status when synced active messages are already complete', () => {
@@ -292,7 +299,7 @@ describe('sessionStore', () => {
     expect(state.lastSeenSessions['session-1']).toBeUndefined();
   });
 
-  it('does not let stale running snapshots revive a settled active chat spinner', () => {
+  it('lets a fresh busy snapshot revive a settled active chat spinner', () => {
     sessionStore.setActiveSessionId('session-1');
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
@@ -304,7 +311,7 @@ describe('sessionStore', () => {
       { snapshotStartedAt: Date.now() + 1000 }
     );
 
-    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
   });
 
   it('marks inactive running sessions completed when status turns idle', () => {

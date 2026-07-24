@@ -75,13 +75,19 @@ export function createSessionTreeIndex() {
 
     sessionTreeIdsBySession = new Map();
 
-    const collectIndexedTreeIds = (sessionId: string, rootId: string): string[] => {
+    const collectIndexedTreeIds = (
+      sessionId: string,
+      rootId: string,
+      visited: Set<string>
+    ): string[] => {
+      if (visited.has(sessionId)) return [];
+      visited.add(sessionId);
       nearestPrimarySessionById.set(sessionId, rootId);
 
       const treeIds = [sessionId];
       const children = childrenByParent.get(sessionId) || [];
       for (const childId of children) {
-        treeIds.push(...collectIndexedTreeIds(childId, rootId));
+        treeIds.push(...collectIndexedTreeIds(childId, rootId, visited));
       }
 
       sessionTreeIdsBySession.set(sessionId, treeIds);
@@ -89,7 +95,7 @@ export function createSessionTreeIndex() {
     };
 
     for (const root of primarySessions) {
-      collectIndexedTreeIds(root.id, root.id);
+      collectIndexedTreeIds(root.id, root.id, new Set());
     }
 
     activeUsageLimitByRoot = new Map();

@@ -1394,6 +1394,7 @@ export function MessageList() {
     const userScrolledUp =
       now - lastWheelUpAt <= 160 ||
       (scrollDelta < -1 && now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS);
+    const confirmedManualUpwardMovement = scrollDelta < -1 && userScrolledUp;
     if (!autoScrollEnabled || now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS || userScrolledUp) {
       lastUserScrollAt = now;
     }
@@ -1438,6 +1439,7 @@ export function MessageList() {
     expectedScrollTop = decision.nextExpectedScrollTop;
     ignoreScrollUntil = decision.nextIgnoreScrollUntil;
     followModeLocked = decision.nextFollowModeLocked;
+    if (confirmedManualUpwardMovement) resumeAutoScrollAfterDiffFocus = false;
     if (decision.shouldCancelPendingScroll) cancelPendingScroll();
     if (decision.nextAutoScroll !== null) setAutoScroll(decision.nextAutoScroll);
     if (shouldReattachToBottom) {
@@ -1480,16 +1482,14 @@ export function MessageList() {
     }
     if (event.deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
-      if (diffFocusPauseActive) resumeAutoScrollAfterDiffFocus = false;
-      disengageBottomFollow();
     }
   }
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
     const target = event.target;
+    if (!containerRef || !(target instanceof Element) || !containerRef.contains(target)) return;
     if (
-      target instanceof Element &&
       target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
     ) {
       return;
@@ -1506,7 +1506,22 @@ export function MessageList() {
   }
 
   function handlePointerDown(event: PointerEvent) {
-    if (event.button !== 0) return;
+    if (!containerRef || event.button !== 0 || event.isPrimary === false) return;
+    if (event.pointerType !== 'touch') {
+      if (event.target !== containerRef) return;
+
+      const scrollbarInset = Math.max(0, containerRef.offsetWidth - containerRef.clientWidth);
+      if (scrollbarInset <= 0) return;
+
+      const rect = containerRef.getBoundingClientRect();
+      const scale = containerRef.offsetWidth > 0 ? rect.width / containerRef.offsetWidth : 1;
+      const gutterWidth = scrollbarInset * scale;
+      const inScrollbarGutter =
+        getComputedStyle(containerRef).direction === 'rtl'
+          ? event.clientX >= rect.left && event.clientX <= rect.left + gutterWidth
+          : event.clientX >= rect.right - gutterWidth && event.clientX <= rect.right;
+      if (!inScrollbarGutter) return;
+    }
     lastScrollInputAt = performance.now();
   }
 

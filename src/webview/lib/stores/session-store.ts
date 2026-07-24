@@ -50,7 +50,6 @@ export type SessionStatusSnapshotOptions = {
 };
 
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
-const sessionStatusLocallyIdle = new Set<string>();
 
 export const sessionStore = {
   persistActiveSessionId,
@@ -113,10 +112,6 @@ export const sessionStore = {
         const currentStatus = current[sessionId];
         const incomingStatus = next[sessionId];
         const hasNewerLocalUpdate = updatedAt > options.snapshotStartedAt;
-        const hasLocalIdleAfterWork =
-          sessionStatusLocallyIdle.has(sessionId) &&
-          currentStatus?.type === 'idle' &&
-          isRunningSessionStatus(incomingStatus);
         const activeRootId = getSessionTreeRootId(state.activeSessionId) || state.activeSessionId;
         const sessionRootId = getSessionTreeRootId(sessionId) || sessionId;
         const hasLocalRunningWithoutSettledMessage =
@@ -125,16 +120,7 @@ export const sessionStore = {
           isRunningSessionStatus(currentStatus) &&
           (!incomingStatus || incomingStatus.type === 'idle') &&
           !hasSettledLatestAssistantMessage(sessionId);
-        const hasSettledMessageIdle =
-          currentStatus?.type === 'idle' &&
-          isRunningSessionStatus(incomingStatus) &&
-          hasSettledLatestAssistantMessage(sessionId);
-        if (
-          !hasNewerLocalUpdate &&
-          !hasLocalIdleAfterWork &&
-          !hasLocalRunningWithoutSettledMessage &&
-          !hasSettledMessageIdle
-        ) {
+        if (!hasNewerLocalUpdate && !hasLocalRunningWithoutSettledMessage) {
           continue;
         }
         if (currentStatus) next[sessionId] = currentStatus;
@@ -146,8 +132,6 @@ export const sessionStore = {
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
     const prev = state.sessionStatus[sessionId];
     sessionStatusLocalUpdatedAt.set(sessionId, Date.now());
-    if (status.type === 'idle') sessionStatusLocallyIdle.add(sessionId);
-    else sessionStatusLocallyIdle.delete(sessionId);
     recordStatusCompletionTransition(sessionId, prev, status);
     setState('sessionStatus', (current) => {
       const currentStatus = current[sessionId];

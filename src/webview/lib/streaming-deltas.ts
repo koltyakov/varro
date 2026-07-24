@@ -119,7 +119,7 @@ export function flushPendingStreamingDeltasFor(appState: AppStateInstance) {
         const currentPart = appState.state.messages[location.msgIdx]?.parts[location.partIdx];
         if (
           item.partId !== latest.partId &&
-          currentPart?.type === 'text' &&
+          (currentPart?.type === 'text' || currentPart?.type === 'reasoning') &&
           currentPart.text !== item.text &&
           shouldUseStreamingText(currentPart.text, item.text)
         ) {
