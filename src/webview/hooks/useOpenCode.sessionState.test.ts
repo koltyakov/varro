@@ -193,6 +193,53 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('keeps an active completion unread when session metadata updates with the list open', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => {
+        handlers.delete(event as string);
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('lastSeenSessions', { 'session-1': 1_000 });
+      stateModule.setState('completedSessionResponses', { 'session-1': 1_500 });
+      stateModule.setShowSessionPicker(true);
+
+      handlers.get('session.updated')?.({
+        properties: {
+          info: {
+            ...session('session-1'),
+            time: { created: 0, updated: 2_000 },
+          },
+        },
+      });
+
+      expect(stateModule.state.lastSeenSessions['session-1']).toBe(1_000);
+      expect(stateModule.isSessionCompletedResponseUnread('session-1')).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+      dispose();
+    }
+  });
+
   it('ignores stale session selection results after switching sessions quickly', async () => {
     const { stateModule, hookModule } = await loadModules();
 

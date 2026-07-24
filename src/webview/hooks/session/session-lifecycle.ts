@@ -14,6 +14,7 @@ import type { Session } from '../../types';
 type LifecycleState = {
   activeSessionId: string | null;
   sessions: Session[];
+  showSessionPicker: boolean;
 };
 
 type LifecycleDependencies = {
@@ -54,6 +55,7 @@ export class SessionLifecycleOperations {
       getState: () => ({
         activeSessionId: appStore.state.activeSessionId,
         sessions: appStore.state.sessions,
+        showSessionPicker: uiStore.showSessionPicker(),
       }),
       getCurrentWorkspacePath: deps.getCurrentWorkspacePath,
       setSessions: sessionStore.setSessions,
@@ -239,7 +241,7 @@ export function removeDeletedSessionTree(
 }
 
 export function upsertSession(deps: LifecycleDependencies, session: Session) {
-  const { activeSessionId, sessions } = deps.getState();
+  const { activeSessionId, sessions, showSessionPicker } = deps.getState();
   if (!isSessionInWorkspace(session, deps.getCurrentWorkspacePath())) {
     if (sessions.some((item) => item.id === session.id)) {
       applySessions(
@@ -252,7 +254,7 @@ export function upsertSession(deps: LifecycleDependencies, session: Session) {
 
   applySessions(deps, [session, ...sessions.filter((item) => item.id !== session.id)]);
 
-  if (session.id === activeSessionId) {
+  if (session.id === activeSessionId && !showSessionPicker) {
     deps.markSessionSeen(session.id, session.time.updated);
   }
 }

@@ -95,10 +95,12 @@ function createDeps(overrides?: {
   activeSessionId?: string | null;
   sessions?: Session[];
   workspace?: string | null;
+  showSessionPicker?: boolean;
 }) {
   const current = {
     activeSessionId: overrides?.activeSessionId ?? null,
     sessions: overrides?.sessions ?? [],
+    showSessionPicker: overrides?.showSessionPicker ?? false,
   };
   const sessionStatus: Record<string, SessionStatus> = {};
 
@@ -299,6 +301,18 @@ describe('session-lifecycle helpers', () => {
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1', 'session-2']);
     expect(setup.deps.markSessionSeen).toHaveBeenCalledWith('session-1', 3);
+  });
+
+  it('does not mark the active session seen while the session list is open', () => {
+    const setup = createDeps({
+      activeSessionId: 'session-1',
+      sessions: [session('session-1', '/repo', 1)],
+      showSessionPicker: true,
+    });
+
+    upsertSession(setup.deps, session('session-1', '/repo', 3));
+
+    expect(setup.deps.markSessionSeen).not.toHaveBeenCalled();
   });
 
   it('keeps newer session metadata when an older snapshot arrives later', () => {
