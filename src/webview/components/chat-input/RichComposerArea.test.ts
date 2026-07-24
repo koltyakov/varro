@@ -43,6 +43,8 @@ function renderComposer(props: {
   cursorOffset: number;
   chips: RichComposerChip[];
   onInput?: (text: string, cursorOffset: number) => void;
+  onPaste?: (e: ClipboardEvent) => void;
+  onPasteInsertion?: Parameters<typeof RichComposerArea>[0]['onPasteInsertion'];
   onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
 }) {
@@ -60,7 +62,8 @@ function renderComposer(props: {
         completionSelectedIndex: 0,
         onInput: props.onInput || (() => {}),
         onKeyDown: () => {},
-        onPaste: () => {},
+        onPaste: props.onPaste || (() => {}),
+        onPasteInsertion: props.onPasteInsertion,
         onFocus: () => {},
         onBlur: () => {},
         onClick: () => {},
@@ -108,8 +111,9 @@ describe('RichComposerArea', () => {
 
   it('inserts plain text paste through onInput', () => {
     const onInput = vi.fn();
+    const onPasteInsertion = vi.fn();
 
-    renderComposer({ value: '', cursorOffset: 0, chips: [], onInput });
+    renderComposer({ value: '', cursorOffset: 0, chips: [], onInput, onPasteInsertion });
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     editor?.focus();
@@ -123,6 +127,37 @@ describe('RichComposerArea', () => {
     editor?.dispatchEvent(event);
 
     expect(onInput).toHaveBeenCalledWith('pasted text', 11);
+    expect(onPasteInsertion).toHaveBeenCalledWith(event, {
+      start: 0,
+      end: 11,
+      text: 'pasted text',
+      value: 'pasted text',
+    });
+  });
+
+  it('reports no insertion when paste handling prevents the paste', () => {
+    const onInput = vi.fn();
+    const onPasteInsertion = vi.fn();
+
+    renderComposer({
+      value: '@README.md',
+      cursorOffset: 10,
+      chips: [],
+      onInput,
+      onPaste: (event) => event.preventDefault(),
+      onPasteInsertion,
+    });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? '@README.md' : '') },
+    });
+
+    editor?.dispatchEvent(event);
+
+    expect(onInput).not.toHaveBeenCalled();
+    expect(onPasteInsertion).toHaveBeenCalledWith(event, null);
   });
 
   it('accepts input immediately after syncing the controlled value', () => {

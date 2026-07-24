@@ -22,6 +22,10 @@ const { registeredCommands, vscodeMock } = vi.hoisted(() => {
         get: vi.fn((_key: string, fallback: unknown) => fallback),
       })),
       getWorkspaceFolder: vi.fn(() => undefined),
+      asRelativePath: vi.fn((uri: { fsPath: string } | string) =>
+        (typeof uri === 'string' ? uri : uri.fsPath).replace(/^\/repo\//, '')
+      ),
+      workspaceFolders: undefined as { name: string }[] | undefined,
     },
     window: {
       activeTextEditor: undefined,
@@ -66,13 +70,13 @@ function register(workspacePath: string | null = '/repo', server: unknown = {}) 
   };
   const contextProvider = {
     context: { workspacePath },
-    terminalSelection: null,
+    terminalSelection: null as { text: string; terminalName: string } | null,
     captureTerminalSelection: vi.fn(),
   };
   const context = { subscriptions: [] };
 
   registerCommands(context as never, sidebar as never, contextProvider as never, server as never);
-  return { sidebar };
+  return { contextProvider, sidebar };
 }
 
 describe('About command', () => {
@@ -103,6 +107,10 @@ describe('About command', () => {
     );
   });
 });
+
+function fileUri(fsPath: string) {
+  return { fsPath };
+}
 
 async function runCommand(id: string) {
   const handler = registeredCommands.get(id);
@@ -177,5 +185,168 @@ describe('AGENTS.md commands', () => {
     );
     expect(vscodeMock.workspace.fs.createDirectory).not.toHaveBeenCalled();
     expect(sidebar.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('terminal selection command', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ['no-terminal', 'Varro: Open and focus a terminal first.'],
+    ['empty-selection', 'Varro: Select text in the terminal first.'],
+  ] as const)('clears the webview after a %s recapture', async (reason, warning) => {
+    const { contextProvider, sidebar } = register();
+    contextProvider.terminalSelection = { text: 'stale output', terminalName: 'Terminal 1' };
+    contextProvider.captureTerminalSelection.mockResolvedValue({ ok: false, reason });
+
+    await runCommand('varro.chat.addTerminalSelectionToContext');
+
+    expect(sidebar.postTerminalSelection).toHaveBeenCalledWith(null);
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(warning);
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+  });
+
+  it('clears the webview when terminal recapture throws', async () => {
+    const { contextProvider, sidebar } = register();
+    contextProvider.terminalSelection = { text: 'stale output', terminalName: 'Terminal 1' };
+    contextProvider.captureTerminalSelection.mockRejectedValue(new Error('copy failed'));
+
+    await runCommand('varro.chat.addTerminalSelectionToContext');
+
+    expect(sidebar.postTerminalSelection).toHaveBeenCalledWith(null);
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+  });
+});
+
+describe('varro.chat.addToContext', () => {
+  const FILE = 1;
+  const DIRECTORY = 2;
+
+  async function addToContext(...args: unknown[]) {
+    const handler = registeredCommands.get('varro.chat.addToContext');
+    expect(handler).toBeTypeOf('function');
+    await handler?.(...args);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vscodeMock.window.activeTextEditor = undefined;
+    vscodeMock.workspace.workspaceFolders = undefined;
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: FILE });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+  });
+
+  it('posts an explicit multi-selection and ignores the single-uri argument', async () => {
+    const { sidebar } = register();
+
+    await addToContext(fileUri('/repo/ignored.ts'), [fileUri('/repo/a.ts'), fileUri('/repo/b.ts')]);
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+      { path: '/repo/b.ts', relativePath: 'b.ts', type: 'file' },
+    ]);
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+  });
+
+  it('falls back to the single uri when the multi-selection is empty', async () => {
+    const { sidebar } = register();
+
+    await addToContext(fileUri('/repo/a.ts'), []);
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+    ]);
+  });
+
+  it('falls back to the active editor when invoked with no arguments', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = { document: { uri: fileUri('/repo/open.ts') } } as never;
+
+    await addToContext();
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      { path: '/repo/open.ts', relativePath: 'open.ts', type: 'file' },
+    ]);
+  });
+
+  it('does nothing when there is no target and no active editor', async () => {
+    const { sidebar } = register();
+
+    await addToContext();
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('marks directories so the webview can expand them', async () => {
+    const { sidebar } = register();
+    vscodeMock.workspace.fs.stat.mockImplementation((target: { fsPath: string }) =>
+      Promise.resolve({ type: target.fsPath.endsWith('/src') ? DIRECTORY : FILE })
+    );
+
+    await addToContext(undefined, [fileUri('/repo/src'), fileUri('/repo/a.ts')]);
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      { path: '/repo/src', relativePath: 'src', type: 'directory' },
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+    ]);
+  });
+
+  it('treats a symlinked directory as a directory', async () => {
+    const { sidebar } = register();
+    // FileType is a bitfield: Directory | SymbolicLink === 66.
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: DIRECTORY | 64 });
+
+    await addToContext(fileUri('/repo/src'));
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      expect.objectContaining({ type: 'directory' }),
+    ]);
+  });
+
+  it('skips targets that cannot be stat-ed but still posts the rest', async () => {
+    const { sidebar } = register();
+    vscodeMock.workspace.fs.stat.mockImplementation((target: { fsPath: string }) =>
+      target.fsPath.endsWith('/missing.ts')
+        ? Promise.reject(new Error('ENOENT'))
+        : Promise.resolve({ type: FILE })
+    );
+
+    await addToContext(undefined, [fileUri('/repo/missing.ts'), fileUri('/repo/a.ts')]);
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+    ]);
+  });
+
+  it('does not reveal the sidebar when every target fails to stat', async () => {
+    const { sidebar } = register();
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('ENOENT'));
+
+    await addToContext(fileUri('/repo/missing.ts'));
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('prefixes the folder name in a multi-root workspace', async () => {
+    const { sidebar } = register();
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo' }, { name: 'other' }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ name: 'repo' } as never);
+
+    await addToContext(fileUri('/repo/a.ts'));
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      expect.objectContaining({ relativePath: 'repo/a.ts' }),
+    ]);
   });
 });

@@ -105,6 +105,16 @@ function createMockChildProcess(): MockChildProcess {
   });
 }
 
+// The exit -> cleanup -> health-read -> recovery chain spans several awaits.
+function settleRecovery() {
+  return vi.advanceTimersByTimeAsync(0);
+}
+
+function crashDuringStartup(child: MockChildProcess, stderr: string) {
+  child.stderr.emit('data', Buffer.from(stderr));
+  child.emit('exit', 1, null);
+}
+
 function configureManagedStartup(server: OpenCodeServer, resolveHealth = true) {
   const children: MockChildProcess[] = [];
   const api = server as unknown as {
@@ -2122,5 +2132,192 @@ describe('OpenCodeServer managed process lifecycle', () => {
         'OpenCode server stopped unexpectedly (code 1). Restart attempts (3) were exhausted.',
     });
     expect(children).toHaveLength(4);
+  });
+});
+
+describe('OpenCodeServer startup recovery', () => {
+  function getProcessManager(server: OpenCodeServer) {
+    return (
+      server as unknown as {
+        processManager: {
+          port: number;
+          process: MockChildProcess | null;
+          hasPortInUseDetected(): boolean;
+        };
+      }
+    ).processManager;
+  }
+
+  /**
+   * Drives a managed startup where the first attempt never reaches a healthy
+   * server, so every exit falls into the recovery path. Later attempts resolve
+   * unless `resolveAfterAttempt` is null.
+   */
+  function configureFailingStartup(
+    server: OpenCodeServer,
+    options: { resolveAfterAttempt: number | null }
+  ) {
+    const { api, children } = configureManagedStartup(server, false);
+    let attempt = 0;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    api.pollHealth = (_startAttemptId, _disposeGeneration, resolve) => {
+      attempt += 1;
+      if (options.resolveAfterAttempt === null || attempt <= options.resolveAfterAttempt) return;
+      setRunning(server);
+      resolve(server.url);
+    };
+    return { api, children };
+  }
+
+  it('advances to the next port and retries quickly when the port is already in use', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: 1 });
+    const processManager = getProcessManager(server);
+
+    const startResult = server.start();
+    await flushMicrotasks();
+    expect(children).toHaveLength(1);
+
+    crashDuringStartup(children[0]!, 'Error: listen EADDRINUSE: address already in use :::4096');
+    await settleRecovery();
+    expect(processManager.hasPortInUseDetected()).toBe(false);
+    expect(processManager.port).toBe(4097);
+
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(startResult).resolves.toBe(server.url);
+    expect(children).toHaveLength(2);
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      'Port 4096 in use by another process; retrying on 4097'
+    );
+  });
+
+  it('keeps advancing ports while successive attempts hit a used port', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: 2 });
+    const processManager = getProcessManager(server);
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    for (const expectedPort of [4097, 4098]) {
+      crashDuringStartup(children[children.length - 1]!, 'listen EADDRINUSE :::4096');
+      await settleRecovery();
+      expect(processManager.port).toBe(expectedPort);
+      await vi.advanceTimersByTimeAsync(100);
+    }
+
+    await expect(startResult).resolves.toBe(server.url);
+    expect(children).toHaveLength(3);
+  });
+
+  it('retries on the same port with backoff when the crash is not a port conflict', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: 1 });
+    const processManager = getProcessManager(server);
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    crashDuringStartup(children[0]!, 'fatal: could not parse config');
+    await settleRecovery();
+    expect(processManager.port).toBe(4096);
+
+    // The port-conflict path retries after 100ms; a generic crash waits for backoff.
+    await vi.advanceTimersByTimeAsync(99);
+    expect(children).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(901);
+    await expect(startResult).resolves.toBe(server.url);
+    expect(children).toHaveLength(2);
+    expect(loggerMock.warn).toHaveBeenCalledWith('Retrying server startup in 1000ms (attempt 1)');
+  });
+
+  it('backs off exponentially and fails with the last stderr line once retries are exhausted', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    for (const delay of [1_000, 2_000, 4_000]) {
+      crashDuringStartup(children[children.length - 1]!, 'fatal: could not parse config');
+      await settleRecovery();
+      await vi.advanceTimersByTimeAsync(delay);
+      await flushMicrotasks();
+    }
+
+    expect(children).toHaveLength(4);
+    crashDuringStartup(children[3]!, 'fatal: missing provider credentials');
+
+    await expect(startResult).rejects.toThrow(
+      'OpenCode server exited during startup (code 1): fatal: missing provider credentials'
+    );
+    expect(server.status).toEqual({
+      state: 'error',
+      message:
+        'OpenCode server exited during startup (code 1): fatal: missing provider credentials',
+    });
+    expect(children).toHaveLength(4);
+  });
+
+  it('reports the exit signal rather than a code when the child is signalled', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    for (const delay of [1_000, 2_000, 4_000]) {
+      children[children.length - 1]!.emit('exit', 1, null);
+      await settleRecovery();
+      await vi.advanceTimersByTimeAsync(delay);
+      await flushMicrotasks();
+    }
+
+    children[3]!.emit('exit', null, 'SIGKILL');
+
+    await expect(startResult).rejects.toThrow('OpenCode server exited during startup (SIGKILL)');
+  });
+
+  it('recovers without retrying when the server turns out to be healthy after the exit', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+    api.readHealthInfo = vi
+      .fn()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockResolvedValue({ healthy: true, version: MINIMUM_SUPPORTED_OPENCODE_VERSION });
+    const processManager = getProcessManager(server);
+    (
+      processManager as unknown as { confirmManagedServerOwnership: () => Promise<boolean> }
+    ).confirmManagedServerOwnership = vi.fn().mockResolvedValue(true);
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    children[0]!.emit('exit', 0, null);
+    await settleRecovery();
+
+    await expect(startResult).resolves.toBe(server.url);
+    expect(children).toHaveLength(1);
+    expect(server.status.state).toBe('running');
+  });
+
+  it('rejects an incompatible server that comes up during startup recovery', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const { api, children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+    api.readHealthInfo = vi
+      .fn()
+      .mockResolvedValueOnce({ healthy: false })
+      .mockResolvedValue({ healthy: true, version: '0.0.1' });
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    children[0]!.emit('exit', 0, null);
+    await settleRecovery();
+
+    await expect(startResult).rejects.toThrow(/0\.0\.1/);
+    expect(server.status.state).toBe('error');
+    expect(children).toHaveLength(1);
   });
 });

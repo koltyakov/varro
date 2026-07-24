@@ -15,7 +15,12 @@ const clipboardState = vi.hoisted(() => ({
   terminalSelection: null as string | null,
   // When set, `writeText` returns this promise instead of resolving immediately,
   // so a test can hold a clipboard write open.
-  deferWrite: null as { promise: Promise<void>; resolve: () => void } | null,
+  deferWrite: null as {
+    promise: Promise<void>;
+    resolve: () => void;
+    value?: string;
+  } | null,
+  deferCopy: null as { promise: Promise<void>; resolve: () => void } | null,
 }));
 
 // `realpath` resolves through `symlinks` so containment can be tested without
@@ -84,7 +89,7 @@ const vscodeMock = vi.hoisted(() => ({
       readText: vi.fn(() => Promise.resolve(clipboardState.current)),
       writeText: vi.fn((value: string) => {
         const deferred = clipboardState.deferWrite;
-        if (deferred) {
+        if (deferred && (deferred.value === undefined || deferred.value === value)) {
           clipboardState.deferWrite = null;
           return deferred.promise.then(() => {
             clipboardState.current = value;
@@ -135,6 +140,7 @@ describe('ContextProvider', () => {
     clipboardState.writes = [];
     clipboardState.terminalSelection = null;
     clipboardState.deferWrite = null;
+    clipboardState.deferCopy = null;
     fsState.symlinks.clear();
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
     vscodeMock.window.activeTextEditor = undefined;
@@ -146,6 +152,14 @@ describe('ContextProvider', () => {
     vscodeMock.window.showTextDocument.mockReset();
     vscodeMock.extensions.getExtension.mockReset();
     vscodeMock.commands.executeCommand.mockImplementation((command: string) => {
+      const deferred = clipboardState.deferCopy;
+      if (command === 'workbench.action.terminal.copySelection' && deferred) {
+        clipboardState.deferCopy = null;
+        const selection = clipboardState.terminalSelection;
+        return deferred.promise.then(() => {
+          if (selection !== null) clipboardState.current = selection;
+        });
+      }
       if (
         command === 'workbench.action.terminal.copySelection' &&
         clipboardState.terminalSelection !== null
@@ -311,6 +325,123 @@ describe('ContextProvider', () => {
 
       expect(clipboardState.current).toBe('existing clipboard');
       expect(clipboardState.current).not.toContain('varro-terminal-selection-');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores a terminal copy that lands after the command times out before dequeuing', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'late terminal output';
+    let releaseCopy: () => void = noop;
+    const copyPromise = new Promise<void>((resolve) => {
+      releaseCopy = resolve;
+    });
+    clipboardState.deferCopy = { promise: copyPromise, resolve: releaseCopy };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const firstCapture = provider.captureTerminalSelection();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(firstCapture).rejects.toThrow(/Timed out copying terminal selection/);
+
+      clipboardState.terminalSelection = null;
+      const secondCapture = provider.captureTerminalSelection();
+      const secondSettled = vi.fn();
+      void secondCapture.then(secondSettled, secondSettled);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(secondSettled).not.toHaveBeenCalled();
+
+      releaseCopy();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(secondCapture).resolves.toEqual({ ok: false, reason: 'empty-selection' });
+      expect(clipboardState.current).toBe('existing clipboard');
+      expect(clipboardState.current).not.toBe('late terminal output');
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not wedge the capture queue when a clipboard restore never settles', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'first terminal output';
+    const neverSettles = new Promise<void>(() => undefined);
+    clipboardState.deferWrite = {
+      promise: neverSettles,
+      resolve: noop,
+      value: 'existing clipboard',
+    };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const firstCapture = provider.captureTerminalSelection();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(firstCapture).resolves.toEqual({ ok: true, terminalName: 'Terminal 1' });
+
+      clipboardState.terminalSelection = 'second terminal output';
+      const secondCapture = provider.captureTerminalSelection();
+      const secondSettled = vi.fn();
+      void secondCapture.then(secondSettled, secondSettled);
+      await vi.advanceTimersByTimeAsync(7_000);
+      expect(secondSettled).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      await expect(secondCapture).resolves.toEqual({ ok: true, terminalName: 'Terminal 1' });
+      expect(provider.terminalSelection).toEqual({
+        text: 'second terminal output',
+        terminalName: 'Terminal 1',
+      });
+    } finally {
+      provider.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for a timed-out clipboard restore to settle before starting the next capture', async () => {
+    clipboardState.current = 'existing clipboard';
+    clipboardState.terminalSelection = 'first terminal output';
+    let releaseRestore: () => void = noop;
+    const restorePromise = new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    clipboardState.deferWrite = {
+      promise: restorePromise,
+      resolve: releaseRestore,
+      value: 'existing clipboard',
+    };
+    vi.useFakeTimers();
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      const firstCapture = provider.captureTerminalSelection();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(firstCapture).resolves.toEqual({ ok: true, terminalName: 'Terminal 1' });
+
+      clipboardState.terminalSelection = 'second terminal output';
+      const secondCapture = provider.captureTerminalSelection();
+      const secondSettled = vi.fn();
+      void secondCapture.then(secondSettled, secondSettled);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(secondSettled).not.toHaveBeenCalled();
+      expect(vscodeMock.commands.executeCommand).toHaveBeenCalledTimes(1);
+
+      releaseRestore();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(secondCapture).resolves.toEqual({ ok: true, terminalName: 'Terminal 1' });
+      expect(vscodeMock.commands.executeCommand).toHaveBeenCalledTimes(2);
+      expect(provider.terminalSelection).toEqual({
+        text: 'second terminal output',
+        terminalName: 'Terminal 1',
+      });
+      expect(clipboardState.current).toBe('existing clipboard');
     } finally {
       provider.dispose();
       vi.useRealTimers();
@@ -558,7 +689,7 @@ describe('ContextProvider', () => {
     }
   });
 
-  it('reports the lexical path as metadata even when it resolves elsewhere', async () => {
+  it('returns the verified canonical path with lexical display metadata', async () => {
     const provider = new ContextProvider(vi.fn());
 
     vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
@@ -571,9 +702,12 @@ describe('ContextProvider', () => {
       await expect(
         provider.resolvePath('/repo/link/app.ts', { restrictToWorkspace: true })
       ).resolves.toEqual({
-        path: '/repo/link/app.ts',
+        path: '/repo/real/app.ts',
         relativePath: 'link/app.ts',
         type: 'file',
+      });
+      expect(vscodeMock.workspace.fs.stat).toHaveBeenLastCalledWith({
+        fsPath: '/repo/real/app.ts',
       });
     } finally {
       provider.dispose();

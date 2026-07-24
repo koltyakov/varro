@@ -349,8 +349,16 @@ async function captureTerminalSelectionForContext(
   contextProvider: ContextProvider,
   options?: { silent?: boolean }
 ) {
-  const result = await contextProvider.captureTerminalSelection();
+  let result: Awaited<ReturnType<ContextProvider['captureTerminalSelection']>>;
+  try {
+    result = await contextProvider.captureTerminalSelection();
+  } catch (err) {
+    sidebar.postTerminalSelection(null);
+    throw err;
+  }
+
   if (!result.ok) {
+    sidebar.postTerminalSelection(null);
     if (!options?.silent) {
       const message =
         result.reason === 'no-terminal'

@@ -19,6 +19,23 @@ declare global {
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
+function assertInertWithSafeAnchor(root: ParentNode) {
+  expect(root.querySelector('script')).toBeNull();
+  expect(root.querySelector('img')).toBeNull();
+  expect(root.querySelector('style')).toBeNull();
+
+  for (const element of Array.from(root.querySelectorAll('*'))) {
+    for (const attribute of Array.from(element.attributes)) {
+      expect(attribute.name.startsWith('on')).toBe(false);
+    }
+  }
+
+  const anchor = root.querySelector<HTMLAnchorElement>('a');
+  expect(anchor?.textContent).toBe('Safe docs');
+  expect(anchor?.getAttribute('href')).toBe('https://example.test/docs');
+  expect(anchor?.getAttribute('data-external')).toBe('true');
+}
+
 beforeEach(() => {
   __resetMarkdownCachesForTests();
   container = document.createElement('div');
@@ -159,6 +176,19 @@ describe('MarkdownRenderer', () => {
       expect(sink.innerHTML).toBe(html);
     });
   }
+
+  it('keeps a safe external anchor inert alongside namespace-confusion markup', () => {
+    const payload =
+      '<a href=" https://example.test/docs ">Safe docs</a><svg></p><style><a id="</style><img src=1 onerror=alert(1)>">';
+
+    cleanup = render(() => MarkdownRenderer({ content: payload }), container!);
+
+    assertInertWithSafeAnchor(container!);
+
+    const sink = document.createElement('div');
+    sink.innerHTML = container?.innerHTML ?? '';
+    assertInertWithSafeAnchor(sink);
+  });
 
   it('opens local markdown file links through VS Code', () => {
     const send = vi.fn();

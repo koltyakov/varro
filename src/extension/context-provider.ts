@@ -92,10 +92,18 @@ export class ContextProvider implements vscode.Disposable {
     // The queue is held until any clipboard write this run abandoned has also
     // settled, so the next capture cannot mistake a late landing for output.
     this.terminalCaptureQueue = run.then(
-      () => this.pendingClipboardSettle,
-      () => this.pendingClipboardSettle
+      () => this.waitForPendingClipboardSettle(),
+      () => this.waitForPendingClipboardSettle()
     );
     return run;
+  }
+
+  private async waitForPendingClipboardSettle() {
+    let pending: Promise<void>;
+    do {
+      pending = this.pendingClipboardSettle;
+      await pending;
+    } while (pending !== this.pendingClipboardSettle);
   }
 
   private async captureTerminalSelectionNow(): Promise<
@@ -132,28 +140,13 @@ export class ContextProvider implements vscode.Disposable {
     const sentinel = `varro-terminal-selection-${randomUUID()}`;
     let selectionText = '';
     let capturedSelection = false;
+    let restoreCompleted = false;
 
     // Issued outside the timeout wrapper: `withTimeout` abandons the wait but
     // cannot cancel the write, so from here on the clipboard counts as dirtied
     // and the restore below is unconditional.
     const primeWrite = Promise.resolve(vscode.env.clipboard.writeText(sentinel));
-    let restoreCompleted = false;
-
-    // An abandoned prime that lands after cleanup puts the sentinel back on the
-    // clipboard, so undo it once it finally settles. Bounded, because a write
-    // that never settles must not wedge every later capture.
-    this.pendingClipboardSettle = withTimeout(
-      primeWrite.catch(() => undefined),
-      ContextProvider.LATE_CLIPBOARD_WRITE_TIMEOUT_MS,
-      'Timed out waiting for an abandoned clipboard write to settle'
-    )
-      .then(async () => {
-        if (!restoreCompleted) return;
-        await vscode.env.clipboard.writeText(previousClipboard);
-      })
-      .catch(() => {
-        logger.warn('Could not undo a late clipboard write from terminal selection capture');
-      });
+    this.trackClipboardMutation(primeWrite, previousClipboard, () => restoreCompleted);
 
     try {
       await withTimeout(
@@ -161,8 +154,12 @@ export class ContextProvider implements vscode.Disposable {
         ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
         'Timed out priming clipboard before terminal selection capture'
       );
+      const copyCommand = Promise.resolve(
+        vscode.commands.executeCommand('workbench.action.terminal.copySelection')
+      );
+      this.trackClipboardMutation(copyCommand, previousClipboard, () => restoreCompleted);
       await withTimeout(
-        vscode.commands.executeCommand('workbench.action.terminal.copySelection'),
+        copyCommand,
         ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
         'Timed out copying terminal selection'
       );
@@ -189,9 +186,10 @@ export class ContextProvider implements vscode.Disposable {
           ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
           'Timed out waiting for the clipboard prime to settle'
         ).catch(() => undefined);
-        await vscode.env.clipboard.writeText(previousClipboard);
-      } catch {
-        logger.warn('Failed to restore clipboard after terminal selection capture');
+        await this.restoreClipboard(
+          previousClipboard,
+          'Failed to restore clipboard after terminal selection capture'
+        );
       } finally {
         restoreCompleted = true;
       }
@@ -207,6 +205,62 @@ export class ContextProvider implements vscode.Disposable {
       terminalName: terminal.name,
     };
     return { ok: true, terminalName: terminal.name };
+  }
+
+  private trackClipboardMutation(
+    mutation: Promise<unknown>,
+    previousClipboard: string,
+    isRestoreCompleted: () => boolean
+  ) {
+    const settle = withTimeout(
+      mutation.catch(() => undefined),
+      ContextProvider.LATE_CLIPBOARD_WRITE_TIMEOUT_MS,
+      'Timed out waiting for a late clipboard mutation to settle'
+    )
+      .then(async () => {
+        if (!isRestoreCompleted()) return;
+        await this.restoreClipboard(
+          previousClipboard,
+          'Could not undo a late clipboard mutation from terminal selection capture'
+        );
+      })
+      .catch(() => {
+        logger.warn('Could not undo a late clipboard mutation from terminal selection capture');
+      });
+
+    this.pendingClipboardSettle = Promise.all([this.pendingClipboardSettle, settle]).then(
+      () => undefined
+    );
+  }
+
+  private async restoreClipboard(previousClipboard: string, warning: string) {
+    try {
+      const restoreWrite = Promise.resolve(vscode.env.clipboard.writeText(previousClipboard));
+      // A restore that outlives its immediate timeout is itself a late clipboard
+      // mutation. Wait for it before dequeuing, but never try to restore a restore.
+      this.trackClipboardSettle(restoreWrite);
+      await withTimeout(
+        restoreWrite,
+        ContextProvider.TERMINAL_COPY_TIMEOUT_MS,
+        'Timed out restoring clipboard after terminal selection capture'
+      );
+    } catch {
+      logger.warn(warning);
+    }
+  }
+
+  private trackClipboardSettle(operation: Promise<unknown>) {
+    const settle = withTimeout(
+      operation.catch(() => undefined),
+      ContextProvider.LATE_CLIPBOARD_WRITE_TIMEOUT_MS,
+      'Timed out waiting for a clipboard restore to settle'
+    ).catch(() => {
+      logger.warn('Timed out waiting for a clipboard restore to settle');
+    });
+
+    this.pendingClipboardSettle = Promise.all([this.pendingClipboardSettle, settle]).then(
+      () => undefined
+    );
   }
 
   clearTerminalSelection() {
@@ -391,13 +445,14 @@ export class ContextProvider implements vscode.Disposable {
   ): Promise<{ path: string; relativePath: string; type: 'file' | 'directory' } | null> {
     try {
       const resolved = await this.resolveWorkspaceUri(path, options);
-      const uri = resolved?.uri;
-      if (!uri) return null;
+      const lexicalUri = resolved?.uri;
+      const uri = resolved?.verifiedUri ?? lexicalUri;
+      if (!uri || !lexicalUri) return null;
 
       const stat = await vscode.workspace.fs.stat(uri);
       return {
         path: uri.fsPath,
-        relativePath: getRelativePath(uri, resolved?.workspaceFolder),
+        relativePath: getRelativePath(lexicalUri, resolved?.workspaceFolder),
         type: stat.type & vscode.FileType.Directory ? 'directory' : 'file',
       };
     } catch (err) {

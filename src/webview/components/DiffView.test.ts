@@ -362,6 +362,48 @@ describe('DiffView', () => {
     expect(remountedViewport?.scrollTop).toBe(44);
   });
 
+  it('does not leak undisposed computations while scrolling a keyed preview', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const observers: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          observers.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+
+    cleanup = render(
+      () =>
+        DiffView({
+          showChanges: true,
+          diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(40), additions: 40, deletions: 0 }],
+          stateKey: 'tool-1',
+        }),
+      container!
+    );
+    await Promise.resolve();
+
+    const viewport = container?.querySelector<HTMLElement>('.diff-view-lines');
+    container?.querySelector<HTMLButtonElement>('.diff-view-toggle')?.click();
+
+    // Each of these drives savePreviewState from a callback with no owner.
+    for (let scrollTop = 0; scrollTop < 20; scrollTop += 1) {
+      if (viewport) viewport.scrollTop = scrollTop;
+      viewport?.dispatchEvent(new Event('scroll'));
+      for (const notify of observers) notify();
+    }
+    await Promise.resolve();
+
+    const leaks = warn.mock.calls.filter(
+      ([message]) => typeof message === 'string' && message.includes('never be disposed')
+    );
+    expect(leaks).toEqual([]);
+  });
+
   it('collapses empty number gutters for unnumbered patch fragments', () => {
     cleanup = render(
       () =>

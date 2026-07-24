@@ -21,6 +21,13 @@ export type RichComposerChip = {
   textMarker: string;
 };
 
+export type RichComposerPasteInsertion = {
+  start: number;
+  end: number;
+  text: string;
+  value: string;
+};
+
 export function RichComposerArea(props: {
   editorRef: (el: HTMLDivElement) => void;
   placeholder: string;
@@ -35,6 +42,7 @@ export function RichComposerArea(props: {
   onInput: (text: string, cursorOffset: number) => void;
   onKeyDown: (e: KeyboardEvent) => void;
   onPaste: (e: ClipboardEvent) => void;
+  onPasteInsertion?: (e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) => void;
   onFocus: () => void;
   onBlur: () => void;
   onClick: (cursorOffset: number) => void;
@@ -236,14 +244,20 @@ export function RichComposerArea(props: {
 
   function handlePaste(e: ClipboardEvent) {
     props.onPaste(e);
-    if (e.defaultPrevented) return;
+    if (e.defaultPrevented) {
+      props.onPasteInsertion?.(e, null);
+      return;
+    }
 
     const overrideText = (e as ComposerClipboardEvent).__varroPasteText;
     const text = overrideText ?? e.clipboardData?.getData('text/plain') ?? '';
     if (overrideText !== undefined) {
       e.preventDefault();
     }
-    if (!text) return;
+    if (!text) {
+      props.onPasteInsertion?.(e, null);
+      return;
+    }
     const selection = getSelectionOffsets() || {
       start: props.value.length,
       end: props.value.length,
@@ -251,6 +265,12 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const nextValue = `${props.value.slice(0, selection.start)}${text}${props.value.slice(selection.end)}`;
     props.onInput(nextValue, selection.start + text.length);
+    props.onPasteInsertion?.(e, {
+      start: selection.start,
+      end: selection.start + text.length,
+      text,
+      value: nextValue,
+    });
   }
 
   function handleCopy(e: ClipboardEvent) {

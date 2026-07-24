@@ -125,7 +125,11 @@ import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
-import { RichComposerArea, type RichComposerChip } from './chat-input/RichComposerArea';
+import {
+  RichComposerArea,
+  type RichComposerChip,
+  type RichComposerPasteInsertion,
+} from './chat-input/RichComposerArea';
 import { DropOverlay } from './chat-input/DropOverlay';
 import {
   QUEUED_MESSAGE_DRAG_TYPE,
@@ -1715,39 +1719,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
       if (pasteHandledAsContextOnly) {
         e.preventDefault();
+        resolvePastedMentions(pastedText, null);
       }
     }
-
-    // `@file` mentions only become attachments after an async workspace lookup,
-    // so the composer cannot be gated on them at paste time the way selection
-    // and active-file references are. Snapshot what the composer looks like the
-    // moment the paste lands, then only attach and withdraw if that exact
-    // composer is still on screen when the lookups return.
-    const pasteSessionId = state.activeSessionId;
-    let pastedRange: { start: number; value: string } | null = null;
-    queueMicrotask(() => {
-      const caret = caretPosition();
-      const start = caret - pastedText.length;
-      const value = inputText();
-      if (start < 0 || value.slice(start, caret) !== pastedText) return;
-      pastedRange = { start, value };
-    });
-
-    void resolvePastedMentionContextFiles(pastedText)
-      .then((mentions) => {
-        if (composerDisposed || state.activeSessionId !== pasteSessionId) return;
-        for (const file of mentions.files) {
-          addContextFile(file);
-        }
-        if (mentions.mentionCount === 0 || mentions.resolvedCount < mentions.mentionCount) return;
-        if (pastedPromptText.length > 0 || !pastedRange) return;
-        batch(() => {
-          withdrawPastedText(pastedRange!, pastedText, setInputText, setCaretPosition);
-        });
-      })
-      .catch((err) => {
-        logError('chat-input:resolvePastedMentions', err);
-      });
 
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
@@ -1794,6 +1768,45 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       insertedPlaceholders.map((filename) => `[${filename}]`).join(' '),
       true
     );
+  }
+
+  function handlePasteInsertion(e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) {
+    if (!insertion) return;
+    const pastedText = e.clipboardData?.getData('text/plain') ?? '';
+    if (!pastedText) return;
+
+    resolvePastedMentions(pastedText, insertion);
+  }
+
+  function resolvePastedMentions(pastedText: string, insertion: RichComposerPasteInsertion | null) {
+    const owner = {
+      sessionId: composerSessionId(),
+      mutationVersion: inputTextMutationVersion(),
+      value: insertion?.value ?? inputText(),
+    };
+    const ownsActiveComposer = () =>
+      !composerDisposed &&
+      composerSessionId() === owner.sessionId &&
+      inputTextMutationVersion() === owner.mutationVersion &&
+      inputText() === owner.value;
+
+    void resolvePastedMentionContextFiles(pastedText)
+      .then((mentions) => {
+        if (!ownsActiveComposer()) return;
+        for (const file of mentions.files) {
+          addContextFile(file);
+        }
+        if (!insertion) return;
+        if (mentions.mentionCount === 0 || mentions.resolvedCount < mentions.mentionCount) return;
+        if (getPromptTextWithoutContextReferences(pastedText).length > 0) return;
+        if (!ownsActiveComposer()) return;
+        batch(() => {
+          withdrawPastedText(insertion, setInputText, setCaretPosition);
+        });
+      })
+      .catch((err) => {
+        logError('chat-input:resolvePastedMentions', err);
+      });
   }
 
   onMount(() => {
@@ -2583,6 +2596,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             onKeyDown={handleKeydown}
             onHistory={applyComposerHistoryAction}
             onPaste={handlePaste}
+            onPasteInsertion={handlePasteInsertion}
             onFocus={() => {
               setIsFocused(true);
             }}
@@ -3011,16 +3025,14 @@ function getPastedImageFilename(index: number) {
  * (the value no longer matches the snapshot) leaves the text untouched.
  */
 function withdrawPastedText(
-  range: { start: number; value: string },
-  pastedText: string,
+  insertion: RichComposerPasteInsertion,
   setValue: (value: string) => void,
   setCaret: (caret: number) => void
 ) {
-  if (!pastedText || inputText() !== range.value) return;
-  const end = range.start + pastedText.length;
-  if (range.value.slice(range.start, end) !== pastedText) return;
-  setValue(range.value.slice(0, range.start) + range.value.slice(end));
-  setCaret(range.start);
+  if (!insertion.text || inputText() !== insertion.value) return;
+  if (insertion.value.slice(insertion.start, insertion.end) !== insertion.text) return;
+  setValue(insertion.value.slice(0, insertion.start) + insertion.value.slice(insertion.end));
+  setCaret(insertion.start);
 }
 
 function clickedOutside(target: Node | null, trigger?: HTMLElement, popup?: HTMLElement) {

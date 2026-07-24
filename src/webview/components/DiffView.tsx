@@ -588,10 +588,15 @@ function DiffItem(props: {
   const [viewportElement, setViewportElement] = createSignal<HTMLDivElement>();
   let scrollDrag: DiffScrollDrag | null = null;
   let scrollbarActivityTimer: ReturnType<typeof setTimeout> | undefined;
+  // The parent builds `stateKey` from a dynamic expression, so reading
+  // `props.stateKey` allocates a fresh computation on every access. Scroll and
+  // resize callbacks run without an owner, where those computations would never
+  // be disposed, so resolve the prop once here and read the memo everywhere else.
+  const stateKey = createMemo(() => props.stateKey);
   let renderedFile = props.diff.file;
-  let renderedStateKey = props.stateKey;
-  let previewStateReady = !props.stateKey;
-  const initialPreviewState = props.stateKey ? getToolDiffPreviewState(props.stateKey) : null;
+  let renderedStateKey = stateKey();
+  let previewStateReady = !stateKey();
+  const initialPreviewState = stateKey() ? getToolDiffPreviewState(stateKey()!) : null;
   const file = () => props.diff.file;
   const fromFile = () => props.diff.fromFile;
   const displayName = () => {
@@ -633,8 +638,9 @@ function DiffItem(props: {
   const previewNotice = () =>
     props.showChanges && props.preview?.status !== 'ready' ? props.preview : null;
   const savePreviewState = () => {
-    if (!props.stateKey || !previewStateReady || !linesViewport) return;
-    setToolDiffPreviewState(props.stateKey, {
+    const key = stateKey();
+    if (!key || !previewStateReady || !linesViewport) return;
+    setToolDiffPreviewState(key, {
       expanded: expanded(),
       scrollTop: linesViewport.scrollTop,
       scrollLeft: linesViewport.scrollLeft,
@@ -765,7 +771,7 @@ function DiffItem(props: {
 
   createEffect(() => {
     const nextFile = file();
-    const nextStateKey = props.stateKey;
+    const nextStateKey = stateKey();
     displayLines();
     const itemChanged = nextFile !== renderedFile || nextStateKey !== renderedStateKey;
     renderedFile = nextFile;
@@ -783,9 +789,9 @@ function DiffItem(props: {
 
   createEffect(() => {
     const viewport = viewportElement();
-    const stateKey = props.stateKey;
+    const key = stateKey();
     if (!viewport) return;
-    const state = stateKey ? getToolDiffPreviewState(stateKey) : null;
+    const state = key ? getToolDiffPreviewState(key) : null;
 
     queueMicrotask(() => {
       if (viewport !== linesViewport || !viewport.isConnected) return;

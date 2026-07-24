@@ -2296,6 +2296,52 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('');
   });
 
+  it('resolves mentions in a prevented context-only paste without changing the draft', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setInputText('existing draft');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) =>
+          type === 'text/plain' ? '[Selection from src/app.ts lines 3-5]\n@README.md' : '',
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(inputText()).toBe('existing draft');
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+    ]);
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledTimes(1);
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('README.md');
+  });
+
   it('does not attach or withdraw when the session changes while the lookup is pending', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -2328,6 +2374,77 @@ describe('ChatInput', () => {
     setState('activeSessionId', null);
   });
 
+  it('does not attach a pasted mention after the composer is cleared in the same session', async () => {
+    setState('activeSessionId', 'session-a');
+    let resolveLookup:
+      | ((value: Awaited<ReturnType<typeof client.varro.resolveWorkspacePath>>) => void)
+      | undefined;
+    vi.mocked(client.varro.resolveWorkspacePath).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        })
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    expect(inputText()).toBe('@README.md');
+    setInputText('');
+    resolveLookup?.({ path: '/repo/README.md', relativePath: 'README.md', type: 'file' });
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles).toEqual([]);
+  });
+
+  it('does not attach a pasted mention after it is sent in the same session', async () => {
+    setState('activeSessionId', 'session-a');
+    sendMessageMock.mockResolvedValueOnce(true);
+    let resolveLookup:
+      | ((value: Awaited<ReturnType<typeof client.varro.resolveWorkspacePath>>) => void)
+      | undefined;
+    vi.mocked(client.varro.resolveWorkspacePath).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLookup = resolve;
+        })
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor) setCollapsedSelection(editor, 0);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    resolveLookup?.({ path: '/repo/README.md', relativePath: 'README.md', type: 'file' });
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('@README.md', { noReply: false });
+    expect(inputText()).toBe('');
+    expect(state.droppedFiles).toEqual([]);
+  });
+
   it('withdraws the pasted copy, not an identical mention already in the composer', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -2357,6 +2474,31 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(inputText()).toBe('@README.md and notes');
+  });
+
+  it('does not claim existing mention text when an image-bearing paste is prevented', async () => {
+    setInputText('@README.md');
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.focus();
+    if (editor?.firstChild) setCollapsedSelection(editor.firstChild, '@README.md'.length);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? '@README.md' : ''),
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => null }],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(client.varro.resolveWorkspacePath).not.toHaveBeenCalled();
+    expect(inputText()).toBe('@README.md');
+    expect(state.droppedFiles).toEqual([]);
   });
 
   it('keeps a mention-only paste as text when the mention does not resolve', async () => {
@@ -2415,6 +2557,7 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(inputText()).toBe('@READ-edited-ME.md');
+    expect(state.droppedFiles).toEqual([]);
   });
 
   it('keeps unresolved scoped package names as plain pasted text', async () => {
