@@ -2618,6 +2618,22 @@ describe('usage-limit session status precedence', () => {
     expect(indicator?.getAttribute('aria-label')).toBe('Failed');
   });
 
+  it('keeps a parent running when a previously failed sub-agent resumes work', () => {
+    setState('sessions', [session('parent', 500), session('child', 400, { parentID: 'parent' })]);
+    setState('sessionStatus', {
+      child: { type: 'busy' },
+    });
+    setState('failedSessionIds', ['child']);
+
+    const indicators = deriveSessionIndicators(state.sessions);
+
+    expect(isFailedSession('child')).toBe(false);
+    expect(indicators.failedIds.has('child')).toBe(false);
+    expect(indicators.failedIds.has('parent')).toBe(false);
+    expect(indicators.runningIds.has('child')).toBe(true);
+    expect(indicators.runningIds.has('parent')).toBe(true);
+  });
+
   it('does not render a failed indicator for aborted sessions', () => {
     setState('sessions', [session('session-1', 500)]);
     setState('messages', [

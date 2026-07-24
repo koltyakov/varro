@@ -312,78 +312,22 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });
 
-  it('still virtualizes non-last assistant messages with many parts', () => {
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class ResizeObserver {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+  it('keeps completed responses fully rendered after they stop being last', () => {
+    renderAssistantMessageContent({
+      parts: createManyTextParts(45),
+      isLastAssistant: false,
+    });
 
-    try {
-      const interactiveList = document.createElement('div');
-      interactiveList.className = 'interactive-list';
-      Object.defineProperty(interactiveList, 'clientHeight', { configurable: true, value: 240 });
-      container?.appendChild(interactiveList);
-
-      cleanup = render(
-        () =>
-          AssistantMessageContent({
-            info: createAssistantMessage(),
-            parts: createManyTextParts(45),
-            errorMessage: null,
-            onRetry: undefined,
-            highlightFinalAnswer: false,
-            highlightPlanningAnswer: false,
-            suppressHighlightedCardMetaParts: false,
-            isLastAssistant: false,
-            textForPart: (part) =>
-              part.type === 'text' || part.type === 'reasoning' ? part.text : null,
-          }),
-        interactiveList
-      );
-
-      expect(container?.querySelectorAll('[data-assistant-render-key]').length).toBeLessThan(45);
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
-    }
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });
 
   it('keeps assistant parts fully rendered when the outer message list is virtualized', () => {
-    const originalResizeObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class ResizeObserver {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
+    renderAssistantMessageContent({
+      parts: createManyTextParts(45),
+      isLastAssistant: false,
+      outerListVirtualized: true,
+    });
 
-    try {
-      const interactiveList = document.createElement('div');
-      interactiveList.className = 'interactive-list';
-      Object.defineProperty(interactiveList, 'clientHeight', { configurable: true, value: 240 });
-      container?.appendChild(interactiveList);
-
-      cleanup = render(
-        () =>
-          AssistantMessageContent({
-            info: createAssistantMessage(),
-            parts: createManyTextParts(45),
-            errorMessage: null,
-            onRetry: undefined,
-            highlightFinalAnswer: false,
-            highlightPlanningAnswer: false,
-            suppressHighlightedCardMetaParts: false,
-            isLastAssistant: false,
-            outerListVirtualized: true,
-            textForPart: (part) =>
-              part.type === 'text' || part.type === 'reasoning' ? part.text : null,
-          }),
-        interactiveList
-      );
-
-      expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
-    } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
-    }
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(45);
   });
 });

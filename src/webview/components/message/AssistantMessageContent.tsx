@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { isLoading, showInlineFileChanges } from '../../lib/state';
 import {
   getFinalAssistantTextPartId,
@@ -20,18 +20,8 @@ type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
   | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] };
 
-type AssistantPartVirtualRange = {
-  start: number;
-  end: number;
-  topPad: number;
-  bottomPad: number;
-};
-
 const COMPACTION_BOUNDARY_RE =
   /^(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*\r?\n)+|(?:\r?\n(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*))+[ \t]*(?:\r?\n\s*)*$/g;
-const ASSISTANT_PART_VIRTUALIZE_THRESHOLD = 40;
-const ASSISTANT_PART_DEFAULT_ITEM_HEIGHT = 120;
-const ASSISTANT_PART_OVERSCAN = 3;
 const [readModeShiftPressed, setReadModeShiftPressed] = createSignal(false);
 let readModeShiftListenerCount = 0;
 
@@ -190,31 +180,6 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
   return result;
 }
 
-function lowerBound(values: number[], target: number) {
-  let low = 0;
-  let high = values.length - 1;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    if (values[mid]! < target) low = mid + 1;
-    else high = mid;
-  }
-  return low;
-}
-
-function pruneMeasuredAssistantPartHeights(
-  measuredHeights: Map<string, number>,
-  itemKeys: readonly string[]
-) {
-  const itemKeySet = new Set(itemKeys);
-  let changed = false;
-  for (const key of measuredHeights.keys()) {
-    if (itemKeySet.has(key)) continue;
-    measuredHeights.delete(key);
-    changed = true;
-  }
-  return changed;
-}
-
 function samePartList(previous: readonly Part[], next: readonly Part[]) {
   return previous.length === next.length && previous.every((part, index) => part === next[index]);
 }
@@ -233,45 +198,6 @@ export function getFileEditStackRenderKey(
   return inlinePreviewSignature ? `${baseKey}:inline:${inlinePreviewSignature}` : baseKey;
 }
 
-export function calculateAssistantPartVirtualRange(args: {
-  itemKeys: string[];
-  measuredHeights: Map<string, number>;
-  scrollTop: number;
-  viewportHeight: number;
-  defaultItemHeight?: number;
-  overscan?: number;
-  itemGap?: number;
-}): AssistantPartVirtualRange {
-  const itemCount = args.itemKeys.length;
-  const defaultItemHeight = args.defaultItemHeight ?? ASSISTANT_PART_DEFAULT_ITEM_HEIGHT;
-  const overscan = args.overscan ?? ASSISTANT_PART_OVERSCAN;
-  const itemGap = args.itemGap ?? 0;
-  if (itemCount === 0) return { start: 0, end: 0, topPad: 0, bottomPad: 0 };
-
-  const prefix = Array.from<number>({ length: itemCount + 1 });
-  prefix[0] = 0;
-  for (let index = 0; index < itemCount; index += 1) {
-    prefix[index + 1] =
-      prefix[index]! +
-      (args.measuredHeights.get(args.itemKeys[index]!) ?? defaultItemHeight) +
-      (index < itemCount - 1 ? itemGap : 0);
-  }
-
-  const overscanPx = overscan * defaultItemHeight;
-  const startOffset = Math.max(0, args.scrollTop - overscanPx);
-  const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
-  const start = Math.max(0, Math.min(itemCount - 1, lowerBound(prefix, startOffset + 1) - 1));
-  const end = Math.min(itemCount, Math.max(start + 1, lowerBound(prefix, endOffset + 1)));
-
-  // The live flex gap supplies the boundary between a spacer and its adjacent rendered item.
-  return {
-    start,
-    end,
-    topPad: start > 0 ? Math.max(0, prefix[start]! - itemGap) : 0,
-    bottomPad: (prefix[itemCount] || 0) - (prefix[end] || 0),
-  };
-}
-
 export function AssistantMessageContent(props: {
   info: AssistantMessage;
   parts: Part[];
@@ -288,17 +214,7 @@ export function AssistantMessageContent(props: {
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
-  let flowRef: HTMLDivElement | undefined;
-  let scrollContainerRef: HTMLDivElement | null = null;
-  let viewportRafId = 0;
-  let measurementRafId = 0;
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
-  const measuredItemHeights = new Map<string, number>();
-  const [hasScrollContainer, setHasScrollContainer] = createSignal(false);
-  const [viewportTop, setViewportTop] = createSignal(0);
-  const [viewportHeight, setViewportHeight] = createSignal(0);
-  const [itemGap, setItemGap] = createSignal(0);
-  const [measurementVersion, setMeasurementVersion] = createSignal(0);
   const [readModeOpen, setReadModeOpen] = createSignal(false);
   const displayParts = createMemo(() =>
     props.suppressHighlightedCardMetaParts
@@ -395,150 +311,6 @@ export function AssistantMessageContent(props: {
     return items;
   }, []);
 
-  const shouldVirtualizeParts = createMemo(
-    () =>
-      hasScrollContainer() &&
-      !props.isLastAssistant &&
-      !props.outerListVirtualized &&
-      !readModeOpen() &&
-      renderItems().length >= ASSISTANT_PART_VIRTUALIZE_THRESHOLD
-  );
-  const renderItemKeys = createMemo(() => renderItems().map((item) => item.key));
-
-  function measureVisibleItems() {
-    if (!shouldVirtualizeParts() || !flowRef) return;
-    let changed = false;
-    const items = flowRef.querySelectorAll<HTMLElement>('[data-assistant-render-key]');
-    for (const item of items) {
-      const key = item.dataset.assistantRenderKey;
-      if (!key) continue;
-      const height = item.getBoundingClientRect().height;
-      if (height > 0 && (measuredItemHeights.get(key) ?? 0) !== height) {
-        measuredItemHeights.set(key, height);
-        changed = true;
-      }
-    }
-    if (changed) {
-      setMeasurementVersion((version) => version + 1);
-    }
-  }
-
-  function cancelScheduledMeasurements() {
-    if (viewportRafId) {
-      cancelAnimationFrame(viewportRafId);
-      viewportRafId = 0;
-    }
-    if (measurementRafId) {
-      cancelAnimationFrame(measurementRafId);
-      measurementRafId = 0;
-    }
-  }
-
-  function updateItemGap() {
-    if (!flowRef) return;
-    const nextItemGap = Number.parseFloat(getComputedStyle(flowRef).rowGap);
-    setItemGap(Number.isFinite(nextItemGap) ? nextItemGap : 0);
-  }
-
-  function sampleViewport() {
-    viewportRafId = 0;
-    if (!flowRef || !scrollContainerRef) return;
-    updateItemGap();
-    const containerRect = scrollContainerRef.getBoundingClientRect();
-    const flowRect = flowRef.getBoundingClientRect();
-    setViewportTop(Math.max(0, containerRect.top - flowRect.top));
-    setViewportHeight(scrollContainerRef.clientHeight || Math.max(0, containerRect.height));
-  }
-
-  function scheduleViewportSample() {
-    if (viewportRafId) return;
-    viewportRafId = requestAnimationFrame(sampleViewport);
-  }
-
-  function scheduleVisibleItemMeasurement() {
-    if (measurementRafId) return;
-    measurementRafId = requestAnimationFrame(() => {
-      measurementRafId = 0;
-      measureVisibleItems();
-    });
-  }
-
-  onMount(() => {
-    scrollContainerRef = flowRef?.closest('.interactive-list') as HTMLDivElement | null;
-    updateItemGap();
-    setHasScrollContainer(!!scrollContainerRef);
-  });
-
-  createEffect(() => {
-    if (!shouldVirtualizeParts() || !scrollContainerRef) {
-      cancelScheduledMeasurements();
-      return;
-    }
-
-    const handleScroll = () => {
-      scheduleViewportSample();
-    };
-
-    scrollContainerRef.addEventListener('scroll', handleScroll);
-    const viewportObserver =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => {
-            scheduleViewportSample();
-            scheduleVisibleItemMeasurement();
-          });
-    viewportObserver?.observe(scrollContainerRef);
-    if (flowRef) viewportObserver?.observe(flowRef);
-
-    queueMicrotask(() => {
-      if (!shouldVirtualizeParts()) return;
-      sampleViewport();
-      scheduleVisibleItemMeasurement();
-    });
-
-    onCleanup(() => {
-      scrollContainerRef?.removeEventListener('scroll', handleScroll);
-      viewportObserver?.disconnect();
-      cancelScheduledMeasurements();
-    });
-  });
-
-  createEffect(() => {
-    if (pruneMeasuredAssistantPartHeights(measuredItemHeights, renderItemKeys())) {
-      setMeasurementVersion((version) => version + 1);
-    }
-  });
-
-  const partVirtualRange = createMemo<AssistantPartVirtualRange>(() => {
-    const items = renderItems();
-    if (!shouldVirtualizeParts() || items.length === 0) {
-      return { start: 0, end: items.length, topPad: 0, bottomPad: 0 };
-    }
-
-    measurementVersion();
-    return calculateAssistantPartVirtualRange({
-      itemKeys: renderItemKeys(),
-      measuredHeights: measuredItemHeights,
-      scrollTop: viewportTop(),
-      viewportHeight: viewportHeight(),
-      itemGap: itemGap(),
-    });
-  });
-  const visibleRenderItems = createMemo(() => {
-    const items = renderItems();
-    if (!shouldVirtualizeParts()) return items;
-    return items.slice(partVirtualRange().start, partVirtualRange().end);
-  });
-
-  createEffect(() => {
-    if (!shouldVirtualizeParts()) return;
-    partVirtualRange();
-    queueMicrotask(() => {
-      if (!shouldVirtualizeParts()) return;
-      scheduleVisibleItemMeasurement();
-    });
-  });
-
   const isLightweight = createMemo(
     () => props.outerListVirtualized && props.nearViewport === false
   );
@@ -618,19 +390,8 @@ export function AssistantMessageContent(props: {
     );
 
   return (
-    <div
-      ref={(element) => {
-        flowRef = element;
-      }}
-      class="assistant-message-flow"
-    >
-      <Show when={shouldVirtualizeParts() && partVirtualRange().topPad > 0}>
-        <div style={{ height: `${partVirtualRange().topPad}px` }} />
-      </Show>
-      <For each={visibleRenderItems()}>{renderAssistantItem}</For>
-      <Show when={shouldVirtualizeParts() && partVirtualRange().bottomPad > 0}>
-        <div style={{ height: `${partVirtualRange().bottomPad}px` }} />
-      </Show>
+    <div class="assistant-message-flow">
+      <For each={renderItems()}>{renderAssistantItem}</For>
       <Show when={props.errorMessage}>
         <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
           <p>{props.errorMessage!}</p>

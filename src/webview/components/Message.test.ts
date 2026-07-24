@@ -7,7 +7,6 @@ import { editingMessage, resetMessageEditState } from '../lib/message-edit-state
 import { setExpandThinkingByDefault, setState as setAppState } from '../lib/state';
 import {
   Message,
-  calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
   getUserMessageEditContext,
   getUserMessageEditText,
@@ -367,89 +366,6 @@ describe('stripCompactionBoundaryMarkdown', () => {
     expect(stripCompactionBoundaryMarkdown('Intro\n\n---\n\nDetails')).toBe(
       'Intro\n\n---\n\nDetails'
     );
-  });
-});
-
-describe('calculateAssistantPartVirtualRange', () => {
-  it('uses measured heights to compute padded visible ranges', () => {
-    expect(
-      calculateAssistantPartVirtualRange({
-        itemKeys: ['part-1', 'part-2', 'part-3', 'part-4', 'part-5'],
-        measuredHeights: new Map([
-          ['part-1', 100],
-          ['part-2', 250],
-          ['part-3', 100],
-          ['part-4', 100],
-          ['part-5', 100],
-        ]),
-        scrollTop: 260,
-        viewportHeight: 120,
-        defaultItemHeight: 100,
-        overscan: 1,
-      })
-    ).toEqual({
-      start: 1,
-      end: 4,
-      topPad: 100,
-      bottomPad: 100,
-    });
-  });
-
-  it('keeps at least one item rendered even with a collapsed viewport sample', () => {
-    expect(
-      calculateAssistantPartVirtualRange({
-        itemKeys: ['part-1', 'part-2', 'part-3'],
-        measuredHeights: new Map(),
-        scrollTop: 1000,
-        viewportHeight: 0,
-        defaultItemHeight: 100,
-        overscan: 0,
-      })
-    ).toEqual({
-      start: 2,
-      end: 3,
-      topPad: 200,
-      bottomPad: 0,
-    });
-  });
-
-  it('includes flex gaps in spacer heights when the rendered range changes', () => {
-    const itemKeys = ['part-1', 'part-2', 'part-3', 'part-4', 'part-5'];
-    const measuredHeights = new Map(itemKeys.map((key) => [key, 100]));
-    const itemGap = 10;
-    const first = calculateAssistantPartVirtualRange({
-      itemKeys,
-      measuredHeights,
-      scrollTop: 230,
-      viewportHeight: 100,
-      defaultItemHeight: 100,
-      overscan: 0,
-      itemGap,
-    });
-    const second = calculateAssistantPartVirtualRange({
-      itemKeys,
-      measuredHeights,
-      scrollTop: 340,
-      viewportHeight: 100,
-      defaultItemHeight: 100,
-      overscan: 0,
-      itemGap,
-    });
-    const renderedHeight = (range: typeof first) => {
-      const renderedItems = range.end - range.start;
-      const spacerCount = Number(range.topPad > 0) + Number(range.bottomPad > 0);
-      return (
-        range.topPad +
-        range.bottomPad +
-        renderedItems * 100 +
-        Math.max(0, renderedItems + spacerCount - 1) * itemGap
-      );
-    };
-
-    expect(first).toEqual({ start: 2, end: 4, topPad: 210, bottomPad: 100 });
-    expect(second).toEqual({ start: 3, end: 5, topPad: 320, bottomPad: 0 });
-    expect(renderedHeight(first)).toBe(540);
-    expect(renderedHeight(second)).toBe(540);
   });
 });
 

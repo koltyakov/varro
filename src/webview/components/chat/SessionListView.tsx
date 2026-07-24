@@ -1832,7 +1832,8 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
     permissionIds.has(rootSessionId(sessionId)) || questionIds.has(rootSessionId(sessionId));
   const isFailed = (sessionId: string) => {
     if (isManuallyStoppedRalphManager(sessionId)) return false;
-    return failedSessionIds.has(sessionId) || hasActiveUsageLimit(sessionId);
+    if (hasActiveUsageLimit(sessionId)) return true;
+    return state.sessionStatus[sessionId]?.type !== 'busy' && failedSessionIds.has(sessionId);
   };
   const isRunning = (sessionId: string) => {
     if (hasActiveUsageLimit(sessionId)) return false;
@@ -1944,7 +1945,10 @@ export function deriveSessionIndicators(sessions: typeof state.sessions): Sessio
 export function isFailedSession(sessionId: string) {
   const ralphRun = ralphStore.getRun(sessionId);
   if (ralphRun?.stopReason === 'manual_stop') return false;
-  return state.failedSessionIds.includes(sessionId) || hasActiveUsageLimit(sessionId);
+  if (hasActiveUsageLimit(sessionId)) return true;
+  return (
+    state.sessionStatus[sessionId]?.type !== 'busy' && state.failedSessionIds.includes(sessionId)
+  );
 }
 
 export function isRunningSession(sessionId: string) {

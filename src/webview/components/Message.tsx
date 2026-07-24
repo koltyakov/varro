@@ -39,7 +39,6 @@ import {
 const AUTH_INVALIDATED_RE = /authentication token has been invalidated|try signing in again/i;
 
 export {
-  calculateAssistantPartVirtualRange,
   getAssistantContainerVariant,
   stripCompactionBoundaryMarkdown,
 } from './message/AssistantMessageContent';

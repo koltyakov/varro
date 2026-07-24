@@ -1653,7 +1653,7 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
-  it('marks progress without resyncing active messages from session.next text progress events', () => {
+  it('clears stale failures and marks progress without resyncing active messages', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
@@ -1671,6 +1671,7 @@ describe('registerSessionEventHandlers', () => {
     );
 
     markLoadingActivity.mockClear();
+    setSessionFailed.mockClear();
     startLoading.mockClear();
 
     handlers.get('session.next.text.delta')?.({
@@ -1685,6 +1686,7 @@ describe('registerSessionEventHandlers', () => {
     expect(markLoadingActivity).toHaveBeenCalledTimes(1);
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(setSessionFailed).toHaveBeenCalledWith('session-1', false);
     expect(clearUsageLimitOnResumedProgress).toHaveBeenCalledWith('session-1', { type: 'busy' });
     expect(syncSessionMessages).not.toHaveBeenCalled();
   });

@@ -107,8 +107,14 @@ describe('AssistantMessageContent perf guards', () => {
     expect(resizeObserverConstructCount).toBe(0);
   });
 
-  it('renders only a bounded assistant-part window for long completed messages', async () => {
+  it('keeps long completed messages stable without ResizeObserver overhead', async () => {
+    let resizeObserverConstructCount = 0;
+
     class ResizeObserverStub {
+      constructor(_callback: ResizeObserverCallback) {
+        resizeObserverConstructCount += 1;
+      }
+
       observe() {}
 
       disconnect() {}
@@ -147,6 +153,7 @@ describe('AssistantMessageContent perf guards', () => {
 
     await settlePerfEffects();
 
-    expect(container?.querySelectorAll('[data-assistant-render-key]').length).toBeLessThan(30);
+    expect(resizeObserverConstructCount).toBe(0);
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(100);
   });
 });

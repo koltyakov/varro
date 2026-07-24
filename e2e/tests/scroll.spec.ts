@@ -1797,15 +1797,14 @@ test.describe('bottom scroll stability during height changes', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
+    await list.hover();
     const positions: number[] = [];
     for (let i = 0; i < 15; i += 1) {
+      await page.mouse.wheel(0, 50);
       await appendDeltaToRapidStreaming(
         page,
         `\n\nBottom-wheel chunk ${i}: ${'content growing while user scrolls down '.repeat(4)}`
       );
-      await list.evaluate((element) => {
-        element.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, bubbles: true }));
-      });
       await waitForAnimationFrames(page, 2);
       positions.push(await list.evaluate((element) => element.scrollTop));
     }

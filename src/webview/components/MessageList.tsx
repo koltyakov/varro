@@ -184,7 +184,7 @@ export function MessageList() {
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
   let lastScrollbarInset = -1;
-  let lastContainerOffsetWidth = -1;
+  let lastContainerClientWidth = -1;
   let lastContainerFontSize = -1;
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
@@ -794,7 +794,7 @@ export function MessageList() {
       const element = entry.target as HTMLDivElement;
       const messageId = element.dataset.msgId;
       const height = element.getBoundingClientRect().height;
-      if (!messageId) continue;
+      if (!messageId || !element.isConnected || height <= 0) continue;
 
       element.style.setProperty('--cis', `${height}px`);
       element.dataset.cis = '';
@@ -1337,7 +1337,6 @@ export function MessageList() {
   }
 
   function onWheel(event: WheelEvent) {
-    lastWheelAt = performance.now();
     if (containerRef && event.deltaY > 0.5) {
       const top = containerRef.scrollTop;
       const maxScrollTop = getEditMaxScrollTop(top);
@@ -1347,7 +1346,11 @@ export function MessageList() {
         event.stopPropagation();
         return;
       }
+      // A downward wheel at the physical bottom cannot move the transcript. Treating it as an
+      // interruption pauses bottom-follow until a later resize snaps the viewport forward.
+      if (distanceFromBottom() <= 1) return;
     }
+    lastWheelAt = performance.now();
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
@@ -1381,7 +1384,7 @@ export function MessageList() {
   onMount(() => {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
-    lastContainerOffsetWidth = containerRef.offsetWidth;
+    lastContainerClientWidth = containerRef.clientWidth;
     lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
@@ -1434,24 +1437,24 @@ export function MessageList() {
     lastAutoScrolledTrackHeight = lastTrackHeight;
     const observer = new ResizeObserver(() => {
       if (!containerRef) return;
-      const currentContainerOffsetWidth = containerRef.offsetWidth;
+      const currentContainerClientWidth = containerRef.clientWidth;
       // Chat text tracks --vscode-font-size, so a live font-size setting
       // change re-wraps every row without changing the container width.
       // Cached heights of unmounted virtualized rows would go stale, so it
       // must invalidate exactly like a width change.
       const currentContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
       if (
-        currentContainerOffsetWidth !== lastContainerOffsetWidth ||
+        currentContainerClientWidth !== lastContainerClientWidth ||
         currentContainerFontSize !== lastContainerFontSize
       ) {
-        lastContainerOffsetWidth = currentContainerOffsetWidth;
+        lastContainerClientWidth = currentContainerClientWidth;
         lastContainerFontSize = currentContainerFontSize;
         if (shouldMeasureRows()) {
           measuredHeights.clear();
           setMeasurementVersion((version) => version + 1);
         }
-        updateScrollbarInset();
       }
+      updateScrollbarInset();
       setViewportHeight(containerRef.clientHeight);
       scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
       scheduleVisibleMeasurement({ afterResize: true });

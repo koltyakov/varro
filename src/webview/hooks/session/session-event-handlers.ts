@@ -274,9 +274,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   };
   const markSessionProgress = (sessionId: string) => {
     // Any genuine progress (more text, a tool call, reasoning) means the turn is
-    // not done — cancel a pending recheck so it can't fire mid-turn.
+    // not done and a previous non-limit error is no longer terminal. Cancel a
+    // pending recheck so it can't fire mid-turn.
     clearStreamedCompletionTimer(sessionId);
     deps.setSessionStatusEntry(sessionId, { type: 'busy' });
+    sessionStore.setSessionFailed(sessionId, false);
     deps.clearUsageLimitOnResumedProgress(sessionId, { type: 'busy' });
     if (isSessionInActiveTree(sessionId)) uiStore.startLoading();
   };
