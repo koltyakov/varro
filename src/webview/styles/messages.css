@@ -1130,9 +1130,18 @@ body.vscode-dark .interactive-session .chat-input-container {
   overflow: visible;
 }
 
-.interactive-session .chat-input-container.focused {
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 45%, var(--color-vscode-border));
-  /* box-shadow: var(--chat-shadow-card), var(--chat-focus-ring); */
+.interactive-session .chat-input-container.focused,
+body.vscode-dark .interactive-session .chat-input-container.focused {
+  border-color: var(--color-vscode-accent);
+}
+
+.interactive-session .chat-input-container.focused::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 35%, transparent);
+  pointer-events: none;
 }
 
 .interactive-session .interactive-input-part {
