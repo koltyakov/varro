@@ -7,6 +7,7 @@ import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
 import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge } from './lib/bridge';
+import { observeSurfaceContrast } from './lib/theme';
 
 export function AppRoot() {
   return (
@@ -46,6 +47,8 @@ export function App() {
 
   onMount(() => {
     ralphRunner.reattachAll();
+    const stopObservingSurfaceContrast = observeSurfaceContrast();
+    onCleanup(stopObservingSurfaceContrast);
   });
 
   return (

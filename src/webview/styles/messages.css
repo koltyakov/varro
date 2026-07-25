@@ -1128,6 +1128,15 @@ body.vscode-dark .interactive-session .chat-input-container {
   border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-border));
 }
 
+body.vscode-dark.varro-flat-dark .interactive-session .chat-input-container {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-vscode-fg) 6%, var(--color-vscode-input-bg)),
+    color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-input-bg))
+  );
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 14%, var(--color-vscode-border));
+}
+
 .interactive-session .chat-input-container.showing-context-popup {
   overflow: visible;
   z-index: var(--z-chrome-raised);

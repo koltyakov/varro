@@ -429,6 +429,19 @@ body.vscode-high-contrast-light {
   --color-code-operator: var(--color-vscode-fg);
 }
 
+body.vscode-dark.varro-flat-dark {
+  --color-vscode-input-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 10%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-input-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 15%,
+    var(--color-vscode-input-bg)
+  );
+}
+
 body.vscode-light
   :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .chat-thinking-box) {
   background: color-mix(in srgb, var(--color-vscode-fg) 1.25%, var(--color-vscode-sidebar));
