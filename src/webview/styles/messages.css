@@ -731,6 +731,15 @@ body.vscode-light
   font-weight: 600;
 }
 
+.rendered-markdown p > strong:first-child {
+  margin-right: 0.3em;
+}
+
+.rendered-markdown p:has(> strong:only-child) {
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+
 .rendered-markdown blockquote {
   position: relative;
   margin: 0 0 18px 0;
