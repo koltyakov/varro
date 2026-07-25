@@ -1546,6 +1546,9 @@ function SessionListItem(props: {
       onMouseMove={() => {
         if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
       }}
+      onMouseLeave={() => {
+        if (!props.actions.sessionId()) props.setFocusedIndex(-1);
+      }}
       onPointerDown={handleRowPointerDown}
       onPointerUp={handleRowPointerUp}
       onPointerCancel={handleRowPointerCancel}

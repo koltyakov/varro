@@ -524,6 +524,18 @@ describe('SessionListView selection', () => {
     }
   });
 
+  it('clears pointer focus when the pointer leaves a session', () => {
+    setState('sessions', [session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView embedded />, container);
+
+    const item = container.querySelector<HTMLElement>('.session-item')!;
+    item.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(item.classList.contains('keyboard-focus')).toBe(true);
+
+    item.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(item.classList.contains('keyboard-focus')).toBe(false);
+  });
+
   it('selects a session from the trailing row area', () => {
     vi.mocked(selectSession).mockClear();
     setState('sessions', [session('session-1', Date.now())]);
