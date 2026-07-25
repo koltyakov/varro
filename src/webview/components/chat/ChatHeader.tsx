@@ -1,4 +1,11 @@
-import { Show } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
+import { normalizeSessionTitle } from '../../../shared/session-title';
+import { deleteSession, renameSession } from '../../hooks/useOpenCode';
+import { client } from '../../lib/client';
+import { clampPopupToViewport } from '../../lib/popup-position';
+import { setError, setState, state } from '../../lib/state';
+import { writeClipboard } from '../../lib/write-clipboard';
 import {
   AttentionSessionsBadge,
   CompletedSessionsBadge,
@@ -7,6 +14,15 @@ import {
   RunningSessionsBadge,
 } from './HeaderBadges';
 import type { SessionListFilter } from './SessionListView';
+
+function getActiveSession() {
+  return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
+}
+
+function isActiveSessionPinned() {
+  const sessionId = state.activeSessionId;
+  return !!sessionId && state.pinnedSessionIds.includes(sessionId);
+}
 
 export function SessionPickerHeader(props: {
   filterLabel: string | null;
@@ -134,6 +150,103 @@ export function ActiveChatHeader(props: {
   onOpenRunningSessions: () => void;
   onCreateSession: () => void;
 }) {
+  let titleRef: HTMLSpanElement | undefined;
+  let actionsMenuRef: HTMLDivElement | undefined;
+  let renameInputRef: HTMLInputElement | undefined;
+  const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
+  const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
+  const [renaming, setRenaming] = createSignal(false);
+  const [renameValue, setRenameValue] = createSignal('');
+  const [renamePending, setRenamePending] = createSignal(false);
+  const actionsSession = () => {
+    const sessionId = actionsSessionId();
+    return sessionId ? (state.sessions.find((session) => session.id === sessionId) ?? null) : null;
+  };
+  const isActionsSessionPinned = () => {
+    const sessionId = actionsSessionId();
+    return !!sessionId && state.pinnedSessionIds.includes(sessionId);
+  };
+  const closeActions = () => {
+    setActionsSessionId(null);
+    setRenaming(false);
+    setRenamePending(false);
+  };
+  const openActions = (event: MouseEvent) => {
+    const session = getActiveSession();
+    if (!session) return;
+    event.preventDefault();
+    setActionsPosition({ x: event.clientX, y: event.clientY });
+    setRenaming(false);
+    setActionsSessionId(session.id);
+    queueMicrotask(() =>
+      actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    );
+  };
+  const beginRename = () => {
+    const session = actionsSession();
+    if (!session) return;
+    setRenameValue(normalizeSessionTitle(session.title) || '');
+    setRenaming(true);
+    queueMicrotask(() => {
+      renameInputRef?.focus();
+      renameInputRef?.select();
+    });
+  };
+  const submitRename = async () => {
+    if (renamePending()) return;
+    const sessionId = actionsSessionId();
+    const title = renameValue().trim();
+    if (!sessionId || !title) return;
+    setRenamePending(true);
+    const renamed = await renameSession(sessionId, title);
+    if (actionsSessionId() !== sessionId) return;
+    setRenamePending(false);
+    if (renamed) closeActions();
+  };
+  const togglePinned = async () => {
+    const sessionId = actionsSessionId();
+    if (!sessionId) return;
+    const pinned = !state.pinnedSessionIds.includes(sessionId);
+    closeActions();
+    try {
+      const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned);
+      setState('pinnedSessionIds', pinnedSessionIds);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const copySessionId = async () => {
+    const sessionId = actionsSessionId();
+    closeActions();
+    if (sessionId && !(await writeClipboard(sessionId))) setError('Failed to copy session ID');
+  };
+
+  createEffect(() => {
+    if (!actionsSessionId()) return;
+    actionsPosition();
+    renaming();
+    queueMicrotask(() => {
+      if (actionsMenuRef) clampPopupToViewport(actionsMenuRef);
+    });
+  });
+
+  createEffect(() => {
+    if (!actionsSessionId()) return;
+    const closeIfOutside = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && actionsMenuRef?.contains(target)) return;
+      closeActions();
+    };
+    window.addEventListener('contextmenu', closeIfOutside, true);
+    window.addEventListener('pointerdown', closeIfOutside, true);
+    window.addEventListener('focusin', closeIfOutside);
+    onCleanup(() => {
+      window.removeEventListener('contextmenu', closeIfOutside, true);
+      window.removeEventListener('pointerdown', closeIfOutside, true);
+      window.removeEventListener('focusin', closeIfOutside);
+    });
+  });
+
   return (
     <>
       <div class="chat-header-left">
@@ -144,7 +257,26 @@ export function ActiveChatHeader(props: {
             </svg>
           </button>
         </Show>
-        <span class="chat-header-title-text">{props.title}</span>
+        <span
+          ref={(element) => {
+            titleRef = element;
+          }}
+          class="chat-header-session-title"
+          onContextMenu={openActions}
+        >
+          <span class="chat-header-title-text">{props.title}</span>
+          <Show when={isActiveSessionPinned()}>
+            <span
+              class="session-item-pinned-marker"
+              title="Pinned session"
+              aria-label="Pinned session"
+            >
+              <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+                <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
+              </svg>
+            </span>
+          </Show>
+        </span>
         <Show when={props.activeSubagentRootId}>
           {(rootSessionId) => (
             <button
@@ -181,6 +313,88 @@ export function ActiveChatHeader(props: {
             </svg>
           </button>
         </div>
+      </Show>
+      <Show when={actionsSession()}>
+        {(session) => (
+          <Portal>
+            <div
+              ref={(element) => {
+                actionsMenuRef = element;
+              }}
+              class="session-item-actions-menu"
+              role="menu"
+              aria-label="Session actions"
+              style={{
+                left: `${actionsPosition().x}px`,
+                top: `${actionsPosition().y}px`,
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                closeActions();
+                titleRef?.focus();
+              }}
+            >
+              <Show
+                when={renaming()}
+                fallback={
+                  <>
+                    <button type="button" role="menuitem" onClick={beginRename}>
+                      Rename
+                    </button>
+                    <Show when={!session().parentID}>
+                      <button type="button" role="menuitem" onClick={() => void togglePinned()}>
+                        {isActionsSessionPinned() ? 'Unpin' : 'Pin'}
+                      </button>
+                    </Show>
+                    <button type="button" role="menuitem" onClick={() => void copySessionId()}>
+                      Copy session ID
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="is-destructive"
+                      onClick={() => {
+                        const sessionId = actionsSessionId();
+                        closeActions();
+                        if (sessionId) void deleteSession(sessionId);
+                      }}
+                    >
+                      Move to Recycle Bin
+                    </button>
+                  </>
+                }
+              >
+                <form
+                  class="session-item-rename-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitRename();
+                  }}
+                >
+                  <label for={`header-session-rename-${session().id}`}>Session name</label>
+                  <input
+                    ref={(element) => {
+                      renameInputRef = element;
+                    }}
+                    id={`header-session-rename-${session().id}`}
+                    value={renameValue()}
+                    onInput={(event) => setRenameValue(event.currentTarget.value)}
+                    disabled={renamePending()}
+                  />
+                  <div class="session-item-rename-actions">
+                    <button type="button" onClick={closeActions}>
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={!renameValue().trim() || renamePending()}>
+                      Save
+                    </button>
+                  </div>
+                </form>
+              </Show>
+            </div>
+          </Portal>
+        )}
       </Show>
     </>
   );

@@ -36,6 +36,13 @@
   color: var(--color-vscode-muted);
 }
 
+.chat-header-session-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
 .chat-header-actions {
   display: flex;
   align-items: center;
