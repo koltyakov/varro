@@ -255,10 +255,14 @@
     background-color 0.1s;
 }
 
-body.vscode-light .question-custom-input,
 body.vscode-high-contrast-light .question-custom-input {
   border-color: color-mix(in srgb, var(--color-vscode-border) 26%, transparent);
   background: color-mix(in srgb, var(--color-vscode-fg) 1.5%, var(--color-vscode-input-bg));
+}
+
+body.vscode-light .question-custom-input {
+  border-color: var(--color-vscode-border-default);
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, var(--color-vscode-input-bg));
 }
 
 .question-option-custom:hover .question-custom-input,

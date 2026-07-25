@@ -399,6 +399,7 @@
 .diff-view-file-type {
   width: 14px;
   flex-shrink: 0;
+  transform: translateY(1px);
   color: color-mix(in srgb, var(--color-vscode-accent) 72%, var(--color-vscode-fg));
   font-family: var(--font-mono);
   font-size: 7.5px;

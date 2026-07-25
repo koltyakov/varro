@@ -52,7 +52,7 @@
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-    body.theme-light {
+    :root:has(body.theme-light) {
       color-scheme: light;
       --preview-page-bg: #f3f3f3;
       --preview-page-fg: #1f1f1f;
@@ -88,7 +88,7 @@
       --vscode-charts-blue: #1a85ff;
     }
 
-    body.theme-high-contrast {
+    :root:has(body.theme-high-contrast) {
       --preview-page-bg: #000000;
       --preview-page-fg: #ffffff;
       --preview-frame-border: #ffffff;
@@ -126,7 +126,7 @@
       --vscode-charts-blue: #3794ff;
     }
 
-    body.theme-high-contrast-light {
+    :root:has(body.theme-high-contrast-light) {
       color-scheme: light;
       --preview-page-bg: #ffffff;
       --preview-page-fg: #000000;

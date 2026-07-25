@@ -871,10 +871,11 @@ function hasChangedPatchLine(patch: string) {
 function computeToolFileChange(toolName: string, toolState: ToolState): FileChange | null {
   const input = (toolState.input || {}) as Record<string, unknown>;
   const metadata = getToolMetadata(toolState) || {};
+  const fileDiff = isRecord(metadata.filediff) ? metadata.filediff : {};
   const title =
     (toolState.status === 'completed' || toolState.status === 'running' ? toolState.title : '') ||
     '';
-  const source = { ...metadata, ...input };
+  const source = { ...fileDiff, ...metadata, ...input };
   const primaryPath = firstString(source, PRIMARY_PATH_KEYS);
   const fromPath = firstString(source, SOURCE_PATH_KEYS);
   const toPath = firstString(source, TARGET_PATH_KEYS);

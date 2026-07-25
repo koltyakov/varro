@@ -429,6 +429,57 @@ body.vscode-high-contrast-light {
   --color-code-operator: var(--color-vscode-fg);
 }
 
+body.vscode-light {
+  --color-vscode-surface-soft: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 6%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-softer: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4.5%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 13%,
+    var(--color-vscode-widget-bg)
+  );
+  --color-vscode-surface-inset: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 3.5%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-surface-subtle: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 5%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-surface-subtle-alt: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 4.5%,
+    var(--color-vscode-list-bg)
+  );
+  --color-vscode-input-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 8%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-input-surface-hover: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 13%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-chat-input-toolbar-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 6.5%,
+    var(--color-vscode-input-bg)
+  );
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
+  --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
+}
+
 body.vscode-dark.varro-flat-dark {
   --color-vscode-input-surface: color-mix(
     in srgb,
@@ -444,12 +495,15 @@ body.vscode-dark.varro-flat-dark {
 
 body.vscode-light
   :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .chat-thinking-box) {
-  background: color-mix(in srgb, var(--color-vscode-fg) 1.25%, var(--color-vscode-sidebar));
-  border-color: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-sidebar));
+  background: color-mix(in srgb, var(--color-vscode-fg) 2.5%, var(--color-vscode-sidebar));
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-sidebar));
 }
 
+body.vscode-light .assistant-turn-content.assistant-turn-content-bare,
+body.vscode-light .assistant-turn-content.assistant-turn-content-plain,
 body.vscode-light .assistant-turn-content.assistant-turn-content-highlighted,
 body.vscode-light .assistant-turn-content.assistant-turn-content-planning {
+  background: transparent;
   border: none;
   box-shadow: none;
 }
@@ -461,6 +515,10 @@ body.vscode-light .assistant-turn-content {
 body.vscode-light .chat-compaction-notice,
 body.vscode-high-contrast-light .chat-compaction-notice {
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light .chat-compaction-notice {
+  background: color-mix(in srgb, var(--color-vscode-fg) 3.5%, var(--color-vscode-sidebar));
 }
 
 body.vscode-light

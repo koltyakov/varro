@@ -103,6 +103,41 @@ describe('tool file change helpers', () => {
     });
   });
 
+  it('extracts nested OpenCode edit diff metadata', () => {
+    expect(
+      getToolFileChange(
+        'edit',
+        completedState(
+          {
+            filePath: 'src/app.ts',
+            oldString: 'const value = 1;',
+            newString: 'const value = 2;',
+          },
+          {
+            metadata: {
+              diff: 'rendered diff',
+              filediff: {
+                file: 'src/app.ts',
+                patch: '@@ -1 +1 @@\n-const value = 1;\n+const value = 2;',
+                additions: 1,
+                deletions: 1,
+              },
+            },
+          }
+        )
+      )
+    ).toEqual({
+      kind: 'edited',
+      path: 'src/app.ts',
+      before: 'const value = 1;',
+      after: 'const value = 2;',
+      patch: '@@ -1 +1 @@\n-const value = 1;\n+const value = 2;',
+      additions: 1,
+      deletions: 1,
+      dedupeKey: 'edited:src/app.ts',
+    });
+  });
+
   it('detects moves from explicit paths or titles', () => {
     expect(
       getToolFileChange('rename', completedState({ fromPath: 'src/old.ts', toPath: 'src/new.ts' }))
