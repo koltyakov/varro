@@ -29,6 +29,7 @@ export async function abortSessionWithDependencies(
     abortRemoteSession(sessionId: string): Promise<unknown>;
     clearPendingAbortTree(sessionIds: string[]): void;
     setSessionUsageLimit(sessionId: string, notice: unknown): void;
+    setError?(message: string): void;
     logError(context: string, err: unknown): void;
   },
   targetSessionId = deps.getActiveSessionId()
@@ -66,6 +67,9 @@ export async function abortSessionWithDependencies(
       }
       deps.setSessionUsageLimit(id, previousUsageLimits.get(id) || null);
     }
+    deps.setError?.(
+      err instanceof Error ? `Failed to stop the run: ${err.message}` : 'Failed to stop the run'
+    );
     deps.logError('abortSession', err);
   }
 }
@@ -318,6 +322,7 @@ export class SessionControlOperations {
         abortRemoteSession: this.deps.abortRemoteSession,
         clearPendingAbortTree: this.deps.clearPendingAbortTree,
         setSessionUsageLimit: this.deps.setSessionUsageLimit,
+        setError: this.deps.setError,
         logError: this.deps.logError,
       },
       sessionId

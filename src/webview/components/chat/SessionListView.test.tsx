@@ -11,6 +11,7 @@ import {
 } from './SessionListView';
 
 const renameSessionMock = vi.hoisted(() => vi.fn());
+const reloadSessionsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
   emptyRecycleBin: vi.fn(),
   restoreSession: vi.fn(),
   renameSession: renameSessionMock,
+  reloadSessions: reloadSessionsMock,
   selectSession: vi.fn(),
 }));
 
@@ -62,8 +64,12 @@ beforeEach(() => {
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
   setState('sessionStatus', {});
+  setState('sessionsLoadError', null);
+  setState('recycleBinLoadError', null);
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
+  reloadSessionsMock.mockReset();
+  reloadSessionsMock.mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -75,6 +81,8 @@ afterEach(() => {
   setState('sessions', []);
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
+  setState('sessionsLoadError', null);
+  setState('recycleBinLoadError', null);
   vi.restoreAllMocks();
   resetSessionDiffSummaryStateForTests();
 });
@@ -914,5 +922,28 @@ describe('SessionListView actions', () => {
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
     expect(menu.style.left).toBe('72px');
     expect(menu.style.top).toBe('84px');
+  });
+});
+
+describe('SessionListView load errors', () => {
+  it('shows a retryable error instead of the empty state when sessions fail to load', async () => {
+    setState('sessionsLoadError', 'Failed to load sessions');
+    cleanup = render(() => <SessionListView />, container);
+
+    const errorRow = container.querySelector('.session-load-error');
+    expect(errorRow?.textContent).toContain('Failed to load sessions');
+    expect(container.textContent).not.toContain('No sessions yet');
+
+    const retry = errorRow?.querySelector<HTMLButtonElement>('.session-load-error-retry');
+    expect(retry).not.toBeNull();
+    retry!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await vi.waitFor(() => expect(reloadSessionsMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('keeps the empty state when sessions load fine', () => {
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.querySelector('.session-load-error')).toBeNull();
+    expect(container.textContent).toContain('No sessions yet');
   });
 });

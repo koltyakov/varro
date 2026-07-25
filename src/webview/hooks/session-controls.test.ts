@@ -78,6 +78,7 @@ describe('session-controls helpers', () => {
   it('marks aborting sessions idle and preserves previous limits on failure', async () => {
     const setSessionStatusEntry = vi.fn();
     const setSessionUsageLimit = vi.fn();
+    const setError = vi.fn();
     const logError = vi.fn();
 
     await abortSessionWithDependencies({
@@ -99,6 +100,7 @@ describe('session-controls helpers', () => {
       }),
       clearPendingAbortTree: vi.fn(),
       setSessionUsageLimit,
+      setError,
       logError,
     });
 
@@ -119,6 +121,7 @@ describe('session-controls helpers', () => {
       sessionID: 'child-1',
       attempt: 1,
     });
+    expect(setError).toHaveBeenCalledWith('Failed to stop the run: abort failed');
     expect(logError).toHaveBeenCalledWith('abortSession', expect.any(Error));
   });
 

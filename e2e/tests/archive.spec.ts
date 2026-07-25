@@ -69,6 +69,7 @@ test('permanently deletes a recycle-bin session', async ({ page }) => {
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Archive row target' });
   await expect(recycleRow).toBeVisible();
   await recycleRow.getByRole('button', { name: 'Delete permanently' }).click();
+  await recycleRow.getByRole('button', { name: 'Confirm permanent delete' }).click();
 
   await expect(page.locator('.recycle-bin-item').filter({ hasText: 'Archive row target' })).toHaveCount(0);
   await expect(page.locator('.session-item-title')).not.toContainText(['Archive row target']);

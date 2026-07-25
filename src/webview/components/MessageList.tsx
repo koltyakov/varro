@@ -36,7 +36,9 @@ import { editingMessage } from '../lib/message-edit-state';
 import {
   getPrefetchedSessionHistory,
   getSessionHistoryPrompts,
+  isSessionHistoryLoadFailed,
   isSessionHistoryTruncated,
+  markSessionHistoryLoadFailed,
   mergeOlderHistory,
 } from '../lib/message-window';
 import { loadOlderSessionHistoryPage, recheckSessionStatus } from '../hooks/useOpenCode';
@@ -104,6 +106,10 @@ import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
+}
+
+function historyLoadFailed() {
+  return !editingMessage() && isSessionHistoryLoadFailed(state.activeSessionId);
 }
 
 const VIRTUALIZE_THRESHOLD = 50;
@@ -2110,6 +2116,7 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const container = containerRef;
     if (!sessionId || !container || loadingOlderHistory()) return;
+    markSessionHistoryLoadFailed(sessionId, false);
     const anchor = captureVisibleScrollAnchor();
     const previousScrollHeight = container.scrollHeight;
     const previousScrollTop = container.scrollTop;
@@ -2163,38 +2170,68 @@ export function MessageList() {
           <Show
             when={state.messages.length > 0}
             fallback={
-              <Show when={shouldShowStarterLogo()}>
-                <div class="chat-empty-state">
-                  <Show when={state.emptyStateLogoUri}>
-                    <img
-                      class="chat-empty-logo"
-                      src={state.emptyStateLogoUri}
-                      alt=""
-                      aria-hidden="true"
-                      draggable="false"
-                    />
+              <Show
+                when={state.messagesLoading}
+                fallback={
+                  <Show when={shouldShowStarterLogo()}>
+                    <div class="chat-empty-state">
+                      <Show when={state.emptyStateLogoUri}>
+                        <img
+                          class="chat-empty-logo"
+                          src={state.emptyStateLogoUri}
+                          alt=""
+                          aria-hidden="true"
+                          draggable="false"
+                        />
+                      </Show>
+                      <div class="chat-empty-hints">
+                        <span class="chat-empty-hint">
+                          <kbd>@</kbd> add files and agents
+                        </span>
+                        <span class="chat-empty-hint">
+                          <kbd>/</kbd> run commands
+                        </span>
+                        <span class="chat-empty-hint">
+                          <kbd>Shift</kbd>
+                          <kbd>Enter</kbd> new line
+                        </span>
+                      </div>
+                    </div>
                   </Show>
-                  <div class="chat-empty-hints">
-                    <span class="chat-empty-hint">
-                      <kbd>@</kbd> add files and agents
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>/</kbd> run commands
-                    </span>
-                    <span class="chat-empty-hint">
-                      <kbd>Shift</kbd>
-                      <kbd>Enter</kbd> new line
-                    </span>
-                  </div>
+                }
+              >
+                <div class="chat-messages-loading" role="status" aria-label="Loading messages">
+                  <span class="chat-messages-loading-dot" />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.3s' }} />
+                  <span class="chat-messages-loading-dot" style={{ 'animation-delay': '0.6s' }} />
                 </div>
               </Show>
             }
           >
             <Show when={showTruncatedHistoryBanner()}>
-              <div
-                class={`message-history-banner${loadingOlderHistory() ? ' is-loading' : ''}`}
-                aria-hidden="true"
-              />
+              <Show
+                when={historyLoadFailed()}
+                fallback={
+                  <div
+                    class={`message-history-banner${loadingOlderHistory() ? ' is-loading' : ''}`}
+                    aria-hidden="true"
+                  />
+                }
+              >
+                <div class="message-history-banner is-error" role="alert">
+                  <span class="message-history-banner-error-text">
+                    Couldn't load earlier messages
+                  </span>
+                  <button
+                    type="button"
+                    class="message-history-banner-retry"
+                    disabled={loadingOlderHistory()}
+                    onClick={() => void handleLoadOlderHistory()}
+                  >
+                    {loadingOlderHistory() ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
+              </Show>
             </Show>
             <VirtualizedContent
               messages={messages()}

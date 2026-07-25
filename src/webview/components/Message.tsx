@@ -277,7 +277,10 @@ export function Message(props: {
             </Show>
           </div>
           <Show when={assistant() && visibleDiffs().length > 0}>
-            <DiffSummary diffs={visibleDiffs()} />
+            <DiffSummary
+              diffs={visibleDiffs()}
+              stateKey={`diff-summary\u0000${props.info.sessionID}\u0000${props.info.id}`}
+            />
           </Show>
         </div>
       </Show>

@@ -31,6 +31,7 @@ export async function selectSessionWithStateDependencies(
     syncSessionMcps(sessionId: string): Promise<void>;
     resetTodoSync(): void;
     clearMessages(): void;
+    setMessagesLoading?(loading: boolean): void;
     loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
     isCurrentSelectionGeneration(generation: number): boolean;
     upsertSession(session: Session): void;
@@ -123,6 +124,7 @@ type SessionSyncDependencies = {
   syncSessionMcps(sessionId: string): Promise<void>;
   resetTodoSync(): void;
   clearMessages(): void;
+  setMessagesLoading?(loading: boolean): void;
   loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
@@ -189,6 +191,7 @@ export class SessionSyncOperations {
         syncSessionMcps: this.deps.syncSessionMcps,
         resetTodoSync: this.deps.resetTodoSync,
         clearMessages: this.deps.clearMessages,
+        setMessagesLoading: this.deps.setMessagesLoading,
         loadSession: this.deps.loadSession,
         isCurrentSelectionGeneration: this.deps.isCurrentSelectionGeneration,
         upsertSession: this.deps.upsertSession,

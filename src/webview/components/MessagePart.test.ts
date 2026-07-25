@@ -6,6 +6,7 @@ import {
   setShowThinking,
   setState,
 } from '../lib/state';
+import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, ReasoningPart } from '../types';
 import {
   MessagePart,
@@ -21,6 +22,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   resetDefaultAppState();
+  resetToolCallExpansionState();
   setExpandThinkingByDefaultPreference(false);
   setShowThinking(true);
 });
@@ -156,6 +158,43 @@ describe('MessagePart', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one'));
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+  });
+
+  it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {
+    const part = reasoningPart('**Planning**\n\nStep one');
+    renderPart(part);
+
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nStep one\nStep two' });
+
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step two');
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+  });
+
+  it('keeps a user-collapsed reasoning block closed when expanded by default', () => {
+    setExpandThinkingByDefaultPreference(true);
+    const part = reasoningPart('**Planning**\n\nStep one');
+    renderPart(part);
+
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nUpdated step' });
+
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
   });
 
   it('keeps a reasoning summary but hides an empty HTML-comment body', () => {

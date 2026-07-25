@@ -92,6 +92,9 @@ export interface AppState {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   sessions: Session[];
+  sessionsLoadError: string | null;
+  recycleBinLoadError: string | null;
+  messagesLoading: boolean;
   pinnedSessionIds: string[];
   recycleBinEntries: RecycleBinEntry[];
   activeSessionId: string | null;
@@ -179,6 +182,8 @@ export interface AppStateInstance {
   setLoadingLastActivityAt: Setter<number | null>;
   error: Accessor<string | null>;
   setError: Setter<string | null>;
+  errorRetry: Accessor<(() => void) | null>;
+  setErrorRetry(action: (() => void) | null): void;
   connectionInitialized: Accessor<boolean>;
   setConnectionInitialized: Setter<boolean>;
   showSessionPicker: Accessor<boolean>;
@@ -258,6 +263,9 @@ export function createAppState(): AppStateInstance {
     droppedFiles: initialWebviewState.droppedFiles ?? [],
     clipboardImages: [],
     sessions: [],
+    sessionsLoadError: null,
+    recycleBinLoadError: null,
+    messagesLoading: false,
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],
     recycleBinEntries: initialWebviewState.recycleBinEntries ?? [],
     activeSessionId: null,
@@ -333,7 +341,15 @@ export function createAppState(): AppStateInstance {
   const [isLoading, setIsLoading] = createSignal(false);
   const [loadingStartedAt, setLoadingStartedAt] = createSignal<number | null>(null);
   const [loadingLastActivityAt, setLoadingLastActivityAt] = createSignal<number | null>(null);
-  const [error, setError] = createSignal<string | null>(null);
+  const [error, setErrorSignal] = createSignal<string | null>(null);
+  const [errorRetry, setErrorRetrySignal] = createSignal<(() => void) | null>(null);
+  const setError: Setter<string | null> = (value) => {
+    setErrorRetrySignal(null);
+    return setErrorSignal(value);
+  };
+  const setErrorRetry = (action: (() => void) | null) => {
+    setErrorRetrySignal(() => action);
+  };
   const [connectionInitialized, setConnectionInitialized] = createSignal(false);
   const [showSessionPicker, setShowSessionPicker] = createSignal(false);
   const [showModelPicker, setShowModelPicker] = createSignal(false);
@@ -401,6 +417,8 @@ export function createAppState(): AppStateInstance {
     setLoadingLastActivityAt,
     error,
     setError,
+    errorRetry,
+    setErrorRetry,
     connectionInitialized,
     setConnectionInitialized,
     showSessionPicker,
@@ -475,6 +493,8 @@ export const loadingLastActivityAt = defaultAppState.loadingLastActivityAt;
 export const setLoadingLastActivityAt = defaultAppState.setLoadingLastActivityAt;
 export const error = defaultAppState.error;
 export const setError = defaultAppState.setError;
+export const errorRetry = defaultAppState.errorRetry;
+export const setErrorRetry = defaultAppState.setErrorRetry;
 export const connectionInitialized = defaultAppState.connectionInitialized;
 export const setConnectionInitialized = defaultAppState.setConnectionInitialized;
 export const showSessionPicker = defaultAppState.showSessionPicker;

@@ -8,6 +8,9 @@ type HistoryPage = MessageEntry[] & { nextCursor?: string };
 const [truncatedSessionIds, setTruncatedSessionIds] = createSignal<ReadonlySet<string>>(
   new Set<string>()
 );
+const [historyLoadFailedSessionIds, setHistoryLoadFailedSessionIds] = createSignal<
+  ReadonlySet<string>
+>(new Set<string>());
 const historyCursors = new Map<string, string>();
 const historyPromptCursors = new Map<string, string>();
 const prefetchedHistoryPages = new Map<string, Map<string, HistoryPage>>();
@@ -90,6 +93,19 @@ export function markSessionHistoryTruncated(sessionId: string, truncated: boolea
   setTruncatedSessionIds(next);
 }
 
+export function isSessionHistoryLoadFailed(sessionId: string | null | undefined): boolean {
+  return !!sessionId && historyLoadFailedSessionIds().has(sessionId);
+}
+
+export function markSessionHistoryLoadFailed(sessionId: string, failed: boolean) {
+  const current = historyLoadFailedSessionIds();
+  if (current.has(sessionId) === failed) return;
+  const next = new Set(current);
+  if (failed) next.add(sessionId);
+  else next.delete(sessionId);
+  setHistoryLoadFailedSessionIds(next);
+}
+
 export function getSessionHistoryCursor(sessionId: string): string | undefined {
   return historyCursors.get(sessionId);
 }
@@ -106,6 +122,7 @@ export function resetMessageWindowState() {
   prefetchedHistoryPages.clear();
   setPrefetchedHistoryVersion(0);
   setTruncatedSessionIds(new Set<string>());
+  setHistoryLoadFailedSessionIds(new Set<string>());
   setHistoryPromptsBySession(new Map());
 }
 

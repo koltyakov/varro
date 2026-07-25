@@ -55,6 +55,7 @@ import {
 } from '../lib/message-edit-state';
 import {
   cacheSessionHistoryPage,
+  markSessionHistoryLoadFailed,
   resetMessageWindowState,
   setSessionHistoryCursor,
   setSessionHistoryPrompts,
@@ -469,6 +470,54 @@ describe('MessageList entrance animation', () => {
   });
 });
 
+describe('MessageList loading states', () => {
+  it('shows a loading indicator instead of a blank transcript while messages load', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    expect(container?.querySelector('.chat-empty-state')).toBeNull();
+
+    setState('messagesLoading', false);
+  });
+
+  it('shows a retry action in the history banner when loading earlier messages failed', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    markSessionHistoryLoadFailed('session-1', true);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const banner = container?.querySelector('.message-history-banner.is-error');
+    expect(banner?.textContent).toContain("Couldn't load earlier messages");
+    expect(banner?.getAttribute('aria-hidden')).toBeNull();
+    expect(banner?.querySelector('.message-history-banner-retry')).not.toBeNull();
+  });
+
+  it('keeps the decorative wave banner when earlier history loads normally', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
+    setSessionHistoryCursor('session-1', 'cursor-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const banner = container?.querySelector('.message-history-banner');
+    expect(banner?.classList.contains('is-error')).toBe(false);
+    expect(banner?.getAttribute('aria-hidden')).toBe('true');
+    expect(container?.querySelector('.message-history-banner-retry')).toBeNull();
+  });
+});
+
 describe('inline preview virtualization signatures', () => {
   const compactFileEdit: Part = {
     id: 'compact-edit',
@@ -562,6 +611,7 @@ afterEach(() => {
   setState('permissions', []);
   setState('questions', []);
   setState('activeSessionId', null);
+  setState('messagesLoading', false);
   setState('providers', []);
   setState('agents', []);
   setState('allAgents', []);

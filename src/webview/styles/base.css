@@ -45,6 +45,11 @@
   --color-vscode-widget-border: var(--vscode-widget-border, #474747);
   --color-vscode-widget-bg: var(--vscode-editorWidget-background, #252526);
   --color-vscode-widget-shadow: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.24));
+  /* Shared popover/menu shadow. Global so Portal-rendered menus (which mount
+     outside `.interactive-session`) can use it; `--chat-shadow-popover`
+     aliases this inside the chat tree. */
+  --shadow-popover: 0 12px 28px
+    color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
   --color-vscode-lines-add: var(--vscode-chat-linesAddedForeground, #73c991);
   --color-vscode-lines-del: var(--vscode-chat-linesRemovedForeground, #c74e39);
   --color-vscode-thinking-shimmer: var(--vscode-chat-thinkingShimmer, rgba(255, 255, 255, 0.6));
@@ -213,6 +218,25 @@
   --space-6: 12px;
   --space-7: 14px;
   --space-8: 16px;
+  /* Stacking scale, lowest to highest. Content tiers layer elements within a
+     card or row; chrome tiers float sticky chat UI above scrolled content;
+     menus/popovers anchor to chrome; modals and the drop overlay top it. */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-lifted: 2;
+  --z-cover: 3;
+  --z-chrome: 4;
+  --z-chrome-raised: 5;
+  --z-chrome-cover: 6;
+  --z-chrome-top: 7;
+  --z-menu: 20;
+  --z-menu-raised: 30;
+  --z-popup: 40;
+  --z-popover: 50;
+  --z-context-menu: 200;
+  --z-modal: 1000;
+  --z-modal-raised: 1001;
+  --z-topmost: 2000;
 }
 
 @keyframes fade-in {

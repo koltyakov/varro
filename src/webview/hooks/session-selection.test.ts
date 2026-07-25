@@ -99,6 +99,141 @@ describe('session-selection helpers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('flags messages as loading until the session messages are applied', async () => {
+    let resolveLoad!: (value: {
+      session: {
+        id: string;
+        projectID: string;
+        directory: string;
+        title: string;
+        version: string;
+        time: { created: number; updated: number };
+      };
+      messages: { info: Message; parts: never[] }[];
+    }) => void;
+    const loadPromise = new Promise<Parameters<typeof resolveLoad>[0]>((resolve) => {
+      resolveLoad = resolve;
+    });
+    const setMessagesLoading = vi.fn();
+    const setMessagesIncremental = vi.fn();
+
+    const selection = selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        setActiveSessionId: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => null,
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => [],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        setMessagesLoading,
+        loadSession: vi.fn(() => loadPromise),
+        isCurrentSelectionGeneration: () => true,
+        upsertSession: vi.fn(),
+        setMessagesIncremental,
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosForSession: vi.fn(async () => {}),
+        loadQuestions: vi.fn(async () => {}),
+        loadSessionStatuses: vi.fn(async () => ({})),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading: vi.fn(),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    await vi.waitFor(() => expect(setMessagesLoading).toHaveBeenCalledWith(true));
+    expect(setMessagesLoading).not.toHaveBeenCalledWith(false);
+
+    resolveLoad({
+      session: {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 2 },
+      },
+      messages: [{ info: assistantMessage('assistant-1'), parts: [] }],
+    });
+    await selection;
+
+    expect(setMessagesLoading.mock.lastCall).toEqual([false]);
+    expect(setMessagesLoading.mock.invocationCallOrder[1]).toBeGreaterThan(
+      setMessagesIncremental.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('clears the loading flag and reports an error when the session load fails', async () => {
+    const setMessagesLoading = vi.fn();
+    const setError = vi.fn();
+
+    await selectSessionWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        setActiveSessionId: vi.fn(),
+        clearPendingAbort: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+        applySelectedAgent: vi.fn(),
+        resolvePersistedModel: () => null,
+        resolveFallbackModel: () => null,
+        applySelectedModel: vi.fn(),
+        getConnectedMcpNames: () => [],
+        hasSelectedMcps: () => false,
+        setSelectedMcpsForSession: vi.fn(),
+        syncSessionMcps: vi.fn(async () => {}),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        setMessagesLoading,
+        loadSession: vi.fn(async () => {
+          throw new Error('load failed');
+        }),
+        isCurrentSelectionGeneration: () => true,
+        upsertSession: vi.fn(),
+        setMessagesIncremental: vi.fn(),
+        syncFailedSessionsFromMessages: vi.fn(),
+        requestMessageListScrollToBottom: vi.fn(),
+        deriveSelectedAgentFromMessages: () => null,
+        deriveSelectedModelFromMessages: () => null,
+        syncTodosForSession: vi.fn(async () => {}),
+        loadQuestions: vi.fn(async () => {}),
+        loadSessionStatuses: vi.fn(async () => ({})),
+        mergeSessionStatuses: vi.fn(),
+        updateUsageLimitState: vi.fn(),
+        startLoading: vi.fn(),
+        stopLoading: vi.fn(),
+        setError,
+      },
+      { next: () => 1 },
+      'session-1'
+    );
+
+    expect(setMessagesLoading).toHaveBeenNthCalledWith(1, true);
+    expect(setMessagesLoading).toHaveBeenNthCalledWith(2, false);
+    expect(setError).toHaveBeenCalledWith('Failed to load messages');
+  });
+
   it('does not persist, mark seen, or surface an error for stale selection failures', async () => {
     const persistActiveSessionId = vi.fn();
     const markSessionSeen = vi.fn();

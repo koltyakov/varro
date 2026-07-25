@@ -27,11 +27,13 @@ async function runLoad<T>(
   load: () => Promise<T>,
   apply: (value: T) => void,
   logError: Logger
-): Promise<void> {
+): Promise<boolean> {
   try {
     apply(await load());
+    return true;
   } catch (err) {
     logError(label, err);
+    return false;
   }
 }
 
@@ -76,8 +78,10 @@ export function createStateBoundDataLoaderOperations(deps: {
     setWorkspaceStatuses: routingStore.setWorkspaceStatuses,
     listSessions: () => client.session.list(),
     applySessions: deps.applySessions,
+    setSessionsLoadError: (message) => appStore.setState('sessionsLoadError', message),
     listRecycleBin: () => client.varro.recycleBin.list(),
     setRecycleBinEntries: sessionStore.setRecycleBinEntries,
+    setRecycleBinLoadError: (message) => appStore.setState('recycleBinLoadError', message),
     loadSessionStatuses: () => client.session.status(),
     setSessionStatuses: sessionStore.setSessionStatuses,
     getSessions: () => appStore.state.sessions,
@@ -130,8 +134,10 @@ export function createDataLoaderOperations(deps: {
   setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
   listSessions(): Promise<Session[]>;
   applySessions(sessions: Session[]): void;
+  setSessionsLoadError?(message: string | null): void;
   listRecycleBin(): Promise<RecycleBinEntry[] | null | undefined>;
   setRecycleBinEntries(entries: RecycleBinEntry[]): void;
+  setRecycleBinLoadError?(message: string | null): void;
   loadSessionStatuses(): Promise<Record<string, SessionStatus>>;
   setSessionStatuses(
     statuses: Record<string, SessionStatus>,
@@ -295,7 +301,7 @@ export function createDataLoaderOperations(deps: {
   const loadSessions = async () => {
     const generation = ++sessionLoadGeneration;
     const mutationBaseline = sessionSnapshots.captureBaseline();
-    await loadSessionsWithDependencies(
+    const loaded = await loadSessionsWithDependencies(
       {
         listSessions: deps.listSessions,
         shouldApplySessionsSnapshot,
@@ -311,16 +317,19 @@ export function createDataLoaderOperations(deps: {
       deps.logError,
       () => generation === sessionLoadGeneration
     );
+    if (generation !== sessionLoadGeneration) return;
+    deps.setSessionsLoadError?.(loaded ? null : 'Failed to load sessions');
   };
 
   const loadRecycleBin = async () => {
-    await loadRecycleBinWithDependencies(
+    const loaded = await loadRecycleBinWithDependencies(
       {
         listRecycleBin: deps.listRecycleBin,
         setRecycleBinEntries: deps.setRecycleBinEntries,
       },
       deps.logError
     );
+    deps.setRecycleBinLoadError?.(loaded ? null : 'Failed to load the recycle bin');
   };
 
   const hydrateSessionStatuses = async () => {
@@ -590,17 +599,19 @@ export async function loadSessionsWithDependencies(
   },
   logError: Logger,
   isCurrent: () => boolean = () => true
-) {
+): Promise<boolean> {
   try {
     const sessions = await deps.listSessions();
-    if (!isCurrent()) return;
+    if (!isCurrent()) return true;
     // Session reads are intentionally broad. Workspace filtering belongs in
     // applySessions(), not the transport/backend layer, to avoid platform-
     // specific path formatting mismatches from hiding valid sessions.
-    if (deps.shouldApplySessionsSnapshot?.(sessions) === false) return;
+    if (deps.shouldApplySessionsSnapshot?.(sessions) === false) return true;
     deps.applySessions(sessions);
+    return true;
   } catch (err) {
     logError('loadSessions', err);
+    return false;
   }
 }
 
@@ -610,8 +621,8 @@ export async function loadRecycleBinWithDependencies(
     setRecycleBinEntries(entries: RecycleBinEntry[]): void;
   },
   logError: Logger
-) {
-  await runLoad(
+): Promise<boolean> {
+  return await runLoad(
     'loadRecycleBin',
     deps.listRecycleBin,
     (entries) => deps.setRecycleBinEntries(entries || []),

@@ -1,9 +1,14 @@
-import { Show, createMemo, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal } from 'solid-js';
+import {
+  getMessageBlockExpanded,
+  setMessageBlockExpanded,
+} from '../../lib/tool-call-expansion-state';
 import type { FileDiff } from '../../types';
 import { DiffView } from '../DiffView';
 
-export function DiffSummary(props: { diffs: FileDiff[] }) {
-  const [expanded, setExpanded] = createSignal(false);
+export function DiffSummary(props: { diffs: FileDiff[]; stateKey: string }) {
+  let currentStateKey = props.stateKey;
+  const [expanded, setExpanded] = createSignal(getMessageBlockExpanded(currentStateKey) ?? false);
   const summary = createMemo(() =>
     props.diffs.reduce((acc, d) => ({ add: acc.add + d.additions, del: acc.del + d.deletions }), {
       add: 0,
@@ -11,13 +16,22 @@ export function DiffSummary(props: { diffs: FileDiff[] }) {
     })
   );
 
+  createEffect(() => {
+    const nextStateKey = props.stateKey;
+    if (nextStateKey === currentStateKey) return;
+    currentStateKey = nextStateKey;
+    setExpanded(getMessageBlockExpanded(nextStateKey) ?? false);
+  });
+
+  const toggleExpanded = () => {
+    const nextExpanded = !expanded();
+    setMessageBlockExpanded(props.stateKey, nextExpanded);
+    setExpanded(nextExpanded);
+  };
+
   return (
     <div class="diff-summary">
-      <button
-        onClick={() => setExpanded((value) => !value)}
-        class="diff-summary-btn"
-        aria-expanded={expanded()}
-      >
+      <button onClick={toggleExpanded} class="diff-summary-btn" aria-expanded={expanded()}>
         <svg
           class={`transition-transform ${expanded() ? 'rotate-90' : ''}`}
           width="10"

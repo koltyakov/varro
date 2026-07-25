@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { expandThinkingByDefault, getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
@@ -12,6 +12,7 @@ import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { parseUsageLimitNotice } from '../lib/usage-limit';
 import { hasVisibleReasoningContent } from '../lib/part-utils';
+import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
 
 export function MessagePart(props: {
   part: Part;
@@ -114,7 +115,12 @@ function ReasoningBlock(props: {
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
 }) {
-  const [expanded, setExpanded] = createSignal(expandThinkingByDefault());
+  const expansionKey = () =>
+    `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
+  let currentExpansionKey = expansionKey();
+  const [expanded, setExpanded] = createSignal(
+    getMessageBlockExpanded(currentExpansionKey) ?? expandThinkingByDefault()
+  );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
   const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);
@@ -125,13 +131,26 @@ function ReasoningBlock(props: {
   const headerLabel = () => formatReasoningHeader(subjectLabel(), detailLabel());
   const durationLabel = () => formatReasoningDuration(props.part.time);
 
+  createEffect(() => {
+    const nextExpansionKey = expansionKey();
+    if (nextExpansionKey === currentExpansionKey) return;
+    currentExpansionKey = nextExpansionKey;
+    setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? expandThinkingByDefault());
+  });
+
+  const toggleExpanded = () => {
+    const nextExpanded = !expanded();
+    setMessageBlockExpanded(expansionKey(), nextExpanded);
+    setExpanded(nextExpanded);
+  };
+
   return (
     <div class="chat-thinking-box">
       <button
         class="thinking-header"
         disabled={!hasBody()}
         aria-expanded={hasBody() ? expanded() : undefined}
-        onClick={() => hasBody() && setExpanded(!expanded())}
+        onClick={() => hasBody() && toggleExpanded()}
       >
         <span class="thinking-label">
           <BrainTopicIcon class={isStreaming() ? 'thinking-in-progress' : undefined} />

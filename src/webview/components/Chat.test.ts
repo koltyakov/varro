@@ -2348,8 +2348,17 @@ describe('header status badges', () => {
 
     restoreButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
 
     expect(restoreSpy).toHaveBeenCalledWith('deleted-session');
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    const confirmButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (item) => item.textContent === 'Confirm'
+    ) as HTMLButtonElement | undefined;
+    confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
     expect(deleteSpy).toHaveBeenCalledWith('deleted-session');
   });
 

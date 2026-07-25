@@ -58,6 +58,7 @@ import {
   stripClipboardImagePlaceholders,
   replaceContextFiles,
   connectionInitialized,
+  setErrorRetry,
 } from '../lib/state';
 import { onMessage, postMessage } from '../lib/bridge';
 import { client, serverEvents } from '../lib/client';
@@ -1307,6 +1308,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       inputText() === ''
     ) {
       setInputText(text);
+      setErrorRetry(() => {
+        setErrorRetry(null);
+        void handleSend();
+      });
     }
   }
 

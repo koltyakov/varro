@@ -87,6 +87,10 @@ export async function emptyRecycleBin() {
   await getCurrentOpenCodeRuntime().emptyRecycleBin();
 }
 
+export async function reloadSessions() {
+  await getCurrentOpenCodeRuntime().reloadSessions();
+}
+
 export async function sendMessage(
   text: string,
   options?: {

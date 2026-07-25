@@ -182,6 +182,35 @@ describe('session management helpers', () => {
     expect(clearDeletedSessionState).toHaveBeenCalledWith('child-1');
   });
 
+  it('surfaces an error when permanent delete fails', async () => {
+    const setError = vi.fn();
+    const entries: RecycleBinEntry[] = [
+      {
+        rootID: 'session-1',
+        deletedAt: 1,
+        expiresAt: 2,
+        root: session('session-1'),
+        sessions: [session('session-1')],
+      },
+    ];
+
+    await deleteSessionPermanentlyWithDependencies(
+      {
+        getRecycleBinEntries: () => entries,
+        deleteRecycleBinEntry: vi.fn(async () => {
+          throw new Error('delete failed');
+        }),
+        loadRecycleBin: vi.fn(async () => {}),
+        clearDeletedSessionState: vi.fn(),
+        setError,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(setError).toHaveBeenCalledWith('delete failed');
+  });
+
   it('empties the recycle bin and clears state for every deleted session', async () => {
     const clearDeletedSessionState = vi.fn();
     const entries: RecycleBinEntry[] = [

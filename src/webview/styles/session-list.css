@@ -131,6 +131,33 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   user-select: none;
 }
 
+.session-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-vscode-error);
+}
+
+.session-load-error-retry {
+  padding: 3px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 35%, transparent);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-load-error-retry:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
+}
+
+.session-load-error-retry:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .session-list-section-toggle {
   display: flex;
   flex: 1 1 auto;
@@ -309,6 +336,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-align: left;
 }
 
+.session-item:hover {
+  background: var(--color-vscode-hover);
+}
+
 .session-item.keyboard-focus {
   background: var(--color-vscode-hover);
 }
@@ -317,6 +348,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
 }
 
+.session-item.is-pinned:hover,
 .session-item.is-pinned.keyboard-focus {
   background: color-mix(in srgb, var(--color-vscode-warning) 12%, var(--color-vscode-hover));
 }
@@ -324,7 +356,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 @media (min-width: 1400px) {
   .chat-workspace .session-list-view-sidebar .session-item.active {
     background: color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
-    box-shadow: inset 2px 0 var(--color-vscode-accent);
+  }
+
+  .chat-workspace .session-list-view-sidebar .session-item.active:hover {
+    background: color-mix(in srgb, var(--color-vscode-accent) 12%, var(--color-vscode-hover));
   }
 }
 
@@ -361,16 +396,16 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-item-actions-menu {
   position: fixed;
-  z-index: 30;
+  z-index: var(--z-menu-raised);
   display: flex;
   flex-direction: column;
   min-width: 170px;
   overflow-y: auto;
   padding: 4px;
-  border: 1px solid var(--color-vscode-border);
-  border-radius: var(--radius-chip);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--radius-card);
   background: var(--color-vscode-widget-bg);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 24%);
+  box-shadow: var(--shadow-popover);
 }
 
 .session-item-actions-menu > button {

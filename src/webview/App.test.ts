@@ -34,9 +34,11 @@ vi.mock('./components/ralph/RalphForm', () => ({
 
 import { AppRoot } from './App';
 import {
+  errorRetry,
   resetDefaultAppState,
   setConnectionInitialized,
   setError,
+  setErrorRetry,
   setState,
   state,
 } from './lib/state';
@@ -138,5 +140,33 @@ describe('AppRoot', () => {
     expect(() => mountAppRoot()).not.toThrow();
     expect(container?.textContent).toContain('Something went wrong');
     expect(container?.textContent).toContain('ralph failed');
+  });
+
+  it('runs the retry action from the error banner and hides it otherwise', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    setError('Failed to send message');
+    mountAppRoot();
+
+    expect(container?.textContent).toContain('Failed to send message');
+    expect(container?.textContent).not.toContain('Retry');
+
+    const retry = vi.fn();
+    setErrorRetry(retry);
+    const retryButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retryButton).toBeDefined();
+
+    retryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the retry action whenever the error changes', () => {
+    setErrorRetry(vi.fn());
+    expect(errorRetry()).not.toBeNull();
+
+    setError('another failure');
+    expect(errorRetry()).toBeNull();
   });
 });

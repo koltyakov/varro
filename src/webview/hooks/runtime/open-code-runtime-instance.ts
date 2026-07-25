@@ -34,6 +34,7 @@ import {
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
   getSessionHistoryPrompts,
+  markSessionHistoryLoadFailed,
   MESSAGE_HISTORY_WINDOW,
   mergeOlderHistory,
   mergeWindowedHistory,
@@ -113,6 +114,7 @@ export interface OpenCodeRuntime {
   restoreSession(rootID: string): Promise<void>;
   deleteSessionPermanently(rootID: string): Promise<void>;
   emptyRecycleBin(): Promise<void>;
+  reloadSessions(): Promise<void>;
   sendMessage(
     text: string,
     options?: {
@@ -1069,6 +1071,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       syncSessionMcps,
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
+      setMessagesLoading: (loading) => appStore.setState('messagesLoading', loading),
       loadSession: loadSessionWithMessages,
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
@@ -1339,9 +1342,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         sessionStore.setMessagesIncremental(mergeOlderHistory(current, page));
         const nextCursor = page.nextCursor === cursor ? undefined : page.nextCursor;
         setSessionHistoryCursor(sessionId, nextCursor);
+        markSessionHistoryLoadFailed(sessionId, false);
         if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor);
         return page.length > 0;
       } catch (err) {
+        if (appStore.state.activeSessionId === sessionId) {
+          markSessionHistoryLoadFailed(sessionId, true);
+        }
         logError('loadOlderSessionHistoryPage', err);
         return false;
       }
@@ -1374,6 +1381,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function emptyRecycleBin() {
     await sessionManagementOperations.emptyRecycleBin();
+  }
+
+  async function reloadSessions() {
+    await Promise.all([loadSessions(), loadRecycleBin()]);
   }
 
   async function sendMessage(
@@ -1509,6 +1520,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     restoreSession,
     deleteSessionPermanently,
     emptyRecycleBin,
+    reloadSessions,
     sendMessage,
     retryMessage,
     editMessage,

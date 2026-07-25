@@ -52,6 +52,7 @@ test('permanently deleting a parent from recycle bin removes the entire tree', a
   const recycleRow = page.locator('.recycle-bin-item').filter({ hasText: 'Parent orchestration' });
   await expect(recycleRow).toBeVisible();
   await recycleRow.getByRole('button', { name: 'Delete permanently' }).click();
+  await recycleRow.getByRole('button', { name: 'Confirm permanent delete' }).click();
 
   await expect(page.locator('.recycle-bin-item')).toHaveCount(0);
 

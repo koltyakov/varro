@@ -42,70 +42,10 @@
   gap: 6px;
 }
 
-.chat-header-failed-badge {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: none;
-  cursor: pointer;
-  transition: background-color 0.1s;
-}
-
-.chat-header-running-badge {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: none;
-  cursor: pointer;
-  transition: background-color 0.1s;
-}
-
-.chat-header-attention-badge {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: none;
-  cursor: pointer;
-  transition: background-color 0.1s;
-}
-
-.chat-header-plan-badge {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: none;
-  cursor: pointer;
-  transition: background-color 0.1s;
-}
-
+.chat-header-failed-badge,
+.chat-header-running-badge,
+.chat-header-attention-badge,
+.chat-header-plan-badge,
 .chat-header-completed-badge {
   position: relative;
   display: inline-flex;
@@ -154,7 +94,7 @@
 .chat-header-running-count {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
   display: flex;
   align-items: center;
   justify-content: center;

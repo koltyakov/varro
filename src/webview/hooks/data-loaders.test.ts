@@ -717,4 +717,46 @@ describe('data loaders', () => {
     expect(applySessions).toHaveBeenCalledWith(listedSessions);
     expect(logError).not.toHaveBeenCalled();
   });
+
+  it('flags session list load failures and clears the flag on the next success', async () => {
+    const setSessionsLoadError = vi.fn();
+    let fail = true;
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => {
+          if (fail) throw new Error('list failed');
+          return [session('session-1')];
+        },
+        setSessionsLoadError,
+      })
+    );
+
+    await operations.loadSessions();
+    expect(setSessionsLoadError).toHaveBeenLastCalledWith('Failed to load sessions');
+
+    fail = false;
+    await operations.loadSessions();
+    expect(setSessionsLoadError).toHaveBeenLastCalledWith(null);
+  });
+
+  it('flags recycle bin load failures and clears the flag on the next success', async () => {
+    const setRecycleBinLoadError = vi.fn();
+    let fail = true;
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listRecycleBin: async () => {
+          if (fail) throw new Error('bin failed');
+          return [];
+        },
+        setRecycleBinLoadError,
+      })
+    );
+
+    await operations.loadRecycleBin();
+    expect(setRecycleBinLoadError).toHaveBeenLastCalledWith('Failed to load the recycle bin');
+
+    fail = false;
+    await operations.loadRecycleBin();
+    expect(setRecycleBinLoadError).toHaveBeenLastCalledWith(null);
+  });
 });

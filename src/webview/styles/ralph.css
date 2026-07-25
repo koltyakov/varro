@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   padding: 16px;
 }
 
@@ -18,8 +18,7 @@
   --chat-radius-control: var(--radius-control);
   --chat-radius-card: var(--radius-card);
   --chat-radius-popover: var(--radius-card);
-  --chat-shadow-popover: 0 12px 28px
-    color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
+  --chat-shadow-popover: var(--shadow-popover);
   width: min(560px, 100%);
   max-height: 90vh;
   display: flex;
@@ -27,7 +26,7 @@
   background: var(--color-vscode-sidebar);
   border: 1px solid var(--color-vscode-border);
   border-radius: var(--chat-radius-card);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--chat-shadow-popover);
   color: var(--color-vscode-fg);
 }
 
@@ -602,7 +601,7 @@
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-control);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 38%, transparent);
   background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);

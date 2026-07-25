@@ -64,10 +64,8 @@ input:focus-visible {
   --chat-radius-control: var(--radius-control);
   --chat-radius-card: var(--radius-bubble);
   --chat-radius-popover: var(--radius-card);
-  --chat-focus-ring: 0 0 0 2px color-mix(in srgb, var(--color-vscode-accent) 36%, transparent);
   --chat-shadow-card: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
-  --chat-shadow-popover: 0 12px 28px
-    color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
+  --chat-shadow-popover: var(--shadow-popover);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -197,7 +195,7 @@ input:focus-visible {
   position: sticky;
   overflow-anchor: none;
   top: 0;
-  z-index: 7;
+  z-index: var(--z-chrome-top);
   height: 0;
   pointer-events: none;
   width: 100%;
@@ -323,13 +321,7 @@ input:focus-visible {
   border: 1.5px solid color-mix(in srgb, currentColor 28%, transparent);
   border-top-color: currentColor;
   border-radius: 50%;
-  animation: sticky-message-loading-spin 0.7s linear infinite;
-}
-
-@keyframes sticky-message-loading-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: spin 0.7s linear infinite;
 }
 
 .latest-user-message-sticky:hover .latest-user-message-sticky-text {
@@ -386,7 +378,7 @@ input:focus-visible {
   left: 50%;
   bottom: 14px;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: var(--z-chrome-raised);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -429,7 +421,7 @@ input:focus-visible {
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 4;
+  z-index: var(--z-chrome);
   height: var(--interactive-list-bottom-fade-gap);
   pointer-events: none;
   isolation: isolate;
@@ -543,7 +535,7 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: var(--space-3) var(--space-5);
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 35%, var(--color-vscode-border));
   border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-surface-softer));

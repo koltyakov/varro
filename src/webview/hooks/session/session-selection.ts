@@ -29,6 +29,7 @@ type SessionSelectionDeps = {
   syncSessionMcps(sessionId: string): Promise<void>;
   resetTodoSync(): void;
   clearMessages(): void;
+  setMessagesLoading?(loading: boolean): void;
   loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
@@ -95,16 +96,21 @@ export async function selectSessionWithDependencies(
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
 
+  const isCurrentSelection = () =>
+    deps.isCurrentSelectionGeneration(generation) && deps.getActiveSessionId() === id;
+
+  deps.setMessagesLoading?.(true);
   let loaded: { session: Session; messages: MessageEntry[] };
   try {
     loaded = await deps.loadSession(id);
   } catch {
-    if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+    if (!isCurrentSelection()) return;
+    deps.setMessagesLoading?.(false);
     deps.setError('Failed to load messages');
     return;
   }
 
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (!isCurrentSelection()) return;
 
   const { session, messages } = loaded;
   deps.upsertSession(session);
@@ -113,6 +119,7 @@ export async function selectSessionWithDependencies(
     deps.markSessionSeen(id);
   }
   deps.setMessagesIncremental(messages);
+  deps.setMessagesLoading?.(false);
   deps.syncFailedSessionsFromMessages(messages);
   deps.requestMessageListScrollToBottom();
 

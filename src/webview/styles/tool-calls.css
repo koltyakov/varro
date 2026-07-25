@@ -132,7 +132,7 @@
   color: var(--color-vscode-fg);
   opacity: 0.94;
   cursor: pointer;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border: none;
   background: transparent;
   width: 100%;
@@ -234,16 +234,6 @@
   -webkit-text-fill-color: transparent;
   animation: chat-thinking-shimmer 2s linear infinite;
   will-change: background-position;
-}
-
-.progress-container {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 14px 0;
-  font-size: 13px;
-  padding-top: 2px;
-  color: var(--color-vscode-muted);
 }
 
 .model-change-indicator {
@@ -533,7 +523,7 @@
 
 .diff-view-scrollbar {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-chrome-raised);
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
@@ -606,7 +596,7 @@
 
 .diff-view-gap {
   position: sticky;
-  z-index: 1;
+  z-index: var(--z-raised);
   left: 8px;
   display: flex;
   align-items: center;
@@ -624,7 +614,7 @@
 
 .diff-view-lines-shell-expandable:not(.diff-view-lines-shell-expanded)::after {
   position: absolute;
-  z-index: 4;
+  z-index: var(--z-chrome);
   right: 0;
   bottom: 0;
   left: 0;
@@ -693,7 +683,7 @@
 
 .diff-view-line-number {
   position: sticky;
-  z-index: 2;
+  z-index: var(--z-lifted);
   left: 0;
   display: flex;
   align-items: center;
@@ -712,7 +702,7 @@
 
 .diff-view-line-marker {
   position: sticky;
-  z-index: 2;
+  z-index: var(--z-lifted);
   left: 39px;
   display: block;
   padding: 0;
@@ -886,7 +876,7 @@ kbd {
   width: 100%;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1107,7 +1097,7 @@ kbd {
   line-height: 1.6;
   color: var(--color-vscode-fg-soft);
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
@@ -1149,7 +1139,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .structured-tool-label {
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   color: var(--color-vscode-fg-muted);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1163,7 +1153,7 @@ kbd {
   min-width: 0;
   max-height: 220px;
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   overflow: auto;
   color: var(--color-vscode-fg);
   font-family: var(--font-mono);
@@ -1295,7 +1285,7 @@ kbd {
 }
 
 .file-change-card:has(.file-edit-more-menu) {
-  z-index: 3;
+  z-index: var(--z-cover);
 }
 
 .file-change-inline-diffs {
@@ -1341,7 +1331,7 @@ kbd {
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   font-size: 12px;
 }
 
@@ -1471,7 +1461,7 @@ kbd {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 20;
+  z-index: var(--z-menu);
   display: flex;
   flex-direction: column;
   width: max-content;
@@ -1553,7 +1543,7 @@ kbd {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   font-size: 12px;
 }
 
@@ -1631,7 +1621,7 @@ kbd {
   border: 1px solid var(--color-vscode-border-soft);
   border-radius: var(--radius-card);
   background: var(--color-vscode-surface-softer);
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
 }
 
 .chat-subtask-part .subtask-header {
@@ -1762,7 +1752,7 @@ kbd {
 .chat-image-preview-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: color-mix(in srgb, var(--color-vscode-bg) 86%, transparent);
 }
 
@@ -1770,7 +1760,7 @@ kbd {
   position: fixed;
   top: 20px;
   right: max(20px, env(safe-area-inset-right));
-  z-index: 1001;
+  z-index: var(--z-modal-raised);
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 90%, transparent);
@@ -1787,7 +1777,7 @@ kbd {
 .chat-image-preview-nav {
   position: fixed;
   top: 50%;
-  z-index: 1001;
+  z-index: var(--z-modal-raised);
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 90%, transparent);
@@ -2028,31 +2018,6 @@ kbd {
   .chat-image-preview-img {
     max-height: calc(100vh - 96px);
   }
-}
-
-.interactive-response-error-details {
-  display: flex;
-  align-items: start;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius-card);
-  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-error) 7%, transparent);
-}
-
-.interactive-response-error-details .error-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  color: var(--color-vscode-error);
-  margin-top: 1px;
-}
-
-.interactive-response-error-details .error-message-text {
-  color: var(--color-vscode-error);
-  margin: 0;
-  font-size: 12.5px;
 }
 
 .interactive-loading-row {
@@ -2301,7 +2266,7 @@ kbd {
 .chat-drop-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-topmost);
   display: flex;
   align-items: center;
   justify-content: center;

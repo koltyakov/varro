@@ -2,7 +2,7 @@
 .settings-panel {
   position: absolute;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   background: var(--color-vscode-sidebar);
@@ -219,7 +219,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: var(--space-3) var(--space-5);
   background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
 }
 
@@ -475,16 +475,16 @@
 
 .settings-context-menu {
   position: fixed;
-  z-index: 200;
+  z-index: var(--z-context-menu);
   display: flex;
   min-width: 220px;
   max-width: min(320px, calc(100vw - 16px));
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--color-vscode-border);
-  border-radius: var(--radius-control);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--radius-card);
   background: var(--color-vscode-widget-bg);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-popover);
 }
 
 .settings-context-menu-item {

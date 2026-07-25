@@ -17,7 +17,7 @@
 
 .interactive-item-container.interactive-request-editing {
   position: relative;
-  z-index: 6;
+  z-index: var(--z-chrome-cover);
 }
 
 /* File menus also cross virtualized row boundaries. Keep the active row above
@@ -28,7 +28,7 @@
 
 .interactive-item-container:has(.file-edit-more-menu) {
   position: relative;
-  z-index: 6;
+  z-index: var(--z-chrome-cover);
 }
 
 /* Inline, the message row's track already provides horizontal padding. */
@@ -195,7 +195,7 @@
   position: absolute;
   top: 0;
   right: 0;
-  z-index: 2;
+  z-index: var(--z-lifted);
   pointer-events: none;
 }
 
@@ -295,15 +295,10 @@
   height: 14px;
 }
 
-.assistant-read-mode-toggle svg {
-  width: 14px;
-  height: 14px;
-}
-
 .assistant-read-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: color-mix(in srgb, var(--color-vscode-bg) 96%, black 4%);
 }
 
@@ -311,7 +306,7 @@
   position: fixed;
   top: 20px;
   right: max(20px, env(safe-area-inset-right));
-  z-index: 1001;
+  z-index: var(--z-modal-raised);
 }
 
 .assistant-read-overlay-scroll {
@@ -659,6 +654,23 @@ body.vscode-light
   justify-content: center;
   padding: 0 2px;
   pointer-events: none;
+}
+
+.chat-messages-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 80px;
+}
+
+.chat-messages-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-vscode-accent);
+  animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
 .chat-empty-hints {
@@ -1083,7 +1095,7 @@ body.vscode-light
 }
 
 .interactive-session .chat-input-shell.showing-floating-popover {
-  z-index: 6;
+  z-index: var(--z-chrome-cover);
 }
 
 .interactive-session .chat-input-container {
@@ -1118,12 +1130,12 @@ body.vscode-dark .interactive-session .chat-input-container {
 
 .interactive-session .chat-input-container.showing-context-popup {
   overflow: visible;
-  z-index: 5;
+  z-index: var(--z-chrome-raised);
 }
 
 .interactive-session .chat-input-container.showing-model-picker {
   overflow: visible;
-  z-index: 5;
+  z-index: var(--z-chrome-raised);
 }
 
 .interactive-session .chat-input-toolbars .toolbar-left.showing-context-popup {
@@ -1162,14 +1174,14 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   left: 0;
   right: 0;
   height: 20px;
-  z-index: 0;
+  z-index: var(--z-base);
   pointer-events: none;
   background: none;
 }
 
 .interactive-session .interactive-input-part > * {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 .interactive-session .model-selection-row {
@@ -1177,7 +1189,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   justify-content: flex-start;
   padding: 0 2px;
   position: relative;
-  z-index: 3;
+  z-index: var(--z-cover);
 }
 
 .interactive-session .model-selection-trigger {
@@ -1364,11 +1376,6 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
-}
-
-.toolbar-picker-detail {
-  color: var(--color-vscode-muted);
-  font-weight: 400;
 }
 
 .chat-context-usage {

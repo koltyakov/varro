@@ -21,6 +21,7 @@ export {
   renameSession,
   refreshRoutingState,
   rejectQuestion,
+  reloadSessions,
   respondPermission,
   respondQuestion,
   restoreSession,

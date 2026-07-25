@@ -32,6 +32,7 @@ import {
   restoreSession,
   deleteSessionPermanently,
   emptyRecycleBin,
+  reloadSessions,
   renameSession,
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
@@ -1203,6 +1204,20 @@ export function SessionListView(props: {
     const label = getSessionListFilterLabel(props.sessionFilter ?? null);
     return label ? `No ${label.toLowerCase()} sessions` : 'No sessions yet';
   };
+  const loadErrorMessage = () =>
+    props.subagentParentId || props.sessionFilter || normalizedSearchQuery()
+      ? null
+      : (state.sessionsLoadError ?? state.recycleBinLoadError);
+  const [isRetryingLoad, setIsRetryingLoad] = createSignal(false);
+  const retryLoadSessions = async () => {
+    if (isRetryingLoad()) return;
+    setIsRetryingLoad(true);
+    try {
+      await reloadSessions();
+    } finally {
+      setIsRetryingLoad(false);
+    }
+  };
   const hasVisibleContent = createMemo(() => {
     if (props.subagentParentId) return subagentSessions().length > 0;
     if (props.sessionFilter) return filteredSessions().length > 0;
@@ -1258,7 +1273,26 @@ export function SessionListView(props: {
       <div class="session-list-content">
         <Show
           when={hasVisibleContent()}
-          fallback={<div class="session-empty">{emptyMessage()}</div>}
+          fallback={
+            <Show
+              when={loadErrorMessage()}
+              fallback={<div class="session-empty">{emptyMessage()}</div>}
+            >
+              {(message) => (
+                <div class="session-empty session-load-error" role="alert">
+                  <span>{message()}</span>
+                  <button
+                    type="button"
+                    class="session-load-error-retry"
+                    disabled={isRetryingLoad()}
+                    onClick={() => void retryLoadSessions()}
+                  >
+                    {isRetryingLoad() ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
+              )}
+            </Show>
+          }
         >
           <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
             <div class="session-list-layout">
@@ -1275,10 +1309,16 @@ export function SessionListView(props: {
 }
 
 function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }) {
+  const [isConfirmingDelete, setIsConfirmingDelete] = createSignal(false);
   const title = () => normalizeSessionTitle(props.entry.root?.title || props.entry.rootID);
   const childCount = () => {
     const sessions = Array.isArray(props.entry.sessions) ? props.entry.sessions : [];
     return Math.max(0, sessions.length - 1);
+  };
+
+  const confirmDelete = async () => {
+    setIsConfirmingDelete(false);
+    await deleteSessionPermanently(props.entry.rootID);
   };
 
   return (
@@ -1298,26 +1338,54 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
         </div>
       </div>
       <div class="session-item-trailing">
-        <button
-          type="button"
-          class="session-item-subagents recycle-bin-restore"
-          onClick={() => void restoreSession(props.entry.rootID)}
-          title="Restore"
-          aria-label="Restore"
+        <Show
+          when={isConfirmingDelete()}
+          fallback={
+            <>
+              <button
+                type="button"
+                class="session-item-subagents recycle-bin-restore"
+                onClick={() => void restoreSession(props.entry.rootID)}
+                title="Restore"
+                aria-label="Restore"
+              >
+                Restore
+              </button>
+              <button
+                type="button"
+                class="session-item-archive recycle-bin-delete"
+                onClick={() => setIsConfirmingDelete(true)}
+                title="Delete permanently"
+                aria-label="Delete permanently"
+              >
+                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+                  <path d="M17 24h-2v-9h2v9zm4-9h-2v9h2v-9zm-8 0h-2v9h2v-9zm14-2h-1.064l-1 15H7.064l-1-15H5V7h7V4h8v3h7v6zM14 7h4V6h-4v1zm-7 4h18V9H7v2zm16.931 2H8.069l.866 13h14.129l.867-13z" />
+                </svg>
+              </button>
+            </>
+          }
         >
-          Restore
-        </button>
-        <button
-          type="button"
-          class="session-item-archive recycle-bin-delete"
-          onClick={() => void deleteSessionPermanently(props.entry.rootID)}
-          title="Delete permanently"
-          aria-label="Delete permanently"
-        >
-          <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
-            <path d="M17 24h-2v-9h2v9zm4-9h-2v9h2v-9zm-8 0h-2v9h2v-9zm14-2h-1.064l-1 15H7.064l-1-15H5V7h7V4h8v3h7v6zM14 7h4V6h-4v1zm-7 4h18V9H7v2zm16.931 2H8.069l.866 13h14.129l.867-13z" />
-          </svg>
-        </button>
+          <>
+            <button
+              type="button"
+              class="session-list-section-confirm"
+              onClick={() => void confirmDelete()}
+              title="Confirm permanent delete"
+              aria-label="Confirm permanent delete"
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              class="session-list-section-cancel"
+              onClick={() => setIsConfirmingDelete(false)}
+              title="Cancel delete"
+              aria-label="Cancel delete"
+            >
+              Cancel
+            </button>
+          </>
+        </Show>
       </div>
     </div>
   );

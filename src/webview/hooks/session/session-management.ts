@@ -133,6 +133,7 @@ export class SessionManagementOperations {
         hideDeletedSessionTree: this.deps.hideDeletedSessionTree,
         loadRecycleBin: this.deps.loadRecycleBin,
         selectSession: this.deps.selectSession,
+        setError: this.deps.setError,
         logError: this.deps.logError,
       },
       id
@@ -146,6 +147,7 @@ export class SessionManagementOperations {
         loadSessions: this.deps.loadSessions,
         loadRecycleBin: this.deps.loadRecycleBin,
         hydrateSessionStatuses: this.deps.hydrateSessionStatuses,
+        setError: this.deps.setError,
         logError: this.deps.logError,
       },
       rootID
@@ -159,6 +161,7 @@ export class SessionManagementOperations {
         deleteRecycleBinEntry: this.deps.deleteRecycleBinEntry,
         loadRecycleBin: this.deps.loadRecycleBin,
         clearDeletedSessionState: this.deps.clearDeletedSessionState,
+        setError: this.deps.setError,
         logError: this.deps.logError,
       },
       rootID
@@ -171,6 +174,7 @@ export class SessionManagementOperations {
       emptyRecycleBin: this.deps.emptyRecycleBin,
       loadRecycleBin: this.deps.loadRecycleBin,
       clearDeletedSessionState: this.deps.clearDeletedSessionState,
+      setError: this.deps.setError,
       logError: this.deps.logError,
     });
   };
@@ -324,6 +328,7 @@ export async function deleteSessionWithDependencies(
     hideDeletedSessionTree(sessionId: string): void;
     loadRecycleBin(): Promise<void>;
     selectSession(sessionId: string, options?: { markSeen?: boolean }): Promise<void>;
+    setError?(message: string): void;
     logError(context: string, err: unknown): void;
   },
   id: string
@@ -343,6 +348,7 @@ export async function deleteSessionWithDependencies(
       await deps.selectSession(nextActiveId, { markSeen: false });
     }
   } catch (err) {
+    deps.setError?.(err instanceof Error ? err.message : 'Failed to delete session');
     deps.logError('deleteSession', err);
   }
 }
@@ -353,6 +359,7 @@ export async function restoreSessionWithDependencies(
     loadSessions(): Promise<void>;
     loadRecycleBin(): Promise<void>;
     hydrateSessionStatuses(): Promise<void>;
+    setError?(message: string): void;
     logError(context: string, err: unknown): void;
   },
   rootID: string
@@ -361,6 +368,7 @@ export async function restoreSessionWithDependencies(
     await deps.restoreRecycleBinEntry(rootID);
     await Promise.all([deps.loadSessions(), deps.loadRecycleBin(), deps.hydrateSessionStatuses()]);
   } catch (err) {
+    deps.setError?.(err instanceof Error ? err.message : 'Failed to restore session');
     deps.logError('restoreSession', err);
   }
 }
@@ -371,6 +379,7 @@ export async function deleteSessionPermanentlyWithDependencies(
     deleteRecycleBinEntry(rootID: string): Promise<unknown>;
     loadRecycleBin(): Promise<void>;
     clearDeletedSessionState(sessionId: string): void;
+    setError?(message: string): void;
     logError(context: string, err: unknown): void;
   },
   rootID: string
@@ -389,6 +398,7 @@ export async function deleteSessionPermanentlyWithDependencies(
       deps.clearDeletedSessionState(session.id);
     }
   } catch (err) {
+    deps.setError?.(err instanceof Error ? err.message : 'Failed to delete session permanently');
     deps.logError('deleteSessionPermanently', err);
   }
 }
@@ -398,6 +408,7 @@ export async function emptyRecycleBinWithDependencies(deps: {
   emptyRecycleBin(): Promise<unknown>;
   loadRecycleBin(): Promise<void>;
   clearDeletedSessionState(sessionId: string): void;
+  setError?(message: string): void;
   logError(context: string, err: unknown): void;
 }) {
   try {
@@ -410,6 +421,7 @@ export async function emptyRecycleBinWithDependencies(deps: {
       }
     }
   } catch (err) {
+    deps.setError?.(err instanceof Error ? err.message : 'Failed to empty the recycle bin');
     deps.logError('emptyRecycleBin', err);
   }
 }

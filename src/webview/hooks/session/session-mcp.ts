@@ -57,8 +57,7 @@ export class SessionMcpOperations {
       {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
         setDraftSelectedMcps: this.deps.setDraftSelectedMcps,
-        syncSessionMcps: (targetSessionId) =>
-          this.reconcileSessionMcps(targetSessionId, false),
+        syncSessionMcps: (targetSessionId) => this.reconcileSessionMcps(targetSessionId, false),
       },
       names,
       sessionId
