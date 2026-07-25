@@ -376,6 +376,7 @@
   gap: 6px;
   padding: 5px 9px;
   font-size: 11px;
+  line-height: 14px;
   transition: background-color 0.1s;
 }
 
