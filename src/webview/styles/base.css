@@ -478,6 +478,13 @@ body.vscode-light {
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
+  --color-vscode-muted: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #717171) 55%,
+    var(--color-vscode-fg)
+  );
+  --color-vscode-fg-muted: color-mix(in srgb, var(--color-vscode-fg) 84%, transparent);
+  --color-vscode-fg-soft: color-mix(in srgb, var(--color-vscode-fg) 93%, transparent);
 }
 
 body.vscode-dark.varro-flat-dark {
