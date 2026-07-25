@@ -1,8 +1,10 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import type { SessionDiffSummary } from '../../../shared/protocol';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import { deleteSession, renameSession } from '../../hooks/useOpenCode';
 import { client } from '../../lib/client';
+import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { setError, setState, state } from '../../lib/state';
 import { writeClipboard } from '../../lib/write-clipboard';
@@ -22,6 +24,13 @@ function getActiveSession() {
 function isActiveSessionPinned() {
   const sessionId = state.activeSessionId;
   return !!sessionId && state.pinnedSessionIds.includes(sessionId);
+}
+
+function isActiveSessionRunning() {
+  const sessionId = state.activeSessionId;
+  if (!sessionId) return false;
+  const type = state.sessionStatus[sessionId]?.type;
+  return type === 'busy' || type === 'retry';
 }
 
 export function SessionPickerHeader(props: {
@@ -150,6 +159,52 @@ export function ActiveChatHeader(props: {
   onOpenRunningSessions: () => void;
   onCreateSession: () => void;
 }) {
+  const [workSummary, setWorkSummary] = createSignal<Pick<
+    SessionDiffSummary,
+    'durationMs' | 'activeStartedAt'
+  > | null>(null);
+  const [workNow, setWorkNow] = createSignal(Date.now());
+  const workedDurationMs = () => {
+    const summary = workSummary();
+    if (!summary) return null;
+    const activeDuration =
+      isActiveSessionRunning() && summary.activeStartedAt !== null
+        ? Math.max(0, workNow() - summary.activeStartedAt)
+        : 0;
+    const total = summary.durationMs + activeDuration;
+    return total > 0 ? total : null;
+  };
+
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) {
+      setWorkSummary(null);
+      return;
+    }
+    isActiveSessionRunning();
+    let cancelled = false;
+    client.varro.session
+      .diffSummary(sessionId)
+      .then((summary) => {
+        if (cancelled) return;
+        setWorkNow(Date.now());
+        setWorkSummary({
+          durationMs: summary.durationMs,
+          activeStartedAt: summary.activeStartedAt,
+        });
+      })
+      .catch(() => {});
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  createEffect(() => {
+    if (!isActiveSessionRunning() || workSummary()?.activeStartedAt == null) return;
+    const timer = setInterval(() => setWorkNow(Date.now()), 1_000);
+    onCleanup(() => clearInterval(timer));
+  });
+
   let titleRef: HTMLSpanElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
@@ -291,6 +346,11 @@ export function ActiveChatHeader(props: {
               </svg>
               <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
             </button>
+          )}
+        </Show>
+        <Show when={workedDurationMs()}>
+          {(durationMs) => (
+            <span class="chat-header-session-duration">{formatDuration(durationMs())}</span>
           )}
         </Show>
       </div>

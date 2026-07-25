@@ -43,6 +43,20 @@
   min-width: 0;
 }
 
+.chat-header-session-duration {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-vscode-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.chat-header-session-title:hover ~ .chat-header-session-duration {
+  opacity: 1;
+}
+
 .chat-header-actions {
   display: flex;
   align-items: center;

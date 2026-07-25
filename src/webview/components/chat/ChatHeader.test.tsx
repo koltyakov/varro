@@ -28,7 +28,7 @@ function session(overrides: Partial<Session> = {}): Session {
   };
 }
 
-function renderHeader() {
+function renderHeader(activeSubagentRootId: string | null = null) {
   cleanup = render(
     () => (
       <ActiveChatHeader
@@ -36,8 +36,8 @@ function renderHeader() {
         showBackButton={false}
         backTitle="Back"
         showActions={false}
-        activeSubagentRootId={null}
-        activeSubagentCount={0}
+        activeSubagentRootId={activeSubagentRootId}
+        activeSubagentCount={activeSubagentRootId ? 2 : 0}
         activeSubagentLabel="Subagents"
         failedCount={0}
         attentionCount={0}
@@ -120,5 +120,24 @@ describe('ActiveChatHeader', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
+  });
+
+  it('shows cumulative worked duration next to the title', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 65_000,
+      activeStartedAt: null,
+    });
+    renderHeader('session-root');
+
+    await vi.waitFor(() => {
+      const duration = container.querySelector('.chat-header-session-duration');
+      expect(duration?.textContent).toBe('1m 5s');
+    });
+    const duration = container.querySelector('.chat-header-session-duration');
+    expect(duration?.previousElementSibling?.classList).toContain('chat-header-subagents');
   });
 });
