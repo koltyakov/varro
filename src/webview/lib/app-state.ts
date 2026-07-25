@@ -118,6 +118,7 @@ export interface AppState {
   sessionSelectedModels: SessionSelectedModels;
   modelVariantSelections: ModelVariantSelections;
   sessionSelectedMcps: SessionSelectedMcps;
+  draftSelectedMcps: string[] | null;
   hiddenProviders: string[];
   hiddenModels: string[];
   lastSeenSessions: Record<string, number>;
@@ -283,6 +284,7 @@ export function createAppState(): AppStateInstance {
     sessionSelectedModels: readStoredSelectedModels(STORAGE_KEYS.sessionSelectedModels),
     modelVariantSelections: readStoredStringRecord(STORAGE_KEYS.modelVariantSelections),
     sessionSelectedMcps: readStoredStringArrayRecord(STORAGE_KEYS.sessionSelectedMcps),
+    draftSelectedMcps: null,
     hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
     hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
     lastSeenSessions: initialLastSeenSessions,

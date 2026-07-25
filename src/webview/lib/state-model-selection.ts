@@ -31,7 +31,15 @@ export function getSelectedAgentForSession(sessionId: string | null | undefined)
 }
 
 export function getSelectedMcpsForSession(sessionId: string | null | undefined): string[] | null {
-  if (!sessionId) return null;
+  if (!sessionId) {
+    return (
+      state.draftSelectedMcps ??
+      Object.entries(state.mcpStatus)
+        .filter(([, value]) => value?.status === 'connected')
+        .map(([name]) => name)
+        .toSorted((a, b) => a.localeCompare(b))
+    );
+  }
   return state.sessionSelectedMcps[sessionId] || null;
 }
 
@@ -94,6 +102,17 @@ export function setSelectedMcpsForSession(sessionId: string, names: string[]) {
   const nextNames = [...new Set(names)].toSorted((a, b) => a.localeCompare(b));
   setState('sessionSelectedMcps', sessionId, nextNames);
   writeStored(STORAGE_KEYS.sessionSelectedMcps, { ...state.sessionSelectedMcps });
+}
+
+export function setDraftSelectedMcps(names: string[]) {
+  setState(
+    'draftSelectedMcps',
+    [...new Set(names)].toSorted((a, b) => a.localeCompare(b))
+  );
+}
+
+export function resetDraftSelectedMcps() {
+  setState('draftSelectedMcps', null);
 }
 
 export function clearSelectedMcpsForSession(sessionId: string) {

@@ -143,6 +143,7 @@ describe('session MCP helpers', () => {
     await applySessionMcpsWithDependencies(
       {
         setSelectedMcpsForSession,
+        setDraftSelectedMcps: vi.fn(),
         syncSessionMcps,
       },
       ['beta'],
@@ -175,8 +176,8 @@ describe('session MCP helpers', () => {
       statuses = { ...statuses, [name]: { status: 'disabled' } };
     });
     const operations = new SessionMcpOperations({
-      getSelectedMcpsForSession: (sessionId) => selections[sessionId],
-      getRequiredMcpSessionIds: (sessionId) => [sessionId],
+      getSelectedMcpsForSession: (sessionId) => (sessionId ? selections[sessionId] : []),
+      getRequiredMcpSessionIds: (sessionId) => (sessionId ? [sessionId] : []),
       getMcpStatus: () => statuses,
       loadMcps: vi.fn(async () => {}),
       getAvailableMcpNames: () => ['alpha', 'beta'],
@@ -185,6 +186,7 @@ describe('session MCP helpers', () => {
       disconnectMcp,
       logError: vi.fn(),
       setSelectedMcpsForSession: vi.fn(),
+      setDraftSelectedMcps: vi.fn(),
     });
 
     const first = operations.syncSessionMcps('session-a');
@@ -201,5 +203,49 @@ describe('session MCP helpers', () => {
       alpha: { status: 'connected' },
       beta: { status: 'disabled' },
     });
+  });
+
+  it('stores and immediately reconciles MCP selections for a draft', async () => {
+    const setDraftSelectedMcps = vi.fn();
+    const syncSessionMcps = vi.fn(async () => {});
+
+    await applySessionMcpsWithDependencies(
+      {
+        setSelectedMcpsForSession: vi.fn(),
+        setDraftSelectedMcps,
+        syncSessionMcps,
+      },
+      ['browser-bridge'],
+      null
+    );
+
+    expect(setDraftSelectedMcps).toHaveBeenCalledWith(['browser-bridge']);
+    expect(syncSessionMcps).toHaveBeenCalledWith(null);
+  });
+
+  it('disconnects an MCP removed from a draft unless a background session requires it', async () => {
+    const disconnectMcp = vi.fn(async () => {});
+
+    await syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: (sessionId) =>
+          sessionId === null ? [] : sessionId === 'background' ? ['docs'] : [],
+        getRequiredMcpSessionIds: () => ['background'],
+        getMcpStatus: () => ({
+          'browser-bridge': { status: 'connected' },
+          docs: { status: 'connected' },
+        }),
+        loadMcps: vi.fn(async () => {}),
+        getAvailableMcpNames: () => ['browser-bridge', 'docs'],
+        connectMcp: vi.fn(async () => {}),
+        authenticateMcp: vi.fn(async () => {}),
+        disconnectMcp,
+        logError: vi.fn(),
+      },
+      null
+    );
+
+    expect(disconnectMcp).toHaveBeenCalledWith('browser-bridge');
+    expect(disconnectMcp).not.toHaveBeenCalledWith('docs');
   });
 });

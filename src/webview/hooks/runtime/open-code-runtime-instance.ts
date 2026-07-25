@@ -897,7 +897,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionMcpOperations = new SessionMcpOperations({
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
     getRequiredMcpSessionIds: (targetSessionId) => [
-      targetSessionId,
+      ...(targetSessionId ? [targetSessionId] : []),
       ...Object.entries(appStore.state.sessionStatus)
         .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
         .map(([sessionId]) => sessionId),
@@ -910,6 +910,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     disconnectMcp: (name) => client.mcp.disconnect(name),
     logError,
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
+    setDraftSelectedMcps: routingStore.setDraftSelectedMcps,
   });
 
   const { syncSessionMcps } = sessionMcpOperations;
@@ -1226,8 +1227,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       routingStore.getPersistedSelectedAgent() ||
       getDefaultPrimaryAgentNameFromState(),
     setSelectedAgent: routingStore.setSelectedAgent,
-    getConnectedMcpNames: routingStore.getConnectedMcpNames,
+    getInitialMcpNames: () => routingStore.getSelectedMcpsForSession(null) || [],
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
+    resetDraftSelectedMcps: routingStore.resetDraftSelectedMcps,
     setPermissionModeForSession: permissionsStore.setPermissionModeForSession,
     resetDraftPermissionMode: permissionsStore.resetDraftPermissionMode,
     resetTodoSync,

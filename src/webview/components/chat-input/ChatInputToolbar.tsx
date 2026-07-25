@@ -121,6 +121,7 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 };
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
+  showMcpControl: boolean;
   connectedMcpCount: number;
   mcpButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   onToggleMcps: () => void;
@@ -215,7 +216,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
   const hasContextControl = () => props.showContextControl && !!props.contextUsage;
   const showMetaRow = () =>
     props.showPermissionControl ||
-    props.connectedMcpCount > 0 ||
+    props.showMcpControl ||
     hasContextControl() ||
     props.providerLimitBadges.length > 0;
 
@@ -239,7 +240,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
         </div>
 
         <div class="toolbar-meta-right">
-          <Show when={props.connectedMcpCount > 0}>
+          <Show when={props.showMcpControl}>
             <button
               ref={props.mcpButtonRef}
               type="button"

@@ -521,6 +521,15 @@ describe('ChatInput', () => {
 
     document.body.click();
     expect(container?.querySelector('.dropdown-menu')).toBeNull();
+
+    setState('mcpStatus', {
+      alpha: { status: 'disabled' },
+      beta: { status: 'disabled' },
+      gamma: { status: 'disabled' },
+      delta: { status: 'disabled' },
+    });
+    const disconnectedCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
+    expect(disconnectedCount?.textContent).toContain('0');
   });
 
   it('hides provider-limit UI when polling is disabled', () => {

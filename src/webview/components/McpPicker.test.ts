@@ -166,4 +166,29 @@ describe('McpPicker', () => {
     expect(anchor?.style.bottom).toBe('100%');
     expect(anchor?.style.paddingBottom).toBe('10px');
   });
+
+  it('toggles MCPs against the connected defaults in a new chat draft', async () => {
+    const onChange = vi.fn();
+    setMcpStatuses({
+      alpha: { status: 'connected' },
+      'browser-bridge': { status: 'failed', error: 'Connection closed' },
+    });
+
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: null,
+          onChange,
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    const items = Array.from(container!.querySelectorAll<HTMLButtonElement>('.dropdown-item'));
+    const browserBridge = items.find((item) => item.textContent?.includes('browser-bridge'));
+    browserBridge?.click();
+
+    expect(onChange).toHaveBeenCalledWith(['alpha', 'browser-bridge']);
+  });
 });

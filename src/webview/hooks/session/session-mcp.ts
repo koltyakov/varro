@@ -1,8 +1,8 @@
 import type { McpStatus } from '../../../shared/protocol';
 
 type SessionMcpDependencies = {
-  getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
-  getRequiredMcpSessionIds?(targetSessionId: string): string[];
+  getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
+  getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
   getMcpStatus(): Record<string, McpStatus>;
   loadMcps(): Promise<void>;
   getAvailableMcpNames(): string[];
@@ -11,6 +11,7 @@ type SessionMcpDependencies = {
   disconnectMcp(name: string): Promise<unknown>;
   logError(context: string, err: unknown): void;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
+  setDraftSelectedMcps(names: string[]): void;
 };
 
 export class SessionMcpOperations {
@@ -19,7 +20,7 @@ export class SessionMcpOperations {
 
   constructor(private readonly deps: SessionMcpDependencies) {}
 
-  readonly syncSessionMcps = (sessionId: string): Promise<void> => {
+  readonly syncSessionMcps = (sessionId: string | null): Promise<void> => {
     const generation = ++this.reconciliationGeneration;
     const reconciliation = this.reconciliationQueue.then(async () => {
       if (generation !== this.reconciliationGeneration) return;
@@ -47,6 +48,7 @@ export class SessionMcpOperations {
     await applySessionMcpsWithDependencies(
       {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
+        setDraftSelectedMcps: this.deps.setDraftSelectedMcps,
         syncSessionMcps: this.syncSessionMcps,
       },
       names,
@@ -57,8 +59,8 @@ export class SessionMcpOperations {
 
 export async function syncSessionMcpsWithDependencies(
   deps: {
-    getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
-    getRequiredMcpSessionIds?(targetSessionId: string): string[];
+    getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
+    getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
     getMcpStatus(): Record<string, McpStatus>;
     loadMcps(): Promise<void>;
     getAvailableMcpNames(): string[];
@@ -67,7 +69,7 @@ export async function syncSessionMcpsWithDependencies(
     disconnectMcp(name: string): Promise<unknown>;
     logError(context: string, err: unknown): void;
   },
-  sessionId: string,
+  sessionId: string | null,
   isCurrent: () => boolean = () => true
 ) {
   if (!deps.getSelectedMcpsForSession(sessionId) || Object.keys(deps.getMcpStatus()).length === 0) {
@@ -76,16 +78,16 @@ export async function syncSessionMcpsWithDependencies(
   if (!isCurrent()) return;
 
   const available = new Set(deps.getAvailableMcpNames());
-  const requiredSessionIds = new Set([
-    sessionId,
-    ...(deps.getRequiredMcpSessionIds?.(sessionId) || []),
-  ]);
-  const desiredSet = new Set(
-    [...requiredSessionIds].flatMap(
+  const selectedTargetMcps = deps.getSelectedMcpsForSession(sessionId);
+  if (!selectedTargetMcps) return;
+  const requiredSessionIds = new Set(deps.getRequiredMcpSessionIds?.(sessionId) || []);
+  if (sessionId) requiredSessionIds.add(sessionId);
+  const desiredSet = new Set([
+    ...selectedTargetMcps.filter((name) => available.has(name)),
+    ...[...requiredSessionIds].flatMap(
       (id) => deps.getSelectedMcpsForSession(id)?.filter((name) => available.has(name)) || []
-    )
-  );
-  if (!deps.getSelectedMcpsForSession(sessionId)) return;
+    ),
+  ]);
 
   const statuses = deps.getMcpStatus();
   const connected = Object.entries(statuses)
@@ -116,12 +118,16 @@ export async function syncSessionMcpsWithDependencies(
 export async function applySessionMcpsWithDependencies(
   deps: {
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
-    syncSessionMcps(sessionId: string): Promise<void>;
+    setDraftSelectedMcps(names: string[]): void;
+    syncSessionMcps(sessionId: string | null): Promise<void>;
   },
   names: string[],
   sessionId: string | null | undefined
 ) {
-  if (!sessionId) return;
-  deps.setSelectedMcpsForSession(sessionId, names);
-  await deps.syncSessionMcps(sessionId);
+  if (!sessionId) {
+    deps.setDraftSelectedMcps(names);
+  } else {
+    deps.setSelectedMcpsForSession(sessionId, names);
+  }
+  await deps.syncSessionMcps(sessionId || null);
 }

@@ -24,10 +24,11 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
 }
 
 describe('session management helpers', () => {
-  it('creates a session and restores the preferred model and build agent', async () => {
+  it('creates a session and restores draft routing selections', async () => {
     const setSelectedModel = vi.fn();
     const setSelectedAgent = vi.fn();
     const setSelectedMcpsForSession = vi.fn();
+    const resetDraftSelectedMcps = vi.fn();
 
     const result = await createSessionWithDependencies(
       {
@@ -47,8 +48,9 @@ describe('session management helpers', () => {
         setSelectedModel,
         resolveDefaultAgent: () => 'build',
         setSelectedAgent,
-        getConnectedMcpNames: () => ['docs'],
+        getInitialMcpNames: () => ['browser-bridge'],
         setSelectedMcpsForSession,
+        resetDraftSelectedMcps,
         setPermissionModeForSession: vi.fn(),
         resetDraftPermissionMode: vi.fn(),
         resetTodoSync: vi.fn(),
@@ -69,7 +71,8 @@ describe('session management helpers', () => {
       sessionId: 'session-2',
       persistGlobal: false,
     });
-    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-2', ['docs']);
+    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-2', ['browser-bridge']);
+    expect(resetDraftSelectedMcps).toHaveBeenCalledTimes(1);
   });
 
   it('persists non-default permission mode for new sessions', async () => {
@@ -93,8 +96,9 @@ describe('session management helpers', () => {
         setSelectedModel: vi.fn(),
         resolveDefaultAgent: () => null,
         setSelectedAgent: vi.fn(),
-        getConnectedMcpNames: () => [],
+        getInitialMcpNames: () => [],
         setSelectedMcpsForSession: vi.fn(),
+        resetDraftSelectedMcps: vi.fn(),
         setPermissionModeForSession,
         resetDraftPermissionMode: vi.fn(),
         resetTodoSync: vi.fn(),
@@ -225,8 +229,9 @@ describe('session management helpers', () => {
         setSelectedModel: vi.fn(),
         resolveDefaultAgent: () => null,
         setSelectedAgent: vi.fn(),
-        getConnectedMcpNames: () => [],
+        getInitialMcpNames: () => [],
         setSelectedMcpsForSession: vi.fn(),
+        resetDraftSelectedMcps: vi.fn(),
         setPermissionModeForSession: vi.fn(),
         resetDraftPermissionMode: vi.fn(),
         resetTodoSync: vi.fn(),

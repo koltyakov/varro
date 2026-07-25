@@ -28,8 +28,9 @@ type SessionManagementDependencies = {
     agent: string | null,
     options?: { sessionId?: string | null; persistGlobal?: boolean }
   ): void;
-  getConnectedMcpNames(): string[];
+  getInitialMcpNames(): string[];
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
+  resetDraftSelectedMcps(): void;
   setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
   resetDraftPermissionMode(): void;
   resetTodoSync(): void;
@@ -78,8 +79,9 @@ export class SessionManagementOperations {
         setSelectedModel: this.deps.setSelectedModel,
         resolveDefaultAgent: this.deps.resolveDefaultAgent,
         setSelectedAgent: this.deps.setSelectedAgent,
-        getConnectedMcpNames: this.deps.getConnectedMcpNames,
+        getInitialMcpNames: this.deps.getInitialMcpNames,
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
+        resetDraftSelectedMcps: this.deps.resetDraftSelectedMcps,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
         resetDraftPermissionMode: this.deps.resetDraftPermissionMode,
         resetTodoSync: this.deps.resetTodoSync,
@@ -198,8 +200,9 @@ export async function createSessionWithDependencies(
       agent: string | null,
       options?: { sessionId?: string | null; persistGlobal?: boolean }
     ): void;
-    getConnectedMcpNames(): string[];
+    getInitialMcpNames(): string[];
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
+    resetDraftSelectedMcps(): void;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
     resetDraftPermissionMode(): void;
     resetTodoSync(): void;
@@ -241,7 +244,8 @@ export async function createSessionWithDependencies(
       deps.setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
     }
 
-    deps.setSelectedMcpsForSession(session.id, deps.getConnectedMcpNames());
+    deps.setSelectedMcpsForSession(session.id, deps.getInitialMcpNames());
+    deps.resetDraftSelectedMcps();
     if (initialPermissionMode !== 'default') {
       deps.setPermissionModeForSession(session.id, initialPermissionMode);
     }
