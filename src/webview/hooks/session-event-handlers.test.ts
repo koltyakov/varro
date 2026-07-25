@@ -653,6 +653,7 @@ describe('registerSessionEventHandlers', () => {
     const respondPermission = vi.fn().mockResolvedValue(undefined);
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
     const syncTodosFromMessages = vi.fn();
+    const setSessionStatusEntry = vi.fn();
 
     const operations = new SessionEventHandlerOperations({
       todoSyncOperations: {
@@ -667,6 +668,7 @@ describe('registerSessionEventHandlers', () => {
         shouldIgnorePendingAbortStatus: () => false,
         hasPendingAbort: () => false,
         clearPendingAbort: vi.fn(),
+        setSessionStatusEntry,
         clearUsageLimitOnResumedProgress: vi.fn(),
         updateUsageLimitState: vi.fn(),
         applyUsageLimitNotice: vi.fn(),
@@ -702,7 +704,7 @@ describe('registerSessionEventHandlers', () => {
         rethrow: true,
       });
     });
-    expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'busy' });
   });
 
   it('resyncs active messages for partial message.updated payloads', () => {

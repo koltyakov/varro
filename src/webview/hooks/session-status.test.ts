@@ -374,10 +374,20 @@ describe('session status helpers', () => {
     const refreshProviderLimit = vi.fn(async () => {});
     const syncSession = vi.fn(async () => {});
     const syncSessionMessages = vi.fn(async () => {});
+    const onSessionSettled = vi.fn();
 
     state.sessionStatus = {
       'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
     };
+    Object.assign(state, {
+      activeSessionId: null,
+      completedSessionResponses: {},
+      failedSessionIds: [],
+      lastSeenSessions: {},
+      permissions: [],
+      questions: [],
+      sessions: [],
+    });
     state.sessionUsageLimits = {
       'session-1': {
         source: 'status',
@@ -400,8 +410,12 @@ describe('session status helpers', () => {
       syncSessionMessages,
       loadSessionStatuses: async () => ({ 'session-1': { type: 'idle' } }),
       isActiveSession: () => true,
+      onSessionSettled,
       logError: vi.fn(),
     });
+
+    operations.setSessionStatusEntry('session-1', { type: 'idle' });
+    expect(onSessionSettled).toHaveBeenCalledWith('session-1');
 
     operations.setSessionStatusEntry('session-1', { type: 'busy' });
     expect(setState).toHaveBeenCalledWith('sessionStatus', expect.any(Function));

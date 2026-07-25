@@ -1,5 +1,5 @@
 import { createRoot } from 'solid-js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ExtensionMessage, McpStatus } from '../../shared/protocol';
 import { getBridgeMocks, getClientMocks, loadModules, session } from './useOpenCode.test-support';
 
@@ -117,7 +117,7 @@ describe('useOpenCode mcp flows', () => {
     expect(stateModule.getSelectedMcpsForSession('session-1')).toEqual(['beta']);
   });
 
-  it('unions a background running session into global MCP reconciliation', async () => {
+  it('lets an explicit selection disconnect an MCP used by a background session', async () => {
     clientMocks.mcpStatus.mockResolvedValue({
       alpha: { status: 'connected' },
       beta: { status: 'connected' },
@@ -139,8 +139,38 @@ describe('useOpenCode mcp flows', () => {
     await hookModule.applySessionMcps(['beta'], 'session-b');
 
     expect(clientMocks.mcpConnect).toHaveBeenCalledWith('beta');
-    expect(clientMocks.mcpDisconnect).not.toHaveBeenCalledWith('alpha');
+    expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('alpha');
     expect(stateModule.getSelectedMcpsForSession('session-a')).toEqual(['alpha']);
     expect(stateModule.getSelectedMcpsForSession('session-b')).toEqual(['beta']);
+  });
+
+  it('disconnects an MCP retained only by a background session after it becomes idle', async () => {
+    const handlers = new Map<string, (data: unknown) => void>();
+    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event as string, handler as (data: unknown) => void);
+      return () => handlers.delete(event as string);
+    });
+    clientMocks.mcpStatus.mockResolvedValue({ alpha: { status: 'connected' } });
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setSelectedMcpsForSession('background', ['alpha']);
+    stateModule.setDraftSelectedMcps([]);
+    stateModule.setState('sessionStatus', 'background', { type: 'busy' });
+    stateModule.setState('mcpStatus', { alpha: { status: 'connected' } });
+
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      handlers.get('session.idle')?.({ properties: { sessionID: 'background' } });
+
+      await vi.waitFor(() => {
+        expect(clientMocks.mcpDisconnect).toHaveBeenCalledWith('alpha');
+      });
+    } finally {
+      dispose();
+    }
   });
 });

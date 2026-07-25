@@ -122,6 +122,7 @@ type EventHandlerOperationDependencies = {
     | 'updateUsageLimitState'
     | 'applyUsageLimitNotice'
     | 'recheckSessionStatus'
+    | 'setSessionStatusEntry'
   >;
   sessionSyncOperations: Pick<EventHandlerDependencies, 'syncSession' | 'syncSessionMessages'>;
   repairSessionTitle?: EventHandlerDependencies['repairSessionTitle'];
@@ -162,7 +163,7 @@ export class SessionEventHandlerOperations {
       hasPendingAbort: this.deps.sessionStatusOperations.hasPendingAbort,
       markPendingAbort: this.deps.sessionStatusOperations.markPendingAbort,
       clearPendingAbort: this.deps.sessionStatusOperations.clearPendingAbort,
-      setSessionStatusEntry: sessionStore.setSessionStatusEntry,
+      setSessionStatusEntry: this.deps.sessionStatusOperations.setSessionStatusEntry,
       clearUsageLimitOnResumedProgress:
         this.deps.sessionStatusOperations.clearUsageLimitOnResumedProgress,
       updateUsageLimitState: this.deps.sessionStatusOperations.updateUsageLimitState,

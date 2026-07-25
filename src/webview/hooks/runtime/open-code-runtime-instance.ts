@@ -477,6 +477,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     loadSessionStatusSnapshot: statusSnapshots.load,
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     getMessages: () => appStore.state.messages,
+    onSessionSettled: () => {
+      void syncSessionMcps(appStore.state.activeSessionId).catch((err) =>
+        logError('syncSessionMcpsAfterSessionSettled', err)
+      );
+    },
     logError,
   });
 

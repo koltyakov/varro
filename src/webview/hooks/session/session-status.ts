@@ -33,6 +33,7 @@ type SessionStatusDependencies = {
   loadSessionStatusSnapshot?(): Promise<SessionStatusSnapshot>;
   isActiveSession(sessionId: string): boolean;
   getMessages?(): MessageEntry[];
+  onSessionSettled?(sessionId: string): void;
   logError(context: string, err: unknown): void;
 };
 
@@ -42,7 +43,11 @@ export class SessionStatusOperations {
   constructor(private readonly deps: SessionStatusDependencies) {}
 
   readonly setSessionStatusEntry = (sessionId: string, status: SessionStatus) => {
+    const previousStatus = appStore.state.sessionStatus[sessionId];
     sessionStore.setSessionStatusEntry(sessionId, status);
+    if (isRunningSessionStatus(previousStatus) && status.type === 'idle') {
+      this.deps.onSessionSettled?.(sessionId);
+    }
   };
 
   readonly clearPendingAbort = (sessionId: string | null | undefined) => {

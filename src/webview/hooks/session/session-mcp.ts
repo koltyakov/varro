@@ -20,7 +20,10 @@ export class SessionMcpOperations {
 
   constructor(private readonly deps: SessionMcpDependencies) {}
 
-  readonly syncSessionMcps = (sessionId: string | null): Promise<void> => {
+  private reconcileSessionMcps = (
+    sessionId: string | null,
+    preserveBackgroundMcps: boolean
+  ): Promise<void> => {
     const generation = ++this.reconciliationGeneration;
     const reconciliation = this.reconciliationQueue.then(async () => {
       if (generation !== this.reconciliationGeneration) return;
@@ -37,11 +40,16 @@ export class SessionMcpOperations {
           logError: this.deps.logError,
         },
         sessionId,
-        () => generation === this.reconciliationGeneration
+        () => generation === this.reconciliationGeneration,
+        preserveBackgroundMcps
       );
     });
     this.reconciliationQueue = reconciliation.catch(() => {});
     return reconciliation;
+  };
+
+  readonly syncSessionMcps = (sessionId: string | null): Promise<void> => {
+    return this.reconcileSessionMcps(sessionId, true);
   };
 
   readonly applySessionMcps = async (names: string[], sessionId: string | null | undefined) => {
@@ -49,7 +57,8 @@ export class SessionMcpOperations {
       {
         setSelectedMcpsForSession: this.deps.setSelectedMcpsForSession,
         setDraftSelectedMcps: this.deps.setDraftSelectedMcps,
-        syncSessionMcps: this.syncSessionMcps,
+        syncSessionMcps: (targetSessionId) =>
+          this.reconcileSessionMcps(targetSessionId, false),
       },
       names,
       sessionId
@@ -70,7 +79,8 @@ export async function syncSessionMcpsWithDependencies(
     logError(context: string, err: unknown): void;
   },
   sessionId: string | null,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  preserveBackgroundMcps = true
 ) {
   if (!deps.getSelectedMcpsForSession(sessionId) || Object.keys(deps.getMcpStatus()).length === 0) {
     await deps.loadMcps();
@@ -80,7 +90,9 @@ export async function syncSessionMcpsWithDependencies(
   const available = new Set(deps.getAvailableMcpNames());
   const selectedTargetMcps = deps.getSelectedMcpsForSession(sessionId);
   if (!selectedTargetMcps) return;
-  const requiredSessionIds = new Set(deps.getRequiredMcpSessionIds?.(sessionId) || []);
+  const requiredSessionIds = new Set(
+    preserveBackgroundMcps ? deps.getRequiredMcpSessionIds?.(sessionId) || [] : []
+  );
   if (sessionId) requiredSessionIds.add(sessionId);
   const desiredSet = new Set([
     ...selectedTargetMcps.filter((name) => available.has(name)),
@@ -102,14 +114,13 @@ export async function syncSessionMcpsWithDependencies(
   if (connect.length === 0 && authenticate.length === 0 && disconnect.length === 0) return;
   if (!isCurrent()) return;
 
-  try {
-    await Promise.all([
-      ...connect.map((name) => deps.connectMcp(name)),
-      ...authenticate.map((name) => deps.authenticateMcp(name)),
-      ...disconnect.map((name) => deps.disconnectMcp(name)),
-    ]);
-  } catch (err) {
-    deps.logError('syncSessionMcps', err);
+  const results = await Promise.allSettled([
+    ...connect.map((name) => deps.connectMcp(name)),
+    ...authenticate.map((name) => deps.authenticateMcp(name)),
+    ...disconnect.map((name) => deps.disconnectMcp(name)),
+  ]);
+  for (const result of results) {
+    if (result.status === 'rejected') deps.logError('syncSessionMcps', result.reason);
   }
 
   await deps.loadMcps();

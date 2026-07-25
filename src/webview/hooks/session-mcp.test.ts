@@ -35,6 +35,43 @@ describe('session MCP helpers', () => {
     expect(loadMcps).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for disconnects to settle when another MCP operation fails', async () => {
+    let finishDisconnect: (() => void) | undefined;
+    const loadMcps = vi.fn(async () => {});
+    const logError = vi.fn();
+
+    const sync = syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: () => ['beta'],
+        getMcpStatus: () => ({
+          alpha: { status: 'connected' },
+          beta: { status: 'disabled' },
+        }),
+        loadMcps,
+        getAvailableMcpNames: () => ['alpha', 'beta'],
+        connectMcp: async () => {
+          throw new Error('connect failed');
+        },
+        authenticateMcp: vi.fn(async () => {}),
+        disconnectMcp: () =>
+          new Promise<void>((resolve) => {
+            finishDisconnect = resolve;
+          }),
+        logError,
+      },
+      'session-1'
+    );
+
+    await vi.waitFor(() => expect(finishDisconnect).toBeTypeOf('function'));
+    expect(loadMcps).not.toHaveBeenCalled();
+
+    finishDisconnect?.();
+    await sync;
+
+    expect(loadMcps).toHaveBeenCalledOnce();
+    expect(logError).toHaveBeenCalledWith('syncSessionMcps', new Error('connect failed'));
+  });
+
   it('authenticates selected MCPs that require OAuth', async () => {
     const connectMcp = vi.fn(async () => {});
     const authenticateMcp = vi.fn(async () => {});
@@ -221,6 +258,31 @@ describe('session MCP helpers', () => {
 
     expect(setDraftSelectedMcps).toHaveBeenCalledWith(['browser-bridge']);
     expect(syncSessionMcps).toHaveBeenCalledWith(null);
+  });
+
+  it('lets an explicit draft selection override MCPs required by background sessions', async () => {
+    const disconnectMcp = vi.fn(async () => {});
+    let draftSelection = ['browser-bridge'];
+    const operations = new SessionMcpOperations({
+      getSelectedMcpsForSession: (sessionId) =>
+        sessionId === null ? draftSelection : sessionId === 'background' ? ['browser-bridge'] : [],
+      getRequiredMcpSessionIds: () => ['background'],
+      getMcpStatus: () => ({ 'browser-bridge': { status: 'connected' } }),
+      loadMcps: vi.fn(async () => {}),
+      getAvailableMcpNames: () => ['browser-bridge'],
+      connectMcp: vi.fn(async () => {}),
+      authenticateMcp: vi.fn(async () => {}),
+      disconnectMcp,
+      logError: vi.fn(),
+      setSelectedMcpsForSession: vi.fn(),
+      setDraftSelectedMcps: (names) => {
+        draftSelection = names;
+      },
+    });
+
+    await operations.applySessionMcps([], null);
+
+    expect(disconnectMcp).toHaveBeenCalledWith('browser-bridge');
   });
 
   it('disconnects an MCP removed from a draft unless a background session requires it', async () => {
