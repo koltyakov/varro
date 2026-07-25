@@ -545,6 +545,28 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   white-space: nowrap;
 }
 
+.session-item-provider-icon {
+  display: none;
+  width: 11px;
+  height: 11px;
+}
+
+.session-item-provider-name {
+  display: none;
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.session-item.has-model-details:hover .session-item-provider-icon,
+.session-item.has-model-details:hover .session-item-provider-name,
+.session-list-view.show-all-model-details
+  .session-item.has-model-details
+  :is(.session-item-provider-icon, .session-item-provider-name) {
+  display: inline-flex;
+}
+
 .session-item-pinned-marker {
   display: inline-flex;
   flex-shrink: 0;
@@ -563,6 +585,15 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   text-overflow: ellipsis;
   white-space: nowrap;
   min-height: 1.2em;
+}
+
+.session-item-model-meta {
+  display: none;
+}
+
+.session-item.has-model-details:hover .session-item-model-meta,
+.session-list-view.show-all-model-details .session-item.has-model-details .session-item-model-meta {
+  display: inline;
 }
 
 .session-item-meta-skeleton {

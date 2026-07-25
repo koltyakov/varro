@@ -61,6 +61,7 @@ function openSessionActions(row: HTMLElement, x = 40, y = 50) {
 beforeEach(() => {
   resetSessionDiffSummaryStateForTests();
   setState('sessions', []);
+  setState('providers', []);
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
   setState('sessionStatus', {});
@@ -79,12 +80,131 @@ afterEach(() => {
   cleanup = undefined;
   container.remove();
   setState('sessions', []);
+  setState('providers', []);
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
   setState('sessionsLoadError', null);
   setState('recycleBinLoadError', null);
   vi.restoreAllMocks();
   resetSessionDiffSummaryStateForTests();
+});
+
+describe('SessionListView model details', () => {
+  it('renders hover-only model details and the provider icon in the row', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'very_high' },
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.6-sol': {
+            id: 'gpt-5.6-sol',
+            name: 'GPT-5.6 Sol',
+            capabilities: {},
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      const row = container.querySelector('.session-item');
+      expect(row?.getAttribute('title')).toBeNull();
+      expect(row?.classList.contains('has-model-details')).toBe(true);
+      expect(row?.querySelector('.session-item-model-meta')?.textContent).toBe(
+        ' · GPT-5.6 Sol · Very High'
+      );
+      const icon = row?.querySelector<HTMLElement>('.session-item-provider-icon');
+      expect(icon).not.toBeNull();
+      expect(icon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
+      expect(row?.querySelector('.session-item-provider-name')).toBeNull();
+    });
+  });
+
+  it('shows the provider name when no provider icon is available', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('providers', [
+      {
+        id: 'local-gateway',
+        name: 'Local Gateway',
+        source: 'custom',
+        models: {
+          'claude-sonnet': {
+            id: 'claude-sonnet',
+            name: 'Claude Sonnet',
+            capabilities: {},
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('sessions', [
+      session('session-1', Date.now(), {
+        model: { providerID: 'local-gateway', id: 'claude-sonnet' },
+      }),
+    ]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-item-model-meta')?.textContent).toBe(
+        ' · Claude Sonnet · Default'
+      );
+      expect(container.querySelector('.session-item-provider-icon')).toBeNull();
+      expect(container.querySelector('.session-item-provider-name')?.textContent).toBe(
+        'Local Gateway'
+      );
+    });
+  });
+
+  it('reveals model details for every row while Control is held', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('sessions', [session('session-1', Date.now()), session('session-2', Date.now() - 1)]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll('.session-item.has-model-details')).toHaveLength(2);
+    });
+    const list = container.querySelector('.session-list-view')!;
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control' }));
+    expect(list.classList.contains('show-all-model-details')).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }));
+    expect(list.classList.contains('show-all-model-details')).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control' }));
+    window.dispatchEvent(new Event('blur'));
+    expect(list.classList.contains('show-all-model-details')).toBe(false);
+  });
 });
 
 describe('SessionListView diff summaries', () => {

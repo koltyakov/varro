@@ -92,6 +92,7 @@ export type SessionDiffSummary = {
   additions: number;
   deletions: number;
   tokens: number;
+  model?: { providerID: string; modelID: string; variant?: string };
   tokenBreakdown?: SessionTokenBreakdown;
   durationMs: number;
   activeStartedAt: number | null;

@@ -426,9 +426,11 @@ export class RestProxy {
     ]);
     const diffStats = summarizeSessionDiff(diffs);
     const tokenBreakdown = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
+    const model = summarizeSessionModel(messages);
     return {
       ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
       tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
+      ...(model ? { model } : {}),
       tokenBreakdown,
       ...summarizeSessionDuration(messages),
     };
@@ -1430,6 +1432,23 @@ function collectDescendantSessions(value: unknown, rootSessionID: string) {
     pending.push(...(childrenByParent.get(session.id) || []));
   }
   return result;
+}
+
+function summarizeSessionModel(value: unknown): SessionDiffSummary['model'] {
+  if (!Array.isArray(value)) return undefined;
+
+  let model: SessionDiffSummary['model'];
+  for (const entry of value) {
+    const info = asRecord(asRecord(entry)?.info);
+    if (info?.role !== 'assistant' || info.mode === 'subagent') continue;
+    if (typeof info.providerID !== 'string' || typeof info.modelID !== 'string') continue;
+    model = {
+      providerID: info.providerID,
+      modelID: info.modelID,
+      ...(typeof info.variant === 'string' && info.variant ? { variant: info.variant } : {}),
+    };
+  }
+  return model;
 }
 
 function summarizeSessionDuration(

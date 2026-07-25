@@ -753,7 +753,14 @@ describe('RestProxy handleRequest', () => {
                 parts: [],
               },
               {
-                info: { role: 'assistant', time: { created: 14_000 }, tokens: {} },
+                info: {
+                  role: 'assistant',
+                  providerID: 'openai',
+                  modelID: 'gpt-5.6-sol',
+                  variant: 'high',
+                  time: { created: 14_000 },
+                  tokens: {},
+                },
                 parts: [],
               },
             ]
@@ -778,6 +785,7 @@ describe('RestProxy handleRequest', () => {
         additions: 6,
         deletions: 4,
         tokens: 4_175,
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
         tokenBreakdown: {
           session: {
             total: 3_475,

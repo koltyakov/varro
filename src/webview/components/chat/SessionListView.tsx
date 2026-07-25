@@ -42,9 +42,10 @@ import { client } from '../../lib/client';
 import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
-import { formatEditCount } from '../../lib/format';
+import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
 import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
+import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import { writeClipboard } from '../../lib/write-clipboard';
 
@@ -694,6 +695,7 @@ export function SessionListView(props: {
   const [activeGroupedSection, setActiveGroupedSection] =
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [showAllModelDetails, setShowAllModelDetails] = createSignal(false);
   const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
   const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
   const [frozenSessionOrder, setFrozenSessionOrder] = createSignal<string[] | null>(null);
@@ -710,6 +712,22 @@ export function SessionListView(props: {
   let archiveHeaderRef: HTMLDivElement | undefined;
   let recycleBinHeaderRef: HTMLDivElement | undefined;
   let hasPointerInteraction = false;
+
+  const handleControlDown = (event: KeyboardEvent) => {
+    if (event.key === 'Control') setShowAllModelDetails(true);
+  };
+  const hideAllModelDetails = () => setShowAllModelDetails(false);
+  const handleControlUp = (event: KeyboardEvent) => {
+    if (event.key === 'Control') hideAllModelDetails();
+  };
+  window.addEventListener('keydown', handleControlDown);
+  window.addEventListener('keyup', handleControlUp);
+  window.addEventListener('blur', hideAllModelDetails);
+  onCleanup(() => {
+    window.removeEventListener('keydown', handleControlDown);
+    window.removeEventListener('keyup', handleControlUp);
+    window.removeEventListener('blur', hideAllModelDetails);
+  });
 
   const closeActions = () => {
     setActionsSessionId(null);
@@ -1230,7 +1248,7 @@ export function SessionListView(props: {
       ref={(el) => {
         containerRef = el;
       }}
-      class={`session-list-view ${props.class || ''}`.trim()}
+      class={`session-list-view ${showAllModelDetails() ? 'show-all-model-details' : ''} ${props.class || ''}`.trim()}
       tabindex="-1"
       onPointerDown={() => {
         hasPointerInteraction = true;
@@ -1393,7 +1411,7 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 
 function SessionListItem(props: {
   session: (typeof state.sessions)[number];
-  diffSummary: SessionSummaryStats | null;
+  diffSummary: SessionDiffSummary | null;
   isSummaryLoading: boolean;
   tokens: number | null;
   durationMs: number | null;
@@ -1455,6 +1473,26 @@ function SessionListItem(props: {
         : 0;
     return props.durationMs + activeDuration;
   };
+  const modelDetails = createMemo(() => {
+    const summaryModel = props.diffSummary?.model;
+    const model = summaryModel
+      ? {
+          providerID: summaryModel.providerID,
+          id: summaryModel.modelID,
+          variant: summaryModel.variant,
+        }
+      : props.session.model;
+    if (!model) return null;
+    const provider = state.providers.find((item) => item.id === model.providerID);
+    const modelName = formatModelName(provider?.models[model.id]?.name || model.id);
+    const reasoningLabel = model.variant ? formatVariantLabel(model.variant) : 'Default';
+    return {
+      providerID: model.providerID,
+      providerName: provider?.name || model.providerID,
+      modelName,
+      reasoningLabel,
+    };
+  });
   const indicatorKind = () =>
     getSessionStatusIndicatorKind({
       isFailed: props.isFailed,
@@ -1609,7 +1647,7 @@ function SessionListItem(props: {
 
   return (
     <div
-      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''}`}
+      class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {
         if (!props.actions.sessionId()) props.setFocusedIndex(props.itemIndex());
@@ -1648,6 +1686,24 @@ function SessionListItem(props: {
             <span class="session-item-title-text">
               {normalizeSessionTitle(props.session.title) || 'Untitled'}
             </span>
+            <Show when={modelDetails()}>
+              {(details) => (
+                <Show
+                  when={getProviderIcon(details().providerID)}
+                  fallback={
+                    <span class="session-item-provider-name">{details().providerName}</span>
+                  }
+                >
+                  {(icon) => (
+                    <span
+                      class="provider-icon session-item-provider-icon"
+                      style={{ '--provider-icon-mask': `url("${icon()}")` }}
+                      aria-hidden="true"
+                    />
+                  )}
+                </Show>
+              )}
+            </Show>
             <Show when={props.isPinned}>
               <span
                 class="session-item-pinned-marker"
@@ -1660,7 +1716,7 @@ function SessionListItem(props: {
               </span>
             </Show>
           </span>
-          <span class="session-item-meta">
+          <span class="session-item-meta session-item-stats-meta">
             <Show
               when={ralphSummary()}
               fallback={
@@ -1714,6 +1770,13 @@ function SessionListItem(props: {
                     {formatDuration(durationMs())}
                   </span>
                 </>
+              )}
+            </Show>
+            <Show when={modelDetails()}>
+              {(details) => (
+                <span class="session-item-model-meta">
+                  {` · ${details().modelName} · ${details().reasoningLabel}`}
+                </span>
               )}
             </Show>
           </span>
