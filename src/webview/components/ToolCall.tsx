@@ -825,6 +825,10 @@ function GenericToolCall(props: {
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
+  const isSearchTool = () => SEARCH_TOOL_NAMES.has(toolName());
+  // Search results are inputs-plus-output like task/apply_patch, so they share the
+  // framed labeled-row card instead of the unframed key/value + bare <pre> body.
+  const usesStructuredCard = () => isStructuredTool() || isSearchTool();
   const taskAgentLabel = () => {
     const type = props.state.input?.subagent_type;
     if (typeof type !== 'string' || !type.trim()) return 'Subagent';
@@ -933,6 +937,9 @@ function GenericToolCall(props: {
   const structuredResult = () => {
     if (props.state.status !== 'completed') return null;
     if (isTask()) return taskResult();
+    if (isSearchTool()) {
+      return { label: 'results', value: props.truncatedOutput || '(no matches)' };
+    }
     return { label: 'result', value: props.truncatedOutput || '(no output)' };
   };
   const completedDurationMs = () => {
@@ -1016,7 +1023,7 @@ function GenericToolCall(props: {
             when={isBash() && bashCommand()}
             fallback={
               <Show
-                when={isStructuredTool()}
+                when={usesStructuredCard()}
                 fallback={
                   <Show when={props.inputEntries.length > 0}>
                     <div class="tool-invocation-input">
@@ -1077,7 +1084,7 @@ function GenericToolCall(props: {
           <Show
             when={
               !isBash() &&
-              !isStructuredTool() &&
+              !usesStructuredCard() &&
               props.state.status === 'completed' &&
               props.truncatedOutput
             }

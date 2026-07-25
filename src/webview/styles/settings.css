@@ -71,7 +71,7 @@
   height: 30px;
   padding: 6px 28px 6px 8px;
   border: 1px solid var(--color-vscode-input-border, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   background: var(--color-vscode-input-bg);
   color: var(--color-vscode-input-fg);
   font-size: 12px;
@@ -112,7 +112,7 @@
 
 .settings-reset-btn {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   font-size: 11px;
   color: var(--color-vscode-muted);
   transition:
@@ -482,7 +482,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--color-vscode-border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--color-vscode-widget-bg);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
 }

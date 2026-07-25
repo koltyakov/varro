@@ -34,7 +34,7 @@
   padding: 1px 5px;
   margin: 0 1px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   background: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-input-bg));
   color: var(--color-vscode-fg);
   vertical-align: baseline;
@@ -95,7 +95,7 @@
   height: 14px;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   appearance: none;
   color: color-mix(in srgb, var(--color-vscode-fg) 72%, var(--color-vscode-input-bg));
@@ -114,7 +114,7 @@
   position: relative;
   color: var(--color-vscode-muted);
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: transparent;
   overflow: hidden;
   transition: background-color 0.1s;
@@ -358,7 +358,7 @@
   background: none;
   cursor: pointer;
   padding: 6px 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   transition: opacity 0.1s;
   user-select: none;
   -webkit-user-select: none;
@@ -375,7 +375,7 @@
 
 .diff-view-widget {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
   overflow: hidden;
 }
@@ -469,7 +469,7 @@
 .diff-view-widget-inline .diff-view-file {
   overflow: hidden;
   border: 1px solid var(--color-vscode-border-default);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--color-vscode-result-editor-bg);
 }
 
@@ -568,7 +568,7 @@
   width: 100%;
   height: 100%;
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(
       --vscode-scrollbarSlider-background,
       color-mix(in srgb, var(--color-vscode-fg) 20%, transparent)
@@ -614,7 +614,7 @@
   width: calc(100cqi - 16px);
   margin: 4px 8px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 9%, var(--color-vscode-result-editor-bg));
   font-family: var(--font-sans);
@@ -821,7 +821,7 @@
 
 kbd {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 0px 4px;
   font-size: 10px;
   background: var(--color-vscode-input-bg);
@@ -836,7 +836,7 @@ kbd {
 .chat-tool-invocation-part {
   margin: 0;
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: transparent;
   overflow: hidden;
   transition: background-color 0.1s;
@@ -1006,7 +1006,7 @@ kbd {
 .chat-tool-invocation-part .terminal-command-card {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 48%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
   font-family: var(--font-mono);
 }
@@ -1108,14 +1108,16 @@ kbd {
   color: var(--color-vscode-fg-soft);
   margin: 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
 
+/* Same frame as .terminal-command-card: both are "tool detail" panels and must
+   read as one component with different row anatomy. */
 .chat-tool-invocation-part .structured-tool-card {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 64%, transparent);
-  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 48%, transparent);
+  border-radius: var(--radius-inset);
   background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
   font-family: var(--font-mono);
 }
@@ -1124,6 +1126,22 @@ kbd {
   display: grid;
   grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
   align-items: start;
+}
+
+/* Each row is its own grid, so a per-row max-content label column would leave
+   the values ragged. Subgrid hands every row the card's single column pair, so
+   the labels size to the widest one and all values start on the same edge —
+   short labels (pattern/path) hug without a hardcoded floor. */
+@supports (grid-template-columns: subgrid) {
+  .chat-tool-invocation-part .structured-tool-card {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .chat-tool-invocation-part .structured-tool-row {
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+  }
 }
 
 .chat-tool-invocation-part .structured-tool-row + .structured-tool-row {
@@ -1206,7 +1224,7 @@ kbd {
   margin-top: 10px;
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 18%, transparent);
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   background: color-mix(in srgb, var(--color-vscode-accent) 5%, transparent);
   font-family: inherit;
   text-align: left;
@@ -1304,7 +1322,7 @@ kbd {
 .file-change-truncated-summary {
   margin-top: 4px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 28%, transparent);
-  border-radius: 7px;
+  border-radius: var(--radius-chip);
   color: color-mix(in srgb, var(--color-vscode-warning) 82%, var(--color-vscode-fg));
   background: color-mix(in srgb, var(--color-vscode-warning) 5%, transparent);
 }
@@ -1474,7 +1492,7 @@ kbd {
   width: 100%;
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   color: var(--color-vscode-fg) !important;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1611,7 +1629,7 @@ kbd {
 .chat-subtask-part {
   margin: 0;
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-softer);
   padding: 8px 10px;
 }
@@ -1665,7 +1683,7 @@ kbd {
   color: var(--color-vscode-warning);
   opacity: 0.88;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 16%, transparent);
 }
@@ -1682,7 +1700,7 @@ kbd {
   font-size: 11.5px;
   color: var(--color-vscode-fg-muted);
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-softer);
 }
 
@@ -1693,7 +1711,7 @@ kbd {
 
 .chat-image-figure {
   margin: 16px 0 6px 0;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--color-vscode-widget-border) 70%, transparent);
   padding: 10px;
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
@@ -1702,7 +1720,7 @@ kbd {
 .chat-image-figure .chat-image-img {
   max-height: 280px;
   max-width: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   display: block;
   user-select: none;
   -webkit-user-select: none;
@@ -1757,7 +1775,7 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 90%, transparent);
   color: var(--color-vscode-icon-fg);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   width: 32px;
   height: 32px;
   display: inline-flex;
@@ -1774,7 +1792,7 @@ kbd {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 90%, transparent);
   color: var(--color-vscode-icon-fg);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   width: 36px;
   height: 36px;
   display: inline-flex;
@@ -1940,7 +1958,7 @@ kbd {
   height: 28px;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 88%, transparent);
   color: var(--color-vscode-fg);
   cursor: pointer;
@@ -2018,7 +2036,7 @@ kbd {
   gap: 8px;
   margin-top: 6px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 18%, transparent);
   background: color-mix(in srgb, var(--color-vscode-error) 7%, transparent);
 }
@@ -2186,8 +2204,8 @@ kbd {
   max-width: calc(100% + 30px);
   padding: 12px 15px 10px;
   overflow: hidden;
-  border-top-left-radius: 15px;
-  border-top-right-radius: 15px;
+  border-top-left-radius: var(--radius-bubble);
+  border-top-right-radius: var(--radius-bubble);
   background: color-mix(
     in srgb,
     var(--color-vscode-widget-bg) 62%,
@@ -2212,7 +2230,7 @@ kbd {
   padding: 1px 5px;
   line-height: 1.35;
   border: 1px solid var(--color-vscode-border-strong);
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   background: var(--color-vscode-surface-hover);
   color: var(--color-vscode-fg);
   flex: 0 0 auto;
@@ -2302,7 +2320,7 @@ kbd {
   width: 100%;
   max-width: 320px;
   padding: 26px 22px;
-  border-radius: 14px;
+  border-radius: var(--radius-bubble);
   border: 1.5px dashed color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
   background: color-mix(in srgb, var(--color-vscode-bg) 88%, transparent);
   box-shadow: 0 10px 32px color-mix(in srgb, var(--color-vscode-widget-shadow) 80%, transparent);

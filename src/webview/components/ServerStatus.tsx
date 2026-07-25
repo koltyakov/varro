@@ -147,7 +147,7 @@ export function ServerStatus() {
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
             </div>
-            <div class="flex flex-col gap-1.5 px-4">
+            <div class="flex flex-col gap-1.5">
               <p class="text-[13px] font-medium text-vscode-fg">OpenCode is not installed</p>
               <p class="text-[12px] leading-normal text-vscode-muted">
                 Varro gives{' '}
@@ -176,7 +176,7 @@ export function ServerStatus() {
             >
               Open terminal and install
             </button>
-            <p class="px-4 text-[11px] leading-normal text-vscode-muted">
+            <p class="text-[11px] leading-normal text-vscode-muted">
               After installing, run{' '}
               <span class="font-medium text-vscode-fg">Varro: Restart Server</span> from the Command
               Palette.

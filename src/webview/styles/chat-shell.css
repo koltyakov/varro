@@ -61,9 +61,9 @@ input:focus-visible {
   --chat-content-max-width: 960px;
   --chat-sidebar-width: 380px;
   --chat-input-top-gradient-bg: var(--color-vscode-bg);
-  --chat-radius-control: 8px;
-  --chat-radius-card: 15px;
-  --chat-radius-popover: 10px;
+  --chat-radius-control: var(--radius-control);
+  --chat-radius-card: var(--radius-bubble);
+  --chat-radius-popover: var(--radius-card);
   --chat-focus-ring: 0 0 0 2px color-mix(in srgb, var(--color-vscode-accent) 36%, transparent);
   --chat-shadow-card: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
   --chat-shadow-popover: 0 12px 28px
@@ -258,7 +258,7 @@ input:focus-visible {
   max-width: 100%;
   margin: 0;
   padding: 12px 15px;
-  border-radius: 16px;
+  border-radius: var(--radius-bubble);
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
   background: var(--color-vscode-request-bubble);
   box-shadow: none;
@@ -346,7 +346,7 @@ input:focus-visible {
 
 .latest-user-message-sticky-text::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -393,7 +393,7 @@ input:focus-visible {
   width: 28px;
   height: 28px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
   background: var(--color-vscode-widget-bg);
   color: var(--color-vscode-fg);
@@ -545,7 +545,7 @@ input:focus-visible {
   gap: 8px;
   padding: 6px 10px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 35%, var(--color-vscode-border));
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--color-vscode-accent) 8%, var(--color-vscode-surface-softer));
   color: var(--color-vscode-fg);
   font-size: 11px;
@@ -567,7 +567,7 @@ input:focus-visible {
 .composer-edit-banner-cancel {
   flex-shrink: 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 60%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   background: transparent;
   color: var(--color-vscode-fg);
   font-size: 11px;

@@ -13,9 +13,11 @@
 }
 
 .ralph-form-card {
-  --chat-radius-control: 6px;
-  --chat-radius-card: 10px;
-  --chat-radius-popover: 8px;
+  /* The overlay is fixed-position, so it renders outside `.interactive-session`
+     and has to restate the chat aliases — but from the same scale, not its own. */
+  --chat-radius-control: var(--radius-control);
+  --chat-radius-card: var(--radius-card);
+  --chat-radius-popover: var(--radius-card);
   --chat-shadow-popover: 0 12px 28px
     color-mix(in srgb, var(--color-vscode-widget-shadow) 92%, transparent);
   width: min(560px, 100%);
@@ -140,7 +142,7 @@
     var(--color-vscode-border) 80%,
     transparent 80%
   );
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: var(--radius-inset);
 }
 
 .ralph-form-input[type='number']::-webkit-inner-spin-button,
@@ -160,7 +162,7 @@
   align-items: stretch;
   gap: 0;
   border: 1px solid var(--color-vscode-border);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   overflow: hidden;
   width: max-content;
 }
@@ -277,7 +279,7 @@
 .ralph-form-error {
   background: color-mix(in srgb, var(--color-vscode-error) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   padding: 6px 8px;
   font-size: 11px;
   color: var(--color-vscode-error);
@@ -294,7 +296,7 @@
 .ralph-form-button {
   background: transparent;
   border: 1px solid var(--color-vscode-border);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   padding: 6px 12px;
   color: var(--color-vscode-fg);
   font-size: 12px;
@@ -407,7 +409,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
@@ -430,7 +432,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
@@ -466,7 +468,7 @@
   font-weight: 500;
   letter-spacing: 0.04em;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--color-vscode-muted);
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
@@ -491,7 +493,7 @@
 .ralph-dashboard-btn {
   background: transparent;
   border: 1px solid var(--color-vscode-border);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   padding: 4px 10px;
   font-size: 11px;
   color: var(--color-vscode-fg);
@@ -503,7 +505,7 @@
   align-items: center;
   justify-content: center;
   width: 26px;
-  height: 24px;
+  height: 26px;
   padding: 0;
 }
 
@@ -601,7 +603,7 @@
   gap: 8px;
   max-width: 100%;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 38%, transparent);
   background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
   color: color-mix(in srgb, var(--color-vscode-error) 88%, var(--color-vscode-fg));
@@ -633,10 +635,10 @@
   position: relative;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px 8px 38px;
-  background: var(--color-vscode-input-bg, var(--color-vscode-bg));
-  border: 1px solid var(--color-vscode-border);
-  border-radius: 4px;
+  padding: var(--space-4) var(--space-5) var(--space-4) 38px;
+  background: var(--color-vscode-surface-subtle-alt);
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: var(--radius-card);
   font-size: 12px;
   color: var(--color-vscode-fg);
   text-align: left;
@@ -646,7 +648,7 @@
 }
 
 .ralph-iter-card:hover {
-  background: var(--color-vscode-toolbar-hover);
+  background: var(--color-vscode-surface-hover);
 }
 
 .ralph-iter-error {
@@ -654,12 +656,12 @@
   background: color-mix(
     in srgb,
     var(--color-vscode-error) 8%,
-    var(--color-vscode-input-bg, var(--color-vscode-bg))
+    var(--color-vscode-surface-subtle-alt)
   );
 }
 
 .ralph-iter-error:hover {
-  background: color-mix(in srgb, var(--color-vscode-error) 12%, var(--color-vscode-toolbar-hover));
+  background: color-mix(in srgb, var(--color-vscode-error) 12%, var(--color-vscode-surface-hover));
 }
 
 .ralph-iter-card:disabled {
@@ -683,7 +685,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid transparent;
 }
 
@@ -758,6 +760,22 @@
   overflow-x: hidden;
   overflow-y: hidden;
   white-space: nowrap;
+  /* The marquee cuts pills mid-shape at narrow widths; fade the edges instead of
+     hard-clipping so a half-visible pill reads as "more here", not as breakage. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent 100%
+  );
 }
 
 .ralph-iter-verdicts-track {
@@ -781,11 +799,14 @@
   }
 }
 
+/* Same pill vocabulary as .ralph-iter-status so one row doesn't mix pills with
+   square chips; only the color varies between the two. */
 .ralph-iter-verdict {
   flex-shrink: 0;
   font-size: 10px;
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: 1px var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
   background: color-mix(in srgb, var(--color-vscode-fg) 6%, transparent);
 }
 
@@ -844,7 +865,7 @@
   justify-content: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 50%, transparent);
   background: color-mix(in srgb, var(--color-vscode-accent) 14%, transparent);
   color: var(--color-vscode-fg);

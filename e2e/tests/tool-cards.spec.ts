@@ -16,6 +16,26 @@ test('renders read, edit, and bash tool cards', async ({ page }) => {
   await expect(page.locator('.terminal-command-card')).toContainText('3 passed');
 });
 
+test('renders search tool details in the same framed card as other tool details', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+
+  const searchTool = page
+    .locator('.chat-tool-invocation-part')
+    .filter({ hasText: 'Search: --color-vscode-input-border' });
+  await searchTool.locator('.tool-invocation-header').click();
+
+  const card = searchTool.locator('.structured-tool-card');
+  await expect(card).toContainText('pattern');
+  await expect(card).toContainText('path');
+  await expect(card).toContainText('results');
+  await expect(card).toContainText('session-list.css:413');
+  // The unframed generic body must not also render the output.
+  await expect(searchTool.locator('.tool-invocation-output')).toHaveCount(0);
+  await expect(searchTool.locator('.tool-invocation-input')).toHaveCount(0);
+});
+
 test('renders aborted and failed tool card states', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-card-errors');
 

@@ -51,7 +51,7 @@
   border: none;
   background: none;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   transition: background-color 0.08s;
 }
 
@@ -97,7 +97,7 @@
   min-height: 16px;
   padding: 0 5px;
   border: 1px solid color-mix(in srgb, currentColor 24%, var(--color-vscode-border));
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, currentColor 6%, transparent);
   font-size: 9px;
   font-weight: 500;
@@ -226,7 +226,7 @@
       var(--color-vscode-input-border, var(--color-vscode-border)) 75%,
       var(--color-vscode-fg) 12%
     );
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   background: color-mix(
     in srgb,
     var(--color-vscode-input-bg) 88%,

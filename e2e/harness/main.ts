@@ -1809,6 +1809,23 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
       {
+        id: 'tool-grep-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'tool-grep-call-1',
+        tool: 'grep',
+        state: {
+          status: 'completed',
+          input: { pattern: '--color-vscode-input-border', path: 'src/webview/styles' },
+          output:
+            'src/webview/styles/session-list.css:413:  border: 1px solid var(--color-vscode-input-border);\nsrc/webview/styles/prompts.css:245:  --color-vscode-input-border,',
+          title: 'Search files',
+          metadata: {},
+          time: { start: BASE_TIME - 4_700, end: BASE_TIME - 4_650 },
+        },
+      },
+      {
         id: 'tool-bash-1',
         sessionID: session.id,
         messageID: assistant.info.id,

@@ -248,7 +248,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 22%, transparent);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
   color: color-mix(in srgb, var(--color-vscode-icon-fg) 78%, transparent);
@@ -389,7 +389,7 @@
 
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-error {
   padding: 12px 14px 14px;
-  border-radius: 16px;
+  border-radius: var(--radius-bubble);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 46%, var(--color-vscode-border));
   background: color-mix(
     in srgb,
@@ -511,7 +511,7 @@ body.vscode-light
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
   background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   color: var(--color-vscode-fg);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   line-height: 1.2;
   padding: 3px 10px;
@@ -581,8 +581,8 @@ body.vscode-light
 }
 
 .assistant-turn-content.assistant-turn-file-edit-group-start {
-  border-bottom-left-radius: 9px;
-  border-bottom-right-radius: 9px;
+  border-bottom-left-radius: var(--radius-control);
+  border-bottom-right-radius: var(--radius-control);
 }
 
 .assistant-turn-content.assistant-turn-file-edit-group-middle,
@@ -591,12 +591,12 @@ body.vscode-light
 }
 
 .assistant-turn-content.assistant-turn-file-edit-group-middle {
-  border-radius: 9px;
+  border-radius: var(--radius-control);
 }
 
 .assistant-turn-content.assistant-turn-file-edit-group-end {
-  border-top-left-radius: 9px;
-  border-top-right-radius: 9px;
+  border-top-left-radius: var(--radius-control);
+  border-top-right-radius: var(--radius-control);
 }
 
 .chat-turn-content > :last-child,
@@ -724,7 +724,7 @@ body.vscode-light
   margin: 0 0 18px 0;
   padding: 2px 4px 2px 14px;
   border: none;
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
   background: none;
   color: color-mix(in srgb, var(--color-vscode-fg) 88%, transparent);
 }
@@ -736,7 +736,7 @@ body.vscode-light
   top: 0;
   bottom: 0;
   width: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-xs);
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--color-vscode-muted) 28%, transparent) 0%,
@@ -842,7 +842,7 @@ body.vscode-light
   color: var(--color-vscode-fg);
   background-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   border: none;
   white-space: pre-wrap;
   font-weight: 500;
@@ -850,7 +850,7 @@ body.vscode-light
 
 .rendered-markdown table {
   text-align: left;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
@@ -926,7 +926,7 @@ body.vscode-light
   margin: 2px 0 18px 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 34%, transparent);
   background-color: var(--color-vscode-result-editor-bg);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   overflow: hidden;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
 }
@@ -960,7 +960,7 @@ body.vscode-light
   width: 20px;
   height: 20px;
   padding: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   color: var(--color-vscode-icon-fg);
   cursor: pointer;
   border: none;
@@ -1095,7 +1095,7 @@ body.vscode-light
     var(--color-vscode-input-bg)
   );
   border: 1px solid var(--color-vscode-border-default);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 8px 8px 7px 8px;
   width: 100%;
   position: relative;
@@ -1219,7 +1219,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   min-width: 0;
   padding: 6px 8px 7px;
   background: var(--color-vscode-chat-input-toolbar-surface);
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
   flex-wrap: nowrap;
   overflow: visible;
 }

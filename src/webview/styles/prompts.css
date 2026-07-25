@@ -95,7 +95,7 @@
   cursor: pointer;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   transition:
     background-color 0.1s,
     border-color 0.1s,
@@ -166,7 +166,7 @@
 }
 
 .question-checkbox {
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-muted) 58%, transparent);
   transition:
     border-color 0.1s,
@@ -243,7 +243,7 @@
   background: var(--color-vscode-input-bg);
   outline: none;
   box-shadow: none;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   font-size: 12px;
   user-select: text;
   -webkit-user-select: text;
@@ -291,7 +291,7 @@ body.vscode-high-contrast-light .question-custom-input {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   min-height: 28px;
   padding: 4px 12px;
   font-size: 11.5px;
@@ -340,7 +340,7 @@ body.vscode-high-contrast-light .question-custom-input {
   justify-content: center;
   min-height: 32px;
   padding: 7px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   background: var(--color-vscode-button-bg);
   color: var(--color-vscode-button-fg);
   font-size: 12px;
@@ -451,7 +451,7 @@ body.vscode-high-contrast-light
 /* Permission Prompt */
 .permission-prompt {
   margin: 0;
-  padding: 10px 12px 6px;
+  padding: var(--space-5) var(--space-6) var(--space-3);
 }
 
 .permission-prompt-header {
@@ -479,7 +479,7 @@ body.vscode-high-contrast-light
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
   color: var(--color-vscode-warning);
   font-size: 11px;
@@ -498,7 +498,7 @@ body.vscode-high-contrast-light
 .permission-prompt-meta {
   margin: 4px 0 6px;
   padding: 6px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   background: color-mix(in srgb, var(--color-vscode-fg) 4%, transparent);
   font-family: var(--font-mono);
   font-size: 11px;

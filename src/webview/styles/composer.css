@@ -42,7 +42,7 @@
 
 .context-popup-bar {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   overflow: hidden;
   margin-bottom: 6px;
@@ -50,7 +50,7 @@
 
 .context-popup-bar-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--color-vscode-accent);
   transition: width 0.3s ease;
 }
@@ -205,7 +205,7 @@
   width: 100%;
   min-height: 26px;
   border: 1px solid var(--color-vscode-border-default);
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   background: var(--color-vscode-input-surface);
   color: var(--color-vscode-fg);
   font-size: 11.5px;
@@ -277,7 +277,7 @@
   gap: 6px;
   border: none;
   background: transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-chip);
   padding: 6px 8px;
   text-align: left;
   color: var(--color-vscode-fg);
@@ -400,7 +400,7 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   color: var(--color-vscode-icon-fg);
   cursor: pointer;
   border: none;
@@ -658,7 +658,7 @@
 
 .provider-limit-row-bar {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--color-vscode-fg-soft) 18%, transparent);
   overflow: hidden;
 }
@@ -791,7 +791,7 @@
   border: none;
   background: none;
   cursor: pointer;
-  border-radius: 7px;
+  border-radius: var(--radius-chip);
   white-space: nowrap;
   transition: background-color 0.08s;
 }
@@ -904,7 +904,7 @@
   padding: 0;
   color: var(--color-vscode-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   transition:
     background-color 0.12s,
     color 0.12s;
@@ -955,7 +955,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   cursor: pointer;
   transition:
@@ -1009,7 +1009,7 @@
   cursor: pointer;
   background: var(--color-vscode-accent);
   color: var(--color-vscode-button-fg);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
   border-left: 1px solid color-mix(in srgb, var(--color-vscode-button-separator) 100%, transparent);
   transition: background-color 0.15s;
   user-select: none;
@@ -1026,7 +1026,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   cursor: pointer;
   color: var(--color-vscode-error);
@@ -1046,9 +1046,9 @@
 
 .todo-block {
   margin: 0 0 4px;
-  padding: 7px 11px 8px;
+  padding: var(--space-3) var(--space-5) var(--space-4);
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-soft);
   overflow: hidden;
 }
@@ -1138,7 +1138,7 @@
   margin-left: auto;
   width: 72px;
   height: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-vscode-muted) 22%, transparent);
   overflow: hidden;
   flex-shrink: 0;
@@ -1146,7 +1146,7 @@
 
 .todo-block-progress-fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-vscode-accent);
   transition:
     width 0.25s ease,
@@ -1263,7 +1263,7 @@
   width: 100%;
   min-height: 20px;
   padding: 2px 0px;
-  border-radius: 5px;
+  border-radius: var(--radius-inset);
   text-align: left;
   color: inherit;
 }
@@ -1289,7 +1289,7 @@
   justify-content: center;
   width: 15px;
   height: 15px;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   font-size: 9.5px;
   font-weight: 700;
   line-height: 1;
@@ -1365,7 +1365,7 @@
   font-size: 11.5px;
   padding: 8px 8px 8px 10px;
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: var(--color-vscode-surface-softer);
   color: var(--color-vscode-fg);
   min-width: 0;
@@ -1406,7 +1406,7 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   background: none;
   color: var(--color-vscode-muted);
   padding: 2px;
@@ -1484,7 +1484,7 @@
   font-size: 11px;
   font-weight: 500;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
     color 0.1s,
@@ -1509,8 +1509,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 11px;
-  border-radius: 10px;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--color-vscode-error) 26%, var(--color-vscode-border));
   background: color-mix(in srgb, var(--color-vscode-error) 10%, var(--color-vscode-surface-softer));
 }
@@ -1525,7 +1525,7 @@
   );
   margin: 8px auto 0;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 22%, var(--color-vscode-border));
   background: color-mix(
     in srgb,
@@ -1629,7 +1629,7 @@
   justify-content: center;
   min-height: 26px;
   padding: 0 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-chip);
   border: 1px solid var(--color-vscode-border-soft);
   background: var(--color-vscode-input-surface);
   color: var(--color-vscode-fg);
@@ -1691,7 +1691,7 @@
 .chat-queue-icon-action.is-active {
   color: var(--color-vscode-accent);
   background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
 }
 
 .chat-queue-icon-action:disabled,
@@ -1728,7 +1728,7 @@
   font-weight: 500;
   padding: 2px 5px;
   border: 1px dashed var(--color-vscode-border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-chip);
   height: auto;
   flex: 0 1 auto;
   max-width: var(--attachment-chip-max-width);

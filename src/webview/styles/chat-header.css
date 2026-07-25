@@ -52,7 +52,7 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
   transition: background-color 0.1s;
@@ -68,7 +68,7 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
   transition: background-color 0.1s;
@@ -84,7 +84,7 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
   transition: background-color 0.1s;
@@ -100,7 +100,7 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
   transition: background-color 0.1s;
@@ -116,7 +116,7 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   cursor: pointer;
   transition: background-color 0.1s;
@@ -170,7 +170,7 @@
 .chat-header-plan-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
@@ -179,7 +179,7 @@
 .chat-header-completed-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-vscode-success);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-success) 55%, transparent);
 }
@@ -188,7 +188,7 @@
 .chat-header-failed-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
@@ -208,7 +208,7 @@
   justify-content: center;
   width: 26px;
   height: 26px;
-  border-radius: 4px;
+  border-radius: var(--radius-inset);
   border: none;
   background: none;
   cursor: pointer;
@@ -261,7 +261,7 @@
   max-width: 100%;
   padding: 2px 4px 2px 8px;
   border: 1px solid var(--color-vscode-border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-vscode-input-surface);
   color: var(--color-vscode-fg);
 }
@@ -283,7 +283,7 @@
   height: 16px;
   padding: 0;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   color: var(--color-vscode-muted);
   cursor: pointer;
