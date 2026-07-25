@@ -740,6 +740,14 @@ body.vscode-light
   margin-bottom: 10px;
 }
 
+.rendered-markdown [data-markdown-segment='stable'] > p:first-child,
+.rendered-markdown
+  [data-markdown-segment='stable']:empty
+  + [data-markdown-segment='tail']
+  > p:first-child {
+  margin-top: 0;
+}
+
 .rendered-markdown blockquote {
   position: relative;
   margin: 0 0 18px 0;
