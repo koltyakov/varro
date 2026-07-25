@@ -478,6 +478,7 @@ body.vscode-light {
   --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent);
   --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
+  --color-vscode-border: var(--vscode-widget-border, var(--vscode-panel-border, #474747));
   --color-vscode-muted: color-mix(
     in srgb,
     var(--vscode-descriptionForeground, #717171) 55%,
@@ -498,6 +499,9 @@ body.vscode-dark.varro-flat-dark {
     var(--color-vscode-fg) 15%,
     var(--color-vscode-input-bg)
   );
+  --color-vscode-border-soft: color-mix(in srgb, var(--color-vscode-fg) 7%, transparent);
+  --color-vscode-border-default: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+  --color-vscode-border-strong: color-mix(in srgb, var(--color-vscode-fg) 14%, transparent);
 }
 
 body.vscode-light
@@ -526,6 +530,10 @@ body.vscode-high-contrast-light .chat-compaction-notice {
 
 body.vscode-light .chat-compaction-notice {
   background: color-mix(in srgb, var(--color-vscode-fg) 3.5%, var(--color-vscode-sidebar));
+}
+
+body.vscode-light .interactive-session {
+  --chat-shadow-card: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
 }
 
 body.vscode-light

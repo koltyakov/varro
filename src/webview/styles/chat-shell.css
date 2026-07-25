@@ -60,7 +60,6 @@ input:focus-visible {
   --interactive-list-scrollbar-inset: 0px;
   --chat-content-max-width: 960px;
   --chat-sidebar-width: 380px;
-  --chat-input-top-gradient-bg: var(--color-vscode-bg);
   --chat-radius-control: var(--radius-control);
   --chat-radius-card: var(--radius-bubble);
   --chat-radius-popover: var(--radius-card);

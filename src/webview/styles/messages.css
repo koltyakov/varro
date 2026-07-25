@@ -1176,18 +1176,6 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   position: relative;
 }
 
-.interactive-session .interactive-input-part.input-top-gradient::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 20px;
-  z-index: var(--z-base);
-  pointer-events: none;
-  background: none;
-}
-
 .interactive-session .interactive-input-part > * {
   position: relative;
   z-index: var(--z-raised);

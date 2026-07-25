@@ -2299,21 +2299,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       : []
   );
 
-  const showInputTopGradient = createMemo(
-    () =>
-      queuedForSession().length === 0 &&
-      state.todos.length === 0 &&
-      !visibleUsageLimit() &&
-      !showModelPicker() &&
-      !showContextPopup() &&
-      !showAgentPicker() &&
-      !showVariantPicker() &&
-      !showMcpPicker() &&
-      !showPermissionModePicker() &&
-      !showBusyMenu() &&
-      !(isFocused() && showCompletionMenu())
-  );
-
   const selectedAgentLabel = () => {
     const name = state.selectedAgent;
     if (!name) return 'Agent';
@@ -2359,9 +2344,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   return (
-    <div
-      class={`interactive-input-part ${showInputTopGradient() ? 'input-top-gradient' : ''}${composerEditingMessage() ? ' editing-message' : ''}`}
-    >
+    <div class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}`}>
       <Show when={isDraggingOver()}>
         <DropOverlay />
       </Show>
