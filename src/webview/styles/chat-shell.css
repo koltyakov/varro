@@ -265,6 +265,8 @@ input:focus-visible {
   color: var(--color-vscode-fg);
   pointer-events: auto;
   box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
   opacity: 1;
   contain: paint;
   transform: translateZ(0);
