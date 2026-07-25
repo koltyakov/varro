@@ -1,13 +1,9 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, waitForAnimationFrame } from './helpers';
 
 async function getRenderedMessageRowCount(page: Page) {
   return getE2EState(page, () => document.querySelectorAll('[data-msg-id]').length);
-}
-
-async function waitForAnimationFrame(page: Page) {
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
 }
 
 test('large transcripts keep rendered rows bounded while scrolling', async ({ page }) => {

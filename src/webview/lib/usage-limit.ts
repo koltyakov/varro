@@ -229,3 +229,23 @@ function parseJsonErrorBody(
     attempt: options?.attempt ?? extractRetryAttempt(displayMessage),
   };
 }
+
+/**
+ * Decides whether a usage-limit notice still applies to what the composer is pointed at.
+ *
+ * A notice raised for one provider or model should disappear once the user switches away, but a
+ * notice with no provider or model attached applies broadly, and a live status notice stays
+ * visible while an assistant turn is still on screen.
+ */
+export function isUsageLimitNoticeVisibleForModel(
+  notice: UsageLimitNotice | null | undefined,
+  currentModel: { providerID?: string | null; modelID?: string | null },
+  hasActiveAssistantContext: boolean
+): boolean {
+  if (!notice) return false;
+  if (!notice.providerID && !notice.modelID) return true;
+  if (hasActiveAssistantContext && notice.source === 'status') return true;
+  if (notice.providerID && notice.providerID !== currentModel.providerID) return false;
+  if (notice.modelID && notice.modelID !== currentModel.modelID) return false;
+  return true;
+}

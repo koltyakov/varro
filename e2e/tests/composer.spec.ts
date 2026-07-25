@@ -1,12 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
-import { getScrollMetrics } from './helpers';
-
-async function waitForAnimationFrames(page: Page, count: number) {
-  for (let index = 0; index < count; index += 1) {
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
-  }
-}
+import { getScrollMetrics, waitForAnimationFrames } from './helpers';
 
 test('creates a session and sends a prompt through the mocked bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');

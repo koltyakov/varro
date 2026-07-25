@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { isLoading, showInlineFileChanges } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
+import { trapModalFocus } from '../../lib/modal-focus';
 import {
   getFinalAssistantTextPartId,
   isFileEditPart,
@@ -467,6 +468,7 @@ export function AssistantMessageContent(props: {
       </Show>
       <Show when={readModeOpen() && finalTextContent().trim().length > 0}>
         <div
+          ref={(element) => onCleanup(trapModalFocus(element))}
           class="assistant-read-overlay"
           role="dialog"
           aria-modal="true"

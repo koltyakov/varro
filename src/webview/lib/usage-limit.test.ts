@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createUsageLimitProviderLimit,
   deriveUsageLimitNotice,
+  isUsageLimitNoticeVisibleForModel,
   parseUsageLimitNotice,
 } from './usage-limit';
+import type { UsageLimitNotice } from './usage-limit';
 
 describe('usage limit helpers', () => {
   it('detects 429 usage-limit messages and infers message units', () => {
@@ -600,5 +602,92 @@ describe('usage limit helpers', () => {
         },
       ],
     });
+  });
+});
+
+function buildUsageLimitNotice(overrides: Partial<UsageLimitNotice> = {}): UsageLimitNotice {
+  return {
+    source: 'message',
+    statusCode: 429,
+    message: 'Usage limit reached',
+    unit: 'requests',
+    retryAt: null,
+    attempt: null,
+    ...overrides,
+  };
+}
+
+describe('isUsageLimitNoticeVisibleForModel', () => {
+  const currentModel = { providerID: 'anthropic', modelID: 'claude-opus-5' };
+
+  it('hides when there is no notice', () => {
+    expect(isUsageLimitNoticeVisibleForModel(null, currentModel, false)).toBe(false);
+    expect(isUsageLimitNoticeVisibleForModel(undefined, currentModel, false)).toBe(false);
+  });
+
+  it('shows an unattributed notice regardless of the selected model', () => {
+    expect(isUsageLimitNoticeVisibleForModel(buildUsageLimitNotice(), currentModel, false)).toBe(
+      true
+    );
+  });
+
+  it('shows a notice raised for the selected provider and model', () => {
+    const limit = buildUsageLimitNotice({ providerID: 'anthropic', modelID: 'claude-opus-5' });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, false)).toBe(true);
+  });
+
+  it('hides a notice once the user switches provider', () => {
+    const limit = buildUsageLimitNotice({ providerID: 'openai' });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, false)).toBe(false);
+  });
+
+  it('hides a notice once the user switches model within the same provider', () => {
+    const limit = buildUsageLimitNotice({ providerID: 'anthropic', modelID: 'claude-haiku-4-5' });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, false)).toBe(false);
+  });
+
+  it('matches on model alone when the notice carries no provider', () => {
+    expect(
+      isUsageLimitNoticeVisibleForModel(
+        buildUsageLimitNotice({ modelID: 'claude-opus-5' }),
+        currentModel,
+        false
+      )
+    ).toBe(true);
+    expect(
+      isUsageLimitNoticeVisibleForModel(
+        buildUsageLimitNotice({ modelID: 'gpt-5' }),
+        currentModel,
+        false
+      )
+    ).toBe(false);
+  });
+
+  it('keeps a status notice visible while an assistant turn is still on screen', () => {
+    const limit = buildUsageLimitNotice({
+      source: 'status',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, true)).toBe(true);
+  });
+
+  it('hides a mismatched status notice once no assistant turn remains', () => {
+    const limit = buildUsageLimitNotice({
+      source: 'status',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, false)).toBe(false);
+  });
+
+  it('does not extend the assistant-context exemption to message notices', () => {
+    const limit = buildUsageLimitNotice({ source: 'message', providerID: 'openai' });
+    expect(isUsageLimitNoticeVisibleForModel(limit, currentModel, true)).toBe(false);
+  });
+
+  it('hides an attributed notice when no model is selected', () => {
+    const limit = buildUsageLimitNotice({ providerID: 'anthropic' });
+    expect(isUsageLimitNoticeVisibleForModel(limit, {}, false)).toBe(false);
   });
 });

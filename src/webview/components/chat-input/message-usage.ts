@@ -167,3 +167,39 @@ export function getUserMessageHistoryText(parts: Part[]) {
 
   return text.length > 0 ? text : null;
 }
+
+export type SessionTreeTokenBreakdown = ReturnType<typeof getSessionTreeTokenBreakdown>;
+
+/** The subset of a breakdown the merge reads, so protocol payloads without `total` still fit. */
+type MergeableTokenBreakdown = Pick<
+  SessionTreeTokenBreakdown,
+  'session' | 'subagents' | 'subagentCount'
+>;
+
+/**
+ * Merges a server-side token breakdown over the one derived from locally loaded messages.
+ *
+ * The local view only counts messages the webview has actually fetched, so it under-reports on
+ * long sessions; the server view can lag a live run. Taking the larger of the two per bucket
+ * keeps the displayed totals monotonic instead of flickering downward when one source catches up.
+ */
+export function mergeCompleteTokenBreakdown(
+  local: SessionTreeTokenBreakdown,
+  complete: { rootId: string; breakdown: MergeableTokenBreakdown } | null | undefined,
+  rootId: string | null
+): SessionTreeTokenBreakdown {
+  if (!rootId || complete?.rootId !== rootId) return local;
+
+  return {
+    ...local,
+    session:
+      complete.breakdown.session.total >= local.session.total
+        ? complete.breakdown.session
+        : local.session,
+    subagents:
+      complete.breakdown.subagents.total >= local.subagents.total
+        ? complete.breakdown.subagents
+        : local.subagents,
+    subagentCount: Math.max(local.subagentCount, complete.breakdown.subagentCount),
+  };
+}

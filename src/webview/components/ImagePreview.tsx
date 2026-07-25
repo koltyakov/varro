@@ -1,6 +1,7 @@
 import { Show, createEffect, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { trapModalFocus } from '../lib/modal-focus';
 
 export type PreviewImage = {
   url: string;
@@ -67,6 +68,7 @@ export function ImagePreviewOverlay(props: {
       <Show when={props.image}>
         {(image) => (
           <div
+            ref={(element) => onCleanup(trapModalFocus(element))}
             class="chat-image-preview-overlay"
             role="dialog"
             aria-modal="true"

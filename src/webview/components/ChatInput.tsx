@@ -149,22 +149,27 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
-import { createUsageLimitProviderLimit } from '../lib/usage-limit';
+import {
+  createUsageLimitProviderLimit,
+  isUsageLimitNoticeVisibleForModel,
+} from '../lib/usage-limit';
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   getMessageEntriesForSession,
   getSessionTreeTokenBreakdown,
   getUserMessageHistoryText,
+  mergeCompleteTokenBreakdown,
 } from './chat-input/message-usage';
 import {
-  TOOLBAR_COMPACT_MODES,
   filterCompactProviderLimitForModel,
   isToolbarControlCompacted,
   isToolbarControlHidden,
   type ToolbarCompactMode,
   type ToolbarControl,
 } from './chat-input/toolbar-compact';
+import { createToolbarFitter } from './chat-input/toolbar-fit';
+import { planMessageHistoryNavigation } from './chat-input/message-history-navigation';
 import {
   SKILLS_COMMAND_NAME,
   createMentionCompletionSource,
@@ -451,8 +456,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
-  let toolbarFitRaf = 0;
-  let toolbarFitRequestId = 0;
+  const toolbarFitter = createToolbarFitter({
+    getToolbar: () => toolbarRef,
+    getLeftGroup: () => toolbarLeftRef,
+    getRightGroup: () => toolbarRightRef,
+    setMode: setToolbarCompactMode,
+  });
 
   function captureComposerSnapshot(): ComposerSnapshot {
     return {
@@ -1563,81 +1572,43 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   function navigateMessageHistory(direction: -1 | 1) {
     const history = messageHistory();
-    const currentIndex = historyIndex();
-    if (currentIndex === null && inputText().length > 0) return false;
+    const text = inputText();
+    const plan = planMessageHistoryNavigation({
+      history,
+      currentIndex: historyIndex(),
+      inputText: text,
+      sessionId: composerSessionId(),
+      direction,
+    });
 
-    if (history.length === 0) {
-      const sessionId = composerSessionId();
-      if (direction !== -1 || !sessionId) return false;
-      setHistoryDraft(inputText());
-      void navigateToOlderMessageHistory(sessionId, 0, null, inputText());
+    if (plan.kind === 'ignore') return false;
+
+    if (plan.kind === 'stash-draft') {
+      setHistoryDraft(text);
+      return false;
+    }
+
+    if (plan.kind === 'load-older') {
+      if (plan.stashDraft) setHistoryDraft(text);
+      void navigateToOlderMessageHistory(
+        plan.sessionId,
+        plan.previousLength,
+        plan.previousIndex,
+        text
+      );
       return true;
     }
 
-    if (currentIndex === null) {
-      setHistoryDraft(inputText());
-    }
-
-    const nextIndex =
-      currentIndex === null
-        ? direction === -1
-          ? history.length - 1
-          : null
-        : currentIndex + direction;
-
-    if (nextIndex === null) return false;
-
-    if (nextIndex < 0) {
-      const sessionId = composerSessionId();
-      if (!sessionId) return false;
-      void navigateToOlderMessageHistory(sessionId, history.length, currentIndex, inputText());
-      return true;
-    }
-
-    if (nextIndex >= history.length) {
+    if (plan.kind === 'restore-draft') {
       setHistoryIndex(null);
       setComposerValue(historyDraft());
       return true;
     }
 
-    setHistoryIndex(nextIndex);
-    setComposerValue(history[nextIndex]!);
+    if (plan.stashDraft) setHistoryDraft(text);
+    setHistoryIndex(plan.index);
+    setComposerValue(history[plan.index]!);
     return true;
-  }
-
-  function getToolbarGap() {
-    if (!toolbarRef) return 0;
-    const styles = window.getComputedStyle(toolbarRef);
-    const rawGap = styles.columnGap || styles.gap || '0';
-    const gap = Number.parseFloat(rawGap);
-    return Number.isFinite(gap) ? gap : 0;
-  }
-
-  function isToolbarOverflowing() {
-    if (!toolbarRef || !toolbarLeftRef || !toolbarRightRef) return false;
-    const leftWidth = toolbarLeftRef.scrollWidth;
-    const rightWidth = toolbarRightRef.getBoundingClientRect().width;
-    return leftWidth + rightWidth + getToolbarGap() > toolbarRef.clientWidth + 1;
-  }
-
-  function fitToolbar(modeIndex: number, requestId: number) {
-    if (requestId !== toolbarFitRequestId) return;
-    const nextMode = TOOLBAR_COMPACT_MODES[Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1)]!;
-    setToolbarCompactMode(nextMode);
-    queueMicrotask(() => {
-      if (requestId !== toolbarFitRequestId) return;
-      if (!isToolbarOverflowing() || modeIndex >= TOOLBAR_COMPACT_MODES.length - 1) return;
-      fitToolbar(modeIndex + 1, requestId);
-    });
-  }
-
-  function scheduleToolbarFit() {
-    if (toolbarFitRaf) cancelAnimationFrame(toolbarFitRaf);
-    const requestId = ++toolbarFitRequestId;
-    toolbarFitRaf = requestAnimationFrame(() => {
-      toolbarFitRaf = 0;
-      fitToolbar(0, requestId);
-    });
   }
 
   async function handleDrop(e: DragEvent) {
@@ -1923,14 +1894,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       )
         return;
       if (showBusyMenu() || showContextPopup() || showProviderLimitPopup()) return;
-      scheduleToolbarFit();
+      toolbarFitter.schedule();
     });
     observer.observe(toolbarRef);
 
     onCleanup(() => {
       observer.disconnect();
-      toolbarFitRequestId += 1;
-      if (toolbarFitRaf) cancelAnimationFrame(toolbarFitRaf);
+      toolbarFitter.cancel();
     });
   });
 
@@ -2076,24 +2046,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   const sessionTokenBreakdown = createMemo(() => {
-    const local = localSessionTokenBreakdown();
     const sessionId = composerSessionId();
     const rootId = sessionId ? getSessionTreeRootId(sessionId) || sessionId : null;
-    const complete = completeTokenBreakdown();
-    if (!rootId || complete?.rootId !== rootId) return local;
-
-    return {
-      ...local,
-      session:
-        complete.breakdown.session.total >= local.session.total
-          ? complete.breakdown.session
-          : local.session,
-      subagents:
-        complete.breakdown.subagents.total >= local.subagents.total
-          ? complete.breakdown.subagents
-          : local.subagents,
-      subagentCount: Math.max(local.subagentCount, complete.breakdown.subagentCount),
-    };
+    return mergeCompleteTokenBreakdown(
+      localSessionTokenBreakdown(),
+      completeTokenBreakdown(),
+      rootId
+    );
   });
 
   let tokenBreakdownRequestId = 0;
@@ -2171,15 +2130,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   const visibleUsageLimit = createMemo(() => {
     const notice = activeUsageLimit();
-    if (!notice) return null;
-
-    const current = currentModel();
     const hasActiveAssistantContext = getLatestAssistantMessageInfo(state.messages) !== null;
-    if (!notice.providerID && !notice.modelID) return notice;
-    if (hasActiveAssistantContext && notice.source === 'status') return notice;
-    if (notice.providerID && notice.providerID !== current.providerID) return null;
-    if (notice.modelID && notice.modelID !== current.modelID) return null;
-    return notice;
+    return isUsageLimitNoticeVisibleForModel(notice, currentModel(), hasActiveAssistantContext)
+      ? notice
+      : null;
   });
   const activeUsageLimitWindow = createMemo(() =>
     getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(visibleUsageLimit()))
@@ -2396,7 +2350,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     if (deps.showBusyMenu || deps.showContextPopup || deps.showProviderLimitPopup) return;
 
-    scheduleToolbarFit();
+    toolbarFitter.schedule();
   });
 
   return (

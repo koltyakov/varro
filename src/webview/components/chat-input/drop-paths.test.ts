@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { collectDroppedPaths, parseDroppedText } from './drop-paths';
+import {
+  collectDroppedPaths,
+  parseDroppedText,
+  readFileAsBase64,
+  readFileAsDataUrl,
+  readItemByType,
+} from './drop-paths';
 
 describe('parseDroppedText', () => {
   it('parses absolute, relative, and uri-list entries while dropping comments and duplicates', () => {
@@ -97,5 +103,246 @@ describe('collectDroppedPaths', () => {
     await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
       '/Users/local/Desktop/note.txt',
     ]);
+  });
+});
+
+function makeDataTransfer(
+  data: Record<string, string>,
+  overrides: Partial<{
+    files: unknown[];
+    items: unknown[];
+    types: string[];
+  }> = {}
+) {
+  return {
+    types: overrides.types ?? Object.keys(data),
+    files: overrides.files ?? [],
+    items: overrides.items ?? [],
+    getData: (type: string) => data[type] ?? '',
+  } as unknown as DataTransfer;
+}
+
+describe('VS Code drop payload parsers', () => {
+  it('reads editor drops from the CodeEditors payload', async () => {
+    const dataTransfer = makeDataTransfer({
+      CodeEditors: JSON.stringify([
+        { resource: 'file:///repo/src/a.ts' },
+        { resource: 'file:///repo/src/b.ts' },
+      ]),
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
+      '/repo/src/a.ts',
+      '/repo/src/b.ts',
+    ]);
+  });
+
+  it('accepts bare strings inside the CodeEditors payload', async () => {
+    const dataTransfer = makeDataTransfer({
+      CodeEditors: JSON.stringify(['file:///repo/src/a.ts', null, 42]),
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/a.ts']);
+  });
+
+  it('ignores a malformed CodeEditors payload instead of throwing', async () => {
+    const dataTransfer = makeDataTransfer({ CodeEditors: '{not json' });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([]);
+  });
+
+  it('reads explorer drops from the CodeFiles payload', async () => {
+    const dataTransfer = makeDataTransfer({
+      CodeFiles: JSON.stringify(['/repo/src/a.ts', 7, '/repo/src/b.ts']),
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
+      '/repo/src/a.ts',
+      '/repo/src/b.ts',
+    ]);
+  });
+
+  it('reads a JSON ResourceURLs payload', async () => {
+    const dataTransfer = makeDataTransfer({
+      ResourceURLs: JSON.stringify(['file:///repo/src/a.ts']),
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/a.ts']);
+  });
+
+  it('falls back to uri-list parsing when ResourceURLs is not JSON', async () => {
+    const dataTransfer = makeDataTransfer({
+      ResourceURLs: 'file:///repo/src/a.ts\nfile:///repo/src/b.ts',
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
+      '/repo/src/a.ts',
+      '/repo/src/b.ts',
+    ]);
+  });
+
+  it('reads the vscode uri-list payload', async () => {
+    const dataTransfer = makeDataTransfer({
+      'application/vnd.code.uri-list': 'file:///repo/src/a.ts\r\nfile:///repo/src/b.ts',
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
+      '/repo/src/a.ts',
+      '/repo/src/b.ts',
+    ]);
+  });
+
+  it('deduplicates the same file arriving through several payloads', async () => {
+    const dataTransfer = makeDataTransfer({
+      CodeEditors: JSON.stringify([{ resource: 'file:///repo/src/a.ts' }]),
+      CodeFiles: JSON.stringify(['/repo/src/a.ts']),
+      'text/uri-list': 'file:///repo/src/a.ts',
+    });
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/a.ts']);
+  });
+
+  it('tolerates a getData implementation that throws for a type', async () => {
+    const dataTransfer = {
+      types: ['text/plain', 'text/uri-list'],
+      files: [],
+      items: [],
+      getData: (type: string) => {
+        if (type === 'text/plain') throw new Error('unavailable');
+        return 'file:///repo/src/a.ts';
+      },
+    } as unknown as DataTransfer;
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/a.ts']);
+  });
+
+  it('reads string items asynchronously when no synchronous payload yields a path', async () => {
+    const dataTransfer = {
+      types: [],
+      files: [],
+      items: [
+        {
+          kind: 'string',
+          type: 'text/plain',
+          getAsFile: () => null,
+          getAsString: (callback: (value: string) => void) => callback('/repo/src/async.ts'),
+        },
+        { kind: 'file', getAsFile: () => null },
+      ],
+      getData: () => '',
+    } as unknown as DataTransfer;
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/async.ts']);
+  });
+
+  it('collects File.path from data transfer items as well as the file list', async () => {
+    const itemFile = { path: '/repo/from-item.ts' } as File & { path: string };
+    const dataTransfer = {
+      types: [],
+      files: [{ path: '/repo/from-files.ts' } as File & { path: string }],
+      items: [{ kind: 'file', getAsFile: () => itemFile }],
+      getData: () => '',
+    } as unknown as DataTransfer;
+
+    await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
+      '/repo/from-files.ts',
+      '/repo/from-item.ts',
+    ]);
+  });
+
+  it('returns nothing when there is no data transfer at all', async () => {
+    await expect(collectDroppedPaths(null)).resolves.toEqual([]);
+  });
+});
+
+describe('dropped path decoding', () => {
+  it.each([
+    ['file:///repo/src/a.ts', '/repo/src/a.ts'],
+    ['file:///c%3A/repo/a.ts', 'c:/repo/a.ts'],
+    ['vscode-file://vscode-app/repo/a.ts', '/repo/a.ts'],
+    ['file://server/share/a.ts', '//server/share/a.ts'],
+    ['file:///repo/with%20space.ts', '/repo/with space.ts'],
+  ])('decodes %s', (input, expected) => {
+    expect(parseDroppedText(input)).toEqual([expected]);
+  });
+
+  it('keeps an absolute posix path as-is', () => {
+    expect(parseDroppedText('/repo/src/a.ts')).toEqual(['/repo/src/a.ts']);
+  });
+
+  it('keeps a windows drive path as-is', () => {
+    expect(parseDroppedText('C:\\repo\\a.ts')).toEqual(['C:\\repo\\a.ts']);
+  });
+
+  it('normalizes workspace-relative paths and strips a leading ./', () => {
+    expect(parseDroppedText('./src/a.ts')).toEqual(['src/a.ts']);
+  });
+
+  it('rejects bare words that are not path-like', () => {
+    expect(parseDroppedText('hello')).toEqual([]);
+  });
+
+  it('rejects values containing whitespace as relative paths', () => {
+    expect(parseDroppedText('some file.ts')).toEqual([]);
+  });
+
+  it('rejects dot and double-dot entries', () => {
+    expect(parseDroppedText('.')).toEqual([]);
+    expect(parseDroppedText('..')).toEqual([]);
+  });
+
+  it('accepts a bare filename with an extension', () => {
+    expect(parseDroppedText('README.md')).toEqual(['README.md']);
+  });
+
+  it('ignores an unparseable url scheme', () => {
+    expect(parseDroppedText('http://')).toEqual([]);
+  });
+});
+
+describe('readItemByType', () => {
+  it('resolves the string item matching the requested type', async () => {
+    const dataTransfer = {
+      items: [
+        { kind: 'string', type: 'text/plain', getAsString: (cb: (v: string) => void) => cb('hi') },
+      ],
+      getData: () => 'unused',
+    } as unknown as DataTransfer;
+
+    await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('hi');
+  });
+
+  it('falls back to getData when no matching item exists', async () => {
+    const dataTransfer = {
+      items: [],
+      getData: (type: string) => (type === 'text/plain' ? 'from-getData' : ''),
+    } as unknown as DataTransfer;
+
+    await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('from-getData');
+  });
+
+  it('resolves an empty string when the item yields nothing', async () => {
+    const dataTransfer = {
+      items: [
+        { kind: 'string', type: 'text/plain', getAsString: (cb: (v: string) => void) => cb('') },
+      ],
+      getData: () => '',
+    } as unknown as DataTransfer;
+
+    await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('');
+  });
+});
+
+describe('file readers', () => {
+  it('reads a file as a data url', async () => {
+    const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+
+    await expect(readFileAsDataUrl(file)).resolves.toMatch(/^data:text\/plain;base64,/);
+  });
+
+  it('reads a file as bare base64 without the data url prefix', async () => {
+    const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+
+    await expect(readFileAsBase64(file)).resolves.toBe(btoa('hello'));
   });
 });

@@ -48,10 +48,13 @@ vi.mock('vscode', () => vscodeMock);
 vi.mock('./open-code-process', () => ({
   getOpenCodeConfigDirectory: () => '/config/opencode',
 }));
-vi.mock('./logger', () => ({
-  logger: { error: vi.fn(), info: vi.fn(), show: vi.fn() },
+const { errorHubMock, loggerMock } = vi.hoisted(() => ({
+  errorHubMock: { report: vi.fn() },
+  loggerMock: { error: vi.fn(), info: vi.fn(), show: vi.fn() },
 }));
-vi.mock('./error-hub', () => ({ errorHub: { report: vi.fn() } }));
+
+vi.mock('./logger', () => ({ logger: loggerMock }));
+vi.mock('./error-hub', () => ({ errorHub: errorHubMock }));
 
 import { registerCommands } from './commands';
 
@@ -344,6 +347,301 @@ describe('varro.chat.addToContext', () => {
     vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ name: 'repo' } as never);
 
     await addToContext(fileUri('/repo/a.ts'));
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      expect.objectContaining({ relativePath: 'repo/a.ts' }),
+    ]);
+  });
+});
+
+describe('sidebar navigation commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reveals the view and focuses the composer', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.focus');
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+    expect(sidebar.requestInputFocus).toHaveBeenCalledOnce();
+  });
+
+  it('swallows a reveal failure so the command never surfaces an error', async () => {
+    const { sidebar } = register();
+    vscodeMock.commands.executeCommand.mockRejectedValueOnce(new Error('no such view'));
+
+    await expect(runCommand('varro.chat.focus')).resolves.toBeUndefined();
+
+    expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('opens attention sessions from the status bar when something needs attention', async () => {
+    const { sidebar } = register();
+    sidebar.hasPendingAttention.mockReturnValue(true);
+
+    await runCommand('varro.chat.statusBarClick');
+
+    expect(sidebar.openAttentionSessions).toHaveBeenCalledOnce();
+    expect(sidebar.requestInputFocus).not.toHaveBeenCalled();
+  });
+
+  it('focuses the composer from the status bar when nothing needs attention', async () => {
+    const { sidebar } = register();
+    sidebar.hasPendingAttention.mockReturnValue(false);
+
+    await runCommand('varro.chat.statusBarClick');
+
+    expect(sidebar.openAttentionSessions).not.toHaveBeenCalled();
+    expect(sidebar.requestInputFocus).toHaveBeenCalledOnce();
+  });
+
+  it('reveals the view before opening session search', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.searchSessions');
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+    expect(sidebar.searchSessions).toHaveBeenCalledOnce();
+  });
+
+  it('does not open session search when the view cannot be revealed', async () => {
+    const { sidebar } = register();
+    vscodeMock.commands.executeCommand.mockRejectedValueOnce(new Error('no such view'));
+
+    await runCommand('varro.chat.searchSessions');
+
+    expect(sidebar.searchSessions).not.toHaveBeenCalled();
+  });
+
+  it('forwards new-session and abort to the webview as commands', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.newSession');
+    await runCommand('varro.chat.abort');
+
+    expect(sidebar.postCommand).toHaveBeenNthCalledWith(1, 'new-session');
+    expect(sidebar.postCommand).toHaveBeenNthCalledWith(2, 'abort');
+  });
+
+  it('switches sessions in both directions', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.previousSession');
+    await runCommand('varro.chat.nextSession');
+
+    expect(sidebar.switchSession).toHaveBeenNthCalledWith(1, 'previous');
+    expect(sidebar.switchSession).toHaveBeenNthCalledWith(2, 'next');
+  });
+
+  it('opens the source control view', async () => {
+    register();
+
+    await runCommand('varro.openSourceControl');
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+  });
+});
+
+describe('varro.server.restart', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('refreshes providers after a successful restart', async () => {
+    const { sidebar } = register('/repo', {
+      restart: vi.fn().mockResolvedValue('http://127.0.0.1:4096'),
+      status: { state: 'running' },
+    });
+
+    await runCommand('varro.server.restart');
+
+    expect(sidebar.post).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
+  it('reports a restart failure through the error hub when the server is not already errored', async () => {
+    const { sidebar } = register('/repo', {
+      restart: vi.fn().mockRejectedValue(new Error('port busy')),
+      status: { state: 'running' },
+    });
+
+    await runCommand('varro.server.restart');
+
+    expect(errorHubMock.report).toHaveBeenCalledWith({
+      code: 'server-start',
+      message: 'Failed to restart server: port busy',
+    });
+    expect(sidebar.post).not.toHaveBeenCalled();
+  });
+
+  it('only logs a restart failure when the server already reported an error', async () => {
+    register('/repo', {
+      restart: vi.fn().mockRejectedValue(new Error('port busy')),
+      status: { state: 'error' },
+    });
+
+    await runCommand('varro.server.restart');
+
+    expect(errorHubMock.report).not.toHaveBeenCalled();
+    expect(loggerMock.error).toHaveBeenCalledWith('Failed to restart server: port busy');
+  });
+});
+
+describe('varro.showOutput', () => {
+  it('shows the extension output channel', async () => {
+    vi.clearAllMocks();
+    register();
+
+    await runCommand('varro.showOutput');
+
+    expect(loggerMock.show).toHaveBeenCalledOnce();
+  });
+});
+
+describe('varro.about', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('surfaces a failure to read server info', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn().mockRejectedValue(new Error('server unreachable')),
+    });
+
+    await runCommand('varro.about');
+
+    expect(vscodeMock.window.showErrorMessage).toHaveBeenCalledWith(
+      'Failed to open Varro about: server unreachable'
+    );
+    expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+  });
+});
+
+function editorWithSelection(
+  fsPath: string,
+  startLine: number,
+  endLine: number,
+  overrides: { isUntitled?: boolean; scheme?: string; isEmpty?: boolean } = {}
+) {
+  return {
+    document: {
+      uri: { fsPath, scheme: overrides.scheme ?? 'file' },
+      isUntitled: overrides.isUntitled ?? false,
+    },
+    selection: {
+      isEmpty: overrides.isEmpty ?? false,
+      start: { line: startLine },
+      end: { line: endLine },
+    },
+  };
+}
+
+describe('varro.chat.addSelectionToContext', () => {
+  const FILE = 1;
+  const DIRECTORY = 2;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vscodeMock.window.activeTextEditor = undefined;
+    vscodeMock.workspace.workspaceFolders = undefined;
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: FILE });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+  });
+
+  it('posts the selected range as a one-based line range', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 11, 19) as never;
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 12, endLine: 20 }],
+      }),
+    ]);
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+  });
+
+  it('does nothing without an active editor', async () => {
+    const { sidebar } = register();
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+    expect(vscodeMock.commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the selection is empty', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 1, 1, {
+      isEmpty: true,
+    }) as never;
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+  });
+
+  it('ignores an untitled document that has no file on disk', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/untitled-1', 0, 2, {
+      isUntitled: true,
+    }) as never;
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+  });
+
+  it('ignores a document served over the untitled scheme', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/untitled-1', 0, 2, {
+      scheme: 'untitled',
+    }) as never;
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+  });
+
+  it('ignores a selection whose target stats as a directory', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/src', 0, 2) as never;
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: DIRECTORY });
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+  });
+
+  it('ignores a selection whose target cannot be stat-ed', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 0, 2) as never;
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('ENOENT'));
+
+    await runCommand('varro.chat.addSelectionToContext');
+
+    expect(sidebar.postDroppedFiles).not.toHaveBeenCalled();
+  });
+
+  it('prefixes the folder name in a multi-root workspace', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 0, 0) as never;
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo' }, { name: 'other' }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ name: 'repo' } as never);
+
+    await runCommand('varro.chat.addSelectionToContext');
 
     expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
       expect.objectContaining({ relativePath: 'repo/a.ts' }),
