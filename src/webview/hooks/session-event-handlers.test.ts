@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
 import type { Message, Part, SessionStatus } from '../types';
+import {
+  markSessionUnshared,
+  resetSessionShareOverridesForTests,
+} from '../lib/session-share-overrides';
 
 const {
   serverEventsOn,
@@ -1285,6 +1289,86 @@ describe('registerSessionEventHandlers', () => {
     });
     expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
     expect(stopLoading).not.toHaveBeenCalled();
+  });
+
+  it('clears optional fields omitted from complete session updates', () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+
+    state.sessions = [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Shared session',
+        version: '1',
+        share: { url: 'https://share.test/session-1' },
+        time: { created: 1, updated: 1 },
+      },
+    ];
+
+    registerSessionEventHandlers(createDefaultDeps({ upsertSession }));
+    handlers.get('session.updated')?.({
+      properties: {
+        info: {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Shared session',
+          version: '1',
+          time: { created: 1, updated: 2 },
+        },
+      },
+    });
+
+    expect(upsertSession).toHaveBeenCalledWith({
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Shared session',
+      version: '1',
+      time: { created: 1, updated: 2 },
+    });
+  });
+
+  it('suppresses stale share URLs from complete events after unsharing', () => {
+    const handlers = installHandlers();
+    const upsertSession = vi.fn();
+    markSessionUnshared('session-1');
+
+    try {
+      state.sessions = [
+        {
+          id: 'session-1',
+          projectID: 'project-1',
+          directory: '/repo',
+          title: 'Shared session',
+          version: '1',
+          time: { created: 1, updated: 1 },
+        },
+      ];
+
+      registerSessionEventHandlers(createDefaultDeps({ upsertSession }));
+      handlers.get('session.updated')?.({
+        properties: {
+          info: {
+            id: 'session-1',
+            projectID: 'project-1',
+            directory: '/repo',
+            title: 'Shared session',
+            version: '1',
+            share: { url: 'https://share.test/session-1' },
+            time: { created: 1, updated: 2 },
+          },
+        },
+      });
+
+      expect(upsertSession).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'session-1', share: undefined })
+      );
+    } finally {
+      resetSessionShareOverridesForTests();
+    }
   });
 
   it('applies child-session tool part updates when they belong to the active session tree', () => {

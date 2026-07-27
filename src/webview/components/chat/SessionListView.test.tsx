@@ -9,6 +9,8 @@ import {
   resetSessionDiffSummaryStateForTests,
   SessionListView,
 } from './SessionListView';
+import { SessionActionFeedback } from './SessionActionFeedback';
+import { resetSessionShareOverridesForTests } from '../../lib/session-share-overrides';
 
 const renameSessionMock = vi.hoisted(() => vi.fn());
 const reloadSessionsMock = vi.hoisted(() => vi.fn());
@@ -59,6 +61,7 @@ function openSessionActions(row: HTMLElement, x = 40, y = 50) {
 }
 
 beforeEach(() => {
+  resetSessionShareOverridesForTests();
   resetSessionDiffSummaryStateForTests();
   setState('sessions', []);
   setState('providers', []);
@@ -87,6 +90,7 @@ afterEach(() => {
   setState('recycleBinLoadError', null);
   vi.restoreAllMocks();
   resetSessionDiffSummaryStateForTests();
+  resetSessionShareOverridesForTests();
 });
 
 describe('SessionListView model details', () => {
@@ -783,6 +787,101 @@ describe('SessionListView ordering', () => {
 });
 
 describe('SessionListView actions', () => {
+  it('shares, copies, and unshares a session from its row menu', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    const share = vi
+      .spyOn(client.session, 'share')
+      .mockResolvedValue(
+        session('session-1', Date.now(), { share: { url: 'https://share.test/1' } })
+      );
+    const unshare = vi
+      .spyOn(client.session, 'unshare')
+      .mockResolvedValue(
+        session('session-1', Date.now(), { share: { url: 'https://share.test/1' } })
+      );
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+
+    try {
+      cleanup = render(
+        () => (
+          <>
+            <SessionListView />
+            <SessionActionFeedback />
+          </>
+        ),
+        container
+      );
+      const row = container.querySelector<HTMLElement>('.session-item')!;
+
+      openSessionActions(row);
+      Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+        .find((button) => button.textContent?.trim() === 'Share session')!
+        .click();
+
+      await vi.waitFor(() =>
+        expect(share).toHaveBeenCalledWith('session-1', { directory: '/repo' })
+      );
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('https://share.test/1'));
+      await vi.waitFor(() => {
+        const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
+        expect(feedback?.textContent?.trim()).toBe('Share link copied');
+        expect(feedback?.getAttribute('aria-live')).toBe('polite');
+      });
+
+      openSessionActions(row);
+      const sharedActions = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      );
+      expect(sharedActions.some((button) => button.textContent?.trim() === 'Copy share link')).toBe(
+        true
+      );
+      sharedActions.find((button) => button.textContent?.trim() === 'Unshare session')!.click();
+
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      await vi.waitFor(() =>
+        expect(unshare).toHaveBeenCalledWith('session-1', { directory: '/repo' })
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector('.session-action-feedback')?.textContent?.trim()).toBe(
+          'Session unshared'
+        );
+      });
+      openSessionActions(row);
+      const unsharedActions = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      );
+      expect(unsharedActions.some((button) => button.textContent?.trim() === 'Share session')).toBe(
+        true
+      );
+      unsharedActions.find((button) => button.textContent?.trim() === 'Copy session ID')!.click();
+      await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('session-1'));
+      await vi.waitFor(() => {
+        expect(document.querySelector('.session-action-feedback')?.textContent?.trim()).toBe(
+          'Session ID copied'
+        );
+      });
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+    }
+  });
+
   it('closes the context menu without selecting another session with one click', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,

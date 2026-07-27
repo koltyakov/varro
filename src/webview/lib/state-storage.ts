@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   hiddenModels: 'varro.hiddenModels',
   lastSeenSessions: 'varro.lastSeenSessions',
   completedSessionResponses: 'varro.completedSessionResponses',
+  unsharedSessions: 'varro.unsharedSessions',
   queuedMessages: 'varro.queuedMessages',
   lastActiveSessionId: 'varro.lastActiveSessionId',
   lastOpenedView: 'varro.lastOpenedView',

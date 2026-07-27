@@ -29,6 +29,7 @@ import type {
 } from '../../shared/protocol';
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
+import { applySessionShareOverride } from './session-share-overrides';
 import type {
   ProviderAuthAuthorization,
   ProviderAuthMethodsByProvider,
@@ -44,10 +45,12 @@ export const client = {
 
   session: {
     async list(): Promise<Session[]> {
-      return apiCall('GET', '/session');
+      return apiCall<Session[]>('GET', '/session').then((sessions) =>
+        sessions.map(applySessionShareOverride)
+      );
     },
     async get(id: string): Promise<Session> {
-      return apiCall('GET', `/session/${id}`);
+      return apiCall<Session>('GET', `/session/${id}`).then(applySessionShareOverride);
     },
     async create(
       body?: {
@@ -73,6 +76,12 @@ export const client = {
     },
     async abort(id: string): Promise<boolean> {
       return apiCall('POST', `/session/${id}/abort`);
+    },
+    async share(id: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall('POST', withDirectory(`/session/${id}/share`, options?.directory));
+    },
+    async unshare(id: string, options?: { directory?: string }): Promise<Session> {
+      return apiCall('DELETE', withDirectory(`/session/${id}/share`, options?.directory));
     },
     async init(
       id: string,

@@ -6,6 +6,7 @@ import { deleteSession, renameSession } from '../../hooks/useOpenCode';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
+import { shareSession, unshareSession } from '../../lib/session-sharing';
 import { setError, setState, state } from '../../lib/state';
 import { writeClipboard } from '../../lib/write-clipboard';
 import {
@@ -16,6 +17,7 @@ import {
   RunningSessionsBadge,
 } from './HeaderBadges';
 import type { SessionListFilter } from './SessionListView';
+import { showSessionActionFeedback } from './SessionActionFeedback';
 
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
@@ -273,7 +275,24 @@ export function ActiveChatHeader(props: {
   const copySessionId = async () => {
     const sessionId = actionsSessionId();
     closeActions();
-    if (sessionId && !(await writeClipboard(sessionId))) setError('Failed to copy session ID');
+    if (!sessionId) return;
+    if (!(await writeClipboard(sessionId))) {
+      setError('Failed to copy session ID');
+      return;
+    }
+    showSessionActionFeedback('Session ID copied');
+  };
+  const shareActionsSession = async () => {
+    const session = actionsSession();
+    closeActions();
+    if (!session || !(await shareSession(session))) return;
+    showSessionActionFeedback('Share link copied');
+  };
+  const unshareActionsSession = async () => {
+    const session = actionsSession();
+    closeActions();
+    if (!session || !(await unshareSession(session))) return;
+    showSessionActionFeedback('Session unshared');
   };
 
   createEffect(() => {
@@ -410,6 +429,22 @@ export function ActiveChatHeader(props: {
                     <button type="button" role="menuitem" onClick={() => void copySessionId()}>
                       Copy session ID
                     </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => void shareActionsSession()}
+                    >
+                      {session().share?.url ? 'Copy share link' : 'Share session'}
+                    </button>
+                    <Show when={session().share?.url}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void unshareActionsSession()}
+                      >
+                        Unshare session
+                      </button>
+                    </Show>
                     <button
                       type="button"
                       role="menuitem"

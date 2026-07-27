@@ -47,7 +47,9 @@ import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
+import { shareSession, unshareSession } from '../../lib/session-sharing';
 import { writeClipboard } from '../../lib/write-clipboard';
+import { showSessionActionFeedback } from './SessionActionFeedback';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -1528,7 +1530,23 @@ function SessionListItem(props: {
   };
   const copySessionId = async () => {
     props.actions.close();
-    if (!(await writeClipboard(props.session.id))) setError('Failed to copy session ID');
+    if (!(await writeClipboard(props.session.id))) {
+      setError('Failed to copy session ID');
+      return;
+    }
+    showSessionActionFeedback('Session ID copied');
+  };
+  const copyShareLink = async () => {
+    const session = props.session;
+    props.actions.close();
+    if (!(await shareSession(session))) return;
+    showSessionActionFeedback('Share link copied');
+  };
+  const unshare = async () => {
+    const session = props.session;
+    props.actions.close();
+    if (!(await unshareSession(session))) return;
+    showSessionActionFeedback('Session unshared');
   };
 
   const openActions = (event: MouseEvent) => {
@@ -1856,6 +1874,14 @@ function SessionListItem(props: {
                   <button type="button" role="menuitem" onClick={() => void copySessionId()}>
                     Copy session ID
                   </button>
+                  <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
+                    {props.session.share?.url ? 'Copy share link' : 'Share session'}
+                  </button>
+                  <Show when={props.session.share?.url}>
+                    <button type="button" role="menuitem" onClick={() => void unshare()}>
+                      Unshare session
+                    </button>
+                  </Show>
                   <button
                     type="button"
                     role="menuitem"

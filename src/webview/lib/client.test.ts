@@ -56,6 +56,8 @@ describe('client', () => {
     await client.session.fork('session-1', 'message-1');
     await client.session.delete('session-1');
     await client.session.abort('session-1');
+    await client.session.share('session-1');
+    await client.session.unshare('session-1');
     await client.session.init('session-1', {
       messageID: 'message-1',
       providerID: 'openai',
@@ -118,6 +120,8 @@ describe('client', () => {
       ['POST', '/session/session-1/fork', { messageID: 'message-1' }],
       ['DELETE', '/session/session-1'],
       ['POST', '/session/session-1/abort'],
+      ['POST', '/session/session-1/share'],
+      ['DELETE', '/session/session-1/share'],
       [
         'POST',
         '/session/session-1/init',
@@ -201,6 +205,35 @@ describe('client', () => {
     expect(result.nextCursor).toBe('cursor with spaces');
   });
 
+  it('suppresses OpenCode share URLs after a confirmed local unshare', async () => {
+    const { client } = await loadClient();
+    const { markSessionShared, markSessionUnshared } = await import('./session-share-overrides');
+    const sharedSession = {
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Shared session',
+      version: '1',
+      share: { url: 'https://share.test/session-1' },
+      time: { created: 1, updated: 2 },
+    };
+    bridgeMocks.apiCall
+      .mockResolvedValueOnce([sharedSession])
+      .mockResolvedValueOnce(sharedSession)
+      .mockResolvedValueOnce(sharedSession);
+
+    markSessionUnshared('session-1');
+
+    await expect(client.session.list()).resolves.toEqual([{ ...sharedSession, share: undefined }]);
+    await expect(client.session.get('session-1')).resolves.toEqual({
+      ...sharedSession,
+      share: undefined,
+    });
+
+    markSessionShared('session-1');
+    await expect(client.session.get('session-1')).resolves.toEqual(sharedSession);
+  });
+
   it('creates sessions with an empty body when none is provided', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ id: 'session-1' });
@@ -210,7 +243,7 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('POST', '/session', {});
   });
 
-  it('scopes session creation and prompts to an explicit workspace directory', async () => {
+  it('scopes session creation, prompts, and sharing to an explicit workspace directory', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ id: 'session-1' });
 
@@ -220,6 +253,8 @@ describe('client', () => {
       { parts: [{ type: 'text', text: 'Anchor' }], noReply: true },
       { directory: '/workspace with spaces' }
     );
+    await client.session.share('session-1', { directory: '/workspace with spaces' });
+    await client.session.unshare('session-1', { directory: '/workspace with spaces' });
 
     expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
       1,
@@ -232,6 +267,16 @@ describe('client', () => {
       'POST',
       '/session/session-1/prompt_async?directory=%2Fworkspace+with+spaces',
       { parts: [{ type: 'text', text: 'Anchor' }], noReply: true }
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      3,
+      'POST',
+      '/session/session-1/share?directory=%2Fworkspace+with+spaces'
+    );
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(
+      4,
+      'DELETE',
+      '/session/session-1/share?directory=%2Fworkspace+with+spaces'
     );
   });
 

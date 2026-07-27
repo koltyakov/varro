@@ -4,6 +4,7 @@ import type { Session } from '../../types';
 import { client } from '../../lib/client';
 import { setState } from '../../lib/state';
 import { ActiveChatHeader } from './ChatHeader';
+import { SessionActionFeedback } from './SessionActionFeedback';
 
 const deleteSessionMock = vi.hoisted(() => vi.fn());
 const renameSessionMock = vi.hoisted(() => vi.fn());
@@ -31,28 +32,31 @@ function session(overrides: Partial<Session> = {}): Session {
 function renderHeader(activeSubagentRootId: string | null = null) {
   cleanup = render(
     () => (
-      <ActiveChatHeader
-        title="Session one"
-        showBackButton={false}
-        backTitle="Back"
-        showActions={false}
-        activeSubagentRootId={activeSubagentRootId}
-        activeSubagentCount={activeSubagentRootId ? 2 : 0}
-        activeSubagentLabel="Subagents"
-        failedCount={0}
-        attentionCount={0}
-        planReadyCount={0}
-        completedCount={0}
-        runningCount={0}
-        onBack={vi.fn()}
-        onOpenSubagents={vi.fn()}
-        onOpenFailedSessions={vi.fn()}
-        onOpenAttentionSessions={vi.fn()}
-        onOpenPlanReadySessions={vi.fn()}
-        onOpenCompletedSessions={vi.fn()}
-        onOpenRunningSessions={vi.fn()}
-        onCreateSession={vi.fn()}
-      />
+      <>
+        <ActiveChatHeader
+          title="Session one"
+          showBackButton={false}
+          backTitle="Back"
+          showActions={false}
+          activeSubagentRootId={activeSubagentRootId}
+          activeSubagentCount={activeSubagentRootId ? 2 : 0}
+          activeSubagentLabel="Subagents"
+          failedCount={0}
+          attentionCount={0}
+          planReadyCount={0}
+          completedCount={0}
+          runningCount={0}
+          onBack={vi.fn()}
+          onOpenSubagents={vi.fn()}
+          onOpenFailedSessions={vi.fn()}
+          onOpenAttentionSessions={vi.fn()}
+          onOpenPlanReadySessions={vi.fn()}
+          onOpenCompletedSessions={vi.fn()}
+          onOpenRunningSessions={vi.fn()}
+          onCreateSession={vi.fn()}
+        />
+        <SessionActionFeedback />
+      </>
     ),
     container
   );
@@ -97,6 +101,8 @@ describe('ActiveChatHeader', () => {
     expect(menu!.textContent).toContain('Rename');
     expect(menu!.textContent).toContain('Pin');
     expect(menu!.textContent).toContain('Copy session ID');
+    expect(menu!.textContent).toContain('Share session');
+    expect(menu!.textContent).not.toContain('Unshare session');
     expect(menu!.textContent).toContain('Move to Recycle Bin');
     expect(menu!.style.left).toBe('40px');
     expect(menu!.style.top).toBe('50px');
@@ -120,6 +126,38 @@ describe('ActiveChatHeader', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Pinned session"]')).toBeNull();
     });
+  });
+
+  it('shows copied feedback after sharing from the header menu', async () => {
+    vi.spyOn(client.session, 'share').mockResolvedValue(
+      session({ share: { url: 'https://share.test/session-1' } })
+    );
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    });
+
+    try {
+      renderHeader();
+      container
+        .querySelector<HTMLElement>('.chat-header-session-title')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+        .find((button) => button.textContent?.trim() === 'Share session')!
+        .click();
+
+      await vi.waitFor(() => {
+        const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
+        expect(feedback?.textContent?.trim()).toBe('Share link copied');
+      });
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+    }
   });
 
   it('shows cumulative worked duration next to the title', async () => {

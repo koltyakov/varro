@@ -57,6 +57,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/command')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/fork')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/session/abc/share')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/session/abc/share')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/session/abc/share?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=msg-1')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=200')).toBe(true);
@@ -105,6 +108,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&directory=%2Fb')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&extra=1')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/abc/abort?directory=%2Frepo-a')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session/abc/share')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/session/abc/share?directory=')).toBe(false);
+    expect(isAllowedApiRequest('DELETE', '/session/abc/share?extra=1')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);

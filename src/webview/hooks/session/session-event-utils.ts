@@ -1,4 +1,5 @@
 import { appStore } from '../../lib/stores/app-store';
+import { applySessionShareOverride } from '../../lib/session-share-overrides';
 import type {
   AssistantMessage,
   Message,
@@ -311,27 +312,29 @@ function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
 }
 
 export function mergeSessionEventInfo(info: NormalizedSessionEventInfo): Session | null {
+  if (isCompleteSessionEventInfo(info)) return applySessionShareOverride(info as Session);
+
   const existing = appStore.state.sessions.find((session) => session.id === info.id);
   if (existing) {
-    return {
+    return applySessionShareOverride({
       ...existing,
       ...info,
       time: { ...existing.time, ...info.time },
-    };
+    });
   }
 
-  if (
+  return null;
+}
+
+function isCompleteSessionEventInfo(info: NormalizedSessionEventInfo) {
+  return (
     typeof info.projectID === 'string' &&
     typeof info.directory === 'string' &&
     typeof info.title === 'string' &&
     typeof info.version === 'string' &&
     typeof info.time?.created === 'number' &&
     typeof info.time.updated === 'number'
-  ) {
-    return info as Session;
-  }
-
-  return null;
+  );
 }
 
 export function syncSessionAgent(info: NormalizedSessionEventInfo) {

@@ -977,6 +977,10 @@ const API_ROUTES: ApiRoute[] = [
   route('/session/:id/message/:messageId', methodsNoQuery('DELETE')),
   route('/session/:id/todo', methodsNoQuery('GET')),
   route(
+    '/session/:id/share',
+    ({ method, url }) => (method === 'POST' || method === 'DELETE') && optionalDirectoryQuery(url)
+  ),
+  route(
     '/session/:id/:action',
     ({ method, url, params }) =>
       method === 'POST' &&

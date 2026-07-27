@@ -5,6 +5,7 @@ import { connectionInitialized, defaultAppState } from './lib/state';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
+import { SessionActionFeedback } from './components/chat/SessionActionFeedback';
 import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge } from './lib/bridge';
 import { observeSurfaceContrast } from './lib/theme';
@@ -59,6 +60,7 @@ export function App() {
         </Show>
       </Show>
       <RalphForm />
+      <SessionActionFeedback />
       <Show when={defaultAppState.error()}>
         <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
           <span class="break-words leading-relaxed">{defaultAppState.error()}</span>

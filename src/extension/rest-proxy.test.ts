@@ -286,6 +286,33 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('forwards session unshare requests to OpenCode', async () => {
+    const response = {
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Session one',
+      version: '1',
+      time: { created: 1, updated: 2 },
+    };
+    const serverRequest = vi.fn(() => Promise.resolve(response));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest },
+    });
+
+    await proxy.handleRequest(
+      makePayload(7, 'DELETE', '/session/session-1/share?directory=%2Frepo')
+    );
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'DELETE',
+      '/session/session-1/share?directory=%2Frepo',
+      undefined
+    );
+    expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 7, data: response });
+  });
+
   it('updates pinned sessions without starting OpenCode', async () => {
     const setPinned = vi.fn(() => Promise.resolve(['session-1']));
     const { proxy, callbacks } = createProxy({ pinnedSessions: { setPinned } });
