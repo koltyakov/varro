@@ -2,7 +2,7 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
-import { setSessions, setState } from '../../lib/state';
+import { setSessions, setState, state as appState } from '../../lib/state';
 import { selectSession } from '../../hooks/useOpenCode';
 import {
   getSessionDiffSummaryStateForTests,
@@ -10,7 +10,10 @@ import {
   SessionListView,
 } from './SessionListView';
 import { SessionActionFeedback } from './SessionActionFeedback';
-import { resetSessionShareOverridesForTests } from '../../lib/session-share-overrides';
+import {
+  applySessionShareOverride,
+  resetSessionShareOverridesForTests,
+} from '../../lib/session-share-overrides';
 
 const renameSessionMock = vi.hoisted(() => vi.fn());
 const reloadSessionsMock = vi.hoisted(() => vi.fn());
@@ -788,6 +791,8 @@ describe('SessionListView ordering', () => {
 
 describe('SessionListView actions', () => {
   it('shares, copies, and unshares a session from its row menu', async () => {
+    const activityUpdatedAt = Date.now() - 60_000;
+    const shareUpdatedAt = Date.now();
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -799,20 +804,20 @@ describe('SessionListView actions', () => {
     const share = vi
       .spyOn(client.session, 'share')
       .mockResolvedValue(
-        session('session-1', Date.now(), { share: { url: 'https://share.test/1' } })
+        session('session-1', shareUpdatedAt, { share: { url: 'https://share.test/1' } })
       );
-    const unshare = vi
-      .spyOn(client.session, 'unshare')
-      .mockResolvedValue(
-        session('session-1', Date.now(), { share: { url: 'https://share.test/1' } })
-      );
+    const unshareResult = session('session-1', shareUpdatedAt + 1, {
+      share: { url: 'https://share.test/1' },
+    });
+    const pendingUnshare = deferred<Session>();
+    const unshare = vi.spyOn(client.session, 'unshare').mockReturnValue(pendingUnshare.promise);
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
       configurable: true,
     });
-    setState('sessions', [session('session-1', Date.now())]);
+    setState('sessions', [session('session-1', activityUpdatedAt)]);
 
     try {
       cleanup = render(
@@ -835,6 +840,7 @@ describe('SessionListView actions', () => {
         expect(share).toHaveBeenCalledWith('session-1', { directory: '/repo' })
       );
       await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('https://share.test/1'));
+      expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
       await vi.waitFor(() => {
         const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Share link copied');
@@ -854,11 +860,19 @@ describe('SessionListView actions', () => {
       await vi.waitFor(() =>
         expect(unshare).toHaveBeenCalledWith('session-1', { directory: '/repo' })
       );
+      const inFlightEvent = applySessionShareOverride({
+        ...unshareResult,
+        share: undefined,
+      });
+      expect(inFlightEvent.time.updated).toBe(activityUpdatedAt);
+
+      pendingUnshare.resolve(unshareResult);
       await vi.waitFor(() => {
         expect(document.querySelector('.session-action-feedback')?.textContent?.trim()).toBe(
           'Session unshared'
         );
       });
+      expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
       openSessionActions(row);
       const unsharedActions = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')

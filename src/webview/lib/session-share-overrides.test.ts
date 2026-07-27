@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Session } from '../types';
 import {
   applySessionShareOverride,
+  beginSessionShareUpdate,
+  completeSessionShareUpdate,
   markSessionShared,
   markSessionUnshared,
   resetSessionShareOverridesForTests,
@@ -34,5 +36,53 @@ describe('session share overrides', () => {
 
     expect(applySessionShareOverride(session).share).toEqual(session.share);
     expect(localStorage.getItem(STORAGE_KEYS.unsharedSessions)).toBeNull();
+  });
+
+  it('preserves the activity time from a share update without hiding later activity', () => {
+    beginSessionShareUpdate(session.id, session.time.updated);
+
+    const responseUpdate = { ...session, time: { ...session.time, updated: 8 } };
+    const eventUpdate = { ...session, time: { ...session.time, updated: 9 } };
+
+    expect(applySessionShareOverride(eventUpdate).time.updated).toBe(session.time.updated);
+
+    completeSessionShareUpdate(session.id, 10);
+
+    expect(applySessionShareOverride(responseUpdate).time.updated).toBe(session.time.updated);
+    expect(applySessionShareOverride(eventUpdate).time.updated).toBe(session.time.updated);
+    expect(applySessionShareOverride(responseUpdate).time.updated).toBe(session.time.updated);
+    expect(
+      applySessionShareOverride({ ...session, time: { ...session.time, updated: 11 } }).time.updated
+    ).toBe(11);
+  });
+
+  it('does not suppress newer activity when the matching share update was not observed', () => {
+    beginSessionShareUpdate(session.id, session.time.updated);
+    completeSessionShareUpdate(session.id, 10);
+
+    expect(
+      applySessionShareOverride({ ...session, time: { ...session.time, updated: 11 } }).time.updated
+    ).toBe(11);
+  });
+
+  it('preserves activity across unshare response and event timestamp differences', () => {
+    markSessionUnshared(session.id);
+    beginSessionShareUpdate(session.id, session.time.updated);
+
+    const response = applySessionShareOverride({
+      ...session,
+      share: undefined,
+      time: { ...session.time, updated: 8 },
+    });
+    const event = applySessionShareOverride({
+      ...session,
+      time: { ...session.time, updated: 9 },
+    });
+
+    completeSessionShareUpdate(session.id, 10);
+
+    expect(response.time.updated).toBe(session.time.updated);
+    expect(event.time.updated).toBe(session.time.updated);
+    expect(event.share).toBeUndefined();
   });
 });
