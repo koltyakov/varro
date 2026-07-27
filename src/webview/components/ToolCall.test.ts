@@ -1173,6 +1173,56 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.question-prompt-card')).not.toBeNull();
   });
 
+  it('shows completed questions and answers as a compact read-only summary', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: {
+        status: 'completed',
+        input: {
+          questions: [
+            { question: 'Which environment should I target?' },
+            { question: 'Which checks should I run?', multiple: true },
+            { question: 'Anything else?' },
+          ],
+        },
+        output: 'User has answered your questions.',
+        title: 'Asked 3 questions',
+        metadata: {
+          answers: [['Staging'], ['Tests', 'Lint'], []],
+        },
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const summary = container?.querySelector('.question-summary-card');
+    expect(summary?.querySelector('.question-summary-title')?.textContent).toBe(
+      'Asked 3 questions'
+    );
+    expect(
+      Array.from(summary?.querySelectorAll('.question-summary-question') || []).map(
+        (item) => item.textContent
+      )
+    ).toEqual([
+      'Which environment should I target?',
+      'Which checks should I run?',
+      'Anything else?',
+    ]);
+    expect(
+      Array.from(summary?.querySelectorAll('.question-summary-answer') || []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Staging', 'Tests, Lint', 'Unanswered']);
+    expect(summary?.querySelector('button, input')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+  });
+
   it('lets users select a survey option', () => {
     const part: ToolPart = {
       id: 'tool-1',

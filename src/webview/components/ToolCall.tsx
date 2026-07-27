@@ -59,6 +59,34 @@ function isQuestionToolName(toolName: string) {
   return normalizeToolName(toolName) === 'question';
 }
 
+type QuestionSummaryItem = {
+  question: string;
+  answers: string[];
+};
+
+function getQuestionSummaryItems(state: ToolPart['state']): QuestionSummaryItem[] {
+  if (state.status !== 'completed') return [];
+
+  const questions = Array.isArray(state.input.questions) ? state.input.questions : [];
+  const answers = Array.isArray(state.metadata.answers) ? state.metadata.answers : [];
+
+  return questions.flatMap((value, index) => {
+    if (!value || typeof value !== 'object') return [];
+    const question = (value as Record<string, unknown>).question;
+    if (typeof question !== 'string' || !question.trim()) return [];
+
+    const answer = answers[index];
+    return [
+      {
+        question: question.trim(),
+        answers: Array.isArray(answer)
+          ? answer.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []))
+          : [],
+      },
+    ];
+  });
+}
+
 function isStructuredToolName(toolName: string) {
   return STRUCTURED_TOOL_NAMES.has(normalizeToolName(toolName));
 }
@@ -291,6 +319,10 @@ export function ToolCall(props: {
     });
   });
 
+  const questionSummaryItems = createMemo(() =>
+    isQuestionToolName(tool().tool) ? getQuestionSummaryItems(state()) : []
+  );
+
   const truncatedOutput = createMemo(() => {
     if (state().status !== 'completed') return '';
     const output = (state() as ToolStateCompleted).output || '';
@@ -325,6 +357,10 @@ export function ToolCall(props: {
   };
 
   const toolContent = () => {
+    if (questionSummaryItems().length > 0) {
+      return <QuestionToolSummary title={title()} items={questionSummaryItems()} />;
+    }
+
     if (fileChanges().length > 0) {
       return (
         <FileChangeCard
@@ -364,6 +400,42 @@ export function ToolCall(props: {
         {(permission) => <PermissionPrompt permission={permission()} />}
       </Show>
     </>
+  );
+}
+
+function QuestionToolSummary(props: { title: string; items: QuestionSummaryItem[] }) {
+  return (
+    <div class="chat-tool-invocation-part question-summary-card">
+      <div class="question-summary-header">
+        <svg
+          class="question-summary-icon"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
+          />
+        </svg>
+        <span class="question-summary-title">{props.title}</span>
+      </div>
+      <div class="question-summary-list">
+        <For each={props.items}>
+          {(item) => (
+            <div class="question-summary-item">
+              <span class="question-summary-question">{item.question}</span>
+              <span
+                class={`question-summary-answer ${item.answers.length === 0 ? 'is-unanswered' : ''}`}
+              >
+                {item.answers.length > 0 ? item.answers.join(', ') : 'Unanswered'}
+              </span>
+            </div>
+          )}
+        </For>
+      </div>
+    </div>
   );
 }
 

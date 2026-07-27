@@ -11,6 +11,76 @@
   box-shadow: 0 4px 14px color-mix(in srgb, var(--color-vscode-widget-shadow) 22%, transparent);
 }
 
+.question-summary-card {
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 22%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--color-vscode-fg) 2%, transparent);
+}
+
+.question-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+}
+
+.question-summary-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-vscode-accent);
+}
+
+.question-summary-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-vscode-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.question-summary-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.question-summary-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.question-summary-item + .question-summary-item {
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 12%, transparent);
+}
+
+.question-summary-question {
+  min-width: 0;
+  color: var(--color-vscode-fg-soft);
+  overflow-wrap: anywhere;
+}
+
+.question-summary-answer {
+  max-width: min(45%, 260px);
+  color: var(--color-vscode-fg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.question-summary-answer.is-unanswered {
+  color: var(--color-vscode-fg-muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
 .question-prompt-header {
   display: flex;
   align-items: flex-start;
@@ -371,6 +441,16 @@ body.vscode-light .question-custom-input {
 }
 
 @media (max-width: 560px) {
+  .question-summary-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .question-summary-answer {
+    max-width: none;
+    text-align: left;
+  }
+
   .question-prompt-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
