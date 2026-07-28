@@ -43,6 +43,17 @@
   min-width: 0;
 }
 
+.chat-header-shared-marker {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+}
+
+.chat-header-shared-marker svg {
+  width: 12px;
+  height: 12px;
+}
+
 .chat-header-session-duration {
   font-size: 11px;
   font-weight: 400;

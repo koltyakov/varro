@@ -151,6 +151,8 @@ describe('ActiveChatHeader', () => {
         const feedback = document.body.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Share link copied');
       });
+      const sharedMarker = container.querySelector('[aria-label="Session is shared"]');
+      expect(sharedMarker?.getAttribute('title')).toBe('Session is shared');
     } finally {
       if (clipboardDescriptor) {
         Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);

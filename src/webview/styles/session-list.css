@@ -656,10 +656,21 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-item-pinned-marker {
   display: inline-flex;
   flex-shrink: 0;
-  color: var(--color-vscode-accent);
+  color: var(--color-vscode-muted);
 }
 
 .session-item-pinned-marker svg {
+  width: 12px;
+  height: 12px;
+}
+
+.session-item-shared-marker {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-vscode-muted);
+}
+
+.session-item-shared-marker svg {
   width: 12px;
   height: 12px;
 }

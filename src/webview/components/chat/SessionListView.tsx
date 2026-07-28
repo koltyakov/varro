@@ -50,6 +50,7 @@ import { compareSessionsByActivity } from '../../lib/session-order';
 import { shareSession, unshareSession } from '../../lib/session-sharing';
 import { writeClipboard } from '../../lib/write-clipboard';
 import { showSessionActionFeedback } from './SessionActionFeedback';
+import { SharedSessionIcon } from './SharedSessionIcon';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -1704,6 +1705,26 @@ function SessionListItem(props: {
             <span class="session-item-title-text">
               {normalizeSessionTitle(props.session.title) || 'Untitled'}
             </span>
+            <Show when={props.isPinned}>
+              <span
+                class="session-item-pinned-marker"
+                title="Pinned session"
+                aria-label="Pinned session"
+              >
+                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+                  <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
+                </svg>
+              </span>
+            </Show>
+            <Show when={props.session.share?.url}>
+              <span
+                class="session-item-shared-marker"
+                title="Session is shared"
+                aria-label="Session is shared"
+              >
+                <SharedSessionIcon />
+              </span>
+            </Show>
             <Show when={modelDetails()}>
               {(details) => (
                 <Show
@@ -1721,17 +1742,6 @@ function SessionListItem(props: {
                   )}
                 </Show>
               )}
-            </Show>
-            <Show when={props.isPinned}>
-              <span
-                class="session-item-pinned-marker"
-                title="Pinned session"
-                aria-label="Pinned session"
-              >
-                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
-                  <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
-                </svg>
-              </span>
             </Show>
           </span>
           <span class="session-item-meta session-item-stats-meta">

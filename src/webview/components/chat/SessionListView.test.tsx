@@ -841,6 +841,9 @@ describe('SessionListView actions', () => {
       );
       await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('https://share.test/1'));
       expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
+      expect(row.querySelector('.session-item-shared-marker')?.getAttribute('title')).toBe(
+        'Session is shared'
+      );
       await vi.waitFor(() => {
         const feedback = document.querySelector<HTMLElement>('.session-action-feedback');
         expect(feedback?.textContent?.trim()).toBe('Share link copied');
@@ -873,6 +876,7 @@ describe('SessionListView actions', () => {
         );
       });
       expect(appState.sessions[0]?.time.updated).toBe(activityUpdatedAt);
+      expect(row.querySelector('.session-item-shared-marker')).toBeNull();
       openSessionActions(row);
       const unsharedActions = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')

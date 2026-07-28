@@ -18,6 +18,7 @@ import {
 } from './HeaderBadges';
 import type { SessionListFilter } from './SessionListView';
 import { showSessionActionFeedback } from './SessionActionFeedback';
+import { SharedSessionIcon } from './SharedSessionIcon';
 
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
@@ -348,6 +349,15 @@ export function ActiveChatHeader(props: {
               <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
                 <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
               </svg>
+            </span>
+          </Show>
+          <Show when={getActiveSession()?.share?.url}>
+            <span
+              class="chat-header-shared-marker"
+              title="Session is shared"
+              aria-label="Session is shared"
+            >
+              <SharedSessionIcon />
             </span>
           </Show>
         </span>
