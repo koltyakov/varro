@@ -70,14 +70,25 @@ export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle 
   }
 }
 
-export function getFinalAssistantTextPartId(parts: Part[], isCompleted: boolean): string | null {
+export function getFinalAssistantTextPartId(
+  parts: Part[],
+  isCompleted: boolean,
+  textForPart?: (part: Part) => string | null
+): string | null {
   if (!isCompleted) return null;
 
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index]!;
-    if (!shouldShowAssistantPartInline(part, false)) continue;
+    const effectiveText = textForPart?.(part);
+    const effectivePart =
+      effectiveText !== null &&
+      effectiveText !== undefined &&
+      (part.type === 'text' || part.type === 'reasoning')
+        ? { ...part, text: effectiveText }
+        : part;
+    if (!shouldShowAssistantPartInline(effectivePart, false)) continue;
     if (part.type !== 'text') return null;
-    if (part.type === 'text' && part.text.trim().length > 0) return part.id;
+    return part.id;
   }
 
   return null;

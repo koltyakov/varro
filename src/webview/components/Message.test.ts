@@ -1175,6 +1175,24 @@ describe('Message streamed assistant text rendering', () => {
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
   });
 
+  it('marks completed text from the streaming buffer as the final answer', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-stream-final'),
+          parts: [textPart('text-1', '')],
+          streamingPartId: 'text-1',
+          streamingText: 'Implemented the fix.',
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    const finalItem = container?.querySelector('.assistant-message-flow-item-final');
+    expect(finalItem).toBeInstanceOf(HTMLDivElement);
+    expect(finalItem?.textContent).toContain('Implemented the fix.');
+  });
+
   it('hides compaction boundary hr markers from rendered streamed text', () => {
     cleanup = render(
       () =>

@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('context bar shows file with selection line range after context/update', async ({ page }) => {
+test('context bar keeps a selected line range on one line beside another attachment', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 474, height: 400 });
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
   await page.locator('[role="textbox"][aria-multiline="true"]').first().waitFor();
 
@@ -12,11 +15,11 @@ test('context bar shows file with selection line range after context/update', as
         payload: {
           workspacePath: '/workspace/varro',
           activeFile: {
-            path: '/workspace/varro/src/webview/lib/state.ts',
-            relativePath: 'src/webview/lib/state.ts',
+            path: '/workspace/varro/src/veryLongProductStatusesConfigurationFilename.ts',
+            relativePath: 'src/veryLongProductStatusesConfigurationFilename.ts',
             language: 'typescript',
           },
-          selection: { startLine: 10, endLine: 15 },
+          selection: { startLine: 9, endLine: 113 },
           diagnostics: [],
         },
       },
@@ -24,8 +27,30 @@ test('context bar shows file with selection line range after context/update', as
     );
   });
 
-  await expect(page.locator('[title*="L10-15"]')).toBeVisible();
-  await expect(page.getByText('state.ts')).toBeVisible();
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'files/dropped',
+        payload: [
+          { path: '/workspace/varro/image.png', relativePath: 'image.png', type: 'file' },
+        ],
+      },
+      '*'
+    );
+  });
+
+  const contextChip = page.locator('.chat-attachment-chip[title*="L9-113"]');
+  const lineRange = contextChip.locator('.chip-detail');
+  await expect(contextChip).toBeVisible();
+  await expect(page.getByText('veryLongProductStatusesConfigurationFilename.ts')).toBeVisible();
+  await expect(lineRange).toHaveText('L9-113');
+  expect(
+    await lineRange.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getClientRects().length;
+    })
+  ).toBe(1);
 });
 
 test('prompt body includes selection reference from active editor', async ({ page }) => {

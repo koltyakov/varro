@@ -28,9 +28,11 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   expect(overflowFade.overlayContent).toBe('none');
 
   const gaps = await getE2EState(page, () => {
-    const header = document.querySelector('.interactive-session > .chat-header') as HTMLElement | null;
+    const header = document.querySelector(
+      '.interactive-session > .chat-header'
+    ) as HTMLElement | null;
     const stickyElement = document.querySelector(
-      '.latest-user-message-sticky'
+      '.latest-user-message-sticky-overlay'
     ) as HTMLElement | null;
     const nextPromptElement = document.querySelector(
       '[data-msg-id="message-sticky-user-2"] .user-message-card'
@@ -55,4 +57,68 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
 
   await expect(sticky).toBeVisible();
   await expect(nextPrompt).toBeVisible();
+});
+
+test('sticky preview follows live prompt geometry when the assistant row grows', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  const nextPrompt = page.locator('[data-msg-id="message-sticky-user-2"] .user-message-card');
+
+  await page.locator('[data-msg-id="message-sticky-assistant-2"]').evaluate((row) => {
+    row.setAttribute('style', 'padding-bottom: 600px');
+  });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = Math.max(0, element.scrollTop - 100);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await list.evaluate((element) => {
+    const prompt = element.querySelector(
+      '[data-msg-id="message-sticky-user-2"] .user-message-card'
+    );
+    if (!prompt) throw new Error('Next prompt is not mounted');
+    element.scrollTop +=
+      prompt.getBoundingClientRect().top - element.getBoundingClientRect().top - 70;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await expect
+    .poll(() =>
+      nextPrompt.evaluate((prompt) => {
+        const scrollList = prompt.closest('.interactive-list');
+        if (!scrollList) throw new Error('Message list is missing');
+        return prompt.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+      })
+    )
+    .toBeCloseTo(70, 0);
+  await expect(sticky).toHaveCount(0);
+
+  await page.locator('[data-msg-id="message-sticky-assistant-1"]').evaluate((row) => {
+    row.setAttribute('style', 'padding-bottom: 220px');
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+
+  const promptTop = await nextPrompt.evaluate((prompt) => {
+    const scrollList = prompt.closest('.interactive-list');
+    if (!scrollList) throw new Error('Message list is missing');
+    return prompt.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+  });
+  expect(promptTop).toBeGreaterThan(200);
+  await expect(sticky).toBeVisible();
+  await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
 });

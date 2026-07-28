@@ -580,7 +580,9 @@ test.describe('diff preview anchoring', () => {
 });
 
 test.describe('sticky preview overlap', () => {
-  test('hides immediately when next user message reaches the sticky bottom', async ({ page }) => {
+  test('hides immediately when next user message reaches the painted sticky overlay', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
     const list = page.locator('.interactive-list');
     const sticky = page.locator('.latest-user-message-sticky');
@@ -593,7 +595,7 @@ test.describe('sticky preview overlap', () => {
     await expect(sticky).toBeVisible();
 
     const overlapDetected = await list.evaluate((element) => {
-      const stickyEl = document.querySelector('.latest-user-message-sticky');
+      const stickyEl = document.querySelector('.latest-user-message-sticky-overlay');
       const nextPrompt = document.querySelector(
         '[data-msg-id="message-sticky-user-2"] .user-message-card'
       );
@@ -604,7 +606,7 @@ test.describe('sticky preview overlap', () => {
         element.scrollTop += step;
         element.dispatchEvent(new Event('scroll'));
 
-        const currentStickyEl = document.querySelector('.latest-user-message-sticky');
+        const currentStickyEl = document.querySelector('.latest-user-message-sticky-overlay');
         const currentPromptEl = document.querySelector(
           '[data-msg-id="message-sticky-user-2"] .user-message-card'
         );

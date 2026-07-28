@@ -57,7 +57,6 @@ import {
   StickyUserMessagePreviewCard,
 } from './message-list/MessageListChrome';
 import {
-  getNextVisibleUserMessageTopMap,
   getStickyUserMessagePreview,
   isMessageHiddenBehindStickyPreview,
   shouldShowStickyUserMessagePreview,
@@ -223,10 +222,6 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
-  const [observedVisibleMessageVersion, setObservedVisibleMessageVersion] = createSignal(0);
-  const [observedFirstVisibleMessageId, setObservedFirstVisibleMessageId] = createSignal<
-    string | null
-  >(null);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
   const [stickyPreviewScrollTop, setStickyPreviewScrollTop] = createSignal(0);
@@ -293,38 +288,9 @@ export function MessageList() {
     });
   });
 
-  function recomputeObservedFirstVisibleMessageId() {
-    if (!containerRef || shouldVirtualize()) {
-      setObservedFirstVisibleMessageId(null);
-      return;
-    }
-
-    const currentViewportHeight = containerRef.clientHeight;
-    let nextMessageId: string | null = null;
-    let nextTop = Number.POSITIVE_INFINITY;
-    for (const [messageId, bounds] of observedVisibleMessageBounds) {
-      if (bounds.bottom <= 0 || bounds.top >= currentViewportHeight) continue;
-      if (bounds.top < nextTop) {
-        nextTop = bounds.top;
-        nextMessageId = messageId;
-      }
-    }
-    setObservedFirstVisibleMessageId(nextMessageId);
-  }
-
   function clearObservedVisibleMessages() {
-    if (observedVisibleMessageBounds.size > 0) {
-      setObservedVisibleMessageVersion((version) => version + 1);
-    }
     observedVisibleMessageBounds.clear();
-    setObservedFirstVisibleMessageId(null);
   }
-
-  const nextVisibleUserMessageTopByMessageId = createMemo(() => {
-    observedVisibleMessageVersion();
-    messageStructureVersion();
-    return untrack(() => getNextVisibleUserMessageTopMap(messages(), observedVisibleMessageBounds));
-  });
 
   function flushStickyPreviewViewportState() {
     stickyPreviewViewportStateScheduled = false;
@@ -733,6 +699,10 @@ export function MessageList() {
   }
 
   const stickyUserMessagePreviewCandidate = createMemo(() => {
+    // Sticky state must follow current painted geometry. IntersectionObserver bounds can remain
+    // stale while a fully visible prompt moves or an assistant row grows; measurementVersion also
+    // reruns this DOM pass for layout changes that happen without a scroll event.
+    measurementVersion();
     const throttledViewportHeight = stickyPreviewViewportHeight();
     const currentViewportHeight =
       throttledViewportHeight > 0 ? throttledViewportHeight : viewportHeight();
@@ -748,30 +718,32 @@ export function MessageList() {
         })
       : visibleRange();
     const containerRect = containerRef.getBoundingClientRect();
-    let firstVisibleMessageIndex = virtualized
-      ? getFirstVisibleMessageIndexFromVirtualMetrics({
-          metrics: virtualMetrics(),
-          scrollTop: currentScrollTop,
-        })
-      : null;
+    let firstVisibleMessageIndex: number | null = null;
 
-    if (firstVisibleMessageIndex === null) {
-      const firstVisibleMessageId = observedFirstVisibleMessageId();
-      if (firstVisibleMessageId) {
-        firstVisibleMessageIndex = messageIndexById().get(firstVisibleMessageId) ?? null;
-      } else {
-        const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
-        for (const row of rows) {
-          const rowId = row.dataset.msgId;
-          if (!rowId) continue;
-          const rowRect = row.getBoundingClientRect();
-          const rowTop = rowRect.top - containerRect.top;
-          const rowBottom = rowRect.bottom - containerRect.top;
-          if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
-          firstVisibleMessageIndex = messageIndexById().get(rowId) ?? null;
-          break;
-        }
-      }
+    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
+    for (const row of rows) {
+      const rowId = row.dataset.msgId;
+      if (!rowId) continue;
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = rowRect.top - containerRect.top;
+      const rowBottom = rowRect.bottom - containerRect.top;
+      if (rowBottom <= 0 || rowTop >= currentViewportHeight) continue;
+      const rowIndex = messageIndexById().get(rowId) ?? null;
+      firstVisibleMessageIndex =
+        rowIndex !== null &&
+        rowIndex > 0 &&
+        rowTop > 0 &&
+        messages()[rowIndex]?.info.role === 'user'
+          ? rowIndex - 1
+          : rowIndex;
+      break;
+    }
+
+    if (firstVisibleMessageIndex === null && virtualized) {
+      firstVisibleMessageIndex = getFirstVisibleMessageIndexFromVirtualMetrics({
+        metrics: virtualMetrics(),
+        scrollTop: currentScrollTop,
+      });
     }
 
     const visibleMessages = messages();
@@ -801,11 +773,7 @@ export function MessageList() {
 
     const previewElement = getStickyUserMessageSourceElement(preview.id);
     const rowRect = previewElement?.getBoundingClientRect();
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(
-      preview.id,
-      preview.index,
-      containerRect
-    );
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
     const stickyPreviewBounds =
       previousStickyPreviewId === preview.id
         ? (getStickyUserMessagePreviewBounds(containerRect) ?? previousStickyPreviewBounds)
@@ -1074,7 +1042,8 @@ export function MessageList() {
 
   function getStickyUserMessagePreviewBounds(containerRect: DOMRect) {
     if (!containerRef) return null;
-    const sticky = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky');
+    // The solid gap and fade paint below the card, so collision must use the whole overlay.
+    const sticky = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
     const stickyRect = sticky?.getBoundingClientRect();
     if (!stickyRect) return null;
 
@@ -1092,15 +1061,7 @@ export function MessageList() {
     return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
   }
 
-  function getStickyUserMessageNextUserMessageTop(
-    messageId: string,
-    messageIndex: number,
-    containerRect: DOMRect
-  ) {
-    if (firstVisibleMessageObserver && !shouldVirtualize()) {
-      return nextVisibleUserMessageTopByMessageId().get(messageId) ?? null;
-    }
-
+  function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
     if (!containerRef) return null;
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
@@ -1155,13 +1116,8 @@ export function MessageList() {
 
   function getNextUserMessageTopFromDOM(
     messageIndex: number,
-    containerRect: DOMRect,
-    messageId?: string
+    containerRect: DOMRect
   ): number | null {
-    if (firstVisibleMessageObserver && !shouldVirtualize() && messageId) {
-      return nextVisibleUserMessageTopByMessageId().get(messageId) ?? null;
-    }
-
     if (!containerRef) return null;
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
@@ -1187,11 +1143,7 @@ export function MessageList() {
     const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getNextUserMessageTopFromDOM(
-      preview.index,
-      containerRect,
-      preview.id
-    );
+    const nextUserMessageTop = getNextUserMessageTopFromDOM(preview.index, containerRect);
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -1617,6 +1569,8 @@ export function MessageList() {
     setStickyPreviewScrollTop(containerRef.scrollTop);
 
     if (typeof IntersectionObserver !== 'undefined') {
+      // These cached bounds are only a best-effort scroll anchor. Sticky selection and collision
+      // must read live DOM rects because observer thresholds do not report in-viewport movement.
       firstVisibleMessageObserver = new IntersectionObserver(
         (entries) => {
           if (!containerRef) return;
@@ -1635,8 +1589,6 @@ export function MessageList() {
               bottom: entry.boundingClientRect.bottom - rootBounds.top,
             });
           }
-          setObservedVisibleMessageVersion((version) => version + 1);
-          recomputeObservedFirstVisibleMessageId();
         },
         {
           root: containerRef,
@@ -1661,6 +1613,9 @@ export function MessageList() {
     lastAutoScrolledTrackHeight = lastTrackHeight;
     const observer = new ResizeObserver(() => {
       if (!containerRef) return;
+      // Below the virtualization threshold rows have no individual ResizeObserver. Invalidate the
+      // sticky DOM pass when the track changes so streamed assistant growth can reveal it again.
+      if (!shouldMeasureRows()) setMeasurementVersion((version) => version + 1);
       const currentContainerClientWidth = containerRef.clientWidth;
       // Chat text tracks --vscode-font-size, so a live font-size setting
       // change re-wraps every row without changing the container width.

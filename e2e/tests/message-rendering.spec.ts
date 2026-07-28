@@ -1,10 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('opens read mode for long assistant answers and preserves rendered content', async ({ page }) => {
+test('opens read mode for long assistant answers and preserves rendered content', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 
-  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Rendered message actions');
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText(
+    'Rendered message actions'
+  );
   await expect(page.getByRole('link', { name: 'release notes' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Copy code' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open read mode' })).toHaveCount(0);
@@ -26,7 +30,9 @@ test('opens read mode for long assistant answers and preserves rendered content'
 test('closes read mode with escape', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 
-  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Rendered message actions');
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText(
+    'Rendered message actions'
+  );
   await page.keyboard.down('Shift');
   await page.getByRole('button', { name: 'Open read mode' }).click();
   await page.keyboard.up('Shift');
@@ -39,6 +45,36 @@ test('closes read mode with escape', async ({ page }) => {
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
+test('keeps final-answer rails visible in virtualized transcripts', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+
+  const track = page.locator('.interactive-list-track');
+  await expect(track).toHaveClass(/virtualized/);
+
+  const finalRow = page.locator('[data-msg-id="message-large-assistant-239"]');
+  const ordinaryRow = page.locator('[data-msg-id="message-large-user-239"]');
+  const finalItem = finalRow.locator('.assistant-message-flow-item-final');
+  await expect(finalItem).toBeVisible();
+
+  const containment = await finalRow.evaluate((row) => getComputedStyle(row).contain);
+  const ordinaryContainment = await ordinaryRow.evaluate((row) => getComputedStyle(row).contain);
+  const rail = await finalItem.evaluate((item) => {
+    const style = getComputedStyle(item, '::before');
+    return {
+      content: style.content,
+      width: style.width,
+      backgroundColor: style.backgroundColor,
+    };
+  });
+
+  expect(containment).toContain('layout');
+  expect(containment).not.toBe('content');
+  expect(ordinaryContainment).toBe('content');
+  expect(rail.content).not.toBe('none');
+  expect(rail.width).toBe('1px');
+  expect(rail.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+});
+
 test('routes safe external markdown links through the extension bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=message-rendering');
 
@@ -47,9 +83,11 @@ test('routes safe external markdown links through the extension bridge', async (
   await expect
     .poll(() =>
       getE2EState(page, () => {
-        const value = (window as Window & {
-          __varroE2E?: { externalUrls?: string[] };
-        }).__varroE2E;
+        const value = (
+          window as Window & {
+            __varroE2E?: { externalUrls?: string[] };
+          }
+        ).__varroE2E;
         return value?.externalUrls || [];
       })
     )

@@ -107,6 +107,10 @@ export function shouldShowStickyUserMessagePreview(args: {
 
   const isPreviousPreview = args.previousPreviewId === preview.id;
 
+  // A mounted row reflects the current layout more accurately than a virtual range that may still
+  // be reconciling after scrolling or measurement updates.
+  if (args.rowBottom !== null && args.rowBottom !== undefined && args.rowBottom > 0) return false;
+
   if (args.shouldVirtualize && preview.index < args.visibleRange.start) {
     if (
       isPreviousPreview &&

@@ -26,6 +26,16 @@
   contain: layout style;
 }
 
+/* Final-answer rails paint into the track gutter, outside the row's paint box. */
+.interactive-list-track.virtualized
+  .interactive-item-container:has(
+    .assistant-turn-content-highlighted,
+    .assistant-turn-content-planning,
+    .assistant-message-flow-item-final
+  ) {
+  contain: layout style;
+}
+
 .interactive-item-container:has(.file-edit-more-menu) {
   position: relative;
   z-index: var(--z-chrome-cover);

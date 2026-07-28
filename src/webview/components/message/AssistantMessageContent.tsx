@@ -238,7 +238,7 @@ export function AssistantMessageContent(props: {
       : dedupedParts()
   );
   const finalTextPartId = createMemo(() =>
-    getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer)
+    getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer, props.textForPart)
   );
   const finalTextPart = createMemo(() => {
     const partId = finalTextPartId();

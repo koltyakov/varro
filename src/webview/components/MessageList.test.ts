@@ -65,6 +65,7 @@ import { client } from '../lib/client';
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+let originalIntersectionObserver: typeof globalThis.IntersectionObserver | undefined;
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
@@ -131,6 +132,40 @@ function installQueuedAnimationFrameMocks() {
         writable: true,
         value: originalWindowCancelAnimationFrame,
       });
+    },
+  };
+}
+
+function installControllableIntersectionObserver() {
+  let callback: IntersectionObserverCallback | undefined;
+  let observer: IntersectionObserver | undefined;
+
+  class TestIntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = '0px';
+    readonly thresholds = [0, 1];
+
+    constructor(nextCallback: IntersectionObserverCallback) {
+      callback = nextCallback;
+      observer = this as unknown as IntersectionObserver;
+    }
+
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  }
+
+  globalThis.IntersectionObserver = TestIntersectionObserver as typeof IntersectionObserver;
+
+  return {
+    emit(
+      entries: Array<Partial<IntersectionObserverEntry> & Pick<IntersectionObserverEntry, 'target'>>
+    ) {
+      if (!callback || !observer) throw new Error('IntersectionObserver was not created');
+      callback(entries as IntersectionObserverEntry[], observer);
     },
   };
 }
@@ -584,6 +619,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
+  originalIntersectionObserver = globalThis.IntersectionObserver;
   originalRequestAnimationFrame = globalThis.requestAnimationFrame;
   originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -626,6 +662,11 @@ afterEach(() => {
   stopLoading();
   resetMessageEditState();
   globalThis.ResizeObserver = originalResizeObserver;
+  if (originalIntersectionObserver) {
+    globalThis.IntersectionObserver = originalIntersectionObserver;
+  } else {
+    delete (globalThis as Partial<typeof globalThis>).IntersectionObserver;
+  }
   globalThis.requestAnimationFrame = originalRequestAnimationFrame;
   globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
   if (originalScrollIntoView) {
@@ -859,6 +900,19 @@ describe('shouldShowStickyUserMessagePreview', () => {
         visibleRange: { start: 0, end: 4 },
         rowTop: 120,
         rowBottom: 180,
+        viewportHeight: 500,
+      })
+    ).toBe(false);
+  });
+
+  it('trusts a mounted prompt over a stale virtual range', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        preview: { id: 'user-1', index: 2, text: 'Prompt' },
+        shouldVirtualize: true,
+        visibleRange: { start: 3, end: 8 },
+        rowTop: -20,
+        rowBottom: 32,
         viewportHeight: 500,
       })
     ).toBe(false);
@@ -2841,6 +2895,298 @@ describe('MessageList sticky prompt preview', () => {
       container?.querySelectorAll('.interactive-list-track .latest-user-message-sticky')
     ).toHaveLength(1);
     expect(container?.querySelector('.latest-user-message-sticky [data-msg-id]')).toBeNull();
+
+    animationFrames.restore();
+  });
+
+  it('uses mounted row geometry when virtual metrics point at a later turn', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 30 }, (_, turn) => [
+        {
+          info: userMessage(`user-${turn}`),
+          parts: [textPart(`user-text-${turn}`, `Prompt ${turn}`)],
+        },
+        {
+          info: assistantMessage(`assistant-${turn}`),
+          parts: [textPart(`assistant-text-${turn}`, `Response ${turn}`)],
+        },
+      ]).flat()
+    );
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-17') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-17') return new DOMRect(0, 20, 500, 160);
+      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Prompt 17');
+
+    animationFrames.restore();
+  });
+
+  it('keeps the previous sticky prompt while the next user row is lower in the viewport', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 30 }, (_, turn) => [
+        {
+          info: userMessage(`user-${turn}`),
+          parts: [textPart(`user-text-${turn}`, `Prompt ${turn}`)],
+        },
+        {
+          info: assistantMessage(`assistant-${turn}`),
+          parts: [textPart(`assistant-text-${turn}`, `Response ${turn}`)],
+        },
+      ]).flat()
+    );
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-20') return new DOMRect(0, 280, 500, 52);
+      if (this.dataset.msgId) return new DOMRect(0, -600, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, value: 9_600 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 6_400 });
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Prompt 19');
+
+    animationFrames.restore();
+  });
+
+  it('hides the previous sticky before the next user row enters its painted overlay', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let nextUserTop = 220;
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
+      }
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    expect(list).toBeInstanceOf(HTMLDivElement);
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list!, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
+
+    nextUserTop = 72;
+    list!.scrollTop = 1_348;
+    list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+
+    animationFrames.restore();
+  });
+
+  it('keeps the previous sticky when layout growth moves the next prompt below stale observer bounds', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const intersections = installControllableIntersectionObserver();
+    let nextUserTop = 220;
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
+      }
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const assistant1 = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+
+    const emitVisibleBounds = (observedUserTop: number) =>
+      intersections.emit([
+        {
+          target: assistant1,
+          isIntersecting: true,
+          rootBounds: new DOMRect(0, 0, 500, 500),
+          boundingClientRect: new DOMRect(0, 0, 500, 500),
+        },
+        {
+          target: user2,
+          isIntersecting: true,
+          rootBounds: new DOMRect(0, 0, 500, 500),
+          boundingClientRect: new DOMRect(0, observedUserTop, 500, 52),
+        },
+      ]);
+
+    emitVisibleBounds(220);
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
+
+    nextUserTop = 70;
+    emitVisibleBounds(70);
+    list.scrollTop = 1_350;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+
+    nextUserTop = 360;
+    list.scrollTop = 1_210;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
+
+    animationFrames.restore();
+  });
+
+  it('hides the previous sticky when the next prompt reaches it without a new observer callback', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const intersections = installControllableIntersectionObserver();
+    let nextUserTop = 220;
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.classList.contains('latest-user-message-sticky-overlay')) {
+        return new DOMRect(0, 10, 500, 74);
+      }
+      if (this.classList.contains('latest-user-message-sticky')) {
+        return new DOMRect(0, 10, 500, 50);
+      }
+
+      const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+      if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+      if (messageId === 'assistant-1') return new DOMRect(0, 0, 500, 500);
+      if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+      if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+      return new DOMRect(0, -600, 500, 40);
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const assistant1 = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+
+    intersections.emit([
+      {
+        target: assistant1,
+        isIntersecting: true,
+        rootBounds: new DOMRect(0, 0, 500, 500),
+        boundingClientRect: new DOMRect(0, 0, 500, 500),
+      },
+      {
+        target: user2,
+        isIntersecting: true,
+        rootBounds: new DOMRect(0, 0, 500, 500),
+        boundingClientRect: new DOMRect(0, 220, 500, 52),
+      },
+    ]);
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
+
+    nextUserTop = 70;
+    list.scrollTop = 1_350;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
 
     animationFrames.restore();
   });

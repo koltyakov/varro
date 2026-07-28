@@ -1799,6 +1799,8 @@
 .chat-attachment-chip .chip-detail {
   color: var(--color-vscode-muted);
   font-size: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .chat-attachment-chip .chip-remove {
