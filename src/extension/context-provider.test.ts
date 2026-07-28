@@ -61,6 +61,8 @@ const vscodeMock = vi.hoisted(() => ({
   workspace: {
     asRelativePath: vi.fn(),
     onDidChangeWorkspaceFolders: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidChangeTextDocument: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
+    onDidSaveTextDocument: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     onDidChangeConfiguration: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
     getConfiguration: vi.fn(() => ({ get: vi.fn((_key: string, fallback: boolean) => fallback) })),
     workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
@@ -951,6 +953,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
         activeFile: {
           path: '/repo/src/app.ts',
           relativePath: 'src/app.ts',
@@ -960,7 +963,9 @@ describe('ContextProvider', () => {
           startLine: 2,
           endLine: 4,
         },
+        editorText: null,
         diagnostics: [],
+        diagnosticsTotal: 0,
       });
     } finally {
       provider.dispose();
@@ -1015,6 +1020,7 @@ describe('ContextProvider', () => {
       expect(onChange).toHaveBeenCalledTimes(2);
       expect(onChange).toHaveBeenLastCalledWith({
         workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
         activeFile: {
           path: '/repo/src/app.ts',
           relativePath: 'src/app.ts',
@@ -1024,6 +1030,7 @@ describe('ContextProvider', () => {
           startLine: 3,
           endLine: 5,
         },
+        editorText: null,
         diagnostics: [
           {
             path: '/repo/src/app.ts',
@@ -1032,6 +1039,7 @@ describe('ContextProvider', () => {
             line: 7,
           },
         ],
+        diagnosticsTotal: 1,
       });
     } finally {
       provider.dispose();
@@ -1065,6 +1073,90 @@ describe('ContextProvider', () => {
             language: 'markdown',
           },
         })
+      );
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('captures selected text from a dirty editor instead of relying on disk content', () => {
+    const onChange = vi.fn();
+    const uri = {
+      fsPath: '/repo/src/app.ts',
+      scheme: 'file',
+      toString: () => 'file:///repo/src/app.ts',
+    };
+    vscodeMock.window.activeTextEditor = {
+      document: {
+        uri,
+        isUntitled: false,
+        isDirty: true,
+        languageId: 'typescript',
+        getText: vi.fn(() => 'const unsaved = true;'),
+      },
+      selection: {
+        isEmpty: false,
+        start: { line: 4 },
+        end: { line: 4 },
+        active: { line: 4 },
+      },
+    };
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(
+      vscodeMock.workspace.workspaceFolders[0]
+    );
+    vscodeMock.workspace.asRelativePath.mockReturnValue('src/app.ts');
+
+    const provider = new ContextProvider(onChange);
+    try {
+      expect(provider.context.editorText).toEqual({
+        kind: 'selection',
+        path: '/repo/src/app.ts',
+        relativePath: 'src/app.ts',
+        language: 'typescript',
+        range: { startLine: 5, endLine: 5 },
+        text: 'const unsaved = true;',
+        truncated: false,
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('persists an explicit workspace root and stops following the active editor root', async () => {
+    const workspaceState = { get: vi.fn(), update: vi.fn(() => Promise.resolve()) };
+    const first = { name: 'first', uri: { fsPath: '/first' } };
+    const second = { name: 'second', uri: { fsPath: '/second' } };
+    const uri = {
+      fsPath: '/first/app.ts',
+      scheme: 'file',
+      toString: () => 'file:///first/app.ts',
+    };
+    vscodeMock.workspace.workspaceFolders = [first, second];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(first);
+    vscodeMock.languages.getDiagnostics.mockReturnValue([
+      { severity: 0, message: 'first-root error', range: { start: { line: 1 } } },
+    ]);
+    vscodeMock.window.activeTextEditor = {
+      document: { uri, isUntitled: false, isDirty: false, languageId: 'typescript' },
+      selection: {
+        isEmpty: true,
+        start: { line: 0 },
+        end: { line: 0 },
+        active: { line: 0 },
+      },
+    };
+
+    const provider = new ContextProvider(vi.fn(), workspaceState);
+    try {
+      await provider.selectWorkspace('/second');
+
+      expect(provider.context.workspacePath).toBe('/second');
+      expect(provider.context.activeFile).toBeNull();
+      expect(provider.context.diagnostics).toEqual([]);
+      expect(workspaceState.update).toHaveBeenCalledWith(
+        'varro.selectedWorkspaceFolder',
+        '/second'
       );
     } finally {
       provider.dispose();

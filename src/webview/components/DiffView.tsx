@@ -2,6 +2,7 @@ import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } f
 import { postMessage } from '../lib/bridge';
 import { getLeafPathName } from '../lib/path-display';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
+import { state } from '../lib/state';
 import type { FileDiff } from '../types';
 import { renderHighlightedCodeHtml } from './MarkdownRenderer';
 
@@ -766,7 +767,15 @@ function DiffItem(props: {
   const openFile = () => {
     const path = file();
     if (!path) return;
-    postMessage({ type: 'vscode/open', payload: { path, kind: 'file', view: 'diff' } });
+    postMessage({
+      type: 'vscode/open',
+      payload: {
+        path,
+        kind: 'file',
+        view: 'diff',
+        ...(state.activeSessionId ? { sessionID: state.activeSessionId } : {}),
+      },
+    });
   };
 
   createEffect(() => {
@@ -777,9 +786,9 @@ function DiffItem(props: {
     renderedFile = nextFile;
     renderedStateKey = nextStateKey;
     if (itemChanged) {
-      const state = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
+      const previewState = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
       previewStateReady = !nextStateKey;
-      setExpanded(state?.expanded ?? false);
+      setExpanded(previewState?.expanded ?? false);
       return;
     }
     queueMicrotask(() => {
@@ -791,13 +800,13 @@ function DiffItem(props: {
     const viewport = viewportElement();
     const key = stateKey();
     if (!viewport) return;
-    const state = key ? getToolDiffPreviewState(key) : null;
+    const previewState = key ? getToolDiffPreviewState(key) : null;
 
     queueMicrotask(() => {
       if (viewport !== linesViewport || !viewport.isConnected) return;
-      if (state?.expanded) {
-        viewport.scrollTop = state.scrollTop;
-        viewport.scrollLeft = state.scrollLeft;
+      if (previewState?.expanded) {
+        viewport.scrollTop = previewState.scrollTop;
+        viewport.scrollLeft = previewState.scrollLeft;
       } else if (expanded()) {
         scrollToFirstChange();
       } else {

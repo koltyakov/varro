@@ -24,9 +24,11 @@ type RalphMessage = Extract<
 
 export interface MessageRouterCallbacks {
   ready(): Promise<void>;
+  updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
   setWebviewFocus(focused: boolean): void;
   setProviderWatchActive(active: boolean): void;
   requestContext(): void;
+  selectWorkspace(path: string): Promise<void>;
   refreshProviders(): Promise<void>;
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
@@ -59,6 +61,9 @@ export class MessageRouter {
         case 'ready':
           await this.handleReadyMessage();
           break;
+        case 'commands/state':
+          this.callbacks.updateCommandState(msg.payload.canAbort, msg.payload.canSwitchSessions);
+          break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);
           break;
@@ -67,6 +72,9 @@ export class MessageRouter {
           break;
         case 'context/request':
           this.handleContextRequestMessage();
+          break;
+        case 'workspace/select':
+          await this.callbacks.selectWorkspace(msg.payload.path);
           break;
         case 'providers/refresh':
           await this.handleProvidersRefreshMessage();

@@ -51,6 +51,8 @@ const mocks = vi.hoisted(() => ({
         dispose: vi.fn(),
       })),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+      registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       getWorkspaceFolder: vi.fn(() => undefined),
       getConfiguration: vi.fn(() => ({
         get: vi.fn((_key: string, fallback?: unknown) => fallback),
@@ -88,6 +90,10 @@ const mocks = vi.hoisted(() => ({
     Uri: {
       joinPath: vi.fn(() => ({ toString: () => 'vscode-resource://icon.png' })),
       file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
+      from: vi.fn((value: { scheme: string; path: string }) => ({
+        ...value,
+        toString: () => `${value.scheme}:${value.path}`,
+      })),
     },
   },
 }));

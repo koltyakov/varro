@@ -49,8 +49,9 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('varro.chat.newSession', () => {
+    vscode.commands.registerCommand('varro.chat.newSession', async () => {
       sidebar.postCommand('new-session');
+      await vscode.commands.executeCommand('workbench.view.extension.varro');
     }),
 
     vscode.commands.registerCommand('varro.chat.searchSessions', async () => {
@@ -64,16 +65,19 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('varro.chat.abort', () => {
+    vscode.commands.registerCommand('varro.chat.abort', async () => {
       sidebar.postCommand('abort');
+      await vscode.commands.executeCommand('workbench.view.extension.varro');
     }),
 
-    vscode.commands.registerCommand('varro.chat.previousSession', () => {
+    vscode.commands.registerCommand('varro.chat.previousSession', async () => {
       sidebar.switchSession('previous');
+      await vscode.commands.executeCommand('workbench.view.extension.varro');
     }),
 
-    vscode.commands.registerCommand('varro.chat.nextSession', () => {
+    vscode.commands.registerCommand('varro.chat.nextSession', async () => {
       sidebar.switchSession('next');
+      await vscode.commands.executeCommand('workbench.view.extension.varro');
     }),
 
     vscode.commands.registerCommand('varro.about', async () => {
@@ -117,7 +121,7 @@ export function registerCommands(
       try {
         await openAgentsFile(vscode.Uri.file(workspacePath));
         await vscode.commands.executeCommand('workbench.view.extension.varro');
-        sidebar.post({ type: 'command/new-session', payload: { prefill: '/init' } });
+        sidebar.postCommand('new-session', { prefill: '/init' });
         sidebar.requestInputFocus();
       } catch (err) {
         showAgentsFileError('project', err);

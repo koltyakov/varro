@@ -646,6 +646,36 @@ describe('webview message validation', () => {
     ).toBeNull();
   });
 
+  it('validates workspace selection, command state, and session diff identity', () => {
+    expect(
+      parseWebviewMessage({ type: 'workspace/select', payload: { path: '/repo/packages/app' } })
+    ).toEqual({ type: 'workspace/select', payload: { path: '/repo/packages/app' } });
+    expect(
+      parseWebviewMessage({
+        type: 'commands/state',
+        payload: { canAbort: true, canSwitchSessions: false },
+      })
+    ).toEqual({
+      type: 'commands/state',
+      payload: { canAbort: true, canSwitchSessions: false },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open',
+        payload: { path: 'src/app.ts', view: 'diff', sessionID: 'session-1' },
+      })
+    ).toEqual({
+      type: 'vscode/open',
+      payload: { path: 'src/app.ts', view: 'diff', sessionID: 'session-1' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'commands/state',
+        payload: { canAbort: 'yes', canSwitchSessions: false },
+      })
+    ).toBeNull();
+  });
+
   it('validates dropped-content encoding, declared sizes, and aggregate limits', () => {
     expect(
       parseWebviewMessage({

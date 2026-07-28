@@ -164,7 +164,12 @@ describe('ChangedFilesList', () => {
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: 'src/app.ts', kind: 'file', view: 'diff' },
+      payload: {
+        path: 'src/app.ts',
+        kind: 'file',
+        view: 'diff',
+        sessionID: 'session-1',
+      },
     });
   });
 

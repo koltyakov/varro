@@ -176,10 +176,7 @@ describe('AGENTS.md commands', () => {
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
       'workbench.view.extension.varro'
     );
-    expect(sidebar.post).toHaveBeenCalledWith({
-      type: 'command/new-session',
-      payload: { prefill: '/init' },
-    });
+    expect(sidebar.postCommand).toHaveBeenCalledWith('new-session', { prefill: '/init' });
     expect(sidebar.requestInputFocus).toHaveBeenCalledOnce();
   });
 

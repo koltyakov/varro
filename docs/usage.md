@@ -40,12 +40,16 @@ Varro can include more than the text in the composer.
 - Workspace path, sent as `[Working directory: ...]`
 - Active file, when `varro.context.autoAttachFile` is enabled
 - Current selection, when `varro.context.autoAttachSelection` is enabled
+- Unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection
 - Selected terminal text
+- Diagnostics from the active file when you explicitly attach current Problems from the composer toolbar
 - Explicitly attached files or folders
 - Explicit line ranges attached from the editor selection command
 - Pasted image attachments when the selected model supports vision
 
 The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
+
+In a multi-root workspace, use the working-directory picker in the composer toolbar to choose which root owns sessions and OpenCode requests. Varro remembers that root for the workspace instead of switching it when editor focus changes.
 
 When the active file is also attached explicitly, Varro avoids duplicating overlapping line ranges.
 
@@ -112,6 +116,7 @@ Sessions are filtered to the current workspace directory, then sorted by most re
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently until they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
+- Changed-file rows open the selected session's before/after snapshot in VS Code's native diff editor when OpenCode provides both sides, with the working-tree Git diff as a fallback.
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 
@@ -275,7 +280,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 Server:
 
 - `varro.server.autoStart` - auto-start `opencode serve` when Varro first needs it
-- `varro.server.port` - port used for the local OpenCode server (default `4096`)
+- `varro.server.port` - port used for the local OpenCode server (default `4096`); reload the VS Code window after changing it
 - `varro.server.command` - optional path to the OpenCode CLI executable
 - `varro.server.autoUpdate` - run OpenCode CLI updates in the background when Varro detects a newer version; failed background updates fall back to the normal upgrade prompt
 

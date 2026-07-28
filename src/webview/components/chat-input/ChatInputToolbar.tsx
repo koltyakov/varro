@@ -1,6 +1,10 @@
 import { Show } from 'solid-js';
 import type { Agent } from '../../types';
-import type { PermissionMode, ProviderLimitStatus } from '../../../shared/protocol';
+import type {
+  PermissionMode,
+  ProviderLimitStatus,
+  WorkspaceFolderContext,
+} from '../../../shared/protocol';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
@@ -13,6 +17,7 @@ import {
   PermissionModePicker,
   ProviderLimitChip,
   VariantPicker,
+  WorkspacePicker,
 } from './ToolbarPickers';
 
 type CurrentModelInfo = {
@@ -98,6 +103,9 @@ type ToolbarSharedProps = {
   onCompactSession: () => void;
   showAttachmentsControl: boolean;
   onAttach: () => void;
+  showDiagnosticsControl: boolean;
+  diagnosticsCount: number;
+  onAttachDiagnostics: () => void;
   showStopButton: boolean;
   onStop: () => void;
   showSendControl: boolean;
@@ -118,6 +126,13 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   toolbarLeftRef: (el: HTMLDivElement) => void;
   toolbarRightRef: (el: HTMLDivElement) => void;
   showLeftPopupState: boolean;
+  workspaceFolders: WorkspaceFolderContext[];
+  selectedWorkspacePath: string | null;
+  showWorkspacePicker: boolean;
+  workspaceButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  onToggleWorkspacePicker: () => void;
+  onSelectWorkspace: (path: string) => void;
 };
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
@@ -137,6 +152,18 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
         ref={props.toolbarLeftRef}
         class={`toolbar-left${props.showLeftPopupState ? ' showing-context-popup' : ''}`}
       >
+        <Show when={props.workspaceFolders.length > 1}>
+          <WorkspacePicker
+            buttonRef={props.workspaceButtonRef}
+            popoverRef={props.workspacePopoverRef}
+            folders={props.workspaceFolders}
+            selectedPath={props.selectedWorkspacePath}
+            showPicker={props.showWorkspacePicker}
+            onToggle={props.onToggleWorkspacePicker}
+            onSelect={props.onSelectWorkspace}
+          />
+        </Show>
+
         <Show when={props.agents.length > 0 && props.showAgentControl}>
           <AgentPicker
             buttonRef={props.agentButtonRef}
@@ -181,6 +208,17 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
       <div ref={props.toolbarRightRef} class="toolbar-right">
         <Show when={props.showAttachmentsControl}>
           <AttachButton onAttach={props.onAttach} />
+        </Show>
+
+        <Show when={props.showDiagnosticsControl}>
+          <button
+            class="toolbar-attach-button"
+            title={`Attach ${props.diagnosticsCount} current problem${props.diagnosticsCount === 1 ? '' : 's'}`}
+            aria-label="Attach current problems"
+            onClick={props.onAttachDiagnostics}
+          >
+            <span class="codicon codicon-warning" aria-hidden="true" />
+          </button>
         </Show>
 
         <Show when={props.showStopButton}>

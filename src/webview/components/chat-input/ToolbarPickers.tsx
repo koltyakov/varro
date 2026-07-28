@@ -1,6 +1,6 @@
 import { createEffect, For, onCleanup, Show } from 'solid-js';
 import type { Agent } from '../../types';
-import type { PermissionMode } from '../../../shared/protocol';
+import type { PermissionMode, WorkspaceFolderContext } from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { formatModelName } from '../../lib/format';
 import {
@@ -26,6 +26,53 @@ function PickerChevron() {
     >
       <path d="M4 6l4 4 4-4" />
     </svg>
+  );
+}
+
+export function WorkspacePicker(props: {
+  buttonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  popoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
+  folders: WorkspaceFolderContext[];
+  selectedPath: string | null;
+  showPicker: boolean;
+  onToggle: () => void;
+  onSelect: (path: string) => void;
+}) {
+  const selected = () => props.folders.find((folder) => folder.path === props.selectedPath);
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        ref={props.buttonRef}
+        class="toolbar-picker"
+        title={selected()?.path ?? 'Select workspace folder'}
+        aria-label="Select workspace folder"
+        onClick={props.onToggle}
+      >
+        <span class="codicon codicon-root-folder" aria-hidden="true" />
+        <span class="toolbar-picker-label">{selected()?.name ?? 'Workspace'}</span>
+        <PickerChevron />
+      </button>
+      <Show when={props.showPicker}>
+        <div ref={props.popoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+          <div class="toolbar-popover-header">Working directory</div>
+          <For each={props.folders}>
+            {(folder) => (
+              <button
+                class={`toolbar-popover-item ${folder.path === props.selectedPath ? 'selected' : ''}`}
+                title={folder.path}
+                onClick={() => props.onSelect(folder.path)}
+              >
+                <span class="codicon codicon-folder" aria-hidden="true" />
+                <span class="min-w-0">
+                  <span class="block truncate">{folder.name}</span>
+                  <span class="block truncate text-[10px] text-vscode-muted">{folder.path}</span>
+                </span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
   );
 }
 

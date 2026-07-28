@@ -13,7 +13,12 @@ import { permissionsStore } from '../../lib/stores/permissions-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
-import type { ClipboardImage, QueuedMessage, SelectedModel } from '../../lib/app-state-types';
+import type {
+  AttachedDiagnostics,
+  ClipboardImage,
+  QueuedMessage,
+  SelectedModel,
+} from '../../lib/app-state-types';
 import { postMessage } from '../../lib/bridge';
 import { getPromptTextForClipboardImages } from '../../lib/clipboard-images';
 import {
@@ -41,6 +46,7 @@ type ComposerState = {
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  attachedDiagnostics?: AttachedDiagnostics | null;
 };
 
 export type SessionSendBody = {
@@ -63,7 +69,7 @@ type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
-  'droppedFiles' | 'clipboardImages' | 'terminalSelection'
+  'droppedFiles' | 'clipboardImages' | 'terminalSelection' | 'attachedDiagnostics'
 >;
 
 type SessionSendOptions = SendFlowOptions & {
@@ -77,10 +83,12 @@ type CapturedComposerAttachments = {
     droppedFiles: DroppedFile[];
     clipboardImages: ClipboardImage[];
     terminalSelection: { text: string; terminalName: string } | null;
+    attachedDiagnostics?: AttachedDiagnostics | null;
   };
   droppedFileIdentities: Map<string, DroppedFile>;
   clipboardImageIdentities: Map<string, ClipboardImage>;
   terminalSelectionIdentity: { text: string; terminalName: string } | null;
+  attachedDiagnosticsIdentity: AttachedDiagnostics | null;
 };
 
 type StateBoundSendDependencies = {
@@ -149,7 +157,16 @@ export function buildSessionSendBody(
   const selection = composerState.editorContext.selection;
   const activeFile = composerState.editorContext.activeFile;
   const currentDocumentEnabled = isCurrentDocumentEnabled(sessionId);
-  if (activeFile && currentDocumentEnabled) {
+  const editorText = composerState.editorContext.editorText;
+  if (editorText && currentDocumentEnabled) {
+    const range = `lines ${editorText.range.startLine}-${editorText.range.endLine}`;
+    const source = editorText.kind === 'selection' ? 'Unsaved selection' : 'Unsaved buffer';
+    const truncation = editorText.truncated ? '; truncated' : '';
+    parts.push({
+      type: 'text',
+      text: `[${source} from ${editorText.relativePath} ${range}${truncation}]\n\`\`\`${editorText.language || 'text'}\n${editorText.text}\n\`\`\``,
+    });
+  } else if (activeFile && currentDocumentEnabled) {
     const activeFilePath = getAttachmentReference(
       { path: activeFile.path, type: 'file' },
       workspacePath
@@ -193,6 +210,19 @@ export function buildSessionSendBody(
     parts.push({
       type: 'text',
       text: `[Selection from terminal ${terminalSelection.terminalName}]\n\`\`\`text\n${terminalSelection.text}\n\`\`\``,
+    });
+  }
+
+  if (composerState.attachedDiagnostics) {
+    const attached = composerState.attachedDiagnostics;
+    const rows = attached.diagnostics.map((diagnostic) => {
+      const path = getWorkspaceRelativePath(diagnostic.path, workspacePath) ?? diagnostic.path;
+      const message = diagnostic.message.replace(/\s+/g, ' ').slice(0, 500);
+      return `${diagnostic.severity.toUpperCase()} ${path}:${diagnostic.line} - ${message}`;
+    });
+    parts.push({
+      type: 'text',
+      text: `[Attached diagnostics: ${attached.diagnostics.length} of ${attached.total}]\n${rows.join('\n')}`,
     });
   }
 
@@ -259,6 +289,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
   terminalSelection: { text: string; terminalName: string } | null;
+  attachedDiagnostics?: AttachedDiagnostics | null;
 }): QueuedAttachmentSnapshot {
   return {
     droppedFiles: composerState.droppedFiles.map((file) => ({
@@ -286,6 +317,16 @@ export function getQueuedAttachmentSnapshot(composerState: {
           terminalName: composerState.terminalSelection.terminalName,
         }
       : null,
+    ...(composerState.attachedDiagnostics
+      ? {
+          attachedDiagnostics: {
+            diagnostics: composerState.attachedDiagnostics.diagnostics.map((diagnostic) => ({
+              ...diagnostic,
+            })),
+            total: composerState.attachedDiagnostics.total,
+          },
+        }
+      : {}),
   };
 }
 
@@ -295,22 +336,28 @@ function captureComposerAttachments(
   const liveDroppedFiles = [...appStore.state.droppedFiles];
   const liveClipboardImages = [...appStore.state.clipboardImages];
   const liveTerminalSelection = appStore.state.terminalSelection;
+  const liveAttachedDiagnostics = appStore.state.attachedDiagnostics;
   const source = queuedAttachments
     ? {
         droppedFiles: queuedAttachments.droppedFiles ?? [],
         clipboardImages: queuedAttachments.clipboardImages ?? [],
         terminalSelection: queuedAttachments.terminalSelection ?? null,
+        attachedDiagnostics: queuedAttachments.attachedDiagnostics ?? null,
       }
     : {
         droppedFiles: liveDroppedFiles,
         clipboardImages: liveClipboardImages,
         terminalSelection: liveTerminalSelection,
+        attachedDiagnostics: liveAttachedDiagnostics,
       };
   const queuedSnapshot = getQueuedAttachmentSnapshot(source);
   const snapshot = {
     droppedFiles: queuedSnapshot.droppedFiles ?? [],
     clipboardImages: queuedSnapshot.clipboardImages ?? [],
     terminalSelection: queuedSnapshot.terminalSelection ?? null,
+    ...(queuedSnapshot.attachedDiagnostics
+      ? { attachedDiagnostics: queuedSnapshot.attachedDiagnostics }
+      : {}),
   };
   const droppedFileIdentities = new Map<string, DroppedFile>();
   for (const sent of snapshot.droppedFiles) {
@@ -336,6 +383,12 @@ function captureComposerAttachments(
       liveTerminalSelection &&
       areTerminalSelectionsEqual(snapshot.terminalSelection, liveTerminalSelection)
         ? liveTerminalSelection
+        : null,
+    attachedDiagnosticsIdentity:
+      snapshot.attachedDiagnostics &&
+      liveAttachedDiagnostics &&
+      areAttachedDiagnosticsEqual(snapshot.attachedDiagnostics, liveAttachedDiagnostics)
+        ? liveAttachedDiagnostics
         : null,
   };
 }
@@ -373,6 +426,14 @@ function clearCapturedComposerAttachments(captured: CapturedComposerAttachments)
     currentTerminalSelection === captured.terminalSelectionIdentity &&
     areTerminalSelectionsEqual(currentTerminalSelection, captured.snapshot.terminalSelection);
   if (terminalSelectionCleared) composerStore.clearTerminalSelection();
+  const currentAttachedDiagnostics = appStore.state.attachedDiagnostics;
+  if (
+    captured.snapshot.attachedDiagnostics &&
+    currentAttachedDiagnostics === captured.attachedDiagnosticsIdentity &&
+    areAttachedDiagnosticsEqual(currentAttachedDiagnostics, captured.snapshot.attachedDiagnostics)
+  ) {
+    composerStore.clearAttachedDiagnostics();
+  }
 
   if (removedFilePaths.length > 0) {
     if (appStore.state.droppedFiles.length === 0) {
@@ -426,6 +487,13 @@ function areTerminalSelectionsEqual(
   right: { text: string; terminalName: string } | null
 ) {
   return !!left && !!right && left.text === right.text && left.terminalName === right.terminalName;
+}
+
+function areAttachedDiagnosticsEqual(
+  left: AttachedDiagnostics | null,
+  right: AttachedDiagnostics | null
+) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export class SessionSendOperations {

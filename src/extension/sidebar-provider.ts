@@ -22,6 +22,7 @@ import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
 import { SessionExportService } from './session-export-service';
+import { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import { SessionStateManager } from './session-state-manager';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
@@ -58,6 +59,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly serverEventBridge: ServerEventBridge;
   private readonly droppedFilesService: DroppedFilesService;
   private readonly providerFileRefresh: ProviderFileRefreshController;
+  private readonly sessionDiffProvider: SessionDiffDocumentProvider;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -122,6 +124,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
     this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
+    this.sessionDiffProvider = new SessionDiffDocumentProvider(server);
     this.runtime = new SidebarProviderRuntime(
       server,
       this.sessionState,
@@ -215,11 +218,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         extensionId: this.extensionId,
         webviewSession: {
           setFocus: (focused) => this.webviewSession.setFocus(focused),
+          updateCommandState: (canAbort, canSwitchSessions) =>
+            this.webviewSession.updateCommandState(canAbort, canSwitchSessions),
         },
         setProviderWatchActive: (active) => this.setProviderWatchActive(active),
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
+        sessionDiffProvider: this.sessionDiffProvider,
         refreshProviders: () => this.refreshProviderState(),
         postContext: () => this.postContext(),
         postTerminalSelection: (selection) => this.postTerminalSelection(selection),
@@ -304,12 +310,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'terminal-selection/update', payload: selection });
   }
 
-  postCommand(cmd: 'new-session' | 'abort') {
-    this.post({ type: `command/${cmd}` } as ExtensionMessage);
+  postCommand(cmd: 'new-session' | 'abort', payload?: { prefill: string }) {
+    this.webviewSession.queueCommand(
+      cmd === 'new-session'
+        ? { type: 'command/new-session', ...(payload ? { payload } : {}) }
+        : { type: 'command/abort' }
+    );
   }
 
   switchSession(direction: 'previous' | 'next') {
-    this.post({ type: 'command/switch-session', payload: { direction } });
+    this.webviewSession.queueCommand({
+      type: 'command/switch-session',
+      payload: { direction },
+    });
   }
 
   requestInputFocus() {
@@ -341,6 +354,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.windowStateDisposable.dispose();
     this.providerFileRefresh.dispose();
     this.fileSearch.dispose();
+    this.sessionDiffProvider.dispose();
     await this.droppedFilesService.dispose();
   }
 

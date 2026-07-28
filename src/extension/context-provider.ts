@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'path';
-import type { EditorContext } from '../shared/protocol';
+import type { EditorContext, EditorTextContext } from '../shared/protocol';
 import { logger } from './logger';
 import {
   getRelativePath,
@@ -22,6 +22,10 @@ export type WorkspaceResolutionOptions = {
 };
 
 export class ContextProvider implements vscode.Disposable {
+  private static readonly SELECTED_WORKSPACE_KEY = 'varro.selectedWorkspaceFolder';
+  private static readonly MAX_SELECTION_CHARACTERS = 32 * 1024;
+  private static readonly MAX_DIRTY_BUFFER_CHARACTERS = 16 * 1024;
+  private static readonly MAX_DIRTY_BUFFER_LINES = 300;
   private static readonly TERMINAL_COPY_DELAY_MS = 40;
   private static readonly TERMINAL_COPY_MAX_ATTEMPTS = 5;
   private static readonly TERMINAL_COPY_TIMEOUT_MS = 1500;
@@ -33,9 +37,12 @@ export class ContextProvider implements vscode.Disposable {
   private activeEditorSettleTimer: ReturnType<typeof setTimeout> | null = null;
   private _context: EditorContext = {
     workspacePath: null,
+    workspaceFolders: [],
     activeFile: null,
     selection: null,
+    editorText: null,
     diagnostics: [],
+    diagnosticsTotal: 0,
   };
   private _terminalSelection: { text: string; terminalName: string } | null = null;
   private terminalCaptureQueue: Promise<void> = Promise.resolve();
@@ -44,13 +51,25 @@ export class ContextProvider implements vscode.Disposable {
   private _lastEmittedContextSnapshot: EditorContext | null = null;
   private _lastDiagnosticsSourceKey: string | null = null;
   private onChange: (ctx: EditorContext) => void;
+  private selectedWorkspacePath: string | null;
 
-  constructor(onChange: (ctx: EditorContext) => void) {
+  constructor(
+    onChange: (ctx: EditorContext) => void,
+    private readonly workspaceState?: Pick<vscode.Memento, 'get' | 'update'>
+  ) {
     this.onChange = onChange;
+    this.selectedWorkspacePath =
+      workspaceState?.get<string>(ContextProvider.SELECTED_WORKSPACE_KEY) ?? null;
 
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.update()),
       vscode.window.onDidChangeTextEditorSelection(() => this.debouncedUpdate()),
+      vscode.workspace.onDidChangeTextDocument((event) => {
+        if (event.document === vscode.window.activeTextEditor?.document) this.debouncedUpdate();
+      }),
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        if (document === vscode.window.activeTextEditor?.document) this.update();
+      }),
       vscode.languages.onDidChangeDiagnostics((event) => {
         const activeUri = vscode.window.activeTextEditor?.document.uri;
         if (!activeUri || event.uris.some((uri) => uri.toString() === activeUri.toString())) {
@@ -74,6 +93,17 @@ export class ContextProvider implements vscode.Disposable {
 
   get terminalSelection() {
     return this._terminalSelection;
+  }
+
+  async selectWorkspace(path: string) {
+    const folder = vscode.workspace.workspaceFolders?.find((item) => item.uri.fsPath === path);
+    if (!folder) throw new Error('Selected workspace folder is not open');
+    this.selectedWorkspacePath = folder.uri.fsPath;
+    await this.workspaceState?.update(
+      ContextProvider.SELECTED_WORKSPACE_KEY,
+      this.selectedWorkspacePath
+    );
+    this.update();
   }
 
   /**
@@ -290,6 +320,10 @@ export class ContextProvider implements vscode.Disposable {
     }
 
     this._context.workspacePath = this.getPreferredWorkspacePath();
+    this._context.workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
+      name: folder.name,
+      path: folder.uri.fsPath,
+    }));
     const config = getContextConfig();
 
     const editor = vscode.window.activeTextEditor;
@@ -302,6 +336,7 @@ export class ContextProvider implements vscode.Disposable {
         }
         this._context.activeFile = null;
         this._context.selection = null;
+        this._context.editorText = null;
         if (!this.captureContextSnapshot()) return;
         this.refreshDiagnosticsIfNeeded();
       }, ContextProvider.ACTIVE_EDITOR_SETTLE_DELAY_MS);
@@ -311,13 +346,20 @@ export class ContextProvider implements vscode.Disposable {
     const doc = editor.document;
     if (doc.isUntitled || doc.uri.scheme === 'untitled') {
       this._context.activeFile = null;
-      this._context.selection = null;
+      const selection = editor.selection;
+      this._context.selection =
+        config.autoAttachSelection && !selection.isEmpty
+          ? { startLine: selection.start.line + 1, endLine: selection.end.line + 1 }
+          : null;
+      this._context.editorText = this.createEditorTextContext(editor, null, doc.fileName);
       if (!this.captureContextSnapshot()) return;
       this.refreshDiagnosticsIfNeeded();
       return;
     }
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
+    const belongsToSelectedWorkspace =
+      !this.selectedWorkspacePath || workspaceFolder?.uri.fsPath === this.selectedWorkspacePath;
     // For files outside any workspace folder we surface the absolute fsPath
     // as `relativePath` so that downstream consumers (e.g. Ralph plan input)
     // receive a path that ContextProvider.readFile can resolve. Display sites
@@ -326,16 +368,17 @@ export class ContextProvider implements vscode.Disposable {
       ? getRelativePath(doc.uri, workspaceFolder)
       : doc.uri.fsPath;
 
-    this._context.activeFile = config.autoAttachFile
-      ? {
-          path: doc.uri.fsPath,
-          relativePath,
-          language: doc.languageId,
-        }
-      : null;
+    this._context.activeFile =
+      config.autoAttachFile && belongsToSelectedWorkspace
+        ? {
+            path: doc.uri.fsPath,
+            relativePath,
+            language: doc.languageId,
+          }
+        : null;
 
     const selection = editor.selection;
-    if (config.autoAttachSelection && !selection.isEmpty) {
+    if (config.autoAttachSelection && !selection.isEmpty && belongsToSelectedWorkspace) {
       this._context.selection = {
         startLine: selection.start.line + 1,
         endLine: selection.end.line + 1,
@@ -343,6 +386,9 @@ export class ContextProvider implements vscode.Disposable {
     } else {
       this._context.selection = null;
     }
+    this._context.editorText = belongsToSelectedWorkspace
+      ? this.createEditorTextContext(editor, doc.uri.fsPath, relativePath)
+      : null;
 
     if (!this.captureContextSnapshot()) return;
 
@@ -365,11 +411,21 @@ export class ContextProvider implements vscode.Disposable {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       this._context.diagnostics = [];
+      this._context.diagnosticsTotal = 0;
+      this.emitContextIfChanged();
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+    if (this.selectedWorkspacePath && workspaceFolder?.uri.fsPath !== this.selectedWorkspacePath) {
+      this._context.diagnostics = [];
+      this._context.diagnosticsTotal = 0;
       this.emitContextIfChanged();
       return;
     }
 
     const diags = vscode.languages.getDiagnostics(editor.document.uri);
+    this._context.diagnosticsTotal = diags.length;
     this._context.diagnostics = diags.slice(0, 20).map((d) => ({
       path: editor.document.uri.fsPath,
       severity:
@@ -398,6 +454,7 @@ export class ContextProvider implements vscode.Disposable {
     const activeFile = this._context.activeFile;
     return {
       workspacePath: this._context.workspacePath,
+      workspaceFolders: this._context.workspaceFolders?.map((folder) => ({ ...folder })),
       activeFile: activeFile
         ? {
             path: activeFile.path,
@@ -411,11 +468,13 @@ export class ContextProvider implements vscode.Disposable {
             endLine: this._context.selection.endLine,
           }
         : null,
+      editorText: this._context.editorText ? { ...this._context.editorText } : null,
     };
   }
 
   private getDiagnosticsSourceKey() {
-    return vscode.window.activeTextEditor?.document.uri.toString() || null;
+    const uri = vscode.window.activeTextEditor?.document.uri.toString();
+    return uri ? `${this._context.workspacePath ?? ''}:${uri}` : null;
   }
 
   private emitContextIfChanged() {
@@ -606,12 +665,69 @@ export class ContextProvider implements vscode.Disposable {
   }
 
   private getPreferredWorkspacePath(): string | null {
+    if (this.selectedWorkspacePath) {
+      const selectedFolder = vscode.workspace.workspaceFolders?.find(
+        (folder) => folder.uri.fsPath === this.selectedWorkspacePath
+      );
+      if (selectedFolder) return selectedFolder.uri.fsPath;
+      this.selectedWorkspacePath = null;
+      void this.workspaceState?.update(ContextProvider.SELECTED_WORKSPACE_KEY, undefined);
+    }
     const activeUri = vscode.window.activeTextEditor?.document.uri;
     const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
     if (activeFolder) return activeFolder.uri.fsPath;
 
     const fallbackFolder = vscode.workspace.workspaceFolders?.[0];
     return fallbackFolder?.uri.fsPath || null;
+  }
+
+  private createEditorTextContext(
+    editor: vscode.TextEditor,
+    path: string | null,
+    relativePath: string
+  ): EditorTextContext | null {
+    const { document, selection } = editor;
+    const config = getContextConfig();
+    if (
+      config.autoAttachSelection &&
+      !selection.isEmpty &&
+      (document.isDirty || document.isUntitled)
+    ) {
+      const text = document.getText(selection);
+      const truncated = text.length > ContextProvider.MAX_SELECTION_CHARACTERS;
+      return {
+        kind: 'selection',
+        path,
+        relativePath,
+        language: document.languageId,
+        range: { startLine: selection.start.line + 1, endLine: selection.end.line + 1 },
+        text: text.slice(0, ContextProvider.MAX_SELECTION_CHARACTERS),
+        truncated,
+      };
+    }
+    if (!document.isDirty || !config.autoAttachFile || !path) return null;
+
+    const halfWindow = Math.floor(ContextProvider.MAX_DIRTY_BUFFER_LINES / 2);
+    const startLine = Math.max(0, selection.active.line - halfWindow);
+    const endLine = Math.min(
+      document.lineCount - 1,
+      startLine + ContextProvider.MAX_DIRTY_BUFFER_LINES - 1
+    );
+    const range = new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+    const text = document.getText(range);
+    const truncated =
+      startLine > 0 ||
+      endLine < document.lineCount - 1 ||
+      text.length > ContextProvider.MAX_DIRTY_BUFFER_CHARACTERS;
+    return {
+      kind: 'dirty-buffer',
+      path,
+      relativePath,
+      language: document.languageId,
+      range: { startLine: startLine + 1, endLine: endLine + 1 },
+      text: text.slice(0, ContextProvider.MAX_DIRTY_BUFFER_CHARACTERS),
+      truncated,
+    };
   }
 }
 
@@ -677,21 +793,29 @@ async function resolveInsideWorkspace(
   }
 }
 
-type ContextSnapshot = Pick<EditorContext, 'workspacePath' | 'activeFile' | 'selection'>;
+type ContextSnapshot = Pick<
+  EditorContext,
+  'workspacePath' | 'workspaceFolders' | 'activeFile' | 'selection' | 'editorText'
+>;
 
 function areContextSnapshotsEqual(a: ContextSnapshot | null, b: ContextSnapshot | null) {
   return (
     a?.workspacePath === b?.workspacePath &&
+    JSON.stringify(a?.workspaceFolders ?? []) === JSON.stringify(b?.workspaceFolders ?? []) &&
     areActiveFilesEqual(a?.activeFile ?? null, b?.activeFile ?? null) &&
-    areSelectionsEqual(a?.selection ?? null, b?.selection ?? null)
+    areSelectionsEqual(a?.selection ?? null, b?.selection ?? null) &&
+    areEditorTextContextsEqual(a?.editorText ?? null, b?.editorText ?? null)
   );
 }
 
 function areEditorContextsEqual(a: EditorContext, b: EditorContext | null) {
   return (
     a.workspacePath === b?.workspacePath &&
+    JSON.stringify(a.workspaceFolders ?? []) === JSON.stringify(b?.workspaceFolders ?? []) &&
     areActiveFilesEqual(a.activeFile, b?.activeFile ?? null) &&
     areSelectionsEqual(a.selection, b?.selection ?? null) &&
+    areEditorTextContextsEqual(a.editorText ?? null, b?.editorText ?? null) &&
+    a.diagnosticsTotal === b?.diagnosticsTotal &&
     areDiagnosticsEqual(a.diagnostics, b?.diagnostics ?? null)
   );
 }
@@ -702,6 +826,13 @@ function areActiveFilesEqual(a: EditorContext['activeFile'], b: EditorContext['a
 
 function areSelectionsEqual(a: EditorContext['selection'], b: EditorContext['selection']) {
   return a?.startLine === b?.startLine && a?.endLine === b?.endLine;
+}
+
+function areEditorTextContextsEqual(
+  a: EditorContext['editorText'],
+  b: EditorContext['editorText']
+) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
 function areDiagnosticsEqual(
@@ -729,9 +860,12 @@ function areDiagnosticsEqual(
 function cloneEditorContext(context: EditorContext): EditorContext {
   return {
     workspacePath: context.workspacePath,
+    workspaceFolders: context.workspaceFolders?.map((folder) => ({ ...folder })),
     activeFile: context.activeFile ? { ...context.activeFile } : null,
     selection: context.selection ? { ...context.selection } : null,
+    editorText: context.editorText ? { ...context.editorText } : null,
     diagnostics: context.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    diagnosticsTotal: context.diagnosticsTotal,
   };
 }
 

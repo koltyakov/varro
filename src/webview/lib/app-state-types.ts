@@ -1,4 +1,4 @@
-import type { DroppedFile } from '../../shared/protocol';
+import type { DroppedFile, EditorDiagnostic } from '../../shared/protocol';
 
 export type SelectedModel = { providerID: string; modelID: string; variant?: string };
 export type ModelVariantSelections = Record<string, string>;
@@ -14,6 +14,12 @@ export interface QueuedMessage {
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];
   terminalSelection?: { text: string; terminalName: string } | null;
+  attachedDiagnostics?: AttachedDiagnostics | null;
+}
+
+export interface AttachedDiagnostics {
+  diagnostics: EditorDiagnostic[];
+  total: number;
 }
 
 export interface ClipboardImage {

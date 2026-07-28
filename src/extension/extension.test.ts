@@ -8,6 +8,7 @@ const {
   getMock,
   onDidChangeConfigurationMock,
   registerWebviewViewProviderMock,
+  showInformationMessageMock,
   sweepStaleInjectedConfigDirectoriesMock,
 } = vi.hoisted(() => ({
   executeCommandMock: vi.fn(() => Promise.resolve()),
@@ -33,6 +34,7 @@ const {
   }),
   onDidChangeConfigurationMock: vi.fn((_listener: ConfigChangeListener) => ({ dispose: vi.fn() })),
   registerWebviewViewProviderMock: vi.fn(() => ({ dispose: vi.fn() })),
+  showInformationMessageMock: vi.fn(() => Promise.resolve('Reload Window')),
   sweepStaleInjectedConfigDirectoriesMock: vi.fn(() => Promise.resolve()),
 }));
 
@@ -92,6 +94,7 @@ vi.mock('vscode', () => ({
   },
   window: {
     registerWebviewViewProvider: registerWebviewViewProviderMock,
+    showInformationMessage: showInformationMessageMock,
   },
   commands: {
     executeCommand: executeCommandMock,
@@ -226,6 +229,29 @@ describe('extension activation', () => {
       autoStart: true,
       command: '',
     });
+  });
+
+  it('offers to reload the window when the configured server port changes', async () => {
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.server.port',
+    });
+    await Promise.resolve();
+
+    expect(showInformationMessageMock).toHaveBeenCalledWith(
+      'Reload VS Code to apply the new Varro server port.',
+      'Reload Window'
+    );
+    expect(executeCommandMock).toHaveBeenCalledWith('workbench.action.reloadWindow');
   });
 
   it('uses a less aggressive reserved token default', async () => {

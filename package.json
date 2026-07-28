@@ -107,15 +107,18 @@
       },
       {
         "command": "varro.chat.abort",
-        "title": "Varro: Abort Session"
+        "title": "Varro: Abort Session",
+        "enablement": "varro:canAbortSession"
       },
       {
         "command": "varro.chat.previousSession",
-        "title": "Varro: Previous Session"
+        "title": "Varro: Previous Session",
+        "enablement": "varro:canSwitchSessions"
       },
       {
         "command": "varro.chat.nextSession",
-        "title": "Varro: Next Session"
+        "title": "Varro: Next Session",
+        "enablement": "varro:canSwitchSessions"
       },
       {
         "command": "varro.server.restart",
@@ -216,7 +219,7 @@
         "varro.server.port": {
           "type": "number",
           "default": 4096,
-          "description": "Port for the OpenCode server"
+          "markdownDescription": "Port for the OpenCode server. Reload the VS Code window after changing this setting."
         },
         "varro.server.command": {
           "type": "string",

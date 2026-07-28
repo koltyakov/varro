@@ -8,6 +8,7 @@ import { AttachmentChip } from './AttachmentChip';
 type AttachmentStripItem =
   | { type: 'active-context'; value: ActiveContextAttachment }
   | { type: 'terminal-selection'; value: TerminalSelectionAttachment }
+  | { type: 'diagnostics'; value: { count: number; total: number } }
   | { type: 'file'; value: DroppedFile }
   | { type: 'clipboard-image'; value: ClipboardImage };
 
@@ -25,11 +26,13 @@ export function AttachmentStrip(props: {
   activeContextEnabled: boolean;
   activeContextTitle: string | null;
   terminalSelection: TerminalSelectionAttachment | null;
+  diagnostics: { count: number; total: number } | null;
   files: DroppedFile[];
   clipboardImages: ClipboardImage[];
   clipboardImagesDisabled: boolean;
   onToggleActiveContext: () => void;
   onClearTerminalSelection: () => void;
+  onClearDiagnostics: () => void;
   onRemoveFile: (path: string) => void;
   onRemoveClipboardImage: (id: string) => void;
   onOpenFile?: (file: DroppedFile) => void;
@@ -43,6 +46,7 @@ export function AttachmentStrip(props: {
       ...(props.terminalSelection
         ? [{ type: 'terminal-selection' as const, value: props.terminalSelection }]
         : []),
+      ...(props.diagnostics ? [{ type: 'diagnostics' as const, value: props.diagnostics }] : []),
       ...props.files.map((file) => ({ type: 'file' as const, value: file })),
       ...props.clipboardImages.map((image) => ({ type: 'clipboard-image' as const, value: image })),
     ].toSorted((a, b) => getAttachmentSequence(a) - getAttachmentSequence(b));
@@ -72,6 +76,18 @@ export function AttachmentStrip(props: {
                 icon="terminal"
                 title={`Terminal: ${item.value.terminalName}`}
                 onRemove={props.onClearTerminalSelection}
+              />
+            );
+          }
+
+          if (item.type === 'diagnostics') {
+            return (
+              <AttachmentChip
+                label="Problems"
+                detail={`${item.value.count}${item.value.total > item.value.count ? ` of ${item.value.total}` : ''}`}
+                icon="warning"
+                title={`${item.value.count} attached diagnostics`}
+                onRemove={props.onClearDiagnostics}
               />
             );
           }
@@ -120,6 +136,8 @@ function getAttachmentSequence(item: AttachmentStripItem) {
       return -2;
     case 'terminal-selection':
       return -1;
+    case 'diagnostics':
+      return 0;
     case 'file':
       return item.value.attachmentSequence ?? Number.MAX_SAFE_INTEGER;
     case 'clipboard-image':

@@ -77,6 +77,8 @@ interface RalphContentBudget {
 
 const WEBVIEW_MESSAGE_TYPES = {
   'context/request': true,
+  'workspace/select': true,
+  'commands/state': true,
   'webview/focus': true,
   'providers/watch': true,
   'providers/refresh': true,
@@ -127,6 +129,26 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const sessionId = getBoundedString(payload?.sessionId, 512);
       return sessionId ? { type, payload: { sessionId } } : null;
+    }
+
+    case 'workspace/select': {
+      const payload = asRecord(message?.payload);
+      const path = getBoundedString(payload?.path, MAX_PATH_LENGTH);
+      return path ? { type, payload: { path } } : null;
+    }
+
+    case 'commands/state': {
+      const payload = asRecord(message?.payload);
+      return typeof payload?.canAbort === 'boolean' &&
+        typeof payload.canSwitchSessions === 'boolean'
+        ? {
+            type,
+            payload: {
+              canAbort: payload.canAbort,
+              canSwitchSessions: payload.canSwitchSessions,
+            },
+          }
+        : null;
     }
 
     case 'vscode/open-settings': {
@@ -224,7 +246,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const line = payload?.line === undefined ? undefined : getSafeInteger(payload.line);
       const kind = payload?.kind;
       const view = payload?.view;
+      const sessionID = getOptionalBoundedString(payload?.sessionID, 512);
       if (!path || (payload?.line !== undefined && line === null)) return null;
+      if (payload?.sessionID !== undefined && !sessionID) return null;
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
       if (view !== undefined && view !== 'diff') return null;
@@ -235,6 +259,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           ...(line !== undefined && line !== null ? { line } : {}),
           ...(kind ? { kind } : {}),
           ...(view ? { view } : {}),
+          ...(sessionID ? { sessionID } : {}),
         },
       };
     }

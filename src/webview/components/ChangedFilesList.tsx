@@ -163,7 +163,12 @@ function ChangedFileItem(props: { change: FileChange }) {
   const openFile = () => {
     postMessage({
       type: 'vscode/open',
-      payload: { path: openPath(), kind: 'file', view: 'diff' },
+      payload: {
+        path: openPath(),
+        kind: 'file',
+        view: 'diff',
+        ...(state.activeSessionId ? { sessionID: state.activeSessionId } : {}),
+      },
     });
   };
 

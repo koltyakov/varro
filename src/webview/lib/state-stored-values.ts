@@ -8,6 +8,7 @@ import type {
 import type {
   DesktopSessionPaneSide,
   DroppedFile,
+  EditorDiagnostic,
   InitialWebviewState,
   PermissionMode,
 } from '../../shared/protocol';
@@ -157,6 +158,37 @@ function normalizeStoredTerminalSelection(value: unknown): QueuedMessage['termin
   return { text: record.text, terminalName: record.terminalName };
 }
 
+function normalizeStoredDiagnostics(value: unknown): QueuedMessage['attachedDiagnostics'] {
+  const record = asStoredRecord(value);
+  if (!record || !Array.isArray(record.diagnostics)) return null;
+  const diagnostics = record.diagnostics.slice(0, 20).flatMap<EditorDiagnostic>((item) => {
+    const diagnostic = asStoredRecord(item);
+    if (
+      typeof diagnostic?.path !== 'string' ||
+      (diagnostic.severity !== 'error' &&
+        diagnostic.severity !== 'warning' &&
+        diagnostic.severity !== 'info') ||
+      typeof diagnostic.message !== 'string' ||
+      !Number.isFinite(diagnostic.line)
+    ) {
+      return [];
+    }
+    return [
+      {
+        path: diagnostic.path,
+        severity: diagnostic.severity,
+        message: diagnostic.message.slice(0, 500),
+        line: diagnostic.line as number,
+      },
+    ];
+  });
+  if (diagnostics.length === 0) return null;
+  const total = Number.isInteger(record.total)
+    ? Math.max(diagnostics.length, record.total as number)
+    : diagnostics.length;
+  return { diagnostics, total };
+}
+
 function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
   const record = asStoredRecord(value);
   const id = normalizeStoredString(record?.id);
@@ -174,11 +206,13 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
         .filter((image): image is ClipboardImage => image !== null)
     : [];
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
+  const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
   if (
     record.text.trim().length === 0 &&
     droppedFiles.length === 0 &&
     clipboardImages.length === 0 &&
-    !terminalSelection
+    !terminalSelection &&
+    !attachedDiagnostics
   ) {
     return null;
   }
@@ -190,6 +224,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     droppedFiles,
     clipboardImages,
     terminalSelection,
+    ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
   };
 }
 

@@ -44,6 +44,10 @@ function createState(overrides?: {
     filename: string;
     size: number;
   }>;
+  attachedDiagnostics?: {
+    total: number;
+    diagnostics: EditorContext['diagnostics'];
+  } | null;
 }) {
   return {
     selectedAgent: 'build',
@@ -63,6 +67,7 @@ function createState(overrides?: {
     terminalSelection: null,
     droppedFiles: [],
     clipboardImages: [],
+    attachedDiagnostics: null,
     ...overrides,
   };
 }
@@ -110,6 +115,57 @@ describe('session-send helpers', () => {
       },
       effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
     });
+  });
+
+  it('sends bounded unsaved editor text and explicitly attached diagnostics', () => {
+    const result = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({
+          activeFile: {
+            path: '/repo/src/app.ts',
+            relativePath: 'src/app.ts',
+            language: 'typescript',
+          },
+          selection: { startLine: 2, endLine: 3 },
+          editorText: {
+            kind: 'selection',
+            path: '/repo/src/app.ts',
+            relativePath: 'src/app.ts',
+            language: 'typescript',
+            range: { startLine: 2, endLine: 3 },
+            text: 'const changed = true;',
+            truncated: false,
+          },
+        }),
+        attachedDiagnostics: {
+          total: 2,
+          diagnostics: [
+            {
+              path: '/repo/src/app.ts',
+              severity: 'error',
+              message: 'Cannot find name changed',
+              line: 2,
+            },
+          ],
+        },
+      }),
+      'session-1',
+      'Fix this',
+      () => true
+    );
+
+    expect(result?.body.parts).toEqual([
+      { type: 'text', text: 'Fix this' },
+      { type: 'text', text: '[Working directory: /repo]' },
+      {
+        type: 'text',
+        text: '[Unsaved selection from src/app.ts lines 2-3]\n```typescript\nconst changed = true;\n```',
+      },
+      {
+        type: 'text',
+        text: '[Attached diagnostics: 1 of 2]\nERROR src/app.ts:2 - Cannot find name changed',
+      },
+    ]);
   });
 
   it('omits current document when disabled while keeping other attachments and vision files', () => {

@@ -5,6 +5,7 @@ import type { MessageRouterCallbacks } from './message-router';
 import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
+import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -18,11 +19,13 @@ export interface SidebarProviderActionDeps {
   extensionId: string;
   webviewSession: {
     setFocus(focused: boolean): void;
+    updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
   };
   setProviderWatchActive(active: boolean): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
+  sessionDiffProvider: SessionDiffDocumentProvider;
   refreshProviders(): Promise<void>;
   postContext(): void;
   postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
@@ -45,6 +48,9 @@ export function createSidebarProviderActions(
 ): MessageRouterCallbacks {
   return {
     ready: () => deps.handleReadyMessage(),
+    updateCommandState: (canAbort, canSwitchSessions) => {
+      deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
+    },
     setWebviewFocus: (focused) => {
       deps.webviewSession.setFocus(focused);
     },
@@ -54,6 +60,9 @@ export function createSidebarProviderActions(
     requestContext: () => {
       deps.postContext();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
+    },
+    selectWorkspace: async (path) => {
+      await deps.contextProvider.selectWorkspace(path);
     },
     refreshProviders: () => deps.refreshProviders(),
     clearTerminalSelection: () => {
@@ -84,12 +93,20 @@ export function createSidebarProviderActions(
       await deps.contextProvider.readFile(path);
       deps.postContext();
     },
-    openPath: (payload: OpenPathPayload) =>
-      deps.contextProvider.openPath(payload.path, {
+    openPath: async (payload: OpenPathPayload) => {
+      if (
+        payload.view === 'diff' &&
+        payload.sessionID &&
+        (await deps.sessionDiffProvider.open(payload.sessionID, payload.path))
+      ) {
+        return;
+      }
+      await deps.contextProvider.openPath(payload.path, {
         line: payload.line,
         kind: payload.kind,
         view: payload.view,
-      }),
+      });
+    },
     openExternal: async (url) => {
       if (!url.startsWith('https://')) {
         throw new Error('Unsupported external URL');

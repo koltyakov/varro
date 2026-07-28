@@ -16,6 +16,7 @@ import { parseWebviewMessage } from './util/webview-message';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
 import { renderWebviewLoadingHtml } from './webview-html';
 import type {
+  ExtensionMessage,
   InitialWebviewState,
   PermissionMode,
   ServerStatus,
@@ -31,6 +32,13 @@ export class WebviewSession {
   private pendingInputFocus = false;
   private pendingSearchSessions = false;
   private pendingOpenAttentionSessions = false;
+  private pendingCommands: Array<
+    Extract<
+      ExtensionMessage,
+      { type: 'command/new-session' | 'command/abort' | 'command/switch-session' }
+    >
+  > = [];
+  private commandStateReady = false;
   private webviewLoadGeneration = 0;
   private recoverySnapshotLoad?: Promise<RecoverySnapshot>;
   private themeDisposable?: vscode.Disposable;
@@ -108,9 +116,27 @@ export class WebviewSession {
     this.flushPendingOpenAttentionSessions();
   }
 
+  queueCommand(
+    message: Extract<
+      ExtensionMessage,
+      { type: 'command/new-session' | 'command/abort' | 'command/switch-session' }
+    >
+  ) {
+    this.pendingCommands.push(message);
+    this.flushPendingCommands();
+  }
+
+  updateCommandState(canAbort: boolean, canSwitchSessions: boolean) {
+    this.commandStateReady = true;
+    void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', canAbort);
+    void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', canSwitchSessions);
+    this.flushPendingCommands();
+  }
+
   async resolve(webviewView: vscode.WebviewView) {
     this.bridge.setView(webviewView);
     this.webviewReady = false;
+    this.resetCommandState();
     const webviewLoadGeneration = ++this.webviewLoadGeneration;
 
     webviewView.webview.options = this.bridge.webviewOptions();
@@ -134,6 +160,7 @@ export class WebviewSession {
           this.bridge.setView(undefined);
           this.webviewReady = false;
           this.webviewHasFocus = false;
+          this.resetCommandState();
           this.deps.updateStatusBarItem();
         }
       })
@@ -184,6 +211,7 @@ export class WebviewSession {
     this.webviewReady = true;
     this.webviewHasFocus = false;
     this.postBootMessages(status, { clearResolvedEmbedded: true });
+    this.flushPendingCommands();
     this.handleInterruptedSessionNotification();
     void this.deps.handleReadySideEffects().catch(() => {});
     void this.deps.ensureServerStarted().catch(() => {});
@@ -199,6 +227,7 @@ export class WebviewSession {
 
   async dispose() {
     this.webviewReady = false;
+    this.resetCommandState();
     this.disposeWebviewDisposables();
     this.themeDisposable?.dispose();
     this.themeDisposable = undefined;
@@ -324,6 +353,18 @@ export class WebviewSession {
     if (!this.pendingSearchSessions || !this.bridge.isVisible() || !this.webviewReady) return;
     this.pendingSearchSessions = false;
     this.bridge.post({ type: 'command/search-sessions' });
+  }
+
+  private flushPendingCommands() {
+    if (!this.bridge.getView() || !this.webviewReady || !this.commandStateReady) return;
+    const commands = this.pendingCommands.splice(0);
+    for (const command of commands) this.bridge.post(command);
+  }
+
+  private resetCommandState() {
+    this.commandStateReady = false;
+    void vscode.commands.executeCommand('setContext', 'varro:canAbortSession', false);
+    void vscode.commands.executeCommand('setContext', 'varro:canSwitchSessions', false);
   }
 
   private disposeWebviewDisposables() {

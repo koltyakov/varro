@@ -9,6 +9,9 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
     env: {
       remoteName: undefined as string | undefined,
     },
+    commands: {
+      executeCommand: vi.fn(() => Promise.resolve(undefined)),
+    },
     window: {
       onDidChangeActiveColorTheme: vi.fn((_listener?: () => void) => ({ dispose: vi.fn() })),
       createOutputChannel: vi.fn(() => ({
@@ -208,6 +211,39 @@ describe('WebviewSession', () => {
     );
     expect(sessionState.clearCompleted).toHaveBeenCalledOnce();
     expect(deps.handleVisibleSideEffects).toHaveBeenCalledOnce();
+  });
+
+  it('flushes queued action commands in order after command state is ready', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+
+    session.queueCommand({ type: 'command/new-session', payload: { prefill: '/init' } });
+    session.queueCommand({
+      type: 'command/switch-session',
+      payload: { direction: 'next' },
+    });
+    await session.resolve(view as never);
+    await session.handleReady();
+
+    expect(bridge.post).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'command/new-session' })
+    );
+
+    session.updateCommandState(false, true);
+
+    expect(
+      bridge.post.mock.calls
+        .map(([message]) => message)
+        .filter((message) => (message as { type: string }).type.startsWith('command/'))
+    ).toEqual([
+      { type: 'command/new-session', payload: { prefill: '/init' } },
+      { type: 'command/switch-session', payload: { direction: 'next' } },
+    ]);
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'setContext',
+      'varro:canSwitchSessions',
+      true
+    );
   });
 
   it('ignores stale renderHtml results from an earlier resolve generation', async () => {

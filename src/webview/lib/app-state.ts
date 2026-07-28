@@ -15,6 +15,7 @@ import type {
   MessageEntry,
 } from '../types';
 import type {
+  AttachedDiagnostics,
   ClipboardImage,
   ModelVariantSelections,
   QueuedMessage,
@@ -86,6 +87,7 @@ export interface AppState {
   providersLoaded: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
+  attachedDiagnostics: AttachedDiagnostics | null;
   emptyStateLogoUri: string;
   currentDocumentEnabled: boolean;
   draftCurrentDocumentEnabled: boolean | null;
@@ -255,6 +257,7 @@ export function createAppState(): AppStateInstance {
     providersLoaded: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: initialWebviewState.terminalSelection ?? null,
+    attachedDiagnostics: null,
     emptyStateLogoUri: initialWebviewState.emptyStateLogoUri ?? '',
     currentDocumentEnabled: currentDocumentWorkspace
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)

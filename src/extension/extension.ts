@@ -49,7 +49,13 @@ export async function activate(context: vscode.ExtensionContext) {
   const compactionSettings = readCompactionSettings(config);
 
   server = new OpenCodeServer(port, autoStart, command, simulateMissingCli, compactionSettings);
+  let scopedWorkspacePath: string | null | undefined;
   contextProvider = new ContextProvider((ctx) => {
+    if (scopedWorkspacePath === ctx.workspacePath) {
+      sidebarProvider?.post({ type: 'context/update', payload: ctx });
+      return;
+    }
+    scopedWorkspacePath = ctx.workspacePath;
     const generation = ++contextUpdateGeneration;
     void (async () => {
       let restartGraceDeadline = 0;
@@ -81,7 +87,7 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
     })();
-  });
+  }, context.workspaceState);
 
   sidebarProvider = new SidebarProvider(
     context.extensionUri,
@@ -100,13 +106,27 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
+      const portChanged = event.affectsConfiguration('varro.server.port');
       const compactionChanged =
         event.affectsConfiguration('varro.chat.autoCompact') ||
         event.affectsConfiguration('varro.chat.autoCompactionReservedTokens');
       const launchSettingsChanged =
         event.affectsConfiguration('varro.server.autoStart') ||
         event.affectsConfiguration('varro.server.command');
-      if (!compactionChanged && !launchSettingsChanged) return;
+      if (!portChanged && !compactionChanged && !launchSettingsChanged) return;
+
+      if (portChanged) {
+        void vscode.window
+          .showInformationMessage(
+            'Reload VS Code to apply the new Varro server port.',
+            'Reload Window'
+          )
+          .then((selection) => {
+            if (selection === 'Reload Window') {
+              void vscode.commands.executeCommand('workbench.action.reloadWindow');
+            }
+          });
+      }
 
       const nextConfig = vscode.workspace.getConfiguration('varro');
       if (compactionChanged) {

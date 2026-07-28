@@ -256,8 +256,44 @@ function isEditorContext(value: unknown): value is EditorContext {
   if (record.workspacePath !== null && typeof record.workspacePath !== 'string') return false;
   if (!isActiveFile(record.activeFile)) return false;
   if (!isSelection(record.selection)) return false;
+  if (record.workspaceFolders !== undefined && !isWorkspaceFolders(record.workspaceFolders)) {
+    return false;
+  }
+  if (record.editorText !== undefined && !isEditorText(record.editorText)) return false;
   if (!Array.isArray(record.diagnostics)) return false;
+  if (
+    record.diagnosticsTotal !== undefined &&
+    (!Number.isInteger(record.diagnosticsTotal) || (record.diagnosticsTotal as number) < 0)
+  ) {
+    return false;
+  }
   return record.diagnostics.every(isDiagnostic);
+}
+
+function isWorkspaceFolders(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => {
+      const record = asRecord(item);
+      return !!record && typeof record.name === 'string' && typeof record.path === 'string';
+    })
+  );
+}
+
+function isEditorText(value: unknown): boolean {
+  if (value === null) return true;
+  const record = asRecord(value);
+  return (
+    !!record &&
+    (record.kind === 'selection' || record.kind === 'dirty-buffer') &&
+    (record.path === null || typeof record.path === 'string') &&
+    typeof record.relativePath === 'string' &&
+    typeof record.language === 'string' &&
+    isSelection(record.range) &&
+    record.range !== null &&
+    typeof record.text === 'string' &&
+    typeof record.truncated === 'boolean'
+  );
 }
 
 function isActiveFile(

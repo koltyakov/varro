@@ -7,6 +7,7 @@ import {
   openAttentionSessionsKey,
   sessionSearchFocusKey,
   isSessionAwaitingInput,
+  isActiveSessionWorking,
   getSessionTreeRootId,
   setShowSettings,
 } from '../lib/state';
@@ -29,7 +30,12 @@ import {
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
 import type { SessionListFilter } from './chat/SessionListView';
-import { onMessage, onSlowApiRequestsChange, type SlowApiRequest } from '../lib/bridge';
+import {
+  onMessage,
+  onSlowApiRequestsChange,
+  postMessage,
+  type SlowApiRequest,
+} from '../lib/bridge';
 import { compareSessionsByActivity } from '../lib/session-order';
 import {
   clearDirectSessionReturn,
@@ -86,6 +92,30 @@ export function Chat() {
   let reconnectBannerVisibleSince = 0;
   let chatViewEnterTimer: ReturnType<typeof setTimeout> | undefined;
   const pendingEmptySessionDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  createEffect(() => {
+    const activeSessionId = state.activeSessionId;
+    const canSwitchSessions =
+      shouldRenderWorkspace() &&
+      !showSettings() &&
+      primarySessions().length >= 2 &&
+      Boolean(
+        activeSessionId && primarySessions().some((session) => session.id === activeSessionId)
+      );
+    postMessage({
+      type: 'commands/state',
+      payload: {
+        canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
+        canSwitchSessions,
+      },
+    });
+  });
+  onCleanup(() => {
+    postMessage({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: false },
+    });
+  });
 
   const clearReconnectBannerShowTimer = () => {
     if (reconnectBannerShowTimer == null) return;

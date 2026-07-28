@@ -4,8 +4,31 @@ import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
 import { asRecord } from './type-utils';
 
+export interface WorkspaceFolderContext {
+  name: string;
+  path: string;
+}
+
+export interface EditorTextContext {
+  kind: 'selection' | 'dirty-buffer';
+  path: string | null;
+  relativePath: string;
+  language: string;
+  range: ContextLineRange;
+  text: string;
+  truncated: boolean;
+}
+
+export interface EditorDiagnostic {
+  path: string;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  line: number;
+}
+
 export interface EditorContext {
   workspacePath: string | null;
+  workspaceFolders?: WorkspaceFolderContext[];
   activeFile: {
     path: string;
     relativePath: string;
@@ -15,12 +38,9 @@ export interface EditorContext {
     startLine: number;
     endLine: number;
   } | null;
-  diagnostics: Array<{
-    path: string;
-    severity: 'error' | 'warning' | 'info';
-    message: string;
-    line: number;
-  }>;
+  editorText?: EditorTextContext | null;
+  diagnostics: EditorDiagnostic[];
+  diagnosticsTotal?: number;
 }
 
 export interface ContextLineRange {
@@ -495,6 +515,11 @@ export type ExtensionMessage =
 
 export type WebviewMessage =
   | { type: 'context/request' }
+  | { type: 'workspace/select'; payload: { path: string } }
+  | {
+      type: 'commands/state';
+      payload: { canAbort: boolean; canSwitchSessions: boolean };
+    }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'providers/watch'; payload: { active: boolean } }
   | { type: 'providers/refresh' }
@@ -521,6 +546,7 @@ export type WebviewMessage =
         line?: number;
         kind?: 'auto' | 'file' | 'directory';
         view?: 'diff';
+        sessionID?: string;
       };
     }
   | { type: 'vscode/open-external'; payload: { url: string } }

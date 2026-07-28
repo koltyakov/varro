@@ -252,7 +252,8 @@ function canEditQueuedMessage() {
     inputText().length === 0 &&
     state.droppedFiles.length === 0 &&
     state.clipboardImages.length === 0 &&
-    !state.terminalSelection
+    !state.terminalSelection &&
+    !state.attachedDiagnostics
   );
 }
 
@@ -362,6 +363,14 @@ export async function sendDroppedContent(droppedFiles: File[]) {
   }
 }
 
+function attachCurrentDiagnostics() {
+  if (state.editorContext.diagnostics.length === 0) return;
+  setState('attachedDiagnostics', {
+    diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
+  });
+}
+
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
   let richEditorRef: HTMLDivElement | undefined;
   let containerRef: HTMLDivElement | undefined;
@@ -370,6 +379,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let permissionPopoverRef: HTMLDivElement | undefined;
   let agentPickerRef: HTMLButtonElement | undefined;
   let agentPopoverRef: HTMLDivElement | undefined;
+  let workspacePickerRef: HTMLButtonElement | undefined;
+  let workspacePopoverRef: HTMLDivElement | undefined;
   let modelPickerRef: HTMLButtonElement | undefined;
   let modelPopoverRef: HTMLDivElement | undefined;
   let mcpPickerRef: HTMLButtonElement | undefined;
@@ -387,6 +398,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let busyToggleRef: HTMLButtonElement | undefined;
   const [isDraggingOver, setIsDraggingOver] = createSignal(false);
   const [showAgentPicker, setShowAgentPicker] = createSignal(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = createSignal(false);
+  const [pendingWorkspacePath, setPendingWorkspacePath] = createSignal<string | null>(null);
   const [agentFocusIndex, setAgentFocusIndex] = createSignal(0);
   const [showBusyMenu, setShowBusyMenu] = createSignal(false);
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
@@ -411,6 +424,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   type PopupKind =
+    | 'workspace'
     | 'agent'
     | 'variant'
     | 'model'
@@ -420,6 +434,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     | 'busy'
     | 'mcp';
   const closePopups = (except?: PopupKind) => {
+    if (except !== 'workspace') setShowWorkspacePicker(false);
     if (except !== 'agent') setShowAgentPicker(false);
     if (except !== 'variant') setShowVariantPicker(false);
     if (except !== 'model') setShowModelPicker(false);
@@ -430,6 +445,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (except !== 'busy') setShowBusyMenu(false);
   };
   const anyComposerPopupOpen = () =>
+    showWorkspacePicker() ||
     showAgentPicker() ||
     showVariantPicker() ||
     showModelPicker() ||
@@ -438,6 +454,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     showContextPopup() ||
     showProviderLimitPopup() ||
     showBusyMenu();
+
+  createEffect(() => {
+    const pending = pendingWorkspacePath();
+    if (pending && state.editorContext.workspacePath === pending) setPendingWorkspacePath(null);
+  });
 
   const [isFocused, setIsFocused] = createSignal(false);
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null);
@@ -509,7 +530,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const explicitContextForActiveFile = () =>
     hasExplicitContextForPath(composerFiles(), composerActiveFile()?.path);
   const hasContext = () =>
-    !!composerActiveFile() || !!composerSelection() || !!composerTerminalSelection();
+    !!composerActiveFile() ||
+    !!composerSelection() ||
+    !!composerTerminalSelection() ||
+    !!state.attachedDiagnostics;
 
   const currentModel = createMemo(() => {
     const selected = resolveSelectedModel(
@@ -969,6 +993,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (e.key === 'Escape') {
         e.preventDefault();
         setShowAgentPicker(false);
+        setShowWorkspacePicker(false);
         return;
       }
     }
@@ -1177,7 +1202,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       !sendableText.trim() &&
       state.droppedFiles.length === 0 &&
       !hasSendableImages &&
-      !state.terminalSelection
+      !state.terminalSelection &&
+      !state.attachedDiagnostics
     )
       return;
 
@@ -1185,6 +1211,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       droppedFiles: state.droppedFiles,
       clipboardImages: state.clipboardImages,
       terminalSelection: state.terminalSelection,
+      attachedDiagnostics: state.attachedDiagnostics,
     });
 
     if (props.newSession) props.onBeforeSend?.();
@@ -1192,12 +1219,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const hasQueuedAttachments =
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
-      queuedAttachments.terminalSelection;
+      queuedAttachments.terminalSelection ||
+      queuedAttachments.attachedDiagnostics;
 
     const editing = composerEditingMessage();
     if (editing) {
       const hasEditableAttachments =
-        state.droppedFiles.length > 0 || hasSendableImages || !!state.terminalSelection;
+        state.droppedFiles.length > 0 ||
+        hasSendableImages ||
+        !!state.terminalSelection ||
+        !!state.attachedDiagnostics;
       if (!sendableText.trim() && !hasEditableAttachments) return;
       const editTargetExists = state.messages.some(
         (entry) => entry.info.role === 'user' && entry.info.id === editing.messageId
@@ -1258,6 +1289,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         terminalSelection: queuedAttachments.terminalSelection,
+        attachedDiagnostics: queuedAttachments.attachedDiagnostics,
       };
       const replaced =
         queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
@@ -1269,6 +1301,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setInputText('');
       clearContextFiles();
       setState('terminalSelection', null);
+      setState('attachedDiagnostics', null);
       clearClipboardImages();
       resetPastedImageIndex();
       postMessage({ type: 'files/clear' });
@@ -1327,6 +1360,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,
           terminalSelection: item.terminalSelection,
+          ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
         },
         preserveComposer: true,
       });
@@ -1465,6 +1499,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setSuppressCompletion(false);
       clearContextFiles();
       setState('terminalSelection', null);
+      setState('attachedDiagnostics', null);
       clearClipboardImages();
       resetPastedImageIndex();
       setComposerValue('');
@@ -1498,6 +1533,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         },
         queued.text
       );
+      setState('attachedDiagnostics', queued.attachedDiagnostics ?? null);
       setQueuedMessageEdit({ id: queued.id, sessionId: queued.sessionId });
     });
   }
@@ -1820,6 +1856,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (showAgentPicker() && clickedOutside(target, agentPickerRef, agentPopoverRef)) {
         setShowAgentPicker(false);
       }
+      if (
+        showWorkspacePicker() &&
+        clickedOutside(target, workspacePickerRef, workspacePopoverRef)
+      ) {
+        setShowWorkspacePicker(false);
+      }
       if (showModelPicker() && clickedOutside(target, modelPickerRef, modelPopoverRef)) {
         setShowModelPicker(false);
       }
@@ -2003,12 +2045,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   const canSend = () =>
+    !pendingWorkspacePath() &&
     !composerHasActiveQuestion() &&
     !composerHasActivePermission() &&
     (getSendableInputText().trim().length > 0 ||
       state.droppedFiles.length > 0 ||
       hasSendableClipboardImages() ||
-      !!state.terminalSelection);
+      !!state.terminalSelection ||
+      !!state.attachedDiagnostics);
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
@@ -2491,11 +2535,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               activeContextEnabled={activeContextEnabled(composerSessionId())}
               activeContextTitle={activeContextTitle()}
               terminalSelection={composerTerminalSelection()}
+              diagnostics={
+                state.attachedDiagnostics
+                  ? {
+                      count: state.attachedDiagnostics.diagnostics.length,
+                      total: state.attachedDiagnostics.total,
+                    }
+                  : null
+              }
               files={visibleFiles()}
               clipboardImages={visibleClipboardImages()}
               clipboardImagesDisabled={clipboardImagesDisabled()}
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
+              onClearDiagnostics={() => setState('attachedDiagnostics', null)}
               onRemoveFile={(path) => {
                 removeContextFile(path);
                 postMessage({ type: 'files/remove', payload: { path } });
@@ -2610,7 +2663,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               toolbarRightRef = el;
             }}
             compactTight={toolbarCompactMode() === 'tight'}
-            showLeftPopupState={showAgentPicker() || showVariantPicker()}
+            showLeftPopupState={showWorkspacePicker() || showAgentPicker() || showVariantPicker()}
+            workspaceFolders={state.editorContext.workspaceFolders ?? []}
+            selectedWorkspacePath={state.editorContext.workspacePath}
+            showWorkspacePicker={showWorkspacePicker()}
+            workspaceButtonRef={(el) => {
+              workspacePickerRef = el;
+            }}
+            workspacePopoverRef={(el) => {
+              workspacePopoverRef = el;
+            }}
+            onToggleWorkspacePicker={() => {
+              const next = !showWorkspacePicker();
+              closePopups(next ? 'workspace' : undefined);
+              setShowWorkspacePicker(next);
+            }}
+            onSelectWorkspace={(path) => {
+              setPendingWorkspacePath(path);
+              setShowWorkspacePicker(false);
+              postMessage({ type: 'workspace/select', payload: { path } });
+            }}
             showPermissionControl={true}
             permissionButtonRef={(el) => {
               permissionPickerRef = el;
@@ -2727,6 +2799,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             onAttach={() => postMessage({ type: 'files/pick' })}
+            showDiagnosticsControl={
+              !state.attachedDiagnostics && state.editorContext.diagnostics.length > 0
+            }
+            diagnosticsCount={state.editorContext.diagnostics.length}
+            onAttachDiagnostics={attachCurrentDiagnostics}
             showStopButton={showStopButton()}
             onStop={() => abortSession()}
             showSendControl={showSendControl()}
@@ -2890,6 +2967,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           onAttach={() => postMessage({ type: 'files/pick' })}
+          showDiagnosticsControl={
+            !state.attachedDiagnostics && state.editorContext.diagnostics.length > 0
+          }
+          diagnosticsCount={state.editorContext.diagnostics.length}
+          onAttachDiagnostics={attachCurrentDiagnostics}
           showStopButton={showStopButton()}
           onStop={() => abortSession()}
           showSendControl={showSendControl()}
