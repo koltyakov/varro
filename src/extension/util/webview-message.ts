@@ -4,6 +4,7 @@ import {
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
+import { OPENCODE_TERMINAL_COMMANDS } from '../../shared/opencode-install';
 import { isPermissionMode, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import type { DesktopSessionPaneSide, PermissionMode, WebviewMessage } from '../../shared/protocol';
 import type {
@@ -15,6 +16,16 @@ import type {
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
+
+// The webview may only ask for commands Varro itself authored: the auth flows
+// plus the install and update commands the server-status recovery states offer.
+// Anything else is dropped, so a compromised webview cannot run arbitrary
+// shell text in the user's terminal.
+const ALLOWED_TERMINAL_COMMANDS = new Set<string>([
+  'opencode auth login',
+  'opencode auth',
+  ...OPENCODE_TERMINAL_COMMANDS,
+]);
 
 const MAX_PATH_LENGTH = 4096;
 const MAX_QUERY_LENGTH = 2048;
@@ -93,6 +104,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'ralph/update-model': true,
   'ralph/sync': true,
   log: true,
+  'server/restart': true,
 } as const satisfies Record<WebviewMessage['type'], true>;
 
 export function parseWebviewMessage(value: unknown): WebviewMessage | null {
@@ -108,6 +120,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'files/clear':
     case 'files/pick':
     case 'vscode/show-output':
+    case 'server/restart':
       return { type };
 
     case 'session/export': {
@@ -140,7 +153,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const command = getBoundedString(payload?.command, 200);
       const title = getOptionalBoundedString(payload?.title, 120);
-      if (command !== 'opencode auth login' && command !== 'opencode auth') return null;
+      if (!command || !ALLOWED_TERMINAL_COMMANDS.has(command)) return null;
       return { type, payload: title ? { command, title } : { command } };
     }
 

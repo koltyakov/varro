@@ -2,7 +2,7 @@ import type { ChildProcess } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import type { Dirent } from 'fs';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import {
   lstat,
   mkdtemp,
@@ -16,8 +16,16 @@ import {
   writeFile,
 } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
-import { basename, dirname, join, win32 } from 'path';
+import { basename, dirname, isAbsolute, join, resolve as resolvePath, win32 } from 'path';
 import * as vscode from 'vscode';
+import {
+  classifyUpgradeFailure,
+  describeUpgradeFailure,
+  detectInstallMethod,
+  getRecoveryCommand,
+  type OpenCodeInstallMethod,
+  type OpenCodeUpgradeFailureKind,
+} from '../shared/opencode-install';
 import type { ServerStatus } from '../shared/protocol';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
@@ -100,6 +108,18 @@ interface MaybeSuggestCliUpdateCallbacks {
   requestMaintenanceCheck: () => void;
   getWorkspaceCwd: () => string | undefined;
   prepareForWindowsCliUpgrade: () => Promise<void>;
+  finishWindowsCliUpgrade?: () => void;
+}
+
+export interface UpgradeFailureReport {
+  /** Raw error text, kept for the output channel and the About report. */
+  cause: string;
+  kind: OpenCodeUpgradeFailureKind;
+  installMethod: OpenCodeInstallMethod;
+  /** One sentence naming what failed and what to do instead. */
+  guidance: string;
+  /** Command that repairs this install, or null when none is safe to suggest. */
+  suggestedCommand: string | null;
 }
 
 interface UpdateCompactionSettingsCallbacks {
@@ -570,10 +590,40 @@ export class OpenCodeProcess {
   static readonly MISSING_CLI_MESSAGE =
     'OpenCode CLI not found. Install it with: npm install -g opencode-ai';
 
+  /** Unambiguous "the binary is not there": the spawn itself never got started. */
+  static isMissingCliFailure(text: string): boolean {
+    return (
+      text.includes('ENOENT') ||
+      text.includes(OpenCodeProcess.MISSING_CLI_MESSAGE) ||
+      /command not found: ?opencode/i.test(text)
+    );
+  }
+
+  /**
+   * A shell reporting that it could not find the command it was asked to run.
+   * This is how a missing CLI surfaces on Windows, where the fallback is
+   * `opencode.cmd` run through `cmd.exe`: the spawn succeeds and the shell
+   * reports the missing shim on stderr, so ENOENT never fires. The text alone
+   * does not name which command was missing, so callers must only trust it when
+   * the CLI was already known to be unresolved.
+   */
+  static isShellCommandNotFoundFailure(text: string): boolean {
+    return (
+      /is not recognized as an internal or external command/i.test(text) ||
+      /the system cannot find the (path|file) specified/i.test(text)
+    );
+  }
+
   private static readonly CLI_UPGRADE_COMMAND = 'opencode upgrade';
   private static readonly CLI_UPGRADE_ACTION = 'Run Upgrade';
-  private static readonly CLI_COMMAND_TIMEOUT_MS = 5000;
-  private static readonly CLI_BACKGROUND_UPGRADE_TIMEOUT_MS = 2 * 60_000;
+  private static readonly CLI_UPGRADE_IN_TERMINAL_ACTION = 'Update in Terminal';
+  private static readonly SHOW_LOGS_ACTION = 'Show Logs';
+  // Windows resolves through a .cmd shim and is frequently slowed by realtime
+  // antivirus scanning, so a 5s budget produces spurious "timed out" errors.
+  private static readonly CLI_COMMAND_TIMEOUT_MS = process.platform === 'win32' ? 10_000 : 5000;
+  // The OpenCode binary is ~130MB; 2 minutes times out on slow connections and
+  // reports a download still in progress as a hard failure.
+  private static readonly CLI_BACKGROUND_UPGRADE_TIMEOUT_MS = 5 * 60_000;
   private static readonly VERSION_CHECK_INTERVAL_MS = 5 * 60_000;
   private static readonly CLI_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60_000;
   private static readonly CLI_REGISTRY_TIMEOUT_MS = 10_000;
@@ -584,8 +634,8 @@ export class OpenCodeProcess {
   private readonly originalPort: number;
   private portFallbackAttempts = 0;
   private portInUseDetected = false;
-  private readonly autoStart: boolean;
-  private readonly command: string;
+  private autoStart: boolean;
+  private command: string;
   private readonly simulateMissingCli: boolean;
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private maintenanceInFlight = false;
@@ -597,6 +647,7 @@ export class OpenCodeProcess {
   private resolvedCommandCache: {
     key: string;
     value: string;
+    found: boolean;
   } | null = null;
   private _processStdoutHandler: ((data: Buffer) => void) | null = null;
   private _processStderrHandler: ((data: Buffer) => void) | null = null;
@@ -666,6 +717,15 @@ export class OpenCodeProcess {
 
   get isAutoStartEnabled(): boolean {
     return this.autoStart;
+  }
+
+  updateLaunchSettings(options: { autoStart: boolean; command: string }) {
+    const command = options.command.trim();
+    if (command !== this.command) {
+      this.command = command;
+      this.clearResolvedCommandCache();
+    }
+    this.autoStart = options.autoStart;
   }
 
   get isAutoUpdateEnabled(): boolean {
@@ -1929,6 +1989,7 @@ export class OpenCodeProcess {
     if (exceedsTestedCeiling && !this.shouldSuggestUntestedUpdates) {
       return null;
     }
+    let backgroundFailure: UpgradeFailureReport | null = null;
     if (
       !exceedsTestedCeiling &&
       this.isBackgroundCliAutoUpdateEnabled() &&
@@ -1942,9 +2003,8 @@ export class OpenCodeProcess {
         this.lastSuggestedCliVersion = latestCliVersion;
         return latestCliVersion;
       } catch (err) {
-        logger.warn(
-          `Failed to auto-update OpenCode CLI in background: ${err instanceof Error ? err.message : String(err)}`
-        );
+        backgroundFailure = this.describeUpgradeError(err);
+        logger.warn(`Failed to auto-update OpenCode CLI in background: ${backgroundFailure.cause}`);
       }
     }
 
@@ -1952,6 +2012,14 @@ export class OpenCodeProcess {
       return null;
     }
     this.lastSuggestedCliVersion = latestCliVersion;
+
+    if (backgroundFailure) {
+      // The routine "update is available" phrasing would hide the fact that
+      // Varro already tried and failed, and the default action would re-run
+      // the command that just failed.
+      this.reportFailedBackgroundUpgrade(latestCliVersion, backgroundFailure, callbacks);
+      return null;
+    }
 
     const upgradeCommand = OpenCodeProcess.CLI_UPGRADE_COMMAND;
     const message = exceedsTestedCeiling
@@ -1972,6 +2040,50 @@ export class OpenCodeProcess {
     return null;
   }
 
+  /**
+   * Turns a raw upgrade error into the cause plus the one instruction that
+   * actually applies to this install.
+   */
+  describeUpgradeError(err: unknown): UpgradeFailureReport {
+    const cause = err instanceof Error ? err.message : String(err);
+    const { installMethod } = this.getInstallInfo();
+    const kind = classifyUpgradeFailure(cause, process.platform);
+    return {
+      cause,
+      kind,
+      installMethod,
+      guidance: describeUpgradeFailure(kind, installMethod, process.platform),
+      suggestedCommand: getRecoveryCommand(kind, installMethod, process.platform),
+    };
+  }
+
+  private reportFailedBackgroundUpgrade(
+    latestCliVersion: string,
+    failure: UpgradeFailureReport,
+    callbacks: MaybeSuggestCliUpdateCallbacks
+  ) {
+    const message = `Varro could not update the OpenCode CLI to ${latestCliVersion} automatically. ${failure.guidance}`;
+    logger.warn(message);
+
+    const actions: string[] = [];
+    if (failure.suggestedCommand) actions.push(OpenCodeProcess.CLI_UPGRADE_IN_TERMINAL_ACTION);
+    actions.push(OpenCodeProcess.SHOW_LOGS_ACTION);
+
+    void vscode.window.showWarningMessage(message, ...actions).then(async (action) => {
+      if (action === OpenCodeProcess.SHOW_LOGS_ACTION) {
+        logger.show();
+        return;
+      }
+      if (action === OpenCodeProcess.CLI_UPGRADE_IN_TERMINAL_ACTION && failure.suggestedCommand) {
+        // Same prerequisite as the regular terminal upgrade: on Windows the
+        // managed server holds opencode.exe open, and the manual retry would
+        // hit the very file lock this guidance is about.
+        await callbacks.prepareForWindowsCliUpgrade();
+        this.runInTerminal(failure.suggestedCommand, 'OpenCode Update', callbacks);
+      }
+    });
+  }
+
   async readInstalledCliVersion(): Promise<string | null> {
     if (this.simulateMissingCli) {
       return null;
@@ -1982,7 +2094,15 @@ export class OpenCodeProcess {
       return extractVersion(output);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('ENOENT') || message.includes(OpenCodeProcess.MISSING_CLI_MESSAGE)) {
+      if (OpenCodeProcess.isMissingCliFailure(message)) {
+        return null;
+      }
+      // The Windows shim reports itself missing through cmd.exe rather than
+      // ENOENT, and only counts when the CLI is the command that went missing.
+      if (
+        !this.resolveCommandInfo().found &&
+        OpenCodeProcess.isShellCommandNotFoundFailure(message)
+      ) {
         return null;
       }
       throw err;
@@ -2012,10 +2132,24 @@ export class OpenCodeProcess {
   }
 
   async upgradeCli(targetVersion: string) {
-    await this.runCliCommand(
+    // Update failures are platform- and install-specific and hard to reproduce
+    // on purpose, so the recovery guidance is exercised by injecting the stderr
+    // instead of breaking a real install.
+    const simulatedFailure = vscode.workspace
+      .getConfiguration('varro')
+      .get<string>('debug.simulateUpgradeFailure', '')
+      .trim();
+    if (simulatedFailure) {
+      throw new Error(simulatedFailure);
+    }
+
+    const { stdout, stderr } = await this.runCliCommandWithDiagnostics(
       ['upgrade', targetVersion],
       OpenCodeProcess.CLI_BACKGROUND_UPGRADE_TIMEOUT_MS
     );
+    // Everything the command printed, so the caller can classify the real cause
+    // rather than inventing one after the fact.
+    return [stderr, stdout.trim()].filter(Boolean).join('\n');
   }
 
   private async runBackgroundCliUpgrade(
@@ -2030,10 +2164,30 @@ export class OpenCodeProcess {
       logger.info(
         `Updated OpenCode CLI to ${latestCliVersion} through the running OpenCode server`
       );
+      await this.verifyUpgradedCli(latestCliVersion, '');
       return;
     }
-    await this.upgradeCli(latestCliVersion);
+    const diagnostics = await this.upgradeCli(latestCliVersion);
+    await this.verifyUpgradedCli(latestCliVersion, diagnostics);
     logger.info(`Updated OpenCode CLI to ${latestCliVersion} in background`);
+  }
+
+  /**
+   * A zero exit code is not proof the upgrade happened: `opencode upgrade`
+   * handles its own errors and can report failure while exiting successfully.
+   * Only the version on disk settles it. Whatever the command printed is what
+   * gets thrown, because that text is the only thing that can classify the
+   * failure into actionable guidance — a message invented here would always
+   * classify as `unknown`.
+   */
+  private async verifyUpgradedCli(targetVersion: string, diagnostics: string) {
+    this.clearResolvedCommandCache();
+    const installed = await this.readInstalledCliVersion();
+    if (installed && compareVersions(installed, targetVersion) >= 0) return;
+
+    const outcome = `the upgrade reported success but the installed CLI is still ${installed || 'unreadable'}`;
+    const reason = diagnostics.trim();
+    throw new Error(reason ? `${reason} (${outcome})` : outcome);
   }
 
   private async runTerminalCliUpgrade(callbacks: MaybeSuggestCliUpdateCallbacks) {
@@ -2044,11 +2198,55 @@ export class OpenCodeProcess {
   }
 
   resolveCommand(): string {
-    if (this.command) return this.command;
+    return this.resolveCommandInfo().command;
+  }
+
+  /**
+   * Drops the memoized lookup so a CLI installed while this window was open is
+   * picked up. The cache key only covers the environment, which does not change
+   * when the user installs OpenCode from the panel's own terminal button.
+   */
+  clearResolvedCommandCache() {
+    this.resolvedCommandCache = null;
+  }
+
+  /**
+   * Resolves the CLI path and reports whether it was actually found on disk.
+   * `found` is what separates "OpenCode is not installed" from "the path you
+   * configured does not exist" and from "it is installed but not where Varro
+   * looked" — three failures that need three different instructions.
+   */
+  resolveCommandInfo(): { command: string; found: boolean } {
+    if (this.command) {
+      const looksLikePath = /[\\/]/.test(this.command);
+      if (looksLikePath) {
+        const pathTools =
+          process.platform === 'win32' ? win32 : { isAbsolute, resolve: resolvePath };
+        const command = pathTools.isAbsolute(this.command)
+          ? this.command
+          : pathTools.resolve(this.getWorkspaceCwd() || process.cwd(), this.command);
+        return { command, found: existsSync(command) };
+      }
+
+      const candidates =
+        process.platform === 'win32' && !/\.(?:exe|cmd|bat)$/i.test(this.command)
+          ? [this.command, `${this.command}.exe`, `${this.command}.cmd`, `${this.command}.bat`]
+          : [this.command];
+      for (const dir of this.serverPathEntries()) {
+        for (const candidate of candidates) {
+          const command = join(dir, candidate);
+          if (existsSync(command)) return { command, found: true };
+        }
+      }
+      return { command: this.command, found: false };
+    }
 
     const cacheKey = this.getResolvedCommandCacheKey();
     if (this.resolvedCommandCache?.key === cacheKey) {
-      return this.resolvedCommandCache.value;
+      return {
+        command: this.resolvedCommandCache.value,
+        found: this.resolvedCommandCache.found,
+      };
     }
 
     const candidates =
@@ -2060,15 +2258,49 @@ export class OpenCodeProcess {
       for (const candidate of candidates) {
         const fullPath = join(dir, candidate);
         if (existsSync(fullPath)) {
-          this.resolvedCommandCache = { key: cacheKey, value: fullPath };
-          return fullPath;
+          this.resolvedCommandCache = { key: cacheKey, value: fullPath, found: true };
+          return { command: fullPath, found: true };
         }
       }
     }
 
     const fallback = process.platform === 'win32' ? 'opencode.cmd' : 'opencode';
-    this.resolvedCommandCache = { key: cacheKey, value: fallback };
-    return fallback;
+    this.resolvedCommandCache = { key: cacheKey, value: fallback, found: false };
+    return { command: fallback, found: false };
+  }
+
+  getInstallInfo(): {
+    resolvedCommand: string;
+    configuredCommand: string;
+    configuredCommandMissing: boolean;
+    found: boolean;
+    installMethod: OpenCodeInstallMethod;
+    searchedPaths: string[];
+  } {
+    const { command, found } = this.resolveCommandInfo();
+    return {
+      resolvedCommand: command,
+      configuredCommand: this.command,
+      configuredCommandMissing: Boolean(this.command) && !found,
+      found,
+      installMethod: detectInstallMethod({
+        // `/opt/homebrew/bin/opencode` is the same path whether Homebrew or an
+        // npm global under Homebrew's Node put it there; only the link target
+        // (Cellar vs node_modules) tells them apart, and recommending
+        // `brew upgrade` for an npm install fails outright.
+        resolvedCommand: found ? this.resolveLinkTarget(command) : command,
+        configuredCommand: this.command,
+      }),
+      searchedPaths: this.command && /[\\/]/.test(this.command) ? [] : this.serverPathEntries(),
+    };
+  }
+
+  private resolveLinkTarget(command: string): string {
+    try {
+      return realpathSync(command);
+    } catch {
+      return command;
+    }
   }
 
   private buildServerEnv(
@@ -2089,6 +2321,18 @@ export class OpenCodeProcess {
     args: string[],
     timeoutMs = OpenCodeProcess.CLI_COMMAND_TIMEOUT_MS
   ): Promise<string> {
+    return (await this.runCliCommandWithDiagnostics(args, timeoutMs)).stdout;
+  }
+
+  /**
+   * Same spawn, but keeps stderr on success. `opencode upgrade` handles its own
+   * errors and exits 0 after printing the reason, so on that command stderr is
+   * the only place the actual cause exists.
+   */
+  private async runCliCommandWithDiagnostics(
+    args: string[],
+    timeoutMs = OpenCodeProcess.CLI_COMMAND_TIMEOUT_MS
+  ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
@@ -2117,7 +2361,7 @@ export class OpenCodeProcess {
           reject(result.error);
           return;
         }
-        resolve(result.output || '');
+        resolve({ stdout: result.output || '', stderr: stderr.trim() });
       };
 
       try {
@@ -2177,17 +2421,32 @@ export class OpenCodeProcess {
   private runInTerminal(
     command: string,
     title: string,
-    callbacks: { getWorkspaceCwd: () => string | undefined }
+    callbacks: {
+      getWorkspaceCwd: () => string | undefined;
+      finishWindowsCliUpgrade?: () => void;
+    }
   ) {
     const text = command.trim();
     if (!text) return;
 
-    const terminal = vscode.window.createTerminal({
-      name: title,
-      cwd: callbacks.getWorkspaceCwd(),
-    });
-    terminal.show(false);
-    terminal.sendText(text, true);
+    try {
+      const terminal = vscode.window.createTerminal({
+        name: title,
+        cwd: callbacks.getWorkspaceCwd(),
+      });
+      if (process.platform === 'win32' && callbacks.finishWindowsCliUpgrade) {
+        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+          if (closedTerminal !== terminal) return;
+          disposable.dispose();
+          callbacks.finishWindowsCliUpgrade?.();
+        });
+      }
+      terminal.show(false);
+      terminal.sendText(text, true);
+    } catch (err) {
+      callbacks.finishWindowsCliUpgrade?.();
+      throw err;
+    }
   }
 
   getWorkspaceCwd(): string | undefined {

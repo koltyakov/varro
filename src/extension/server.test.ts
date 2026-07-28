@@ -15,6 +15,7 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
+      show: vi.fn(),
     },
     mkdirMock: vi.fn(() => Promise.resolve(undefined)),
     spawnMock: vi.fn(),
@@ -22,16 +23,20 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
       window: {
         activeTextEditor: undefined,
         showInformationMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
+        showWarningMessage: vi.fn<ShowMessageMock>(() => Promise.resolve(undefined)),
         createTerminal: vi.fn(() => ({
           show: vi.fn(),
           sendText: vi.fn(),
         })),
+        onDidCloseTerminal: vi.fn(() => ({ dispose: vi.fn() })),
       },
       workspace: {
         getConfiguration: vi.fn(),
         getWorkspaceFolder: vi.fn(),
         workspaceFolders: undefined,
       },
+      env: { openExternal: vi.fn() },
+      Uri: { parse: vi.fn((value: string) => value) },
     },
     writeFileMock: vi.fn(() => Promise.resolve(undefined)),
   }));
@@ -252,6 +257,53 @@ function maybeSuggestCliUpdate(server: OpenCodeServer, installedCliVersion: stri
       maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
     }
   ).maybeSuggestCliUpdate(installedCliVersion);
+}
+
+/**
+ * Stubs the CLI spawn used by both `upgrade` and `--version`. `version` is what
+ * `--version` prints, which is what the upgrade verification reads back: a stub
+ * that prints nothing models a CLI that exited 0 without actually updating.
+ */
+function stubCliSpawn(options: { version?: string; stderr?: string } = {}) {
+  spawnMock.mockImplementation((_command, args: string[]) => {
+    let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+    let stdoutHandler: ((chunk: Buffer) => void) | undefined;
+    let stderrHandler: ((chunk: Buffer) => void) | undefined;
+    const proc = {
+      stdout: {
+        on: vi.fn((event: string, listener: typeof stdoutHandler) => {
+          if (event === 'data') stdoutHandler = listener;
+        }),
+        off: vi.fn(),
+      },
+      stderr: {
+        on: vi.fn((event: string, listener: typeof stderrHandler) => {
+          if (event === 'data') stderrHandler = listener;
+        }),
+        off: vi.fn(),
+      },
+      once: vi.fn((event: string, listener: typeof exitHandler) => {
+        if (event === 'exit') {
+          exitHandler = listener;
+        }
+      }),
+      removeAllListeners: vi.fn(),
+      kill: vi.fn(),
+      exitCode: null,
+      signalCode: null,
+    };
+    queueMicrotask(() => {
+      if (options.version && args?.includes('--version')) {
+        stdoutHandler?.(Buffer.from(options.version));
+      }
+      // A CLI that prints the reason on stderr and still exits 0.
+      if (options.stderr && args?.includes('upgrade')) {
+        stderrHandler?.(Buffer.from(options.stderr));
+      }
+      exitHandler?.(0, null);
+    });
+    return proc as never;
+  });
 }
 
 const originalPlatform = process.platform;
@@ -911,6 +963,8 @@ describe('OpenCodeServer maintenance', () => {
     const api = server as unknown as {
       process: { kill: ReturnType<typeof vi.fn>; exitCode: number; signalCode: null } | null;
       managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
       stopServerForRestart: () => Promise<void>;
       start: () => Promise<string>;
       restartServerForCliUpdate: (
@@ -923,6 +977,8 @@ describe('OpenCodeServer maintenance', () => {
     server.on('status', (status) => statuses.push(status));
     api.process = { kill: vi.fn(), exitCode: 0, signalCode: null };
     api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
     api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     api.start = vi.fn().mockResolvedValue(server.url);
 
@@ -1061,31 +1117,96 @@ describe('OpenCodeServer maintenance', () => {
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
     api.restartServerForCliUpdate = restartServerForCliUpdate;
-    spawnMock.mockImplementation((_command, _args) => {
-      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
-      const proc = {
-        stdout: { on: vi.fn(), off: vi.fn() },
-        stderr: { on: vi.fn(), off: vi.fn() },
-        once: vi.fn((event: string, listener: typeof exitHandler) => {
-          if (event === 'exit') {
-            exitHandler = listener;
-          }
-        }),
-        removeAllListeners: vi.fn(),
-        kill: vi.fn(),
-        exitCode: null,
-        signalCode: null,
-      };
-      queueMicrotask(() => {
-        exitHandler?.(0, null);
-      });
-      return proc as never;
-    });
+    stubCliSpawn({ version: '1.14.22' });
 
     await runMaintenanceTick(server);
     await flushMicrotasks();
 
     expect(restartServerForCliUpdate).toHaveBeenCalledWith('1.14.20', '1.14.22');
+  });
+
+  it('does not treat an upgrade that left the CLI unchanged as done', async () => {
+    // `opencode upgrade` handles its own errors: it can print "Upgrade failed"
+    // and still exit 0. Trusting the exit code restarts the server against a
+    // CLI that never moved, and silently records the new version as installed.
+    stubPlatform('linux');
+
+    const server = new OpenCodeServer(4096, true);
+    const restartServerForCliUpdate = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readLatestCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+      restartServerForCliUpdate: (a: string, b: string) => Promise<void>;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    setRunning(server);
+    api.process = {};
+    api.managedProcess = true;
+    api.readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    api.restartServerForCliUpdate = restartServerForCliUpdate;
+    // Exits 0 for `upgrade`, but `--version` still reports the old build.
+    stubCliSpawn({ version: '1.14.20' });
+
+    await runMaintenanceTick(server);
+    await flushMicrotasks();
+
+    expect(restartServerForCliUpdate).not.toHaveBeenCalled();
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('could not update the OpenCode CLI to 1.14.22'),
+      expect.any(String),
+      expect.any(String)
+    );
+  });
+
+  it('keeps the printed cause when a zero-exit upgrade did nothing', async () => {
+    // The cause only exists in what the command printed. Replacing it with a
+    // generic "did not change" message classifies as `unknown` and loses the
+    // one instruction that would actually work.
+    stubPlatform('linux');
+
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      process: Record<string, unknown> | null;
+      managedProcess: boolean;
+      readLatestCliVersion: () => Promise<string | null>;
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: () => Promise<boolean>;
+    };
+
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    setRunning(server);
+    api.process = {};
+    api.managedProcess = true;
+    api.readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
+    stubCliSpawn({
+      version: '1.14.20',
+      stderr: "EACCES: permission denied, mkdir '/usr/local/lib/node_modules'",
+    });
+
+    await runMaintenanceTick(server);
+    await flushMicrotasks();
+
+    // Classified from the real stderr, so the guidance is the permission one.
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('denied write access'),
+      expect.any(String),
+      expect.any(String)
+    );
+    expect(loggerMock.warn).toHaveBeenCalledWith(
+      expect.stringContaining('EACCES: permission denied')
+    );
   });
 
   it('suggests a newer CLI version only on the slower update cadence', async () => {
@@ -1172,26 +1293,7 @@ describe('OpenCodeServer maintenance', () => {
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
     api.readLatestCliVersion = readLatestCliVersion;
-    spawnMock.mockImplementation((_command, _args) => {
-      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
-      const proc = {
-        stdout: { on: vi.fn(), off: vi.fn() },
-        stderr: { on: vi.fn(), off: vi.fn() },
-        once: vi.fn((event: string, listener: typeof exitHandler) => {
-          if (event === 'exit') {
-            exitHandler = listener;
-          }
-        }),
-        removeAllListeners: vi.fn(),
-        kill: vi.fn(),
-        exitCode: null,
-        signalCode: null,
-      };
-      queueMicrotask(() => {
-        exitHandler?.(0, null);
-      });
-      return proc as never;
-    });
+    stubCliSpawn({ version: '1.14.22' });
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
@@ -1282,12 +1384,19 @@ describe('OpenCodeServer maintenance', () => {
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = request;
     setRunning(server);
+    stubCliSpawn({ version: '1.14.22' });
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
 
     expect(request).toHaveBeenCalledWith('POST', '/global/upgrade', { target: '1.14.22' });
-    expect(spawnMock).not.toHaveBeenCalled();
+    // The endpoint replaces the `upgrade` spawn, not the read-back that
+    // confirms the binary actually changed.
+    expect(spawnMock).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining(['upgrade']),
+      expect.any(Object)
+    );
     expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
@@ -1308,26 +1417,7 @@ describe('OpenCodeServer maintenance', () => {
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = request;
     setRunning(server);
-    spawnMock.mockImplementation((_command, _args) => {
-      let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
-      const proc = {
-        stdout: { on: vi.fn(), off: vi.fn() },
-        stderr: { on: vi.fn(), off: vi.fn() },
-        once: vi.fn((event: string, listener: typeof exitHandler) => {
-          if (event === 'exit') {
-            exitHandler = listener;
-          }
-        }),
-        removeAllListeners: vi.fn(),
-        kill: vi.fn(),
-        exitCode: null,
-        signalCode: null,
-      };
-      queueMicrotask(() => {
-        exitHandler?.(0, null);
-      });
-      return proc as never;
-    });
+    stubCliSpawn({ version: '1.14.22' });
 
     await maybeSuggestCliUpdate(server, '1.14.20');
     await flushMicrotasks();
@@ -1351,13 +1441,16 @@ describe('OpenCodeServer maintenance', () => {
     };
     const api = server as unknown as {
       readLatestCliVersion: () => Promise<string | null>;
+      readHealthInfo: ReturnType<typeof vi.fn>;
     };
 
     api.readLatestCliVersion = readLatestCliVersion;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     vscodeMock.window.showInformationMessage.mockResolvedValueOnce('Run Upgrade');
     vscodeMock.window.createTerminal.mockReturnValueOnce(terminal);
 
     await maybeSuggestCliUpdate(server, '1.14.20');
+    await flushMicrotasks();
     await flushMicrotasks();
 
     expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledWith(
@@ -1391,11 +1484,15 @@ describe('OpenCodeServer maintenance', () => {
       } | null;
       managedProcess: boolean;
       request: ReturnType<typeof vi.fn>;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
       stopManagedProcessForRestart: ReturnType<typeof vi.fn>;
     };
 
     api.readLatestCliVersion = readLatestCliVersion;
     api.request = vi.fn().mockRejectedValue(new Error('404 Not Found'));
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.14.20' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(false);
     api.process = {
       kill,
       exitCode: 0,
@@ -1419,6 +1516,89 @@ describe('OpenCodeServer maintenance', () => {
     expect(kill).not.toHaveBeenCalled();
     expect(statuses.some((status) => status.state === 'stopped')).toBe(true);
     expect(terminal.sendText).toHaveBeenCalledWith('opencode upgrade', true);
+  });
+
+  it('does not stop a managed Windows process while sessions are active', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, false);
+    const stopManagedProcessForRestart = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: typeof stopManagedProcessForRestart;
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.18.8' });
+    api.hasActiveSessions = vi.fn().mockResolvedValue(true);
+    api.stopManagedProcessForRestart = stopManagedProcessForRestart;
+    setRunning(server);
+
+    await expect(server.prepareForWindowsCliUpgrade()).rejects.toThrow('active sessions');
+
+    expect(stopManagedProcessForRestart).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+  });
+
+  it('does not stop a managed Windows process when health cannot be verified', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, false);
+    const stopManagedProcessForRestart = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      stopManagedProcessForRestart: typeof stopManagedProcessForRestart;
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    api.stopManagedProcessForRestart = stopManagedProcessForRestart;
+    setRunning(server);
+
+    await expect(server.prepareForWindowsCliUpgrade()).rejects.toThrow(
+      'could not verify that the managed OpenCode server is idle'
+    );
+
+    expect(stopManagedProcessForRestart).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+  });
+
+  it('blocks automatic startup after preparing a Windows terminal update', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      startOperation: typeof startOperation;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    api.startOperation = startOperation;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    await server.prepareForWindowsCliUpgrade();
+
+    await expect(server.start()).rejects.toThrow('being updated in a terminal');
+    expect(startOperation).not.toHaveBeenCalled();
+
+    await expect(server.restart()).rejects.toThrow('close it before restarting');
+    server.finishWindowsCliUpgrade();
+    await expect(server.restart()).resolves.toBe(server.url);
+    expect(startOperation).toHaveBeenCalledOnce();
+  });
+
+  it('does not update through a running Windows server owned outside this window', async () => {
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, false);
+    const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    setRunning(server);
+
+    await expect(server.prepareForWindowsCliUpgrade()).rejects.toThrow(
+      'not owned by this Varro window'
+    );
   });
 });
 
@@ -1529,6 +1709,31 @@ describe('OpenCodeServer compatibility gate', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it('does not replace a server that becomes active while the upgrade is running', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const upgradeRunningServer = vi.fn().mockResolvedValue(true);
+    const api = server as unknown as {
+      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      stopServerForRestart: typeof stopServerForRestart;
+      upgradeRunningServer: typeof upgradeRunningServer;
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
+    api.hasActiveSessions = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    api.stopServerForRestart = stopServerForRestart;
+    api.upgradeRunningServer = upgradeRunningServer;
+
+    await expect(server.start()).rejects.toThrow('has active sessions');
+
+    expect(api.hasActiveSessions).toHaveBeenCalledTimes(2);
+    expect(upgradeRunningServer).toHaveBeenCalledOnce();
+    expect(stopServerForRestart).not.toHaveBeenCalled();
+  });
+
   it('updates and replaces an idle outdated server before reporting success', async () => {
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
@@ -1576,41 +1781,180 @@ describe('OpenCodeServer compatibility gate', () => {
     await expect(server.start()).resolves.toBe(server.url);
 
     expect(upgradeRunningServer).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    expect(api.hasActiveSessions).toHaveBeenCalledTimes(2);
     expect(stopServerForRestart).toHaveBeenCalledOnce();
     expect(upgradeCli).toHaveBeenCalledWith(MINIMUM_SUPPORTED_OPENCODE_VERSION);
     expect(spawnMock).toHaveBeenCalledOnce();
   });
 
-  it('shows actionable recovery when the required automatic update fails', async () => {
-    getConfigurationMock.mockImplementation(() => ({
-      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
-    }));
-    const server = new OpenCodeServer(4096, true);
-    const api = server as unknown as {
-      readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
-      syncInjectedConfigFile: () => Promise<void>;
-      hasActiveSessions: () => Promise<boolean>;
-      stopServerForRestart: () => Promise<void>;
-      upgradeRunningServer: () => Promise<boolean>;
-      readInstalledCliVersion: () => Promise<string | null>;
-      processManager: { upgradeCli: (targetVersion: string) => Promise<void> };
+  type CompatibilityGateApi = {
+    readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
+    syncInjectedConfigFile: () => Promise<void>;
+    hasActiveSessions: () => Promise<boolean>;
+    stopServerForRestart: () => Promise<void>;
+    upgradeRunningServer: () => Promise<boolean>;
+    readInstalledCliVersion: () => Promise<string | null>;
+    processManager: {
+      upgradeCli: (targetVersion: string) => Promise<void>;
+      getInstallInfo: () => unknown;
     };
+  };
+
+  // The real getInstallInfo probes the developer's own PATH, so pin it to keep
+  // the recovery instructions deterministic across machines.
+  function stubIncompatibleServer(
+    server: OpenCodeServer,
+    installMethod: 'npm' | 'bun' | 'unknown' = 'npm'
+  ): CompatibilityGateApi {
+    const api = server as unknown as CompatibilityGateApi;
     api.syncInjectedConfigFile = vi.fn().mockResolvedValue(undefined);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
     api.stopServerForRestart = vi.fn().mockResolvedValue(undefined);
     api.upgradeRunningServer = vi.fn().mockResolvedValue(false);
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.15.13');
-    api.processManager.upgradeCli = vi.fn().mockRejectedValue(new Error('permission denied'));
+    api.processManager.getInstallInfo = vi.fn().mockReturnValue({
+      resolvedCommand: '/Users/me/.npm-global/bin/opencode',
+      configuredCommand: '',
+      configuredCommandMissing: false,
+      found: true,
+      installMethod,
+      searchedPaths: ['/Users/me/.npm-global/bin'],
+    });
+    return api;
+  }
 
-    await expect(server.start()).rejects.toThrow('The automatic update failed: permission denied');
+  it('recommends the install-specific command when the required update fails', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const api = stubIncompatibleServer(server, 'npm');
+    api.processManager.upgradeCli = vi
+      .fn()
+      .mockRejectedValue(new Error("EACCES: permission denied, mkdir '/usr/local/lib'"));
 
-    expect(server.status).toEqual(
+    await expect(server.start()).rejects.toThrow('The automatic update failed.');
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.state).toBe('error');
+    // The whole point: never re-recommend the command that just failed.
+    expect(status.message).not.toContain('opencode upgrade');
+    expect(status.message).toContain('npm install -g opencode-ai@latest');
+    expect(status.detail).toEqual(
       expect.objectContaining({
-        state: 'error',
-        message: expect.stringContaining('Run "opencode upgrade"'),
+        kind: 'update-failed',
+        installMethod: 'npm',
+        suggestedCommand: 'npm install -g opencode-ai@latest',
+        required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
       })
     );
+  });
+
+  it('tells windows users to close the running binary when the update is locked out', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      getConfigurationMock.mockImplementation(() => ({
+        get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+      }));
+      const server = new OpenCodeServer(4096, true);
+      const api = stubIncompatibleServer(server, 'npm');
+      api.processManager.upgradeCli = vi
+        .fn()
+        .mockRejectedValue(new Error('EPERM: operation not permitted, rename opencode.exe'));
+
+      await expect(server.start()).rejects.toThrow('The automatic update failed.');
+
+      const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+      expect(status.message).toContain('Close the OpenCode TUI');
+      expect(status.detail).toEqual(expect.objectContaining({ kind: 'update-failed' }));
+    } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
+  it('falls back to reinstall guidance when the install method is unrecognized', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const api = stubIncompatibleServer(server, 'unknown');
+    api.processManager.upgradeCli = vi
+      .fn()
+      .mockRejectedValue(new Error('Error: unknown installation method'));
+
+    await expect(server.start()).rejects.toThrow('The automatic update failed.');
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.message).toContain('Reinstall OpenCode');
+    expect(status.message).not.toContain('opencode upgrade');
+    expect(status.detail).toEqual(
+      expect.objectContaining({ kind: 'update-failed', installMethod: 'unknown' })
+    );
+    expect((status.detail as { suggestedCommand?: string }).suggestedCommand).toBeUndefined();
+  });
+
+  it('marks an update blocked by disabled auto-update with the setting to change', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? false : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    stubIncompatibleServer(server);
+
+    await expect(server.start()).rejects.toThrow('Automatic updates are disabled.');
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.detail).toEqual(
+      expect.objectContaining({
+        kind: 'update-blocked',
+        blockedBy: 'auto-update-disabled',
+        settingId: 'varro.server.autoUpdate',
+      })
+    );
+    expect(status.message).toContain('Enable varro.server.autoUpdate');
+    expect(status.detail?.suggestedCommand).toBeUndefined();
+  });
+
+  it('marks an update deferred by active sessions as blocked, not failed', async () => {
+    getConfigurationMock.mockImplementation(() => ({
+      get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
+    }));
+    const server = new OpenCodeServer(4096, true);
+    const api = stubIncompatibleServer(server);
+    api.hasActiveSessions = vi.fn().mockResolvedValue(true);
+
+    await expect(server.start()).rejects.toThrow('active sessions');
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.detail).toEqual(
+      expect.objectContaining({ kind: 'update-blocked', blockedBy: 'active-sessions' })
+    );
+  });
+
+  it('fails closed when pending questions cannot be checked', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      hasActiveSessions: () => Promise<boolean>;
+      transport: { request: ReturnType<typeof vi.fn> };
+    };
+    api.transport.request = vi.fn(async (_method: string, path: string) => {
+      if (path === '/question') throw new Error('question endpoint unavailable');
+      return {};
+    });
+
+    await expect(api.hasActiveSessions()).rejects.toThrow('question endpoint unavailable');
+  });
+
+  it('fails closed when active-work responses are malformed', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      hasActiveSessions: () => Promise<boolean>;
+      transport: { request: ReturnType<typeof vi.fn> };
+    };
+    api.transport.request = vi.fn(async () => ({}));
+
+    await expect(api.hasActiveSessions()).rejects.toThrow('invalid pending question response');
   });
 });
 
@@ -1973,6 +2317,100 @@ describe('OpenCodeServer managed process lifecycle', () => {
     expect(server.status.state).toBe('running');
   });
 
+  it('keeps a live server running until restart preflight confirms it is idle', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      hasActiveSessions: ReturnType<typeof vi.fn>;
+      start: typeof start;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.18.8' });
+    api.hasActiveSessions = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    api.start = start;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    await expect(server.restart()).rejects.toThrow('active sessions');
+    expect(stopServerForRestart).not.toHaveBeenCalled();
+    expect(server.status.state).toBe('running');
+
+    await flushMicrotasks();
+    await expect(server.restart()).resolves.toBe(server.url);
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('explicitly restarts an unresponsive managed process', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      managedProcess: boolean;
+      readHealthInfo: ReturnType<typeof vi.fn>;
+      start: typeof start;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.managedProcess = true;
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    api.start = start;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    await expect(server.restart()).resolves.toBe(server.url);
+
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('aborts and drains an in-flight start request before restart preflight', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const requestStarted = deferred<void>();
+    const requestCleanup = deferred<void>();
+    let requestSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      requestSignal = init?.signal as AbortSignal;
+      requestStarted.resolve();
+      await new Promise<void>((resolve) => {
+        requestSignal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      await requestCleanup.promise;
+      throw new Error('aborted');
+    });
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const restartStart = vi.fn().mockResolvedValue(server.url);
+    const readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
+    const api = server as unknown as {
+      setStartPromise: (factory: (signal: AbortSignal) => Promise<string>) => Promise<string>;
+      readHealthInfo: typeof readHealthInfo;
+      start: typeof restartStart;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    const pendingStart = api
+      .setStartPromise(async (signal) => {
+        await server.request('GET', '/session');
+        if (signal.aborted) throw signal.reason;
+        return server.url;
+      })
+      .catch((err: unknown) => err);
+    await requestStarted.promise;
+    api.readHealthInfo = readHealthInfo;
+    api.start = restartStart;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    const restart = server.restart();
+    await flushMicrotasks();
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(readHealthInfo).not.toHaveBeenCalled();
+
+    requestCleanup.resolve();
+    expect(await pendingStart).toEqual(expect.objectContaining({ message: 'aborted' }));
+    await expect(restart).resolves.toBe(server.url);
+    expect(readHealthInfo).toHaveBeenCalledOnce();
+  });
+
   it('returns the same operation for concurrent restarts', async () => {
     const server = new OpenCodeServer(4096, true);
     setRunning(server);
@@ -1983,9 +2421,11 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const start = vi.fn().mockResolvedValue(server.url);
     const stopServerForRestart = vi.fn(() => stopping);
     const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
       start: typeof start;
       processManager: { stopServerForRestart: typeof stopServerForRestart };
     };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     api.start = start;
     api.processManager.stopServerForRestart = stopServerForRestart;
 
@@ -2010,9 +2450,11 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const start = vi.fn().mockResolvedValue(server.url);
     const stopServerForRestart = vi.fn(() => stopping.promise);
     const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
       start: typeof start;
       processManager: { stopServerForRestart: typeof stopServerForRestart };
     };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     api.start = start;
     api.processManager.stopServerForRestart = stopServerForRestart;
     const fetchMock = vi.mocked(fetch).mockResolvedValue({
@@ -2040,15 +2482,18 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const stopping = deferred<void>();
     const start = vi.fn().mockResolvedValue(server.url);
     const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
       start: typeof start;
       processManager: { stopServerForRestart: () => Promise<void> };
     };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     api.processManager.stopServerForRestart = vi.fn(() => stopping.promise);
 
     const restart = server.restart();
     const firstStart = server.start();
     const secondStart = server.start();
 
+    await flushMicrotasks();
     expect(server.status.state).toBe('starting');
     expect(firstStart).toBe(restart);
     expect(secondStart).toBe(restart);
@@ -2071,14 +2516,17 @@ describe('OpenCodeServer managed process lifecycle', () => {
     const start = vi.fn().mockResolvedValue(server.url);
     const stopError = new Error('listener would not stop');
     const api = server as unknown as {
+      readHealthInfo: ReturnType<typeof vi.fn>;
       start: typeof start;
       processManager: { stopServerForRestart: () => Promise<void> };
     };
+    api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: false });
     api.start = start;
     api.processManager.stopServerForRestart = vi.fn().mockRejectedValue(stopError);
 
     const restart = server.restart();
 
+    await flushMicrotasks();
     expect(server.status.state).toBe('starting');
     await expect(restart).rejects.toThrow(stopError.message);
     expect(server.status).toEqual({
@@ -2168,6 +2616,115 @@ describe('OpenCodeServer startup recovery', () => {
     };
     return { api, children };
   }
+
+  it('reports a missing CLI when the windows shim is absent', async () => {
+    // On Windows the fallback is `opencode.cmd`, launched through cmd.exe: the
+    // spawn succeeds and the shell reports the missing shim on stderr, so the
+    // ENOENT-only branch never fires and the user used to get a generic error.
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+    (getProcessManager(server) as unknown as { getInstallInfo: () => unknown }).getInstallInfo = vi
+      .fn()
+      .mockReturnValue({
+        resolvedCommand: 'opencode.cmd',
+        configuredCommand: '',
+        configuredCommandMissing: false,
+        found: false,
+        installMethod: 'unknown',
+        searchedPaths: ['C:\\Users\\me\\AppData\\Roaming\\npm'],
+      });
+
+    const startResult = server.start();
+    await flushMicrotasks();
+
+    const failure = expect(startResult).rejects.toThrow();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const child = children[children.length - 1];
+      if (!child) break;
+      crashDuringStartup(
+        child,
+        "'opencode.cmd' is not recognized as an internal or external command,\r\noperable program or batch file."
+      );
+      await settleRecovery();
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+
+    await failure;
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.state).toBe('error');
+    expect(status.message).toContain('OpenCode CLI not found');
+    expect(status.detail).toEqual(expect.objectContaining({ kind: 'cli-missing' }));
+  });
+
+  it('does not blame a missing CLI when the resolved binary exists', async () => {
+    // "not recognized" does not name the command the shell could not find, so
+    // a nested failure from a CLI that is present must stay a generic error.
+    stubPlatform('win32');
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+    (getProcessManager(server) as unknown as { getInstallInfo: () => unknown }).getInstallInfo = vi
+      .fn()
+      .mockReturnValue({
+        resolvedCommand: 'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd',
+        configuredCommand: '',
+        configuredCommandMissing: false,
+        found: true,
+        installMethod: 'npm',
+        searchedPaths: [],
+      });
+
+    const failure = expect(server.start()).rejects.toThrow();
+    await flushMicrotasks();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const child = children[children.length - 1];
+      if (!child) break;
+      crashDuringStartup(child, "'git' is not recognized as an internal or external command");
+      await settleRecovery();
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    await failure;
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.message).not.toContain('OpenCode CLI not found');
+    expect(status.detail?.kind).not.toBe('cli-missing');
+  });
+
+  it('does not blame a missing CLI for an ENOENT from a present CLI', async () => {
+    // A resolved CLI that cannot open a config path prints ENOENT too. Showing
+    // the install screen there hides the error the user actually needs.
+    const server = new OpenCodeServer(4096, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+    (getProcessManager(server) as unknown as { getInstallInfo: () => unknown }).getInstallInfo = vi
+      .fn()
+      .mockReturnValue({
+        resolvedCommand: '/Users/me/.bun/bin/opencode',
+        configuredCommand: '',
+        configuredCommandMissing: false,
+        found: true,
+        installMethod: 'bun',
+        searchedPaths: [],
+      });
+
+    const failure = expect(server.start()).rejects.toThrow();
+    await flushMicrotasks();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const child = children[children.length - 1];
+      if (!child) break;
+      crashDuringStartup(
+        child,
+        "ENOENT: no such file or directory, open '/Users/me/.config/opencode/opencode.json'"
+      );
+      await settleRecovery();
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    await failure;
+
+    const status = server.status as Extract<ServerStatus, { state: 'error' }>;
+    expect(status.message).toContain('opencode.json');
+    expect(status.message).not.toContain('OpenCode CLI not found');
+    expect(status.detail?.kind).not.toBe('cli-missing');
+  });
 
   it('advances to the next port and retries quickly when the port is already in use', async () => {
     const server = new OpenCodeServer(4096, true);

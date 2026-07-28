@@ -62,6 +62,7 @@ export class OpenCodeTransport {
       }
     | undefined;
   private readonly requestControllers = new Set<AbortController>();
+  private readonly requestSettlementWaiters = new Set<() => void>();
   private readonly pendingAttentionRequests = new Map<string, string>();
 
   constructor(options: OpenCodeTransportOptions) {
@@ -118,6 +119,10 @@ export class OpenCodeTransport {
       throw err;
     } finally {
       this.requestControllers.delete(controller);
+      if (this.requestControllers.size === 0) {
+        for (const resolve of this.requestSettlementWaiters) resolve();
+        this.requestSettlementWaiters.clear();
+      }
     }
   }
 
@@ -402,7 +407,11 @@ export class OpenCodeTransport {
     for (const controller of this.requestControllers) {
       controller.abort();
     }
-    this.requestControllers.clear();
+  }
+
+  waitForRequestsToSettle(): Promise<void> {
+    if (this.requestControllers.size === 0) return Promise.resolve();
+    return new Promise((resolve) => this.requestSettlementWaiters.add(resolve));
   }
 
   clearPendingAttentionRequests() {

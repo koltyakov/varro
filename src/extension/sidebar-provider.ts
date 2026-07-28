@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
 import { AutoApproveJudge } from './auto-approve-judge';
 import type { ContextProvider } from './context-provider';
@@ -403,14 +404,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private runInTerminal(command: string, title = 'OpenCode') {
+  private async runInTerminal(command: string, title = 'OpenCode') {
     const text = command.trim();
     if (!text) return;
+    const replacesBinary = replacesOpenCodeBinary(text);
+
+    // Same prerequisite as Varro's own upgrade path: on Windows a managed
+    // server holds opencode.exe open, and the install or update the user just
+    // asked for cannot replace a running binary.
+    if (replacesBinary) {
+      await this.server.prepareForWindowsCliUpgrade();
+    }
 
     const cwd = this.contextProvider.context.workspacePath || undefined;
-    const terminal = vscode.window.createTerminal({ name: title, cwd });
-    terminal.show(false);
-    terminal.sendText(text, true);
+    try {
+      const terminal = vscode.window.createTerminal({ name: title, cwd });
+      if (replacesBinary && process.platform === 'win32') {
+        const disposable = vscode.window.onDidCloseTerminal((closedTerminal) => {
+          if (closedTerminal !== terminal) return;
+          disposable.dispose();
+          this.server.finishWindowsCliUpgrade();
+        });
+      }
+      terminal.show(false);
+      terminal.sendText(text, true);
+    } catch (err) {
+      if (replacesBinary) this.server.finishWindowsCliUpgrade();
+      throw err;
+    }
   }
 
   private currentTheme() {

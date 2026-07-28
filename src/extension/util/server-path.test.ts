@@ -18,9 +18,28 @@ describe('server path helpers', () => {
       'C:\\Users\\alice\\.pnpm',
       'C:\\Users\\alice\\AppData\\Roaming\\npm',
       'C:\\Users\\alice\\AppData\\Local\\pnpm',
+      'C:\\Users\\alice\\AppData\\Local\\Yarn\\bin',
       'C:\\Users\\alice\\.opencode\\bin',
       'C:\\Users\\alice\\.bun\\bin',
+      'C:\\Users\\alice\\.yarn\\bin',
+      'C:\\Users\\alice\\.volta\\bin',
     ]);
+  });
+
+  it('adds package-manager prefixes that are only known through the environment', () => {
+    const env = {
+      PATH: '/usr/bin',
+      HOME: '/home/alice',
+      PNPM_HOME: '/home/alice/.pnpm-global',
+      VOLTA_HOME: '/home/alice/.volta-custom',
+      N_PREFIX: '/home/alice/n',
+    };
+
+    const entries = getServerPathEntries(env, 'linux');
+
+    expect(entries).toContain('/home/alice/.pnpm-global');
+    expect(entries).toContain('/home/alice/.volta-custom/bin');
+    expect(entries).toContain('/home/alice/n/bin');
   });
 
   it('writes a single Windows PATH key for child processes', () => {
@@ -41,6 +60,8 @@ describe('server path helpers', () => {
         'C:\\Users\\alice\\AppData\\Roaming\\npm',
         'C:\\Users\\alice\\.opencode\\bin',
         'C:\\Users\\alice\\.bun\\bin',
+        'C:\\Users\\alice\\.yarn\\bin',
+        'C:\\Users\\alice\\.volta\\bin',
       ].join(';')
     );
   });

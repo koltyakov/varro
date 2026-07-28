@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro for OpenCode",
-  "version": "0.22.14",
+  "version": "0.22.15",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -50,7 +50,7 @@
     "vscode:install": "rm -f varro-*.vsix && npm run package && NODE_NO_WARNINGS=1 code --install-extension varro-*.vsix"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.7",
+    "@opencode-ai/sdk": "^1.18.9",
     "dompurify": "^3.4.12",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
@@ -68,7 +68,7 @@
     "jsdom": "30.0.0",
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
-    "postcss": "8.5.23",
+    "postcss": "8.5.24",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",
@@ -314,6 +314,12 @@
           "type": "boolean",
           "default": false,
           "description": "Debug only: make Varro behave as if no providers are configured"
+        },
+        "varro.debug.simulateUpgradeFailure": {
+          "deprecationMessage": "Debug only setting. Not intended for regular use.",
+          "type": "string",
+          "default": "",
+          "description": "Debug only: make OpenCode CLI updates fail with this error text, to exercise the update recovery guidance (for example \"EPERM: operation not permitted\")"
         },
         "varro.debug.suggestUntestedOpenCodeUpdates": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

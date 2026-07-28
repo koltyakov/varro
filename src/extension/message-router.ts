@@ -29,10 +29,11 @@ export interface MessageRouterCallbacks {
   requestContext(): void;
   refreshProviders(): Promise<void>;
   clearTerminalSelection(): void;
-  runInTerminal(command: string, title?: string): void;
+  runInTerminal(command: string, title?: string): void | Promise<void>;
   exportSession(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
+  restartServer(): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
   removeContextFile(path: string): void;
@@ -74,7 +75,7 @@ export class MessageRouter {
           this.handleTerminalSelectionClearMessage();
           break;
         case 'terminal/run':
-          this.handleTerminalRunMessage(msg);
+          await this.handleTerminalRunMessage(msg);
           break;
         case 'session/export':
           await this.handleSessionExportMessage(msg);
@@ -84,6 +85,9 @@ export class MessageRouter {
           break;
         case 'vscode/show-output':
           this.callbacks.showOutput();
+          break;
+        case 'server/restart':
+          await this.callbacks.restartServer();
           break;
         case 'files/drop':
           await this.handleFilesDropMessage(msg);
@@ -161,8 +165,8 @@ export class MessageRouter {
     this.callbacks.clearTerminalSelection();
   }
 
-  private handleTerminalRunMessage(msg: Extract<WebviewMessage, { type: 'terminal/run' }>) {
-    this.callbacks.runInTerminal(msg.payload.command, msg.payload.title);
+  private async handleTerminalRunMessage(msg: Extract<WebviewMessage, { type: 'terminal/run' }>) {
+    await this.callbacks.runInTerminal(msg.payload.command, msg.payload.title);
   }
 
   private async handleSessionExportMessage(

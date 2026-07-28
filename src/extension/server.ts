@@ -1,11 +1,23 @@
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
+import * as vscode from 'vscode';
 import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
   OPENCODE_UPDATE_REQUIRED_PREFIX,
 } from '../shared/opencode-compatibility';
-import { parseServerEvent, type ServerStatus } from '../shared/protocol';
-import { OpenCodeProcess, type OpenCodeCompactionSettings } from './open-code-process';
+import type { OpenCodeInstallMethod } from '../shared/opencode-install';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
+import {
+  parseServerEvent,
+  type ServerErrorBlockedBy,
+  type ServerErrorDetail,
+  type ServerStatus,
+} from '../shared/protocol';
+import {
+  OpenCodeProcess,
+  type OpenCodeCompactionSettings,
+  type UpgradeFailureReport,
+} from './open-code-process';
 import {
   OpenCodeTransport,
   type OpenCodeRequestOptions,
@@ -32,6 +44,9 @@ export interface OpenCodeServerInfo {
   processId: number | null;
   cliVersion: string | null;
   cliVersionError: string | null;
+  installMethod: OpenCodeInstallMethod;
+  resolvedCommand: string;
+  searchedPaths: string[];
   activeAgentCount: number | null;
   activeAgentError: string | null;
   health: { healthy: boolean; version?: string };
@@ -71,8 +86,79 @@ function isSupportedOpenCodeVersion(version: string | undefined): boolean {
   );
 }
 
-function createUpdateRequiredMessage(observed: string, reason: string): string {
-  return `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${observed}. ${reason} Run "opencode upgrade", stop any running OpenCode server, then run "Varro: Restart Server".`;
+const DEFAULT_UPGRADE_COMMAND = 'opencode upgrade';
+// Read once: the manifest cannot change while the extension host is alive.
+const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
+
+/** True when `version` is at least one minor release beyond `baseline`. */
+function isMinorVersionAhead(version: string, baseline: string): boolean {
+  const [versionMajor = 0, versionMinor = 0] = version.split('.').map(Number);
+  const [baselineMajor = 0, baselineMinor = 0] = baseline.split('.').map(Number);
+  return versionMajor !== baselineMajor || versionMinor !== baselineMinor;
+}
+
+/**
+ * Builds the message and the structured detail together so the two can never
+ * disagree. The closing instruction is the important part: after an upgrade
+ * has actually failed it must not recommend the command that just failed.
+ */
+function createUpdateRequiredError(options: {
+  observed: string;
+  reason: string;
+  blockedBy?: ServerErrorBlockedBy;
+  settingId?: string;
+  failure?: UpgradeFailureReport;
+}): { message: string; detail: ServerErrorDetail } {
+  const summary = `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${options.observed}. ${options.reason}`;
+  let instruction = `Run "${DEFAULT_UPGRADE_COMMAND}", stop any running OpenCode server, then restart the Varro server.`;
+  if (options.failure) {
+    instruction = options.failure.guidance;
+  } else {
+    switch (options.blockedBy) {
+      case 'active-sessions':
+        instruction = 'Finish or close those sessions, then check again.';
+        break;
+      case 'auto-update-disabled':
+        instruction = 'Enable varro.server.autoUpdate, then restart the Varro server.';
+        break;
+      case 'auto-start-disabled':
+        instruction = 'Enable varro.server.autoStart, then restart the Varro server.';
+        break;
+      case 'foreign-owner':
+        instruction =
+          'Finish work in the other Varro window and close it before retrying from this window.';
+        break;
+      case 'verify-failed':
+        instruction = 'Check the Varro output, then retry when the OpenCode server is responding.';
+        break;
+    }
+  }
+
+  return {
+    message: `${summary} ${instruction}`,
+    detail: {
+      kind: options.failure
+        ? 'update-failed'
+        : options.blockedBy
+          ? 'update-blocked'
+          : 'update-required',
+      required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
+      observed: options.observed,
+      ...(options.blockedBy ? { blockedBy: options.blockedBy } : {}),
+      ...(options.settingId ? { settingId: options.settingId } : {}),
+      ...(options.failure
+        ? {
+            installMethod: options.failure.installMethod,
+            cause: options.failure.cause,
+            ...(options.failure.suggestedCommand
+              ? { suggestedCommand: options.failure.suggestedCommand }
+              : {}),
+          }
+        : options.blockedBy
+          ? {}
+          : { suggestedCommand: DEFAULT_UPGRADE_COMMAND }),
+    },
+  };
 }
 
 function describeManagedProcessCleanupFailure(context: string, err: unknown): string {
@@ -96,6 +182,8 @@ export class OpenCodeServer extends EventEmitter {
   private retryResetTimer: ReturnType<typeof setTimeout> | null = null;
   private retryCount = 0;
   private restartReadyToStart = false;
+  private pendingTerminalCliUpgrades = 0;
+  private lastCeilingNoticeVersion = '';
 
   constructor(
     port: number,
@@ -239,6 +327,11 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   start(): Promise<string> {
+    if (!this.restartReadyToStart && this.pendingTerminalCliUpgrades > 0) {
+      return Promise.reject(
+        new Error('OpenCode is being updated in a terminal; restart the server after it finishes')
+      );
+    }
     if (!this.restartReadyToStart) {
       const restartPromise = this.lifecycle.getRestartPromise<string>();
       if (restartPromise) return restartPromise;
@@ -258,8 +351,9 @@ export class OpenCodeServer extends EventEmitter {
       if (this.processManager.isSimulatingMissingCli) {
         this.stopEventStream();
         this.cancelPollHealth();
-        this.setStatus({ state: 'error', message: OpenCodeProcess.MISSING_CLI_MESSAGE });
-        throw new Error(OpenCodeProcess.MISSING_CLI_MESSAGE);
+        const { message, detail } = this.buildMissingCliError();
+        this.setStatus({ state: 'error', message, detail });
+        throw new Error(message);
       }
 
       if (this.processManager.hasOwnershipLeaseCandidate) {
@@ -275,6 +369,7 @@ export class OpenCodeServer extends EventEmitter {
       this.throwIfStartCancelled(disposeGeneration, signal);
       if (health.healthy) {
         if (isSupportedOpenCodeVersion(health.version)) {
+          this.notifyIfAboveTestedCeiling(health.version);
           logger.info(`Found existing OpenCode server at ${this.url}`);
           await this.processManager.prepareForHealthyExistingServer();
           this.throwIfStartCancelled(disposeGeneration, signal);
@@ -449,13 +544,36 @@ export class OpenCodeServer extends EventEmitter {
         return recent ? `${fallback}: ${recent}` : fallback;
       };
 
-      const failStartup = (message: string, err?: Error) => {
+      // A CLI that is not on disk fails differently per platform: POSIX fails
+      // the spawn with ENOENT, while the Windows fallback (`opencode.cmd`) is
+      // run through cmd.exe, which starts fine and reports the missing shim on
+      // stderr. Both must reach the install guidance, not a generic error.
+      // Neither an ENOENT in the server's output nor a shell's "not recognized"
+      // says *which* file was missing: a present CLI failing on an absent config
+      // path prints ENOENT too. Telling that user to install OpenCode hides the
+      // real error, so nothing here overrides a CLI that did resolve on disk.
+      // The genuine spawn failure is classified at its own call site, where the
+      // missing file is unambiguously the executable.
+      const isMissingCliStartupFailure = (message: string) => {
+        if (this.processManager.getInstallInfo().found) return false;
+        return [message, ...stderrLines].some(
+          (line) =>
+            OpenCodeProcess.isMissingCliFailure(line) ||
+            OpenCodeProcess.isShellCommandNotFoundFailure(line)
+        );
+      };
+
+      const failStartup = (rawMessage: string, err?: Error, rawDetail?: ServerErrorDetail) => {
         if (attemptFinished || operationSettled) return;
         if (isInvalidAttempt()) {
           rejectCancelledAttempt();
           return;
         }
-        this.setStatus({ state: 'error', message });
+        const missing =
+          !rawDetail && isMissingCliStartupFailure(rawMessage) ? this.buildMissingCliError() : null;
+        const message = missing ? missing.message : rawMessage;
+        const detail = missing ? missing.detail : rawDetail;
+        this.setStatus({ state: 'error', message, ...(detail ? { detail } : {}) });
         const failure = err || new Error(message);
         void beginAttemptCleanup().then(
           () => {
@@ -550,14 +668,13 @@ export class OpenCodeServer extends EventEmitter {
           return;
         }
         if (healthNow.healthy && !isSupportedOpenCodeVersion(healthNow.version)) {
-          failStartup(
-            createUpdateRequiredMessage(
-              healthNow.version
-                ? `the running server is ${healthNow.version}`
-                : 'the running server version could not be determined',
-              'The server that started is not compatible.'
-            )
-          );
+          const incompatible = createUpdateRequiredError({
+            observed: healthNow.version
+              ? `the running server is ${healthNow.version}`
+              : 'the running server version could not be determined',
+            reason: 'The server that started is not compatible.',
+          });
+          failStartup(incompatible.message, undefined, incompatible.detail);
           return;
         }
         if (healthNow.healthy) {
@@ -704,7 +821,8 @@ export class OpenCodeServer extends EventEmitter {
               return;
             }
             if (err.message.includes('ENOENT')) {
-              failStartup(OpenCodeProcess.MISSING_CLI_MESSAGE);
+              const missing = this.buildMissingCliError();
+              failStartup(missing.message, undefined, missing.detail);
               return;
             }
 
@@ -831,13 +949,13 @@ export class OpenCodeServer extends EventEmitter {
       }
       if (health.healthy && !isSupportedOpenCodeVersion(health.version)) {
         this.cancelPollHealth();
-        const message = createUpdateRequiredMessage(
-          health.version
+        const { message, detail } = createUpdateRequiredError({
+          observed: health.version
             ? `the running server is ${health.version}`
             : 'the running server version could not be determined',
-          'The server that started is not compatible.'
-        );
-        this.setStatus({ state: 'error', message });
+          reason: 'The server that started is not compatible.',
+        });
+        this.setStatus({ state: 'error', message, detail });
         reject(new Error(message));
       } else if (health.healthy) {
         this.cancelPollHealth();
@@ -916,11 +1034,16 @@ export class OpenCodeServer extends EventEmitter {
       }
     }
 
+    const install = this.processManager.getInstallInfo();
+
     return {
       status: this._status,
       url: this.url,
       port: this.processManager.port,
       command: this.resolveCommand(),
+      installMethod: install.installMethod,
+      resolvedCommand: install.resolvedCommand,
+      searchedPaths: install.searchedPaths,
       autoStart: this.processManager.isAutoStartEnabled,
       managedProcess: this.managedProcess,
       processId: this.processManager.managedProcessId,
@@ -990,7 +1113,13 @@ export class OpenCodeServer extends EventEmitter {
       readInstalledCliVersion: () => this.readInstalledCliVersion(),
       maybeSuggestCliUpdate: (installedCliVersion) =>
         this.maybeSuggestCliUpdate(installedCliVersion),
-      readHealthInfo: () => this.readHealthInfo(),
+      readHealthInfo: async () => {
+        const health = await this.readHealthInfo();
+        // Covers servers Varro launched itself, which never pass through the
+        // existing-server branch in startOperation.
+        if (health.healthy) this.notifyIfAboveTestedCeiling(health.version);
+        return health;
+      },
       hasActiveSessions: () => this.hasActiveSessions(),
       recoverLegacyManagedServerOwnership: () =>
         this.processManager.recoverLegacyManagedServerOwnership(),
@@ -1015,44 +1144,36 @@ export class OpenCodeServer extends EventEmitter {
     if (this.processManager.hasForeignActiveOwnership) {
       this.failForRequiredUpdate(
         observed,
-        'The running server is actively owned by another Varro extension host and cannot be replaced safely.'
+        'The running server is actively owned by another Varro extension host and cannot be replaced safely.',
+        { blockedBy: 'foreign-owner' }
       );
     }
 
     if (!this.processManager.isAutoUpdateEnabled) {
-      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.');
+      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.', {
+        blockedBy: 'auto-update-disabled',
+        settingId: 'varro.server.autoUpdate',
+      });
     }
     if (!this.processManager.isAutoStartEnabled) {
       this.failForRequiredUpdate(
         observed,
-        'Varro server auto-start is disabled, so Varro cannot safely replace the running server.'
+        'Varro server auto-start is disabled, so Varro cannot safely replace the running server.',
+        { blockedBy: 'auto-start-disabled', settingId: 'varro.server.autoStart' }
       );
     }
 
-    let activeSessions: boolean;
-    try {
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      activeSessions = await this.hasActiveSessions();
-      this.throwIfStartCancelled(disposeGeneration, signal);
-    } catch (err) {
-      this.throwIfStartCancelled(disposeGeneration, signal);
-      this.failForRequiredUpdate(
-        observed,
-        `Varro could not verify that the old server is idle: ${err instanceof Error ? err.message : String(err)}.`
-      );
-    }
-    if (activeSessions) {
-      this.failForRequiredUpdate(
-        observed,
-        'The old server has active sessions and was not stopped to avoid interrupting work.'
-      );
-    }
+    await this.ensureOldServerIsIdle(observed, disposeGeneration, signal);
 
     logger.info(
       `OpenCode server ${serverVersion || 'unknown'} is older than required ${MINIMUM_SUPPORTED_OPENCODE_VERSION}; attempting a safe update`
     );
     this.throwIfStartCancelled(disposeGeneration, signal);
     await this.upgradeRunningServer(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+    this.throwIfStartCancelled(disposeGeneration, signal);
+    // The upgrade request can take long enough for another client to start
+    // work, so the initial check is not sufficient authorization to stop.
+    await this.ensureOldServerIsIdle(observed, disposeGeneration, signal);
     this.throwIfStartCancelled(disposeGeneration, signal);
     await this.stopServerForRestart();
     this.throwIfStartCancelled(disposeGeneration, signal);
@@ -1082,52 +1203,136 @@ export class OpenCodeServer extends EventEmitter {
 
     const observed = observedServer || `the installed CLI is ${installedVersion}`;
     if (!this.processManager.isAutoUpdateEnabled) {
-      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.');
+      this.failForRequiredUpdate(observed, 'Automatic updates are disabled.', {
+        blockedBy: 'auto-update-disabled',
+        settingId: 'varro.server.autoUpdate',
+      });
     }
 
     logger.info(
       `Updating OpenCode CLI ${installedVersion} to meet Varro's minimum ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`
     );
+    // Kept for the case below: `opencode upgrade` can print why it failed and
+    // still exit 0, and that text is the only basis for actionable guidance.
+    let upgradeDiagnostics = '';
     try {
       this.throwIfStartCancelled(disposeGeneration, signal);
-      await this.processManager.upgradeCli(MINIMUM_SUPPORTED_OPENCODE_VERSION);
+      upgradeDiagnostics = await this.processManager.upgradeCli(MINIMUM_SUPPORTED_OPENCODE_VERSION);
       this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
       this.throwIfStartCancelled(disposeGeneration, signal);
-      this.failForRequiredUpdate(
-        observed,
-        `The automatic update failed: ${err instanceof Error ? err.message : String(err)}.`
-      );
+      const failure = this.processManager.describeUpgradeError(err);
+      logger.warn(`Automatic OpenCode CLI update failed (${failure.kind}): ${failure.cause}`);
+      this.failForRequiredUpdate(observed, 'The automatic update failed.', { failure });
     }
 
     let updatedVersion: string | null;
     try {
       this.throwIfStartCancelled(disposeGeneration, signal);
+      // The upgrade may have replaced a binary Varro resolved before it ran.
+      this.processManager.clearResolvedCommandCache();
       updatedVersion = await this.readInstalledCliVersion();
       this.throwIfStartCancelled(disposeGeneration, signal);
     } catch (err) {
       this.throwIfStartCancelled(disposeGeneration, signal);
       this.failForRequiredUpdate(
         observed,
-        `The update finished, but Varro could not verify it: ${err instanceof Error ? err.message : String(err)}.`
+        `The update finished, but Varro could not verify it: ${err instanceof Error ? err.message : String(err)}.`,
+        { blockedBy: 'verify-failed' }
       );
     }
     if (!updatedVersion || !isSupportedOpenCodeVersion(updatedVersion)) {
+      // The upgrade command reported success but the on-disk CLI did not move,
+      // so say the part the user cannot see: an older shim earlier on PATH is
+      // what usually shadows the freshly installed binary.
       this.failForRequiredUpdate(
         observed,
-        `The automatic update did not install a compatible CLI${updatedVersion ? ` (found ${updatedVersion})` : ''}.`
+        `The automatic update did not install a compatible CLI${updatedVersion ? ` (found ${updatedVersion})` : ''}, which usually means an older OpenCode earlier on PATH is shadowing it.`,
+        {
+          failure: this.processManager.describeUpgradeError(
+            new Error(upgradeDiagnostics.trim() || 'the updated CLI was not picked up')
+          ),
+        }
       );
     }
 
     logger.info(`OpenCode CLI updated successfully to ${updatedVersion}`);
   }
 
-  private failForRequiredUpdate(observed: string, reason: string): never {
-    const message = createUpdateRequiredMessage(observed, reason);
+  private failForRequiredUpdate(
+    observed: string,
+    reason: string,
+    options: {
+      blockedBy?: ServerErrorBlockedBy;
+      settingId?: string;
+      failure?: UpgradeFailureReport;
+    } = {}
+  ): never {
+    const { message, detail } = createUpdateRequiredError({ observed, reason, ...options });
     this.cancelPollHealth();
     this.stopEventStream();
-    this.setStatus({ state: 'error', message });
+    this.setStatus({ state: 'error', message, detail });
     throw new Error(message);
+  }
+
+  /**
+   * "Not installed" and "installed somewhere Varro did not look" need opposite
+   * instructions, and telling someone with a working CLI to reinstall it is the
+   * most misleading thing Varro can say. Split them on what actually resolved.
+   */
+  private buildMissingCliError(): { message: string; detail: ServerErrorDetail } {
+    const install = this.processManager.getInstallInfo();
+
+    if (install.configuredCommandMissing) {
+      return {
+        message: `OpenCode CLI not found at the configured path: ${install.configuredCommand}. Update varro.server.command to point at your OpenCode executable, or clear it to let Varro search PATH.`,
+        detail: {
+          kind: 'cli-path-invalid',
+          configuredCommand: install.configuredCommand,
+          settingId: 'varro.server.command',
+        },
+      };
+    }
+
+    return {
+      message: OpenCodeProcess.MISSING_CLI_MESSAGE,
+      detail: {
+        kind: 'cli-missing',
+        suggestedCommand: 'npm i -g opencode-ai',
+        settingId: 'varro.server.command',
+        searchedPaths: install.searchedPaths,
+      },
+    };
+  }
+
+  /**
+   * A CLI newer than Varro's tested ceiling is the normal state right after an
+   * OpenCode release, so this only informs: blocking it would be worse than the
+   * silence it replaces. Patch-level drift is expected within days of every
+   * release and is always logged but never popped up — only a minor or major
+   * ahead of the tested version is worth interrupting for.
+   */
+  private notifyIfAboveTestedCeiling(observedVersion: string | undefined) {
+    const normalized = typeof observedVersion === 'string' ? extractVersion(observedVersion) : null;
+    if (!normalized) return;
+    if (this.lastCeilingNoticeVersion === normalized) return;
+    const testedThrough = maximumTestedOpenCodeVersion;
+    if (compareVersions(normalized, testedThrough) <= 0) return;
+    this.lastCeilingNoticeVersion = normalized;
+
+    const message = `OpenCode ${normalized} is newer than the version Varro has been tested against (${testedThrough}). Varro will keep working; report anything broken so compatibility can be updated.`;
+    logger.warn(message);
+    if (!isMinorVersionAhead(normalized, testedThrough)) return;
+    void vscode.window
+      .showInformationMessage(message, 'Report Issue', 'Show Logs')
+      .then((action) => {
+        if (action === 'Show Logs') logger.show();
+        else if (action === 'Report Issue') {
+          void vscode.env.openExternal(
+            vscode.Uri.parse('https://github.com/koltyakov/varro/issues')
+          );
+        }
+      });
   }
 
   private async restartServerForCliUpdate(serverVersion: string, installedCliVersion: string) {
@@ -1158,26 +1363,77 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private async hasActiveSessions(): Promise<boolean> {
-    const [statuses, questions] = await Promise.allSettled([
-      this.request('GET', '/session/status'),
-      this.request('GET', '/question'),
+    // Use the transport directly: restart preflight runs after the lifecycle
+    // has reserved the restart operation, while public request() intentionally
+    // waits behind that operation.
+    const [statuses, questions] = await Promise.all([
+      this.transport.request('GET', '/session/status'),
+      this.transport.request('GET', '/question'),
     ]);
 
-    if (statuses.status === 'rejected') {
-      throw statuses.reason;
+    if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
+      throw new Error('OpenCode returned an invalid session status response');
+    }
+    if (!Array.isArray(questions)) {
+      throw new Error('OpenCode returned an invalid pending question response');
     }
 
-    if (countActiveAgents(statuses.value) > 0) return true;
-
-    if (
-      questions.status === 'fulfilled' &&
-      Array.isArray(questions.value) &&
-      questions.value.length > 0
-    ) {
-      return true;
-    }
+    if (countActiveAgents(statuses) > 0) return true;
+    if (questions.length > 0) return true;
 
     return this.transport.hasPendingAttentionRequests();
+  }
+
+  private async ensureOldServerIsIdle(
+    observed: string,
+    disposeGeneration: number,
+    signal: AbortSignal
+  ) {
+    let activeSessions: boolean;
+    try {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      activeSessions = await this.hasActiveSessions();
+      this.throwIfStartCancelled(disposeGeneration, signal);
+    } catch (err) {
+      this.throwIfStartCancelled(disposeGeneration, signal);
+      this.failForRequiredUpdate(
+        observed,
+        `Varro could not verify that the old server is idle: ${err instanceof Error ? err.message : String(err)}.`,
+        { blockedBy: 'verify-failed' }
+      );
+    }
+    if (activeSessions) {
+      this.failForRequiredUpdate(
+        observed,
+        'The old server has active sessions and was not stopped to avoid interrupting work.',
+        { blockedBy: 'active-sessions' }
+      );
+    }
+  }
+
+  private async ensureSafeToStopLiveServer(allowUnresponsiveManagedProcess = false) {
+    const health = await this.readHealthInfo();
+    if (!health.healthy) {
+      if (this.managedProcess && !allowUnresponsiveManagedProcess) {
+        throw new Error(
+          'Varro could not verify that the managed OpenCode server is idle; retry when the server is responding'
+        );
+      }
+      return;
+    }
+
+    let activeSessions: boolean;
+    try {
+      activeSessions = await this.hasActiveSessions();
+    } catch (err) {
+      throw new Error(
+        `Varro could not verify that the OpenCode server is idle: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err }
+      );
+    }
+    if (activeSessions) {
+      throw new Error('OpenCode has active sessions; finish them before restarting the server');
+    }
   }
 
   private async maybeSuggestCliUpdate(installedCliVersion: string | null) {
@@ -1187,6 +1443,7 @@ export class OpenCodeServer extends EventEmitter {
       requestMaintenanceCheck: () => this.requestMaintenanceCheck(),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
       prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
+      finishWindowsCliUpgrade: () => this.finishWindowsCliUpgrade(),
     });
   }
 
@@ -1209,15 +1466,41 @@ export class OpenCodeServer extends EventEmitter {
     }
   }
 
-  private async prepareForWindowsCliUpgrade() {
+  /**
+   * Releases the Windows file lock on the OpenCode binary before something
+   * tries to replace it. Public because the webview's one-click update runs the
+   * command in a terminal, which needs the same prerequisite as Varro's own
+   * upgrade path. No-op off Windows and when Varro owns no process.
+   */
+  async prepareForWindowsCliUpgrade() {
     if (process.platform !== 'win32') return;
     if (this.processManager.hasForeignActiveOwnership) {
       await this.processManager.refreshManagedServerOwnership();
     }
-    if (!this.managedProcess) return;
+    if (this.processManager.hasForeignActiveOwnership) {
+      throw new Error(
+        'Another Varro extension host owns the OpenCode server; close it before updating OpenCode'
+      );
+    }
+    if (!this.managedProcess) {
+      const health = await this.readHealthInfo();
+      if (this._status.state === 'running' || health.healthy) {
+        throw new Error(
+          'A running OpenCode server is not owned by this Varro window; stop it before updating OpenCode'
+        );
+      }
+      this.pendingTerminalCliUpgrades += 1;
+      return;
+    }
 
+    await this.ensureSafeToStopLiveServer();
     await this.stopManagedProcessForRestart();
+    this.pendingTerminalCliUpgrades += 1;
     this.setStatus({ state: 'stopped' });
+  }
+
+  finishWindowsCliUpgrade() {
+    this.pendingTerminalCliUpgrades = Math.max(0, this.pendingTerminalCliUpgrades - 1);
   }
 
   private async readInstalledCliVersion(): Promise<string | null> {
@@ -1250,18 +1533,48 @@ export class OpenCodeServer extends EventEmitter {
     });
   }
 
-  restart(): Promise<string> {
-    return this.runRestart(async () => {
-      await this.processManager.stopServerForRestart();
-    });
+  updateLaunchSettings(options: { autoStart: boolean; command: string }) {
+    this.processManager.updateLaunchSettings(options);
   }
 
-  private runRestart(stop: () => Promise<void>): Promise<string> {
+  restart(): Promise<string> {
+    // Restart is how the user says "I just installed it, look again", so the
+    // memoized lookup must not survive: its key only covers the environment,
+    // which does not change when a CLI appears in a directory already on PATH.
+    this.processManager.clearResolvedCommandCache();
+    if (this.pendingTerminalCliUpgrades > 0) {
+      return Promise.reject(
+        new Error('OpenCode is being updated in a terminal; close it before restarting the server')
+      );
+    }
+    return this.runRestart(
+      async () => {
+        await this.processManager.stopServerForRestart();
+      },
+      { allowUnresponsiveManagedProcess: true }
+    );
+  }
+
+  private runRestart(
+    stop: () => Promise<void>,
+    options: { allowUnresponsiveManagedProcess?: boolean } = {}
+  ): Promise<string> {
     const existingRestart = this.lifecycle.getRestartPromise<string>();
     if (existingRestart) return existingRestart;
 
     const operation = this.lifecycle.setRestartPromise(async (signal) => {
       this.throwIfOperationCancelled(signal);
+      await this.transport.waitForRequestsToSettle();
+      this.throwIfOperationCancelled(signal);
+      await this.ensureSafeToStopLiveServer(options.allowUnresponsiveManagedProcess);
+      this.throwIfOperationCancelled(signal);
+      this.setStatus({ state: 'starting' });
+      this.clearRestartTimer();
+      this.clearRetryResetTimer();
+      this.cancelPollHealth();
+      this.stopEventStream();
+      this.transport.clearPendingAttentionRequests();
+      this.transport.abortRequests();
       try {
         await stop();
       } catch (err) {
@@ -1282,18 +1595,15 @@ export class OpenCodeServer extends EventEmitter {
         this.restartReadyToStart = false;
       }
     }, OpenCodeServer.START_DISPOSED_MESSAGE);
-
-    this.setStatus({ state: 'starting' });
-    this.clearRestartTimer();
-    this.clearRetryResetTimer();
-    this.cancelPollHealth();
-    this.stopEventStream();
-    this.transport.clearPendingAttentionRequests();
+    // Reserve the lifecycle first so no new public request can start, then
+    // cancel and drain requests that crossed the reservation boundary before
+    // taking the idle snapshot above.
     this.transport.abortRequests();
     return operation;
   }
 
   private async disposeResources(options: { stopProcess: boolean }) {
+    this.pendingTerminalCliUpgrades = 0;
     this.lifecycle.beginDispose(OpenCodeServer.START_DISPOSED_MESSAGE);
     this.clearRestartTimer();
     this.clearRetryResetTimer();

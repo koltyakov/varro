@@ -508,6 +508,44 @@ describe('OpenCodeTransport event stream path', () => {
 });
 
 describe('OpenCodeTransport requests', () => {
+  it('waits for aborted requests to finish settling', async () => {
+    let requestSignal: AbortSignal | undefined;
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        requestSignal = init?.signal as AbortSignal;
+        await new Promise<void>((resolve) => {
+          requestSignal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+        await cleanup;
+        throw new Error('aborted');
+      }) as unknown as typeof fetch
+    );
+    const transport = createTransport();
+    const request = transport.request('GET', '/session').catch(() => undefined);
+    await Promise.resolve();
+
+    transport.abortRequests();
+    const settlement = transport.waitForRequestsToSettle();
+    let settled = false;
+    void settlement.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+
+    finishCleanup();
+    await request;
+    await settlement;
+    expect(settled).toBe(true);
+  });
+
   it('only sends JSON content type when forwarding a request body', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);

@@ -408,6 +408,10 @@ body.vscode-light .question-custom-input {
   color: var(--color-vscode-fg);
 }
 
+.server-status-surface {
+  justify-content: safe center;
+}
+
 .server-status-action-button {
   display: inline-flex;
   align-items: center;
@@ -428,6 +432,28 @@ body.vscode-light .question-custom-input {
 }
 
 .server-status-action-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.server-status-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 12px;
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-chip);
+  color: var(--color-vscode-fg);
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+
+.server-status-secondary-button:hover:not(:disabled) {
+  background: var(--color-vscode-hover);
+}
+
+.server-status-secondary-button:active:not(:disabled) {
   transform: translateY(1px);
 }
 

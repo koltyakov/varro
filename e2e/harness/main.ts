@@ -55,6 +55,10 @@ const SCENARIO_NAMES = [
   'abort-command',
   'server-error-missing-cli',
   'server-error-generic',
+  'server-error-cli-path-invalid',
+  'server-error-update-failed-windows-lock',
+  'server-error-update-blocked-sessions',
+  'server-error-update-blocked-setting',
   'question-prompt',
   'archive-overflow',
   'context-compact',
@@ -140,6 +144,7 @@ type HarnessWindow = Window & {
     dispatchedMessages?: Array<{ type: string; payload?: unknown }>;
     terminalCommands?: Array<{ command: string; title?: string }>;
     settingsQueries?: string[];
+    serverRestartCount?: number;
     filePickCount?: number;
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
     exportSessionIds?: string[];
@@ -1590,6 +1595,71 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.providers = [];
     state.providerDefaults = {};
     state.nextSequence = 230;
+    return state;
+  }
+
+  if (name === 'server-error-cli-path-invalid') {
+    state.readyStatus = {
+      state: 'error',
+      message:
+        'OpenCode CLI not found at the configured path: /opt/nope/opencode. Update varro.server.command to point at your OpenCode executable, or clear it to let Varro search PATH.',
+      detail: {
+        kind: 'cli-path-invalid',
+        configuredCommand: '/opt/nope/opencode',
+        settingId: 'varro.server.command',
+      },
+    } as const;
+    state.providers = [];
+    state.providerDefaults = {};
+    state.nextSequence = 231;
+    return state;
+  }
+
+  if (name === 'server-error-update-failed-windows-lock') {
+    state.readyStatus = {
+      state: 'error',
+      message:
+        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. The automatic update failed. Windows could not replace opencode.exe because it is still running. Close the OpenCode TUI and any other VS Code window using Varro, then retry. Update it manually with: npm install -g opencode-ai@latest',
+      detail: {
+        kind: 'update-failed',
+        installMethod: 'npm',
+        suggestedCommand: 'npm install -g opencode-ai@latest',
+        cause: 'EPERM: operation not permitted, rename opencode.exe',
+      },
+    } as const;
+    state.providers = [];
+    state.providerDefaults = {};
+    state.nextSequence = 232;
+    return state;
+  }
+
+  if (name === 'server-error-update-blocked-sessions') {
+    state.readyStatus = {
+      state: 'error',
+      message:
+        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the running server is 1.15.13. The old server has active sessions and was not stopped to avoid interrupting work. Finish or close those sessions, then run "Varro: Restart Server" to update.',
+      detail: { kind: 'update-blocked', blockedBy: 'active-sessions' },
+    } as const;
+    state.providers = [];
+    state.providerDefaults = {};
+    state.nextSequence = 233;
+    return state;
+  }
+
+  if (name === 'server-error-update-blocked-setting') {
+    state.readyStatus = {
+      state: 'error',
+      message:
+        'OpenCode update required. Varro requires OpenCode 1.16.0 or newer, but the installed CLI is 1.15.13. Automatic updates are disabled. Enable varro.server.autoUpdate, then restart the Varro server.',
+      detail: {
+        kind: 'update-blocked',
+        blockedBy: 'auto-update-disabled',
+        settingId: 'varro.server.autoUpdate',
+      },
+    } as const;
+    state.providers = [];
+    state.providerDefaults = {};
+    state.nextSequence = 234;
     return state;
   }
 
@@ -3566,6 +3636,12 @@ function installBridge(state: ScenarioState) {
       case 'vscode/open-settings':
         harnessWindow.__varroE2E?.settingsQueries?.push(webviewMessage.payload.query || '');
         return;
+      case 'server/restart':
+        if (harnessWindow.__varroE2E) {
+          harnessWindow.__varroE2E.serverRestartCount =
+            (harnessWindow.__varroE2E.serverRestartCount || 0) + 1;
+        }
+        return;
       case 'files/pick':
         if (harnessWindow.__varroE2E) {
           harnessWindow.__varroE2E.filePickCount = (harnessWindow.__varroE2E.filePickCount || 0) + 1;
@@ -3736,6 +3812,7 @@ function setUpHarness() {
     dispatchedMessages: [],
     terminalCommands: [],
     settingsQueries: [],
+    serverRestartCount: 0,
     filePickCount: 0,
     openTargets: [],
     exportSessionIds: [],

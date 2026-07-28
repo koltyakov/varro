@@ -64,6 +64,7 @@ const {
       disconnect: ReturnType<typeof vi.fn>;
       rescopeEventStream: ReturnType<typeof vi.fn>;
       updateCompactionSettings: ReturnType<typeof vi.fn>;
+      updateLaunchSettings: ReturnType<typeof vi.fn>;
     },
   },
   latestSidebarProviderInstance: {
@@ -100,12 +101,14 @@ vi.mock('vscode', () => ({
 vi.mock('./server', () => ({
   OpenCodeServer: class {
     updateCompactionSettings = vi.fn(() => Promise.resolve());
+    updateLaunchSettings = vi.fn();
     disconnect = vi.fn(() => Promise.resolve());
     rescopeEventStream = vi.fn(() => Promise.resolve({ state: 'inactive', directory: undefined }));
 
     constructor(...args: unknown[]) {
       latestServerInstance.current = {
         updateCompactionSettings: this.updateCompactionSettings,
+        updateLaunchSettings: this.updateLaunchSettings,
         disconnect: this.disconnect,
         rescopeEventStream: this.rescopeEventStream,
       };
@@ -201,6 +204,27 @@ describe('extension activation', () => {
     expect(latestServerInstance.current?.updateCompactionSettings).toHaveBeenCalledWith({
       auto: false,
       reserved: 7777,
+    });
+  });
+
+  it('reapplies launch settings when configuration changes', async () => {
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    const listener = onDidChangeConfigurationMock.mock.lastCall?.[0];
+    listener?.({
+      affectsConfiguration: (key: string) => key === 'varro.server.command',
+    });
+
+    expect(latestServerInstance.current?.updateLaunchSettings).toHaveBeenCalledWith({
+      autoStart: true,
+      command: '',
     });
   });
 

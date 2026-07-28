@@ -1,3 +1,4 @@
+import type { OpenCodeInstallMethod } from './opencode-install';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
@@ -135,11 +136,48 @@ export type McpStatus = {
   error?: string;
 };
 
+/**
+ * Why a startup failure happened, in a form the webview can branch on.
+ *
+ * `message` stays the human-readable summary and remains the only required
+ * field: `detail` is optional so older payloads (and the e2e harness scenarios
+ * that predate it) keep rendering through the generic states.
+ */
+export type ServerErrorKind =
+  | 'cli-missing'
+  | 'cli-path-invalid'
+  | 'update-required'
+  | 'update-blocked'
+  | 'update-failed'
+  | 'generic';
+
+export type ServerErrorBlockedBy =
+  | 'active-sessions'
+  | 'auto-update-disabled'
+  | 'auto-start-disabled'
+  | 'foreign-owner'
+  | 'verify-failed';
+
+export type ServerErrorDetail = {
+  kind: ServerErrorKind;
+  installMethod?: OpenCodeInstallMethod;
+  /** Command that repairs this specific install; never `opencode upgrade` after a failure. */
+  suggestedCommand?: string;
+  blockedBy?: ServerErrorBlockedBy;
+  /** Settings id to deep-link, e.g. `varro.server.autoUpdate`. */
+  settingId?: string;
+  configuredCommand?: string;
+  searchedPaths?: string[];
+  observed?: string;
+  required?: string;
+  cause?: string;
+};
+
 export type ServerStatus =
   | { state: 'starting' }
   | { state: 'running'; url: string; eventStream?: 'healthy' | 'degraded' }
   | { state: 'stopped' }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string; detail?: ServerErrorDetail };
 
 export type RecycleBinSession = {
   id: string;
@@ -465,6 +503,7 @@ export type WebviewMessage =
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }
+  | { type: 'server/restart' }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {
       type: 'files/drop-content';

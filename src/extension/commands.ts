@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
+import { describeInstallMethod, getUpgradeCommand } from '../shared/opencode-install';
+import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer, OpenCodeServerInfo } from './server';
@@ -266,7 +268,11 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     '## OpenCode',
     `- SDK version: ${sdkVersion}`,
     `- Minimum supported version: ${MINIMUM_SUPPORTED_OPENCODE_VERSION}`,
+    `- Maximum tested version: ${readMaximumTestedOpenCodeVersion()}`,
     `- CLI version: ${cliVersion}`,
+    `- Install method: ${describeInstallMethod(serverInfo.installMethod)}`,
+    `- Resolved binary: ${serverInfo.resolvedCommand || 'not resolved'}`,
+    `- Update command for this install: ${getUpgradeCommand(serverInfo.installMethod, process.platform) || 'none (reinstall manually)'}`,
     `- Server status: ${status}`,
     `- Server URL: ${serverInfo.url}`,
     `- Server port: ${serverInfo.port}`,
@@ -276,6 +282,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- Active agents: ${activeAgents}`,
     `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
     `- CLI command: ${serverInfo.command}`,
+    `- Searched PATH entries: ${serverInfo.searchedPaths.length > 0 ? serverInfo.searchedPaths.join(', ') : 'n/a (configured command)'}`,
     `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,
     '',
     '## Runtime',

@@ -36,7 +36,7 @@ export interface SidebarProviderActionDeps {
   clearContextFiles(): void;
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
-  runInTerminal(command: string, title?: string): void;
+  runInTerminal(command: string, title?: string): void | Promise<void>;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
 }
 
@@ -70,6 +70,9 @@ export function createSidebarProviderActions(
       );
     },
     showOutput: () => logger.show(),
+    restartServer: async () => {
+      await vscode.commands.executeCommand('varro.server.restart');
+    },
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
     handleDroppedContent: (files) => deps.handleDroppedContent(files),
     removeContextFile: (path) => deps.removeContextFile(path),

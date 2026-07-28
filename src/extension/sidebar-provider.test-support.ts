@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
       showTextDocument: vi.fn(() => Promise.resolve()),
       showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
       showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
+      createTerminal: vi.fn(() => ({ show: vi.fn(), sendText: vi.fn() })),
+      onDidCloseTerminal: vi.fn(() => ({ dispose: vi.fn() })),
     },
     commands: {
       executeCommand: vi.fn(() => Promise.resolve(undefined)),
@@ -169,6 +171,8 @@ export function createServer(
     readServerInfo: ReturnType<typeof vi.fn>;
     getWorkspaceCwd: ReturnType<typeof vi.fn>;
     resolveCommand: ReturnType<typeof vi.fn>;
+    prepareForWindowsCliUpgrade: ReturnType<typeof vi.fn>;
+    finishWindowsCliUpgrade: ReturnType<typeof vi.fn>;
   }> = {}
 ) {
   return {
@@ -181,6 +185,8 @@ export function createServer(
     readServerInfo: vi.fn(() => Promise.resolve({ managedProcess: true })),
     getWorkspaceCwd: vi.fn(() => '/repo'),
     resolveCommand: vi.fn(() => 'opencode'),
+    prepareForWindowsCliUpgrade: vi.fn(() => Promise.resolve()),
+    finishWindowsCliUpgrade: vi.fn(),
     ...overrides,
   };
 }

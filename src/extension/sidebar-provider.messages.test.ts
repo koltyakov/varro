@@ -3,6 +3,7 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  getVscodeMock,
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
@@ -93,5 +94,79 @@ describe('SidebarProvider session message responses', () => {
         ],
       },
     });
+  });
+});
+
+function runInTerminal(provider: object, command: string, title?: string) {
+  return (
+    provider as unknown as {
+      runInTerminal: (command: string, title?: string) => Promise<void>;
+    }
+  ).runInTerminal(command, title);
+}
+
+describe('SidebarProvider terminal commands', () => {
+  it('releases the binary before running an install or update command', async () => {
+    // Windows cannot overwrite a running opencode.exe, so the one-click update
+    // needs the same prerequisite as Varro's own upgrade path.
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({ server });
+    attachTestView(provider);
+
+    await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
+    expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledOnce();
+
+    await runInTerminal(provider, 'npm i -g opencode-ai', 'OpenCode Install');
+    expect(server.prepareForWindowsCliUpgrade).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a Windows update reserved until its terminal closes', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const server = createServer();
+      const { provider } = await createSidebarProviderInstance({ server });
+      attachTestView(provider);
+
+      await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
+
+      const terminal = getVscodeMock().window.createTerminal.mock.results[0]?.value;
+      const closeListener = getVscodeMock().window.onDidCloseTerminal.mock.calls[0]?.[0];
+      expect(closeListener).toBeTypeOf('function');
+      expect(server.finishWindowsCliUpgrade).not.toHaveBeenCalled();
+
+      closeListener?.(terminal);
+
+      expect(server.finishWindowsCliUpgrade).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
+  });
+
+  it('leaves the server alone for commands that do not touch the binary', async () => {
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({ server });
+    attachTestView(provider);
+
+    await runInTerminal(provider, 'opencode auth login', 'OpenCode Auth');
+
+    expect(server.prepareForWindowsCliUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('does not open a terminal when the server cannot be stopped safely', async () => {
+    const server = createServer({
+      prepareForWindowsCliUpgrade: vi.fn(() => Promise.reject(new Error('active sessions'))),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    attachTestView(provider);
+
+    await expect(
+      runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update')
+    ).rejects.toThrow('active sessions');
+
+    expect(getVscodeMock().window.createTerminal).not.toHaveBeenCalled();
   });
 });

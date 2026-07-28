@@ -32,14 +32,22 @@ export function getServerPathEntries(
   const { delimiter, join } = getPathTools(platform);
   const home = env.HOME || env.USERPROFILE;
   const pathEntries = getPathVariableValue(env, platform).split(delimiter).filter(Boolean);
+  // VS Code launched from a desktop shell does not inherit the login shell
+  // PATH, so global install locations are added explicitly. Version managers
+  // that scope globals per Node version (fnm, nvm, asdf) cannot be enumerated
+  // statically; those installs are covered by `varro.server.command`.
   const extras =
     platform === 'win32'
       ? [
           ...(env.PNPM_HOME ? [env.PNPM_HOME] : []),
           ...(env.APPDATA ? [join(env.APPDATA, 'npm')] : []),
           ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, 'pnpm')] : []),
+          ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, 'Yarn', 'bin')] : []),
+          ...(env.VOLTA_HOME ? [join(env.VOLTA_HOME, 'bin')] : []),
           ...(home ? [join(home, '.opencode', 'bin')] : []),
           ...(home ? [join(home, '.bun', 'bin')] : []),
+          ...(home ? [join(home, '.yarn', 'bin')] : []),
+          ...(home ? [join(home, '.volta', 'bin')] : []),
         ]
       : [
           ...(home ? [join(home, '.opencode', 'bin')] : []),
@@ -47,6 +55,10 @@ export function getServerPathEntries(
           ...(home ? [join(home, '.local', 'bin')] : []),
           ...(home ? [join(home, '.bun', 'bin')] : []),
           ...(home ? [join(home, 'Library', 'pnpm')] : []),
+          ...(env.PNPM_HOME ? [env.PNPM_HOME] : []),
+          ...(env.VOLTA_HOME ? [join(env.VOLTA_HOME, 'bin')] : []),
+          ...(home ? [join(home, '.volta', 'bin')] : []),
+          ...(env.N_PREFIX ? [join(env.N_PREFIX, 'bin')] : []),
           '/opt/homebrew/bin',
           '/usr/local/bin',
         ];

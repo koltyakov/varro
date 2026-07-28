@@ -100,12 +100,23 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (
+      const compactionChanged =
         event.affectsConfiguration('varro.chat.autoCompact') ||
-        event.affectsConfiguration('varro.chat.autoCompactionReservedTokens')
-      ) {
-        const nextConfig = vscode.workspace.getConfiguration('varro');
+        event.affectsConfiguration('varro.chat.autoCompactionReservedTokens');
+      const launchSettingsChanged =
+        event.affectsConfiguration('varro.server.autoStart') ||
+        event.affectsConfiguration('varro.server.command');
+      if (!compactionChanged && !launchSettingsChanged) return;
+
+      const nextConfig = vscode.workspace.getConfiguration('varro');
+      if (compactionChanged) {
         void server?.updateCompactionSettings(readCompactionSettings(nextConfig));
+      }
+      if (launchSettingsChanged) {
+        server?.updateLaunchSettings({
+          autoStart: nextConfig.get<boolean>('server.autoStart', true),
+          command: nextConfig.get<string>('server.command', ''),
+        });
       }
     })
   );

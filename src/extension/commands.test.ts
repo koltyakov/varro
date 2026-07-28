@@ -93,6 +93,9 @@ describe('About command', () => {
         managedProcess: true,
         cliVersion: '1.18.4',
         cliVersionError: null,
+        installMethod: 'bun',
+        resolvedCommand: '/home/me/.bun/bin/opencode',
+        searchedPaths: ['/home/me/.bun/bin'],
         activeAgentCount: 1,
         activeAgentError: null,
         health: { healthy: true, version: '1.18.4' },
@@ -104,6 +107,19 @@ describe('About command', () => {
 
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining('- Active agents: 1') })
+    );
+    // The About report is the paste-ready hand-off for update bug reports.
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('- Install method: bun'),
+      })
+    );
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          '- Update command for this install: bun add -g opencode-ai@latest'
+        ),
+      })
     );
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.not.stringContaining('- Loaded workspaces:') })

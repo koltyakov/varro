@@ -44,6 +44,7 @@ import {
 const originalPlatform = process.platform;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
+const originalPath = process.env.PATH;
 // Linux caps PIDs well below this, so birth-identity tests cannot read a real /proc entry.
 const MOCK_LINUX_PID = 1_073_741_824;
 
@@ -61,6 +62,8 @@ afterEach(() => {
   else process.env.OPENCODE_CONFIG = originalOpenCodeConfig;
   if (originalOpenCodeConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
   else process.env.OPENCODE_CONFIG_CONTENT = originalOpenCodeConfigContent;
+  if (originalPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalPath;
 });
 
 function mockLinuxLeaseProcess(options?: {
@@ -576,7 +579,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     });
     spawnMock.mockImplementation(
       (command: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
-        if (command === 'opencode') {
+        if (command === 'opencode' || command.endsWith('/opencode')) {
           serverEnv = options?.env;
           return child;
         }
@@ -1577,5 +1580,115 @@ describe('OpenCodeProcess config ownership', () => {
       rm(live, { recursive: true, force: true }),
       rm(fresh, { recursive: true, force: true }),
     ]);
+  });
+});
+
+describe('OpenCodeProcess install resolution', () => {
+  it('reports a configured path that does not exist as missing', () => {
+    const missingPath = join(tmpdir(), 'varro-missing-opencode-binary');
+    const manager = new OpenCodeProcess(4096, true, missingPath);
+
+    const info = manager.getInstallInfo();
+
+    expect(info.configuredCommandMissing).toBe(true);
+    expect(info.configuredCommand).toBe(missingPath);
+    expect(info.installMethod).toBe('custom');
+    // A configured command bypasses the PATH scan entirely.
+    expect(info.searchedPaths).toEqual([]);
+  });
+
+  it('reports a configured bare command that is absent from PATH as missing', () => {
+    const manager = new OpenCodeProcess(4096, true, 'varro-missing-opencode-command');
+
+    const info = manager.getInstallInfo();
+
+    expect(info.configuredCommandMissing).toBe(true);
+    expect(info.found).toBe(false);
+    expect(info.searchedPaths.length).toBeGreaterThan(0);
+  });
+
+  it('resolves a configured bare command through the server PATH', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-path-'));
+    const binary = join(directory, 'opencode');
+    await writeFile(binary, '#!/bin/sh\n', 'utf-8');
+    process.env.PATH = directory;
+    try {
+      const manager = new OpenCodeProcess(4096, true, 'opencode');
+
+      expect(manager.resolveCommand()).toBe(binary);
+      expect(manager.getInstallInfo().configuredCommandMissing).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a configured path that exists', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-bin-'));
+    const binary = join(directory, 'opencode');
+    await writeFile(binary, '#!/bin/sh\n', 'utf-8');
+    try {
+      const manager = new OpenCodeProcess(4096, true, binary);
+
+      expect(manager.getInstallInfo().configuredCommandMissing).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('uses updated launch settings without recreating the process manager', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'varro-opencode-settings-'));
+    const binary = join(directory, 'opencode');
+    await writeFile(binary, '#!/bin/sh\n', 'utf-8');
+    try {
+      const manager = new OpenCodeProcess(4096, true, '/missing/opencode');
+
+      manager.updateLaunchSettings({ autoStart: false, command: binary });
+
+      expect(manager.isAutoStartEnabled).toBe(false);
+      expect(manager.resolveCommand()).toBe(binary);
+      expect(manager.getInstallInfo().configuredCommandMissing).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies an upgrade error into guidance that omits the failed command', () => {
+    const manager = new OpenCodeProcess(4096, true, '/home/me/.bun/bin/opencode');
+    vi.spyOn(manager, 'getInstallInfo').mockReturnValue({
+      resolvedCommand: '/home/me/.bun/bin/opencode',
+      configuredCommand: '',
+      configuredCommandMissing: false,
+      found: true,
+      installMethod: 'bun',
+      searchedPaths: ['/home/me/.bun/bin'],
+    });
+
+    const report = manager.describeUpgradeError(new Error('bun: command not found'));
+
+    expect(report.kind).toBe('missing-package-manager');
+    expect(report.installMethod).toBe('bun');
+    expect(report.cause).toBe('bun: command not found');
+    expect(report.guidance).not.toContain('opencode upgrade');
+    expect(report.guidance).toContain('bun');
+    // `bun add -g ...` cannot run when bun is what went missing, so there is no
+    // command to offer — only the explanation.
+    expect(report.suggestedCommand).toBeNull();
+  });
+
+  it('still offers the install command for failures the manager can retry', () => {
+    const manager = new OpenCodeProcess(4096, true, '');
+    vi.spyOn(manager, 'getInstallInfo').mockReturnValue({
+      resolvedCommand: '/Users/me/.npm-global/bin/opencode',
+      configuredCommand: '',
+      configuredCommandMissing: false,
+      found: true,
+      installMethod: 'npm',
+      searchedPaths: [],
+    });
+
+    const report = manager.describeUpgradeError(new Error('ETIMEDOUT connecting to registry'));
+
+    expect(report.kind).toBe('network');
+    expect(report.suggestedCommand).toBe('npm install -g opencode-ai@latest');
   });
 });

