@@ -31,6 +31,8 @@ type ModelContextMenuState = {
   modelID: string;
 };
 
+const MIN_RELOAD_INDICATOR_MS = 500;
+
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
 }
@@ -58,7 +60,10 @@ export function ModelsPanel() {
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
+  const [isReloading, setIsReloading] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
+  let reloadIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
+  let minimumReloadIndicatorElapsed = false;
 
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
@@ -126,6 +131,25 @@ export function ModelsPanel() {
     setContextMenu(null);
   }
 
+  function reloadProviders() {
+    if (isReloading()) return;
+    minimumReloadIndicatorElapsed = false;
+    setIsReloading(true);
+    reloadIndicatorTimer = setTimeout(() => {
+      minimumReloadIndicatorElapsed = true;
+      if (state.providersLoaded) setIsReloading(false);
+    }, MIN_RELOAD_INDICATOR_MS);
+    postMessage({ type: 'providers/refresh' });
+  }
+
+  createEffect(() => {
+    if (isReloading() && minimumReloadIndicatorElapsed && state.providersLoaded) {
+      setIsReloading(false);
+    }
+  });
+
+  onCleanup(() => clearTimeout(reloadIndicatorTimer));
+
   onMount(() => {
     updateScrollbarInset();
     void loadRouting();
@@ -166,10 +190,12 @@ export function ModelsPanel() {
           <div class="settings-header-actions">
             <button
               type="button"
-              class="chat-header-btn"
-              onClick={() => postMessage({ type: 'providers/refresh' })}
-              title="Reload providers"
-              aria-label="Reload providers"
+              class={`chat-header-btn ${isReloading() ? 'is-loading' : ''}`}
+              onClick={reloadProviders}
+              title={isReloading() ? 'Reloading providers' : 'Reload providers'}
+              aria-label={isReloading() ? 'Reloading providers' : 'Reload providers'}
+              aria-busy={isReloading()}
+              disabled={isReloading()}
             >
               <svg
                 class="settings-reload-icon"

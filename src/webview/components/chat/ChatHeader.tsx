@@ -346,8 +346,21 @@ export function ActiveChatHeader(props: {
               title="Pinned session"
               aria-label="Pinned session"
             >
-              <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
-                <path d="M27.79 26.386l-6.458-8.303L25.414 14h-4L14 6.586v-4L2.586 14h4L14 21.414v4l4.083-4.083 8.303 6.458 1.404-1.403zM7.414 12L12 7.414 20.586 16 16 20.586 7.414 12zm12.094 7.906.398-.398 1.393 1.791-1.791-1.393z" />
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M9.5 14.5 3 21"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="m5 9.485 9.193 9.193 1.697-1.697-.393-3.787 5.51-4.673-5.85-5.85-4.674 5.51-3.786-.393L5 9.485Z"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
             </span>
           </Show>

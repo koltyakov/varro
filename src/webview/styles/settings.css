@@ -44,6 +44,10 @@
   height: 12px;
 }
 
+.settings-header-actions .is-loading .settings-reload-icon {
+  animation: spin 0.8s linear infinite;
+}
+
 .settings-header-title {
   font-size: 12px;
   font-weight: 600;

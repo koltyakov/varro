@@ -91,6 +91,7 @@ beforeEach(() => {
     },
   ]);
   setState('providerDefaults', { openai: 'gpt-5' });
+  setState('providersLoaded', true);
   setState('agents', [
     {
       name: 'build',
@@ -124,6 +125,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
   container?.remove();
@@ -131,6 +133,7 @@ afterEach(() => {
   delete window.__sendToExtension;
   setState('providers', []);
   setState('providerDefaults', {});
+  setState('providersLoaded', false);
   setState('agents', []);
   setState('allAgents', []);
   setState('hiddenProviders', []);
@@ -154,6 +157,29 @@ describe('ModelsPanel', () => {
 
     expect(reloadButton).toBeInstanceOf(HTMLButtonElement);
     expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
+  it('shows a loading indicator long enough to be perceptible', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const reloadButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Reload providers"]'
+    );
+    reloadButton?.click();
+
+    expect(reloadButton?.disabled).toBe(true);
+    expect(reloadButton?.classList.contains('is-loading')).toBe(true);
+    expect(reloadButton?.getAttribute('aria-label')).toBe('Reloading providers');
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(reloadButton?.disabled).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reloadButton?.disabled).toBe(false);
+    expect(reloadButton?.classList.contains('is-loading')).toBe(false);
   });
 
   it('renders an inline release date for desktop layouts', async () => {
