@@ -32,14 +32,23 @@ Server startup is deferred: activation only constructs the `OpenCodeServer` obje
 Registers the VS Code command surface that surrounds the chat UI.
 
 - `varro.chat.focus`
+- `varro.chat.statusBarClick`
 - `varro.chat.newSession`
+- `varro.chat.searchSessions`
 - `varro.chat.abort`
+- `varro.chat.previousSession`
+- `varro.chat.nextSession`
 - `varro.server.restart`
+- `varro.about`
+- `varro.showOutput`
+- `varro.openSourceControl`
+- `varro.agents.openGlobal`
+- `varro.agents.initializeProject`
 - `varro.chat.addToContext`
 - `varro.chat.addSelectionToContext`
 - `varro.chat.addTerminalSelectionToContext`
 
-These commands route through `SidebarProvider` and `ContextProvider` rather than talking to OpenCode directly.
+Chat and context commands route through `SidebarProvider` and `ContextProvider`; server, output, Source Control, About, and `AGENTS.md` actions use their corresponding extension-host services.
 
 #### `src/extension/server.ts`
 
@@ -76,7 +85,7 @@ This is the main extension-side coordinator.
 - Proxies HTTP requests to `OpenCodeServer`
 - Tracks dropped files, file search cache, and provider limit cache
 - Exports sessions by invoking the OpenCode CLI and opening the JSON in VS Code
-- Sends notifications and updates a status bar item when background sessions finish or need attention
+- Sends notifications for plan completion, top-level session failures, permissions, and questions, and updates a status bar item when top-level background sessions finish or need attention
 
 It also restores pending permission or question prompts across reloads and serializes that state into the initial webview payload.
 

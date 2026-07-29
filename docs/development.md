@@ -192,6 +192,14 @@ It also exposes the Varro extension-host API namespace, `/varro/*`:
 - `POST /varro/plan/open`
 - `GET /varro/opencode-config`
 - `POST /varro/opencode-config/model-routing`
+- `GET /varro/workspace-file`
+- `GET /varro/workspace-file/pick`
+- `GET /varro/workspace-path/resolve`
+- `POST /varro/permission/judge`
+- `GET /varro/session/:sessionID/diff-summary`
+- `POST /varro/session/:sessionID/pin`
+- `POST /varro/session/:sessionID/rename-if-untitled`
+- `DELETE /varro/session/:sessionID/delete`
 - `GET /varro/session-trash`
 - `POST /varro/session-trash/:rootID/restore`
 - `DELETE /varro/session-trash/:rootID/delete`
@@ -208,9 +216,12 @@ Drag and drop also has a fallback path for environments that do not expose local
 `src/extension/commands.ts` registers the VS Code command surface.
 
 - Focus the Varro view and composer
+- Handle status-bar navigation to sessions that need attention
 - Start a new session
+- Search, move to the previous session, or move to the next session
 - Abort the active session
 - Restart the OpenCode server
+- Open About details, output, Source Control, or global/project `AGENTS.md`
 - Add Explorer files, editor selections, or terminal selections to context
 
 ## Webview Responsibilities

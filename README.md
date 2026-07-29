@@ -24,9 +24,9 @@ Your local OpenCode configuration remains the source of truth for agents, provid
 
 Sessions are filtered to the current workspace and sorted by recent activity. Each session can show changed files, line additions and removals, token usage, duration, and current state.
 
-You can search, pin, rename, resume, or move sessions to the recycle bin. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
+You can search, pin, rename, resume, share or unshare, or move sessions to the recycle bin. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
 
-When the sidebar is hidden, Varro can notify you when a session finishes, requests permission, or asks a question.
+When the sidebar is hidden, Varro can notify you when a plan is ready, a top-level session fails, requests permission, or asks a question. The status bar also tracks top-level sessions that finish in the background.
 
 ![Workspace sessions with status, token, and change summaries](https://raw.githubusercontent.com/koltyakov/varro/main/assets/sessions.png)
 
@@ -61,8 +61,8 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 - Answer OpenCode questions and permission requests in the chat
 - Open changed files or hand the session off to VS Code Source Control
 - Open a completed plan as a Markdown document or continue it in an implementation session
-- Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls
-- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/skills`, and `/ralph`
+- Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls; Ralph runs use `Full access`
+- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`
 - Reconnect to resumable sessions after a VS Code reload
 
 ## Quick Start
@@ -73,7 +73,7 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 4. Open a folder in VS Code and select `Varro` from the Activity Bar.
 5. Start a session. Varro starts or connects to OpenCode when the chat first needs it.
 
-For a side-by-side editor and chat layout, move Varro to the `Secondary Side Bar`.
+Varro defaults to the `Secondary Side Bar` for a side-by-side editor and chat layout. You can move it back there if an existing VS Code layout places it elsewhere.
 
 Varro connects to `http://127.0.0.1:4096` by default. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
 
@@ -81,7 +81,7 @@ Varro connects to `http://127.0.0.1:4096` by default. To manage the server manua
 
 - [VS Code](https://code.visualstudio.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.12+ or 24+
-- The [OpenCode CLI](https://opencode.ai/docs) on your `PATH`, or its executable path set in `varro.server.command`
+- The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`. This Varro release is compatibility-tested through OpenCode 1.18.9.
 
 ## Documentation
 
