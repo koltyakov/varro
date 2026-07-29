@@ -3,6 +3,7 @@ import {
   friendlyErrorName,
   isAbortedAssistantError,
   isAbortedToolError,
+  isProviderAuthFailure,
 } from './error-classification';
 
 describe('friendlyErrorName', () => {
@@ -54,6 +55,42 @@ describe('isAbortedAssistantError', () => {
   it('rejects non-abort errors', () => {
     expect(isAbortedAssistantError({ name: 'APIError', data: { message: 'timeout' } })).toBe(false);
     expect(isAbortedAssistantError(undefined)).toBe(false);
+  });
+});
+
+describe('isProviderAuthFailure', () => {
+  it('detects provider auth errors without relying on provider-specific messages', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'ProviderAuthError',
+        data: { message: 'Token refresh failed: 401' },
+      })
+    ).toBe(true);
+  });
+
+  it('detects unauthorized API responses and invalidated-token messages', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'APIError',
+        data: { message: 'Unauthorized', statusCode: 401 },
+      })
+    ).toBe(true);
+    expect(
+      isProviderAuthFailure({
+        name: 'UnknownError',
+        data: { message: 'Your authentication token has been invalidated.' },
+      })
+    ).toBe(true);
+  });
+
+  it('rejects retryable non-auth errors', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'APIError',
+        data: { message: 'Service unavailable', statusCode: 503 },
+      })
+    ).toBe(false);
+    expect(isProviderAuthFailure(undefined)).toBe(false);
   });
 });
 

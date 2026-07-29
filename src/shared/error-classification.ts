@@ -11,6 +11,23 @@ export function friendlyErrorName(name: string | null | undefined): string | nul
   return FRIENDLY_ERROR_NAMES[trimmed] ?? trimmed;
 }
 
+const AUTH_INVALIDATED_RE =
+  /authentication token has been invalidated|token refresh failed:\s*401\b|try signing in again/i;
+
+export function isProviderAuthFailure(
+  error:
+    | {
+        name?: string | null;
+        data?: { message?: string | null; statusCode?: number | null };
+      }
+    | undefined
+) {
+  if (!error) return false;
+  if (error.name === 'ProviderAuthError') return true;
+  if (error.data?.statusCode === 401) return true;
+  return AUTH_INVALIDATED_RE.test(error.data?.message || '');
+}
+
 function normalizeAbortText(value: string | null | undefined) {
   return value?.trim().toLowerCase() || '';
 }

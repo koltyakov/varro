@@ -1868,14 +1868,14 @@ describe('Message assistant final answer rendering', () => {
     }
   });
 
-  it('renders a connect provider action for invalidated provider auth errors', async () => {
+  it('explains a logged-out provider and runs re-authentication', async () => {
     const { setState } = await import('../lib/state');
     const assistant = {
       ...assistantMessage('message-3'),
       error: {
         name: 'ProviderAuthError',
         data: {
-          message: 'Your authentication token has been invalidated. Please try signing in again.',
+          message: 'Token refresh failed: 401',
         },
       },
     };
@@ -1897,12 +1897,19 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
-    const connectButton = container?.querySelector('.assistant-message-flow-item-error-action');
+    const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
+    const reauthenticateButton = container?.querySelector(
+      '.assistant-message-flow-item-error-action'
+    );
 
-    expect(connectButton).toBeInstanceOf(HTMLButtonElement);
-    expect(connectButton?.textContent).toContain('Connect provider');
+    expect(errorBlock?.textContent).toContain(
+      'You are signed out of this provider. Re-authenticate to continue.'
+    );
+    expect(errorBlock?.textContent).not.toContain('Token refresh failed: 401');
+    expect(reauthenticateButton).toBeInstanceOf(HTMLButtonElement);
+    expect(reauthenticateButton?.textContent).toContain('Re-authenticate');
 
-    (connectButton as HTMLButtonElement).click();
+    (reauthenticateButton as HTMLButtonElement).click();
 
     expect(openProviderSetupMock).toHaveBeenCalledTimes(1);
     expect(retryMessageMock).not.toHaveBeenCalled();

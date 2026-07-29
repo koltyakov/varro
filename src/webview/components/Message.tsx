@@ -1,5 +1,9 @@
 import { Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
-import { friendlyErrorName, isAbortedAssistantError } from '../../shared/error-classification';
+import {
+  friendlyErrorName,
+  isAbortedAssistantError,
+  isProviderAuthFailure,
+} from '../../shared/error-classification';
 import { retryMessage } from '../hooks/useOpenCode';
 import { client } from '../lib/client';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
@@ -35,8 +39,6 @@ import {
   hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
-
-const AUTH_INVALIDATED_RE = /authentication token has been invalidated|try signing in again/i;
 
 export {
   getAssistantContainerVariant,
@@ -110,10 +112,17 @@ export function Message(props: {
     if (!parseUsageLimitNotice(error.data?.message || error.name)) return false;
     return !!getActiveUsageLimitNotice(props.info.sessionID);
   });
+  const providerAuthRequired = createMemo(() => {
+    const error = assistant()?.error;
+    return !isAbortedAssistantError(error) && isProviderAuthFailure(error);
+  });
   const assistantErrorMessage = createMemo(() => {
     const error = assistant()?.error;
     if (isAbortedAssistantError(error)) return null;
     if (coveredByUsageLimitBanner()) return null;
+    if (providerAuthRequired()) {
+      return 'You are signed out of this provider. Re-authenticate to continue.';
+    }
     const message = error?.data?.message?.trim();
     if (message) return message;
     return friendlyErrorName(error?.name);
@@ -122,16 +131,10 @@ export function Message(props: {
     const error = assistant()?.error;
     return !!error && !isAbortedAssistantError(error);
   });
-  const shouldConnectProvider = createMemo(() => {
-    const error = assistant()?.error;
-    if (!error || isAbortedAssistantError(error)) return false;
-    if (error.name !== 'ProviderAuthError') return false;
-    return AUTH_INVALIDATED_RE.test(error.data?.message || '');
-  });
   const assistantErrorAction = createMemo(() => {
     if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
-    if (shouldConnectProvider()) {
-      return { label: 'Connect provider', run: openProviderSetup };
+    if (providerAuthRequired()) {
+      return { label: 'Re-authenticate', run: openProviderSetup };
     }
 
     return {
