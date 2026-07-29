@@ -1,6 +1,7 @@
 import { Show } from 'solid-js';
 import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
+import { WarningIcon } from '../WarningIcon';
 
 export function AttachmentChip(props: {
   label: string;
@@ -59,7 +60,7 @@ export function AttachmentChip(props: {
         </svg>
       </Show>
       <Show when={props.icon === 'warning'}>
-        <span class="codicon codicon-warning chip-icon" aria-hidden="true" />
+        <WarningIcon class="chip-icon" width={12} height={12} />
       </Show>
       <Show
         when={

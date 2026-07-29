@@ -1062,7 +1062,7 @@ describe('OpenCodeServer maintenance', () => {
       maybeSuggestCliUpdate: (version: string | null) => Promise<string | null>;
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: () => Promise<boolean>;
-      processManager: { recoverLegacyManagedServerOwnership: () => Promise<boolean> };
+      processManager: { takeOwnershipOfExistingServer: () => Promise<boolean> };
       restartServerForCliUpdate: (
         serverVersion: string,
         installedCliVersion: string
@@ -1076,7 +1076,7 @@ describe('OpenCodeServer maintenance', () => {
     api.maybeSuggestCliUpdate = vi.fn().mockResolvedValue(null);
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
     api.hasActiveSessions = vi.fn().mockResolvedValue(false);
-    api.processManager.recoverLegacyManagedServerOwnership = vi.fn().mockResolvedValue(false);
+    api.processManager.takeOwnershipOfExistingServer = vi.fn().mockResolvedValue(false);
     api.restartServerForCliUpdate = restartServerForCliUpdate;
 
     await runMaintenanceTick(server);
@@ -1159,10 +1159,9 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     expect(restartServerForCliUpdate).not.toHaveBeenCalled();
-    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('could not update the OpenCode CLI to 1.14.22'),
-      expect.any(String),
-      expect.any(String)
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+    expect(vscodeMock.window.showWarningMessage.mock.calls[0]?.[0]).toContain(
+      'could not update the OpenCode CLI to 1.14.22'
     );
   });
 
@@ -1199,10 +1198,9 @@ describe('OpenCodeServer maintenance', () => {
     await flushMicrotasks();
 
     // Classified from the real stderr, so the guidance is the permission one.
-    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('denied write access'),
-      expect.any(String),
-      expect.any(String)
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledOnce();
+    expect(vscodeMock.window.showWarningMessage.mock.calls[0]?.[0]).toContain(
+      'denied write access'
     );
     expect(loggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining('EACCES: permission denied')
@@ -1229,6 +1227,8 @@ describe('OpenCodeServer maintenance', () => {
   });
 
   it('runs the upgrade command in an integrated terminal when the notification action is selected', async () => {
+    stubPlatform('linux');
+
     const server = new OpenCodeServer(4096, false);
     const readLatestCliVersion = vi.fn().mockResolvedValue('1.14.22');
     const terminal = {
@@ -1910,10 +1910,11 @@ describe('OpenCodeServer compatibility gate', () => {
         kind: 'update-blocked',
         blockedBy: 'auto-update-disabled',
         settingId: 'varro.server.autoUpdate',
+        installMethod: 'npm',
+        suggestedCommand: 'npm install -g opencode-ai@latest',
       })
     );
     expect(status.message).toContain('Enable varro.server.autoUpdate');
-    expect(status.detail?.suggestedCommand).toBeUndefined();
   });
 
   it('marks an update deferred by active sessions as blocked, not failed', async () => {

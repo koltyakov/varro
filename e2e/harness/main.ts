@@ -1655,6 +1655,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         kind: 'update-blocked',
         blockedBy: 'auto-update-disabled',
         settingId: 'varro.server.autoUpdate',
+        installMethod: 'brew',
+        suggestedCommand: 'brew upgrade opencode',
       },
     } as const;
     state.providers = [];

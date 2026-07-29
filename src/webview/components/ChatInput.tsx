@@ -124,6 +124,7 @@ import { getSessionHistoryPrompts } from '../lib/message-window';
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
+import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
 import {
@@ -364,7 +365,10 @@ export async function sendDroppedContent(droppedFiles: File[]) {
 }
 
 function attachCurrentDiagnostics() {
-  if (state.editorContext.diagnostics.length === 0) return;
+  if (state.editorContext.diagnostics.length === 0) {
+    showSessionActionFeedback('No issues found');
+    return;
+  }
   setState('attachedDiagnostics', {
     diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
@@ -789,6 +793,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       onOpenModels: () => setShowModelPicker(true),
       onOpenMcps: () => setShowMcpPicker(true),
       onOpenFiles: () => postMessage({ type: 'files/pick' }),
+      onAttachDiagnostics: attachCurrentDiagnostics,
       onOpenSettings: () =>
         postMessage({ type: 'vscode/open-settings', payload: { query: 'Varro' } }),
       onExportSession: () => {
@@ -2799,11 +2804,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             onAttach={() => postMessage({ type: 'files/pick' })}
-            showDiagnosticsControl={
-              !state.attachedDiagnostics && state.editorContext.diagnostics.length > 0
-            }
-            diagnosticsCount={state.editorContext.diagnostics.length}
-            onAttachDiagnostics={attachCurrentDiagnostics}
             showStopButton={showStopButton()}
             onStop={() => abortSession()}
             showSendControl={showSendControl()}
@@ -2967,11 +2967,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           onAttach={() => postMessage({ type: 'files/pick' })}
-          showDiagnosticsControl={
-            !state.attachedDiagnostics && state.editorContext.diagnostics.length > 0
-          }
-          diagnosticsCount={state.editorContext.diagnostics.length}
-          onAttachDiagnostics={attachCurrentDiagnostics}
           showStopButton={showStopButton()}
           onStop={() => abortSession()}
           showSendControl={showSendControl()}

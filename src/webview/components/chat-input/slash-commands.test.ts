@@ -22,6 +22,7 @@ describe('getSlashCommands', () => {
       onOpenModels: () => {},
       onOpenMcps: () => {},
       onOpenFiles: () => {},
+      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       customCommands: [
@@ -42,6 +43,7 @@ describe('getSlashCommands', () => {
       'attach',
       'compact',
       'connect',
+      'diagnostics',
       'export',
       'fork',
       'init',
@@ -59,6 +61,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'init')).toBe(true);
     expect(commands.some((command) => command.name === 'export')).toBe(true);
     expect(commands.some((command) => command.name === 'redo')).toBe(false);
+    expect(commands.find((command) => command.name === 'diagnostics')?.aliases).toEqual([]);
     expect(commands.some((command) => command.name === 'skills')).toBe(true);
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.some((command) => command.name === 'undo')).toBe(false);
@@ -76,6 +79,7 @@ describe('getSlashCommands', () => {
       onOpenModels: () => {},
       onOpenMcps: () => {},
       onOpenFiles: () => {},
+      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       customCommands: [],
@@ -95,6 +99,7 @@ describe('getSlashCommands', () => {
       onOpenModels: () => {},
       onOpenMcps: () => {},
       onOpenFiles: () => {},
+      onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
       customCommands: [

@@ -3,6 +3,7 @@ import type { Agent } from '../../types';
 import type { PermissionMode, WorkspaceFolderContext } from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { formatModelName } from '../../lib/format';
+import { FolderIcon } from '../FolderIcon';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
@@ -48,7 +49,7 @@ export function WorkspacePicker(props: {
         aria-label="Select workspace folder"
         onClick={props.onToggle}
       >
-        <span class="codicon codicon-root-folder" aria-hidden="true" />
+        <FolderIcon width={14} height={14} />
         <span class="toolbar-picker-label">{selected()?.name ?? 'Workspace'}</span>
         <PickerChevron />
       </button>
@@ -62,7 +63,7 @@ export function WorkspacePicker(props: {
                 title={folder.path}
                 onClick={() => props.onSelect(folder.path)}
               >
-                <span class="codicon codicon-folder" aria-hidden="true" />
+                <FolderIcon width={14} height={14} />
                 <span class="min-w-0">
                   <span class="block truncate">{folder.name}</span>
                   <span class="block truncate text-[10px] text-vscode-muted">{folder.path}</span>

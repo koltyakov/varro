@@ -29,6 +29,7 @@ export function getSlashCommands(props: {
   onOpenModels: () => void;
   onOpenMcps: () => void;
   onOpenFiles: () => void;
+  onAttachDiagnostics: () => void;
   onOpenSettings: () => void;
   onExportSession: () => void;
   customCommands: Command[];
@@ -42,6 +43,7 @@ export function getSlashCommands(props: {
     'connect',
     'attach',
     'files',
+    'diagnostics',
     'settings',
     'export',
     'fork',
@@ -103,6 +105,12 @@ export function getSlashCommands(props: {
       aliases: ['files'],
       description: 'Pick files or folders to attach',
       action: () => props.onOpenFiles(),
+    },
+    {
+      name: 'diagnostics',
+      aliases: [],
+      description: 'Attach active-file problems to your next message',
+      action: () => props.onAttachDiagnostics(),
     },
     {
       name: 'settings',

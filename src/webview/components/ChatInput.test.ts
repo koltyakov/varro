@@ -28,6 +28,7 @@ const {
   forkSessionMock,
   loadOlderSessionPromptsMock,
   redoSessionMock,
+  showSessionActionFeedbackMock,
   undoSessionMock,
   runSlashCommandByNameMock,
   sendMessageMock,
@@ -39,6 +40,7 @@ const {
   forkSessionMock: vi.fn(async () => 'forked-session'),
   loadOlderSessionPromptsMock: vi.fn(async () => false),
   redoSessionMock: vi.fn(async () => {}),
+  showSessionActionFeedbackMock: vi.fn(),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
   sendMessageMock: vi.fn(async () => true),
@@ -72,6 +74,10 @@ vi.mock('../hooks/useOpenCode', async () => {
     sendMessage: sendMessageMock,
   };
 });
+
+vi.mock('./chat/SessionActionFeedback', () => ({
+  showSessionActionFeedback: showSessionActionFeedbackMock,
+}));
 
 vi.mock('../lib/client', () => ({
   client: {
@@ -150,6 +156,7 @@ afterEach(() => {
   setState('clipboardImages', []);
   setState('droppedFiles', []);
   setState('terminalSelection', null);
+  setState('attachedDiagnostics', null);
   setState('editorContext', {
     workspacePath: null,
     activeFile: null,
@@ -176,6 +183,7 @@ afterEach(() => {
   forkSessionMock.mockReset();
   forkSessionMock.mockResolvedValue('forked-session');
   redoSessionMock.mockReset();
+  showSessionActionFeedbackMock.mockReset();
   undoSessionMock.mockReset();
   vi.mocked(client.varro.session.diffSummary).mockReset();
   vi.mocked(client.varro.session.diffSummary).mockResolvedValue({
@@ -2067,6 +2075,59 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(runSlashCommandByNameMock).toHaveBeenCalledWith('test', '--watch');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('attaches active-file diagnostics with the diagnostics slash command', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [
+        {
+          path: '/repo/src/app.ts',
+          severity: 'error',
+          message: 'Unexpected value',
+          line: 12,
+        },
+      ],
+      diagnosticsTotal: 3,
+    });
+    setInputText('/diagnostics');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.attachedDiagnostics).toEqual({
+      diagnostics: [
+        {
+          path: '/repo/src/app.ts',
+          severity: 'error',
+          message: 'Unexpected value',
+          line: 12,
+        },
+      ],
+      total: 3,
+    });
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('');
+  });
+
+  it('shows feedback when the diagnostics slash command finds no issues', async () => {
+    setInputText('/diagnostics');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    editor?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith('No issues found');
+    expect(state.attachedDiagnostics).toBeNull();
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(inputText()).toBe('');
   });

@@ -814,8 +814,8 @@ export type ServerEventPropertiesByName = {
   'lsp.client.diagnostics': Record<string, unknown>;
   'lsp.updated': Record<string, unknown>;
   'vcs.branch.updated': { branch?: string };
-  'mcp.tools.changed': Record<string, unknown>;
-  'mcp.browser.open.failed': Record<string, unknown>;
+  'mcp.tools.changed': { server?: string };
+  'mcp.browser.open.failed': { mcpName?: string; url?: string };
   'pty.created': Record<string, unknown>;
   'pty.updated': Record<string, unknown>;
   'pty.exited': Record<string, unknown>;

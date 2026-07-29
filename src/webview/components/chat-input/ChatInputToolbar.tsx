@@ -103,9 +103,6 @@ type ToolbarSharedProps = {
   onCompactSession: () => void;
   showAttachmentsControl: boolean;
   onAttach: () => void;
-  showDiagnosticsControl: boolean;
-  diagnosticsCount: number;
-  onAttachDiagnostics: () => void;
   showStopButton: boolean;
   onStop: () => void;
   showSendControl: boolean;
@@ -208,17 +205,6 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
       <div ref={props.toolbarRightRef} class="toolbar-right">
         <Show when={props.showAttachmentsControl}>
           <AttachButton onAttach={props.onAttach} />
-        </Show>
-
-        <Show when={props.showDiagnosticsControl}>
-          <button
-            class="toolbar-attach-button"
-            title={`Attach ${props.diagnosticsCount} current problem${props.diagnosticsCount === 1 ? '' : 's'}`}
-            aria-label="Attach current problems"
-            onClick={props.onAttachDiagnostics}
-          >
-            <span class="codicon codicon-warning" aria-hidden="true" />
-          </button>
         </Show>
 
         <Show when={props.showStopButton}>

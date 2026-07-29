@@ -17,6 +17,7 @@ function parseArguments(argv) {
     checkFloor: false,
     keepImages: false,
     report: null,
+    summary: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -26,6 +27,7 @@ function parseArguments(argv) {
     else if (argument === '--versions')
       options.versions = (argv[++index] || '').split(',').filter(Boolean);
     else if (argument === '--report') options.report = argv[++index] || null;
+    else if (argument === '--summary') options.summary = argv[++index] || null;
     else throw new Error(`Unknown argument: ${argument}`);
   }
   if (!Number.isSafeInteger(options.count) || options.count < 2) {
@@ -117,7 +119,7 @@ function imageTag(version) {
   return `varro-opencode-compat:${version.replace(/[^a-zA-Z0-9_.-]/g, '-')}`;
 }
 
-function testVersion(version) {
+function testVersion(version, declaredCeiling) {
   const tag = imageTag(version);
   process.stdout.write(`\n[${version}] Building compatibility image...\n`);
   const build = runDocker([
@@ -137,7 +139,10 @@ function testVersion(version) {
   }
 
   process.stdout.write(`[${version}] Probing Varro capabilities...\n`);
-  const run = runDocker(['run', '--rm', tag], { timeout: 2 * 60_000 });
+  const run = runDocker(
+    ['run', '--rm', '--env', `DECLARED_OPENCODE_CEILING=${declaredCeiling}`, tag],
+    { timeout: 2 * 60_000 }
+  );
   const output = `${run.stdout || ''}\n${run.stderr || ''}`;
   const resultLine = output.split(/\r?\n/).find((line) => line.startsWith(RESULT_PREFIX));
   if (!resultLine) {
@@ -202,7 +207,7 @@ process.stdout.write(`Declared Varro tested ceiling: ${declaredCeiling}.\n`);
 
 const results = [];
 try {
-  for (const version of versions) results.push(testVersion(version));
+  for (const version of versions) results.push(testVersion(version, declaredCeiling));
 } finally {
   if (!options.keepImages) {
     for (const version of versions) runDocker(['image', 'rm', '--force', imageTag(version)]);
@@ -210,8 +215,9 @@ try {
 }
 
 const analysis = analyze(results);
+const generatedAt = new Date().toISOString();
 const report = {
-  generatedAt: new Date().toISOString(),
+  generatedAt,
   declaredFloor,
   declaredCeiling,
   testedVersions: versions,
@@ -228,16 +234,48 @@ for (const result of results) {
 }
 
 if (!analysis.boundaryFound) {
-  const message = `No incompatibility boundary found in ${versions.length} releases; the practical floor is ${analysis.oldestTestedCompatible} or older. Increase --count before changing the declared floor.`;
-  if (options.checkFloor) throw new Error(message);
-  process.stdout.write(`${message}\n`);
+  process.stdout.write(
+    `No incompatibility boundary found in ${versions.length} releases; tested compatibility extends through ${analysis.oldestTestedCompatible}.\n`
+  );
 } else {
   process.stdout.write(
     `Detected floor: ${analysis.detectedFloor} (next older tested release ${analysis.firstIncompatible} is incompatible).\n`
   );
-  if (options.checkFloor && analysis.detectedFloor !== declaredFloor) {
+}
+
+if (options.checkFloor) {
+  const requiredResults = results.filter(
+    (result) =>
+      compareVersions(result.requestedVersion, declaredFloor) >= 0 &&
+      compareVersions(result.requestedVersion, declaredCeiling) <= 0
+  );
+  const failedRequired = requiredResults.find((result) => !result.compatible);
+  if (failedRequired) {
     throw new Error(
-      `Declared floor ${declaredFloor} does not match Docker-tested floor ${analysis.detectedFloor}.`
+      `OpenCode ${failedRequired.requestedVersion} failed within the declared ${declaredFloor} through ${declaredCeiling} compatibility range.`
     );
+  }
+  if (!requiredResults.some((result) => result.requestedVersion === declaredFloor)) {
+    throw new Error(`Compatibility run did not test declared floor ${declaredFloor}.`);
+  }
+  if (!requiredResults.some((result) => result.requestedVersion === declaredCeiling)) {
+    throw new Error(`Compatibility run did not test declared ceiling ${declaredCeiling}.`);
+  }
+  if (options.summary) {
+    await writeReport(options.summary, {
+      generatedAt,
+      declaredFloor,
+      declaredCeiling,
+      results: requiredResults
+        .filter(
+          (result) =>
+            result.requestedVersion === declaredFloor || result.requestedVersion === declaredCeiling
+        )
+        .map((result) => ({
+          requestedVersion: result.requestedVersion,
+          serverVersion: result.serverVersion,
+          compatible: result.compatible,
+        })),
+    });
   }
 }

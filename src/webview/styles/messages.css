@@ -475,9 +475,15 @@ body.vscode-light
   font-variant-numeric: tabular-nums;
   margin-top: 10px;
   margin-bottom: 0;
+  height: 24px;
+  box-sizing: border-box;
   display: block;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.model-change-indicator.assistant-dialog-summary:has(.assistant-dialog-summary-actions) {
+  height: auto;
 }
 
 .model-change-indicator.assistant-dialog-summary::before,

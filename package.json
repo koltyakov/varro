@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro for OpenCode",
-  "version": "0.22.15",
+  "version": "0.22.16",
   "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
   "categories": [
     "AI",
@@ -41,7 +41,7 @@
     "lint:check": "oxlint .",
     "fmt": "oxfmt src/",
     "test": "vitest run",
-    "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json",
+    "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "test:e2e": "playwright test",
     "test:coverage": "vitest run --coverage",

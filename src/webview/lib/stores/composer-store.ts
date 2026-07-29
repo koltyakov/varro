@@ -17,7 +17,6 @@ import {
   resetPastedImageIndex,
   setCurrentDocumentEnabled,
   setInputText,
-  state,
   setNextPastedImageIndex,
   setState,
   syncCurrentDocumentForWorkspace,
@@ -56,13 +55,6 @@ export const composerStore = {
   },
   clearTerminalSelection() {
     setState('terminalSelection', null);
-  },
-  attachDiagnostics() {
-    if (state.editorContext.diagnostics.length === 0) return;
-    setState('attachedDiagnostics', {
-      diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-      total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
-    });
   },
   clearAttachedDiagnostics() {
     setState('attachedDiagnostics', null);

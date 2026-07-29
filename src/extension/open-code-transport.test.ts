@@ -92,6 +92,16 @@ function stubPlatform(platform: NodeJS.Platform) {
 }
 
 describe('OpenCodeTransport reconnect delay', () => {
+  it('allows MCP OAuth authentication to use the server callback window', () => {
+    const transport = createTransport() as unknown as {
+      getRequestTimeoutMs(method: string, path: string): number;
+    };
+
+    expect(transport.getRequestTimeoutMs('POST', '/mcp/demo/auth/authenticate')).toBe(310_000);
+    expect(transport.getRequestTimeoutMs('GET', '/mcp/demo/auth/authenticate')).toBe(30_000);
+    expect(transport.getRequestTimeoutMs('POST', '/session/demo/abort')).toBe(30_000);
+  });
+
   it('keeps lower-bound jitter after reaching the max reconnect delay', () => {
     const transport = createTransport() as unknown as {
       eventReconnectDelay: number;

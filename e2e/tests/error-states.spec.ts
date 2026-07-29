@@ -113,6 +113,7 @@ test('opens the blocking setting when auto-update is disabled', async ({ page })
   await page.goto('/e2e/harness/index.html?scenario=server-error-update-blocked-setting');
 
   await expect(page.getByText('OpenCode update required', { exact: true })).toBeVisible();
+  await expect(page.getByText('brew upgrade opencode', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open Settings' }).click();
 
   await expect

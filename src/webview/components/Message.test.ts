@@ -385,6 +385,32 @@ describe('Message user prompt rendering', () => {
     expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
   });
 
+  it('fades overflowing user prompt text until it is scrolled to the end', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-1'),
+          parts: [textPart('text-1', 'A long prompt')],
+        }),
+      container!
+    );
+
+    const scrollContainer = container?.querySelector<HTMLElement>('.user-message-text-scroll');
+    expect(scrollContainer).not.toBeNull();
+    Object.defineProperties(scrollContainer!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 240 },
+    });
+
+    scrollContainer!.scrollTop = 0;
+    scrollContainer!.dispatchEvent(new Event('scroll'));
+    expect(scrollContainer?.classList.contains('has-more-below')).toBe(true);
+
+    scrollContainer!.scrollTop = 140;
+    scrollContainer!.dispatchEvent(new Event('scroll'));
+    expect(scrollContainer?.classList.contains('has-more-below')).toBe(false);
+  });
+
   it('renders fenced user prompt text as a scrollable code block', () => {
     cleanup = render(
       () =>

@@ -230,6 +230,8 @@ describe('ServerStatus', () => {
         kind: 'update-blocked',
         blockedBy: 'auto-update-disabled',
         settingId: 'varro.server.autoUpdate',
+        installMethod: 'brew',
+        suggestedCommand: 'brew upgrade opencode',
       },
     });
 
@@ -245,7 +247,16 @@ describe('ServerStatus', () => {
       type: 'vscode/open-settings',
       payload: { query: 'varro.server.autoUpdate' },
     });
-    expect(container?.textContent).not.toContain('Open terminal and update');
+    expect(container?.textContent).toContain('brew upgrade opencode');
+
+    const updateButton = Array.from(container?.querySelectorAll('button') || []).find(
+      (button) => button.textContent?.trim() === 'Open terminal and update'
+    );
+    updateButton?.click();
+    expect(postMessageMock).toHaveBeenCalledWith({
+      type: 'terminal/run',
+      payload: { command: 'brew upgrade opencode', title: 'OpenCode Update' },
+    });
   });
 
   it('does not offer update or restart actions while another host owns the server', () => {

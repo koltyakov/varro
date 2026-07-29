@@ -244,6 +244,7 @@ describe('mount bridge helpers', () => {
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
     const refreshProviders = vi.fn();
+    const openExternal = vi.fn();
     const addDroppedContextFiles = vi.fn();
     const removeDroppedContextFile = vi.fn();
     const deps = {
@@ -271,6 +272,7 @@ describe('mount bridge helpers', () => {
       abortSession,
       refreshMcps,
       refreshProviders,
+      openExternal,
       setWorkspaceStatusSummary: vi.fn(),
       setWorkspaceStatuses: vi.fn(),
     };
@@ -296,6 +298,13 @@ describe('mount bridge helpers', () => {
       type: 'server/event',
       payload: { type: 'mcp.tools.changed', properties: {} },
     });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'server/event',
+      payload: {
+        type: 'mcp.browser.open.failed',
+        properties: { mcpName: 'docs', url: 'https://mcp.example.com/authorize' },
+      },
+    });
     handleExtensionMessageWithDependencies(deps, { type: 'providers/refresh' });
 
     expect(createSession).toHaveBeenNthCalledWith(1, undefined);
@@ -306,8 +315,9 @@ describe('mount bridge helpers', () => {
     expect(abortSession).toHaveBeenCalledTimes(1);
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
-    expect(refreshMcps).toHaveBeenCalledTimes(1);
+    expect(refreshMcps).toHaveBeenCalledTimes(2);
     expect(refreshProviders).toHaveBeenCalledTimes(1);
+    expect(openExternal).toHaveBeenCalledWith('https://mcp.example.com/authorize');
   });
 
   it('binds extension message handling to shared webview state', () => {

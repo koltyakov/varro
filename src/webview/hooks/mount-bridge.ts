@@ -5,6 +5,7 @@ import { permissionsStore } from '../lib/stores/permissions-store';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
+import { postMessage } from '../lib/bridge';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { syncSessionMarkersForWorkspace } from '../lib/state';
 import { normalizeProjectPath } from './session/session-lifecycle';
@@ -83,6 +84,7 @@ export function createMountBridgeOperations(deps: {
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
         refreshProviders: deps.refreshProviders,
+        openExternal: (url) => postMessage({ type: 'vscode/open-external', payload: { url } }),
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
         setWorkspaceStatuses: (entries) => appStore.setState('workspaceStatuses', entries),
@@ -124,6 +126,7 @@ export function handleExtensionMessageWithDependencies(
     abortSession(): void;
     refreshMcps(): void;
     refreshProviders(): void;
+    openExternal?(url: string): void;
     setWorkspaceStatusSummary(summary: ReturnType<typeof getWorkspaceStatusEventSummary>): void;
     setWorkspaceStatuses(
       payload: {
@@ -208,6 +211,12 @@ export function handleExtensionMessageWithDependencies(
         msg.payload.type === 'mcp.browser.open.failed'
       ) {
         deps.refreshMcps();
+      }
+      if (
+        msg.payload.type === 'mcp.browser.open.failed' &&
+        typeof msg.payload.properties?.url === 'string'
+      ) {
+        deps.openExternal?.(msg.payload.properties.url);
       }
       break;
     case 'providers/refresh':

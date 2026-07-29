@@ -5,7 +5,11 @@ import {
   MINIMUM_SUPPORTED_OPENCODE_VERSION,
   OPENCODE_UPDATE_REQUIRED_PREFIX,
 } from '../shared/opencode-compatibility';
-import type { OpenCodeInstallMethod } from '../shared/opencode-install';
+import {
+  getUpgradeCommand,
+  OPENCODE_UPGRADE_COMMAND,
+  type OpenCodeInstallMethod,
+} from '../shared/opencode-install';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   parseServerEvent,
@@ -16,6 +20,7 @@ import {
 import {
   OpenCodeProcess,
   type OpenCodeCompactionSettings,
+  type OpenCodeServerOwnership,
   type UpgradeFailureReport,
 } from './open-code-process';
 import {
@@ -41,6 +46,7 @@ export interface OpenCodeServerInfo {
   command: string;
   autoStart: boolean;
   managedProcess: boolean;
+  ownership: OpenCodeServerOwnership;
   processId: number | null;
   cliVersion: string | null;
   cliVersionError: string | null;
@@ -86,7 +92,6 @@ function isSupportedOpenCodeVersion(version: string | undefined): boolean {
   );
 }
 
-const DEFAULT_UPGRADE_COMMAND = 'opencode upgrade';
 // Read once: the manifest cannot change while the extension host is alive.
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 
@@ -107,10 +112,19 @@ function createUpdateRequiredError(options: {
   reason: string;
   blockedBy?: ServerErrorBlockedBy;
   settingId?: string;
+  installMethod?: OpenCodeInstallMethod;
   failure?: UpgradeFailureReport;
 }): { message: string; detail: ServerErrorDetail } {
   const summary = `${OPENCODE_UPDATE_REQUIRED_PREFIX} Varro requires OpenCode ${MINIMUM_SUPPORTED_OPENCODE_VERSION} or newer, but ${options.observed}. ${options.reason}`;
-  let instruction = `Run "${DEFAULT_UPGRADE_COMMAND}", stop any running OpenCode server, then restart the Varro server.`;
+  const installMethod = options.failure?.installMethod ?? options.installMethod;
+  const suggestedCommand = installMethod
+    ? getUpgradeCommand(installMethod, process.platform) || OPENCODE_UPGRADE_COMMAND
+    : OPENCODE_UPGRADE_COMMAND;
+  const canSuggestCommand =
+    !options.blockedBy ||
+    options.blockedBy === 'auto-update-disabled' ||
+    options.blockedBy === 'auto-start-disabled';
+  let instruction = `Run "${suggestedCommand}", stop any running OpenCode server, then restart the Varro server.`;
   if (options.failure) {
     instruction = options.failure.guidance;
   } else {
@@ -144,19 +158,19 @@ function createUpdateRequiredError(options: {
           : 'update-required',
       required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
       observed: options.observed,
+      ...(installMethod ? { installMethod } : {}),
       ...(options.blockedBy ? { blockedBy: options.blockedBy } : {}),
       ...(options.settingId ? { settingId: options.settingId } : {}),
       ...(options.failure
         ? {
-            installMethod: options.failure.installMethod,
             cause: options.failure.cause,
             ...(options.failure.suggestedCommand
               ? { suggestedCommand: options.failure.suggestedCommand }
               : {}),
           }
-        : options.blockedBy
-          ? {}
-          : { suggestedCommand: DEFAULT_UPGRADE_COMMAND }),
+        : canSuggestCommand
+          ? { suggestedCommand }
+          : {}),
     },
   };
 }
@@ -673,6 +687,7 @@ export class OpenCodeServer extends EventEmitter {
               ? `the running server is ${healthNow.version}`
               : 'the running server version could not be determined',
             reason: 'The server that started is not compatible.',
+            installMethod: this.processManager.getInstallInfo().installMethod,
           });
           failStartup(incompatible.message, undefined, incompatible.detail);
           return;
@@ -954,6 +969,7 @@ export class OpenCodeServer extends EventEmitter {
             ? `the running server is ${health.version}`
             : 'the running server version could not be determined',
           reason: 'The server that started is not compatible.',
+          installMethod: this.processManager.getInstallInfo().installMethod,
         });
         this.setStatus({ state: 'error', message, detail });
         reject(new Error(message));
@@ -1046,6 +1062,7 @@ export class OpenCodeServer extends EventEmitter {
       searchedPaths: install.searchedPaths,
       autoStart: this.processManager.isAutoStartEnabled,
       managedProcess: this.managedProcess,
+      ownership: this.processManager.serverOwnership,
       processId: this.processManager.managedProcessId,
       cliVersion,
       cliVersionError,
@@ -1121,8 +1138,7 @@ export class OpenCodeServer extends EventEmitter {
         return health;
       },
       hasActiveSessions: () => this.hasActiveSessions(),
-      recoverLegacyManagedServerOwnership: () =>
-        this.processManager.recoverLegacyManagedServerOwnership(),
+      takeOwnershipOfExistingServer: () => this.processManager.takeOwnershipOfExistingServer(),
       restartServerForCliUpdate: (serverVersion, installedCliVersion) =>
         this.restartServerForCliUpdate(serverVersion, installedCliVersion),
     });
@@ -1268,7 +1284,13 @@ export class OpenCodeServer extends EventEmitter {
       failure?: UpgradeFailureReport;
     } = {}
   ): never {
-    const { message, detail } = createUpdateRequiredError({ observed, reason, ...options });
+    const { installMethod } = this.processManager.getInstallInfo();
+    const { message, detail } = createUpdateRequiredError({
+      observed,
+      reason,
+      installMethod,
+      ...options,
+    });
     this.cancelPollHealth();
     this.stopEventStream();
     this.setStatus({ state: 'error', message, detail });

@@ -2088,11 +2088,16 @@ kbd {
   display: flex;
   flex-direction: column;
   row-gap: 10px;
-  max-height: min(320px, 45vh);
+  max-height: min(280px, 40vh);
   overflow-y: auto;
   overscroll-behavior-y: auto;
   margin-right: -14px;
   padding-right: 14px;
+}
+
+.user-message-text-scroll.has-more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent);
 }
 
 .user-message-card > .rendered-markdown.user-message-content-has-image {

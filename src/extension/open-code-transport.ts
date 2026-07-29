@@ -36,6 +36,7 @@ interface OpenCodeTransportOptions {
 export class OpenCodeTransport {
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
+  private static readonly MCP_AUTH_TIMEOUT_MS = 5 * 60_000 + 10_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_STABILITY_WINDOW_MS = 15_000;
   private static readonly EVENT_IDLE_TIMEOUT_MS = 45_000;
@@ -82,7 +83,7 @@ export class OpenCodeTransport {
       this.getWorkspaceDirectoryForRequest(method, path)
     );
     const controller = new AbortController();
-    const timeoutSignal = AbortSignal.timeout(OpenCodeTransport.REQUEST_TIMEOUT_MS);
+    const timeoutSignal = AbortSignal.timeout(this.getRequestTimeoutMs(method, path));
     this.requestControllers.add(controller);
     const headers: Record<string, string> = {
       ...getOpenCodeDirectoryHeaders(scoped.directory),
@@ -124,6 +125,14 @@ export class OpenCodeTransport {
         this.requestSettlementWaiters.clear();
       }
     }
+  }
+
+  private getRequestTimeoutMs(method: string, path: string): number {
+    const pathname = new URL(path, 'http://localhost').pathname;
+    if (method.toUpperCase() === 'POST' && /^\/mcp\/[^/]+\/auth\/authenticate$/.test(pathname)) {
+      return OpenCodeTransport.MCP_AUTH_TIMEOUT_MS;
+    }
+    return OpenCodeTransport.REQUEST_TIMEOUT_MS;
   }
 
   private getWorkspaceDirectoryForRequest(method: string, path: string) {

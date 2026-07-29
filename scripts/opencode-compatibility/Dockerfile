@@ -7,5 +7,6 @@ RUN npm install --global "opencode-ai@${OPENCODE_VERSION}"
 
 WORKDIR /workspace
 COPY scripts/opencode-compatibility/probe-server.mjs /opt/varro/probe-server.mjs
+COPY scripts/opencode-compatibility/mcp-fixture.mjs /opt/varro/mcp-fixture.mjs
 
 CMD ["node", "/opt/varro/probe-server.mjs"]

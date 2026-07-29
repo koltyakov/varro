@@ -124,6 +124,41 @@ describe('About command', () => {
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.not.stringContaining('- Loaded workspaces:') })
     );
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.not.stringContaining('- Searched PATH entries:') })
+    );
+  });
+
+  it('identifies a server managed by another Varro window', async () => {
+    register('/repo', {
+      readServerInfo: vi.fn().mockResolvedValue({
+        status: { state: 'running', url: 'http://127.0.0.1:4096' },
+        url: 'http://127.0.0.1:4096',
+        port: 4096,
+        command: 'opencode',
+        managedProcess: false,
+        ownership: 'other-host',
+        cliVersion: '1.18.9',
+        cliVersionError: null,
+        installMethod: 'script',
+        resolvedCommand: '/home/me/.opencode/bin/opencode',
+        searchedPaths: [],
+        activeAgentCount: 0,
+        activeAgentError: null,
+        health: { healthy: true, version: '1.18.9' },
+        workspaceCwd: '/repo',
+      }),
+    });
+
+    await runCommand('varro.about');
+
+    expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          '- Server ownership: managed by Varro (another VS Code window)'
+        ),
+      })
+    );
   });
 });
 

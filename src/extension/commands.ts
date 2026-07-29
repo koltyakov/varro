@@ -262,6 +262,12 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
   const activeAgents = serverInfo.activeAgentError
     ? `error: ${serverInfo.activeAgentError}`
     : String(serverInfo.activeAgentCount ?? 'unknown');
+  const ownership =
+    serverInfo.ownership === 'other-host'
+      ? 'managed by Varro (another VS Code window)'
+      : serverInfo.ownership === 'current-host' || serverInfo.managedProcess
+        ? 'managed by Varro'
+        : 'unmanaged';
 
   return [
     `# ${name} About`,
@@ -282,11 +288,10 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- Server port: ${serverInfo.port}`,
     `- Server health: ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
     `- Server version: ${serverInfo.health.version || 'unknown'}`,
-    `- Server ownership: ${serverInfo.managedProcess ? 'managed by Varro' : 'unmanaged'}`,
+    `- Server ownership: ${ownership}`,
     `- Active agents: ${activeAgents}`,
     `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
     `- CLI command: ${serverInfo.command}`,
-    `- Searched PATH entries: ${serverInfo.searchedPaths.length > 0 ? serverInfo.searchedPaths.join(', ') : 'n/a (configured command)'}`,
     `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,
     '',
     '## Runtime',

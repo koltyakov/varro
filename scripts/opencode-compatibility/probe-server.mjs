@@ -1,9 +1,13 @@
 import { spawn } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 const TESTED_VERSION = process.env.TESTED_OPENCODE_VERSION || 'unknown';
 const BASE_URL = 'http://127.0.0.1:4096';
 const DIRECTORY = '/workspace';
+const MCP_FIXTURE_NAME = 'varro-compat';
+const MCP_FIXTURE_PATH = '/opt/varro/mcp-fixture.mjs';
+const MCP_PAGE_MARKER_PATH = '/tmp/varro-mcp-pages';
+const MCP_CHECK_REQUIRED = TESTED_VERSION === process.env.DECLARED_OPENCODE_CEILING;
 const RESULT_PREFIX = 'VARRO_COMPAT_RESULT=';
 const START_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -15,8 +19,22 @@ let serverOutput = '';
 
 await writeFile(
   BASE_CONFIG_PATH,
-  `${JSON.stringify({ compaction: { auto: false, reserved: 1111 } }, null, 2)}\n`
+  `${JSON.stringify(
+    {
+      compaction: { auto: false, reserved: 1111 },
+      mcp: {
+        [MCP_FIXTURE_NAME]: {
+          type: 'local',
+          command: ['node', MCP_FIXTURE_PATH],
+          enabled: false,
+        },
+      },
+    },
+    null,
+    2
+  )}\n`
 );
+await writeFile(MCP_PAGE_MARKER_PATH, '');
 await writeFile(
   `${DIRECTORY}/opencode.jsonc`,
   '{\n  // Project config must override Varro\'s pre-project layer.\n  "compaction": { "auto": true, "reserved": 2222 },\n}\n'
@@ -111,12 +129,18 @@ async function request(name, method, path, options = {}) {
     if (options.validate && !options.validate(data)) {
       throw new Error(`unexpected response shape: ${text.slice(0, 300)}`);
     }
-    checks.push({ name, ok: true, durationMs: Date.now() - startedAt });
+    checks.push({
+      name,
+      ok: true,
+      ...(options.required === false ? { required: false, advisory: true } : {}),
+      durationMs: Date.now() - startedAt,
+    });
     return data;
   } catch (error) {
     checks.push({
       name,
       ok: false,
+      ...(options.required === false ? { required: false, advisory: true } : {}),
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -166,7 +190,9 @@ async function requestExpectedMissingRequest(
       checks.push({ name, ok: true, durationMs: Date.now() - startedAt });
       return;
     }
-    if (!isRouteSpecificMissingRequest(response.status, text, path, requestKind, missingRequestId)) {
+    if (
+      !isRouteSpecificMissingRequest(response.status, text, path, requestKind, missingRequestId)
+    ) {
       if (response.status === 400) {
         checks.push({
           name,
@@ -198,7 +224,7 @@ async function requestExpectedMissingRequest(
   }
 }
 
-async function readFirstSsePayload(response) {
+async function readSsePayload(response, accept = () => true) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('event stream response has no body');
   const decoder = new TextDecoder();
@@ -214,7 +240,10 @@ async function readFirstSsePayload(response) {
           .filter((line) => line.startsWith('data:'))
           .map((line) => line.slice(5).trimStart())
           .join('\n');
-        if (data) return JSON.parse(data);
+        if (data) {
+          const payload = JSON.parse(data);
+          if (accept(payload)) return payload;
+        }
         match = /\r?\n\r?\n/.exec(buffer);
       }
 
@@ -245,7 +274,7 @@ async function checkEventStream() {
     if (!contentType.includes('text/event-stream')) {
       throw new Error(`unexpected content-type: ${contentType || 'missing'}`);
     }
-    const payload = await readFirstSsePayload(response);
+    const payload = await readSsePayload(response);
     const event = isRecord(payload?.payload) ? payload.payload : null;
     if (
       !isRecord(payload) ||
@@ -267,6 +296,100 @@ async function checkEventStream() {
   } finally {
     clearTimeout(timeout);
     controller.abort();
+  }
+}
+
+function getWrappedEvent(payload) {
+  return isRecord(payload?.payload) ? payload.payload : isRecord(payload) ? payload : null;
+}
+
+async function checkMcpLifecycle() {
+  const eventName = 'mcp.tools.changed is emitted for MCP tool-list notifications';
+  const eventStartedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let changedEvent;
+  try {
+    const response = await fetch(scopedUrl('/global/event'), {
+      headers: {
+        accept: 'text/event-stream',
+        'x-opencode-directory': DIRECTORY,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+
+    changedEvent = readSsePayload(response, (payload) => {
+      const event = getWrappedEvent(payload);
+      return event?.type === 'mcp.tools.changed';
+    });
+    const connected = await request(
+      'POST /mcp/:name/connect',
+      'POST',
+      `/mcp/${encodeURIComponent(MCP_FIXTURE_NAME)}/connect`,
+      { validate: (value) => value === true, required: MCP_CHECK_REQUIRED }
+    );
+    if (connected !== true) throw new Error('MCP fixture did not connect');
+
+    await request('GET /mcp reports connected fixture', 'GET', '/mcp', {
+      validate: (value) => value?.[MCP_FIXTURE_NAME]?.status === 'connected',
+      required: MCP_CHECK_REQUIRED,
+    });
+    const paginationStartedAt = Date.now();
+    try {
+      const pages = await readFile(MCP_PAGE_MARKER_PATH, 'utf8');
+      if (!pages.includes('first\n') || !pages.includes('second\n')) {
+        throw new Error(`MCP pagination marker is incomplete: ${JSON.stringify(pages)}`);
+      }
+      checks.push({
+        name: 'MCP tool discovery follows pagination cursors',
+        ok: true,
+        ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
+        durationMs: Date.now() - paginationStartedAt,
+      });
+    } catch (error) {
+      checks.push({
+        name: 'MCP tool discovery follows pagination cursors',
+        ok: false,
+        ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
+        durationMs: Date.now() - paginationStartedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const payload = await changedEvent;
+    const event = getWrappedEvent(payload);
+    if (event?.properties?.server !== MCP_FIXTURE_NAME) {
+      throw new Error(`unexpected MCP event: ${JSON.stringify(payload).slice(0, 300)}`);
+    }
+    checks.push({
+      name: eventName,
+      ok: true,
+      ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
+      durationMs: Date.now() - eventStartedAt,
+    });
+
+    await request(
+      'POST /mcp/:name/disconnect',
+      'POST',
+      `/mcp/${encodeURIComponent(MCP_FIXTURE_NAME)}/disconnect`,
+      { validate: (value) => value === true, required: MCP_CHECK_REQUIRED }
+    );
+    await request('GET /mcp reports disconnected fixture', 'GET', '/mcp', {
+      validate: (value) => value?.[MCP_FIXTURE_NAME]?.status === 'disabled',
+      required: MCP_CHECK_REQUIRED,
+    });
+  } catch (error) {
+    checks.push({
+      name: eventName,
+      ok: false,
+      ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
+      durationMs: Date.now() - eventStartedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+    await changedEvent?.catch(() => {});
   }
 }
 
@@ -294,13 +417,16 @@ async function runProbe() {
   });
   await request('GET /provider/auth', 'GET', '/provider/auth', { validate: isRecord });
   await request('GET /command', 'GET', '/command', { validate: Array.isArray });
-  await request('GET /mcp', 'GET', '/mcp', { validate: isRecord });
+  await request('GET /mcp', 'GET', '/mcp', {
+    validate: (value) => isRecord(value) && value?.[MCP_FIXTURE_NAME]?.status === 'disabled',
+  });
   await request('GET /file/status', 'GET', '/file/status', { validate: Array.isArray });
   await request('GET /agent', 'GET', '/agent', { validate: Array.isArray });
   await request('GET /experimental/workspace/status', 'GET', '/experimental/workspace/status', {
     validate: Array.isArray,
   });
   await checkEventStream();
+  await checkMcpLifecycle();
 
   let sessionID;
   let forkSessionID;

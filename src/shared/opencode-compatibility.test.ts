@@ -1,5 +1,10 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { getMaximumTestedOpenCodeVersion } from './opencode-compatibility';
+import {
+  assertOpenCodeCompatibilityReportCurrent,
+  getMaximumTestedOpenCodeVersion,
+} from './opencode-compatibility';
 
 describe('getMaximumTestedOpenCodeVersion', () => {
   it('reads the exact version from the SDK dependency range', () => {
@@ -14,5 +19,35 @@ describe('getMaximumTestedOpenCodeVersion', () => {
     expect(() => getMaximumTestedOpenCodeVersion({ dependencies: {} })).toThrow(
       'Varro package.json does not declare @opencode-ai/sdk'
     );
+  });
+
+  it('rejects a compatibility report with a stale tested ceiling', () => {
+    expect(() =>
+      assertOpenCodeCompatibilityReportCurrent(
+        { dependencies: { '@opencode-ai/sdk': '^1.18.9' } },
+        {
+          declaredFloor: '1.16.0',
+          declaredCeiling: '1.18.2',
+          detectedFloor: '1.16.0',
+          boundaryFound: true,
+          results: [],
+        }
+      )
+    ).toThrow('OpenCode compatibility report does not cover declared ceiling 1.18.9');
+  });
+
+  it('keeps the committed compatibility verification aligned with the manifest', async () => {
+    const root = resolve(import.meta.dirname, '../..');
+    const [packageSource, verificationSource] = await Promise.all([
+      readFile(resolve(root, 'package.json'), 'utf8'),
+      readFile(resolve(root, 'scripts/opencode-compatibility/verified.json'), 'utf8'),
+    ]);
+
+    expect(() =>
+      assertOpenCodeCompatibilityReportCurrent(
+        JSON.parse(packageSource),
+        JSON.parse(verificationSource)
+      )
+    ).not.toThrow();
   });
 });

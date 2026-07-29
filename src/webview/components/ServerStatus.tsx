@@ -418,8 +418,10 @@ function InvalidPathState(props: { message: string; detail: ServerErrorDetail })
 
 function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
   const isWaiting = () => props.detail.blockedBy === 'active-sessions';
-  const blocksUpdateCommand = () =>
-    props.detail.blockedBy === 'foreign-owner' || props.detail.blockedBy === 'verify-failed';
+  const allowsUpdateCommand = () =>
+    props.detail.kind !== 'update-blocked' ||
+    props.detail.blockedBy === 'auto-update-disabled' ||
+    props.detail.blockedBy === 'auto-start-disabled';
   const blocksRestart = () => props.detail.blockedBy === 'foreign-owner';
   const title = () =>
     isWaiting()
@@ -438,14 +440,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
         <p class="text-[12px] leading-normal text-vscode-muted">{props.message}</p>
       </div>
 
-      <Show
-        when={
-          props.detail.kind !== 'update-blocked' &&
-          !isWaiting() &&
-          !blocksUpdateCommand() &&
-          props.detail.suggestedCommand
-        }
-      >
+      <Show when={!isWaiting() && allowsUpdateCommand() && props.detail.suggestedCommand}>
         <SetupCommandCard label="Update" command={props.detail.suggestedCommand || ''} />
         <button
           type="button"

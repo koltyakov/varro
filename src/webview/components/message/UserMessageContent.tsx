@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import {
   formatDisplayPath,
   getLeafPathName,
@@ -57,6 +57,25 @@ type InlineTextSegment =
   | { type: 'attachment'; attachment: InlineRenderableAttachment };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
+
+function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
+  const update = () => {
+    const hasMoreBelow = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    element.classList.toggle('has-more-below', hasMoreBelow);
+  };
+
+  element.addEventListener('scroll', update, { passive: true });
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+  resizeObserver?.observe(element);
+  createEffect(() => {
+    trackText();
+    queueMicrotask(update);
+  });
+  onCleanup(() => {
+    element.removeEventListener('scroll', update);
+    resizeObserver?.disconnect();
+  });
+}
 
 function trimFenceBoundaryNewlines(content: string, side: 'start' | 'end') {
   return side === 'start' ? content.replace(/^\n+/, '') : content.replace(/\n+$/, '');
@@ -475,7 +494,10 @@ export function UserMessageContent(props: { parts: Part[] }) {
       </Show>
       <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
       <Show when={parsed().messageTexts.length > 0}>
-        <div class="user-message-text-scroll">
+        <div
+          class="user-message-text-scroll"
+          ref={(element) => bindUserMessageOverflowFade(element, () => parsed().messageTexts)}
+        >
           <For each={parsed().messageTexts}>
             {(text) => (
               <UserMessageTextContent

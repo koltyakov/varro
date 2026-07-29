@@ -209,6 +209,7 @@ export function MessageList() {
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
+  let activeOlderHistoryLoad: Promise<void> | null = null;
   let diffFocusPauseActive = false;
   let resumeAutoScrollAfterDiffFocus = false;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -224,10 +225,18 @@ export function MessageList() {
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
+  const [pendingStickyJump, setPendingStickyJump] = createSignal<{
+    sessionId: string;
+    preview: StickyUserMessagePreview;
+  } | null>(null);
+  const displayedStickyUserMessagePreview = createMemo(
+    () => pendingStickyJump()?.preview ?? stickyUserMessagePreview()
+  );
   const [stickyPreviewScrollTop, setStickyPreviewScrollTop] = createSignal(0);
   const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
+  const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
   const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
   const activeSessionWorking = createMemo(() => isActiveSessionWorking());
   const shouldShowStarterLogo = createMemo(() => {
@@ -547,6 +556,10 @@ export function MessageList() {
       clearLoadingRowReappearTimer();
       loadingRowHiddenByVisibleStream = false;
       if (isShowing) setShowLoadingRow(false);
+      if (!trailingSummarySettled()) {
+        clearLoadingRowReserveReleaseTimer();
+        return;
+      }
       if (!isReserved || loadingRowReserveReleaseTimer) return;
       loadingRowReserveReleaseTimer = setTimeout(() => {
         loadingRowReserveReleaseTimer = 0;
@@ -663,7 +676,6 @@ export function MessageList() {
   const activeSessionRootId = createMemo(
     () => getSessionTreeRootId(state.activeSessionId) || state.activeSessionId
   );
-  const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
 
   createEffect(() => {
     clearTrailingSummarySettleTimer();
@@ -677,7 +689,12 @@ export function MessageList() {
 
     trailingSummarySettleTimer = setTimeout(() => {
       trailingSummarySettleTimer = 0;
-      if (!activeSessionWorking()) setTrailingSummarySettled(true);
+      if (!activeSessionWorking()) {
+        batch(() => {
+          setTrailingSummarySettled(true);
+          if (!loadingRowEligible()) setReserveLoadingRow(false);
+        });
+      }
     }, TRAILING_SUMMARY_SETTLE_DELAY_MS);
   });
 
@@ -975,7 +992,7 @@ export function MessageList() {
     }
 
     const capturedAutoScroll = autoScroll();
-    if (capturedAutoScroll || userScrollRecentlyActive()) {
+    if (capturedAutoScroll || pendingStickyJump() || userScrollRecentlyActive()) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -1764,6 +1781,7 @@ export function MessageList() {
     pinnedToBottom = true;
     diffFocusPauseActive = false;
     resumeAutoScrollAfterDiffFocus = false;
+    setPendingStickyJump(null);
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
@@ -1998,79 +2016,114 @@ export function MessageList() {
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
 
-  function scrollMessageIntoView(preview: StickyUserMessagePreview) {
-    if (!containerRef) return;
-    const row = [...containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-      (element) => element.dataset.msgId === preview.id
-    );
+  async function scrollMessageIntoView(preview: StickyUserMessagePreview): Promise<boolean> {
+    const container = containerRef;
+    if (!container) return false;
+    const findRow = () =>
+      [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+        (element) => element.dataset.msgId === preview.id
+      );
+    let row = findRow();
     if (row) {
       row.scrollIntoView({ block: 'start' });
-      return;
-    }
-    if (shouldVirtualize()) {
+    } else {
       const messageIndex = messages().findIndex((entry) => entry.info.id === preview.id);
-      if (messageIndex < 0) return;
-      const nextScrollTop = virtualMetrics().prefix[messageIndex] ?? 0;
-      containerRef.scrollTop = nextScrollTop;
-      setScrollTop(nextScrollTop);
-      setStickyPreviewScrollTop(nextScrollTop);
-      requestAnimationFrame(() => {
-        const mountedRow = [
-          ...(containerRef?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? []),
-        ].find((element) => element.dataset.msgId === preview.id);
-        mountedRow?.scrollIntoView({ block: 'start' });
-      });
+      if (messageIndex < 0) return false;
+      for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
+        if (shouldVirtualize()) {
+          const nextScrollTop = virtualMetrics().prefix[messageIndex] ?? 0;
+          container.scrollTop = nextScrollTop;
+          setScrollTop(nextScrollTop);
+          setStickyPreviewScrollTop(nextScrollTop);
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        row = findRow();
+      }
+      if (!row) return false;
+      row.scrollIntoView({ block: 'start' });
     }
+
+    // Let prepend measurements and anchor corrections settle, then make the explicit jump final.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    findRow()?.scrollIntoView({ block: 'start' });
+    return true;
   }
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
-    if (loadingStickyPreviewId()) return;
+    if (pendingStickyJump()) return;
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
-    if (messages().some((entry) => entry.info.id === preview.id)) {
-      scrollMessageIntoView(preview);
+    if (messages().some((entry) => entry.info.id === preview.id) && !activeOlderHistoryLoad) {
+      void scrollMessageIntoView(preview);
       return;
     }
     const sessionId = state.activeSessionId;
     if (sessionId) {
-      setLoadingStickyPreviewId(preview.id);
-      void loadAndScrollToStickyPreview(sessionId, preview);
+      const jump = { sessionId, preview };
+      setPendingStickyJump(jump);
+      void loadAndScrollToStickyPreview(jump);
     }
   }
 
-  async function loadAndScrollToStickyPreview(
-    sessionId: string,
-    preview: StickyUserMessagePreview
-  ) {
-    setLoadingOlderHistory(true);
-    try {
-      while (
-        state.activeSessionId === sessionId &&
-        !messages().some((entry) => entry.info.id === preview.id)
-      ) {
-        if (!(await loadOlderSessionHistoryPage(sessionId))) break;
-      }
-    } finally {
-      setLoadingOlderHistory(false);
-    }
+  async function loadAndScrollToStickyPreview(jump: {
+    sessionId: string;
+    preview: StickyUserMessagePreview;
+  }) {
+    const { sessionId, preview } = jump;
+    const clearPendingJump = () => {
+      if (pendingStickyJump() === jump) setPendingStickyJump(null);
+    };
+    const historyLoad = activeOlderHistoryLoad;
+    if (historyLoad) await historyLoad;
     if (state.activeSessionId !== sessionId) {
-      setLoadingStickyPreviewId(null);
+      clearPendingJump();
       return;
     }
-    requestAnimationFrame(() => {
-      scrollMessageIntoView(preview);
-      setLoadingStickyPreviewId(null);
-    });
+
+    const needsHistory = !messages().some((entry) => entry.info.id === preview.id);
+    const ownsLoadingState = needsHistory && !loadingOlderHistory();
+    if (ownsLoadingState) setLoadingOlderHistory(true);
+    if (needsHistory) {
+      try {
+        while (
+          state.activeSessionId === sessionId &&
+          !messages().some((entry) => entry.info.id === preview.id)
+        ) {
+          if (!(await loadOlderSessionHistoryPage(sessionId))) break;
+        }
+      } finally {
+        if (ownsLoadingState) setLoadingOlderHistory(false);
+      }
+    }
+    if (state.activeSessionId !== sessionId) {
+      clearPendingJump();
+      return;
+    }
+    await scrollMessageIntoView(preview);
+    clearPendingJump();
   }
 
   const stickyPreviewTitle = 'Click to scroll to message';
 
-  const [loadingStickyPreviewId, setLoadingStickyPreviewId] = createSignal<string | null>(null);
   const [loadingOlderHistory, setLoadingOlderHistory] = createSignal(false);
-  async function handleLoadOlderHistory() {
+  function handleLoadOlderHistory(): Promise<void> | undefined {
+    if (activeOlderHistoryLoad) return activeOlderHistoryLoad;
     const sessionId = state.activeSessionId;
     const container = containerRef;
     if (!sessionId || !container || loadingOlderHistory()) return;
+    const load = loadOlderHistoryPreservingScroll(sessionId, container);
+    activeOlderHistoryLoad = load;
+    const clearActiveLoad = () => {
+      if (activeOlderHistoryLoad === load) activeOlderHistoryLoad = null;
+    };
+    void load.then(clearActiveLoad, clearActiveLoad);
+    return load;
+  }
+
+  async function loadOlderHistoryPreservingScroll(
+    sessionId: string,
+    container: HTMLDivElement
+  ): Promise<void> {
     markSessionHistoryLoadFailed(sessionId, false);
     const anchor = captureVisibleScrollAnchor();
     const previousScrollHeight = container.scrollHeight;
@@ -2081,6 +2134,7 @@ export function MessageList() {
       if (!loaded || state.activeSessionId !== sessionId) return;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       if (state.activeSessionId !== sessionId || !containerRef) return;
+      if (pendingStickyJump()) return;
       if (!restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true })) {
         const heightDelta = containerRef.scrollHeight - previousScrollHeight;
         setPreservedScrollTop(previousScrollTop + Math.max(0, heightDelta));
@@ -2112,12 +2166,12 @@ export function MessageList() {
           ref={trackRef}
           class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}${showTruncatedHistoryBanner() && scrollTop() <= 24 ? ' history-boundary-visible' : ''}`}
         >
-          <Show when={stickyUserMessagePreview()}>
+          <Show when={displayedStickyUserMessagePreview()}>
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
                 title={stickyPreviewTitle}
-                loading={loadingStickyPreviewId() === preview().id}
+                loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
               />
             )}

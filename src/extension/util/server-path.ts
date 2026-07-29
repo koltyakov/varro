@@ -1,9 +1,9 @@
-import { delimiter as defaultDelimiter, join as defaultJoin, win32 } from 'path';
+import { posix, win32 } from 'path';
 
 function getPathTools(platform = process.platform) {
   return platform === 'win32'
     ? { delimiter: ';', join: win32.join }
-    : { delimiter: defaultDelimiter, join: defaultJoin };
+    : { delimiter: posix.delimiter, join: posix.join };
 }
 
 export function getPathVariableKey(
