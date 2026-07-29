@@ -164,7 +164,8 @@ describe('MessageListChrome', () => {
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('is-loading')).toBe(true);
-    expect(card?.textContent).toContain('Loading…');
+    expect(card?.textContent).not.toContain('Loading…');
+    expect(card?.querySelector('.latest-user-message-sticky-spinner')).not.toBeNull();
     card?.click();
     expect(onClick).not.toHaveBeenCalled();
   });

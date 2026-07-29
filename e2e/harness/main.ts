@@ -77,6 +77,7 @@ const SCENARIO_NAMES = [
   'statusbar-focus',
   'large-transcript',
   'diff-preview-large-transcript',
+  'assistant-heavy-history',
   'mixed-small-transcript',
   'heterogeneous-large-transcript',
   'huge-content-transcript',
@@ -2293,12 +2294,74 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(user, assistant);
     }
 
+    if (new URLSearchParams(window.location.search).get('boundarySticky') === '1') {
+      messages.push(
+        makeUserMessage(
+          session.id,
+          'message-diff-preview-user-60',
+          ['Review asynchronous report change 60.'],
+          BASE_TIME - 140 * 1000
+        )
+      );
+    }
+
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.showInlineFileChanges = true;
     state.nextSequence = 392;
+    return state;
+  }
+
+  if (name === 'assistant-heavy-history') {
+    const session = makeSession(
+      'session-assistant-heavy-history',
+      'Assistant-heavy paginated history',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    const firstUser = makeUserMessage(
+      session.id,
+      'message-assistant-heavy-user-0',
+      ['Initial request'],
+      BASE_TIME - 100_000
+    );
+    messages.push(firstUser);
+    for (let index = 0; index < 15; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-assistant-heavy-before-${index}`,
+          firstUser.info.id,
+          `Initial response step ${index}.`,
+          BASE_TIME - (99_000 - index)
+        )
+      );
+    }
+    const targetUser = makeUserMessage(
+      session.id,
+      'message-assistant-heavy-target',
+      ['Apply the needed fixes/improvements'],
+      BASE_TIME - 80_000
+    );
+    messages.push(targetUser);
+    for (let index = 0; index < 62; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-assistant-heavy-after-${index}`,
+          targetUser.info.id,
+          `Implementation step ${index}.`,
+          BASE_TIME - (79_000 - index)
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
     return state;
   }
 
@@ -2332,7 +2395,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           '',
           `${'Non-virtualized scroll should not jump while wheel input is active. '.repeat(3 + (index % 5))}`,
           '',
-          index % 5 === 0 ? '```sh\nnpm run test:e2e -- e2e/tests/scroll.spec.ts\n```' : '- stable viewport',
+          index % 5 === 0
+            ? '```sh\nnpm run test:e2e -- e2e/tests/scroll.spec.ts\n```'
+            : '- stable viewport',
         ].join('\n'),
         index % 6 === 0
           ? [
@@ -2450,7 +2515,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             '',
             `The fix should preserve user intent and avoid applying stale measurement anchors. ${'This text represents a final answer block in a multi-agent session. '.repeat(4 + (index % 5))}`,
             '',
-            index % 12 === 0 ? '- agent handoff summarized\n- tool output reviewed\n- regression covered' : 'Done.',
+            index % 12 === 0
+              ? '- agent handoff summarized\n- tool output reviewed\n- regression covered'
+              : 'Done.',
           ].join('\n'),
           index % 12 === 0
             ? [
@@ -2498,7 +2565,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const user = makeUserMessage(
         session.id,
         `message-huge-user-${index}`,
-        [`Review huge-content section ${index}. The scrollbar size must match the transcript size.`],
+        [
+          `Review huge-content section ${index}. The scrollbar size must match the transcript size.`,
+        ],
         createdAt
       );
       const assistant = makeCompletedAssistantMessageWithParts(
@@ -2544,7 +2613,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const user = makeUserMessage(
         session.id,
         `message-multi-agent-user-${index}`,
-        [`Investigate section ${index} and provide a comprehensive analysis with code examples. ${'Include detailed reasoning about the approach and potential edge cases. '.repeat(4)}`],
+        [
+          `Investigate section ${index} and provide a comprehensive analysis with code examples. ${'Include detailed reasoning about the approach and potential edge cases. '.repeat(4)}`,
+        ],
         createdAt
       );
       messages.push(user);
@@ -2580,9 +2651,24 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             `message-multi-agent-assistant-${index}-a`,
             `message-multi-agent-assistant-${index}-a-todo`,
             [
-              { id: `multi-todo-${index}-1`, content: `Analyze section ${index}`, status: 'completed', priority: 'high' },
-              { id: `multi-todo-${index}-2`, content: 'Write test coverage', status: 'completed', priority: 'high' },
-              { id: `multi-todo-${index}-3`, content: 'Review edge cases', status: 'completed', priority: 'medium' },
+              {
+                id: `multi-todo-${index}-1`,
+                content: `Analyze section ${index}`,
+                status: 'completed',
+                priority: 'high',
+              },
+              {
+                id: `multi-todo-${index}-2`,
+                content: 'Write test coverage',
+                status: 'completed',
+                priority: 'high',
+              },
+              {
+                id: `multi-todo-${index}-3`,
+                content: 'Review edge cases',
+                status: 'completed',
+                priority: 'medium',
+              },
             ]
           ),
         ]
@@ -2675,7 +2761,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const user = makeUserMessage(
         session.id,
         `message-rapid-user-${index}`,
-        [`Rapid jitter test prompt ${index}. ${index % 5 === 0 ? 'This is a taller prompt with extra text to vary heights. '.repeat(3) : ''}`],
+        [
+          `Rapid jitter test prompt ${index}. ${index % 5 === 0 ? 'This is a taller prompt with extra text to vary heights. '.repeat(3) : ''}`,
+        ],
         createdAt
       );
       const assistant = makeCompletedAssistantMessageWithParts(
@@ -2750,7 +2838,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const user = makeUserMessage(
         session.id,
         `message-mla-user-${index}`,
-        [`Investigate section ${index} with detailed analysis. ${'Include reasoning about edge cases and potential issues. '.repeat(2 + (index % 3))}`],
+        [
+          `Investigate section ${index} with detailed analysis. ${'Include reasoning about edge cases and potential issues. '.repeat(2 + (index % 3))}`,
+        ],
         createdAt
       );
       messages.push(user);
@@ -2765,7 +2855,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           '',
           `Working through section ${index}. ${'This analysis covers algorithmic considerations and data flow patterns for scroll stability. '.repeat(3 + (index % 5))}`,
           '',
-          index % 4 === 0 ? '```ts\nexport function analyze() {\n  return { stable: true };\n}\n```' : '- measured row height',
+          index % 4 === 0
+            ? '```ts\nexport function analyze() {\n  return { stable: true };\n}\n```'
+            : '- measured row height',
         ].join('\n'),
         [
           ...(index % 3 === 0
@@ -2787,8 +2879,18 @@ function createScenarioState(name: ScenarioName): ScenarioState {
                   `message-mla-assistant-${index}-a`,
                   `message-mla-assistant-${index}-a-todo`,
                   [
-                    { id: `mla-todo-${index}-1`, content: `Analyze section ${index}`, status: 'completed', priority: 'high' },
-                    { id: `mla-todo-${index}-2`, content: 'Verify scroll stability', status: 'completed', priority: 'medium' },
+                    {
+                      id: `mla-todo-${index}-1`,
+                      content: `Analyze section ${index}`,
+                      status: 'completed',
+                      priority: 'high',
+                    },
+                    {
+                      id: `mla-todo-${index}-2`,
+                      content: 'Verify scroll stability',
+                      status: 'completed',
+                      priority: 'medium',
+                    },
                   ]
                 ),
               ]
@@ -2901,7 +3003,8 @@ function getSessionTodos(state: ScenarioState, id: string): Todo[] {
       const part = message.parts[partIndex]!;
       if (part.type !== 'tool' || !part.tool.toLowerCase().includes('todo')) continue;
       const stateRecord = asRecord(part.state);
-      const todos = extractTodoPayload(stateRecord.input) || extractTodoPayload(stateRecord.metadata);
+      const todos =
+        extractTodoPayload(stateRecord.input) || extractTodoPayload(stateRecord.metadata);
       if (todos) return todos;
       if (typeof stateRecord.output === 'string') {
         try {
@@ -3301,9 +3404,10 @@ async function handleApiRequest(
     const entry = rootID ? state.recycleBinEntries.find((item) => item.rootID === rootID) : null;
     if (!entry) return false;
     state.recycleBinEntries = state.recycleBinEntries.filter((item) => item.rootID !== rootID);
-    state.sessions = [...entry.sessions.map((session) => ({ ...session })), ...state.sessions].toSorted(
-      (left, right) => right.time.updated - left.time.updated
-    );
+    state.sessions = [
+      ...entry.sessions.map((session) => ({ ...session })),
+      ...state.sessions,
+    ].toSorted((left, right) => right.time.updated - left.time.updated);
     return true;
   }
 
@@ -3337,7 +3441,8 @@ async function handleApiRequest(
     const messages = state.messagesBySessionId[sessionId] || [];
     const windowed =
       new URLSearchParams(window.location.search).get('windowed') === '1' &&
-      sessionId === 'session-diff-preview-large-transcript';
+      (sessionId === 'session-diff-preview-large-transcript' ||
+        sessionId === 'session-assistant-heavy-history');
     if (!windowed) return messages;
 
     const limit = Math.max(1, Number(url.searchParams.get('limit')) || 50);
@@ -3396,7 +3501,9 @@ async function handleApiRequest(
       textParts.find((text) => !text.startsWith('[Working directory:')) || 'Untitled request';
     const model = asRecord(payload.model);
     const providerID =
-      typeof model.providerID === 'string' && model.providerID ? model.providerID : DEFAULT_PROVIDER_ID;
+      typeof model.providerID === 'string' && model.providerID
+        ? model.providerID
+        : DEFAULT_PROVIDER_ID;
     const modelID =
       typeof model.modelID === 'string' && model.modelID ? model.modelID : DEFAULT_MODEL_ID;
     const variant = typeof payload.variant === 'string' ? payload.variant : undefined;
@@ -3471,10 +3578,7 @@ async function handleApiRequest(
         patterns: ['opencode --version'],
         time: { created: createdAt + 2 },
       };
-      state.pendingPermissions = [
-        ...state.pendingPermissions,
-        permissionRequest,
-      ];
+      state.pendingPermissions = [...state.pendingPermissions, permissionRequest];
       dispatchToWebview({
         type: 'server/event',
         payload: {
@@ -3646,7 +3750,8 @@ function installBridge(state: ScenarioState) {
         return;
       case 'files/pick':
         if (harnessWindow.__varroE2E) {
-          harnessWindow.__varroE2E.filePickCount = (harnessWindow.__varroE2E.filePickCount || 0) + 1;
+          harnessWindow.__varroE2E.filePickCount =
+            (harnessWindow.__varroE2E.filePickCount || 0) + 1;
         }
         return;
       case 'files/search': {

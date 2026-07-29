@@ -61,7 +61,6 @@ export function StickyUserMessagePreviewCard(props: {
             <Show when={props.loading}>
               <div class="latest-user-message-sticky-loading">
                 <span class="latest-user-message-sticky-spinner" aria-hidden="true" />
-                <span>Loading…</span>
               </div>
             </Show>
             <Show when={props.preview.attachmentCount > 0 || props.preview.imageCount > 0}>

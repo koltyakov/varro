@@ -1066,7 +1066,9 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
   it('loads and scrolls to a sticky prompt behind a truncated history boundary', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
-    const scrollIntoView = vi.fn();
+    const scrollIntoView = vi.fn(() => {
+      list.scrollTop = 120;
+    });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       writable: true,
@@ -1097,6 +1099,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
     rectMap.set(list, new DOMRect(0, 0, 500, 500));
     list.dispatchEvent(new Event('scroll'));
@@ -1107,24 +1110,36 @@ describe('shouldShowStickyUserMessagePreview', () => {
       'Boundary prompt'
     );
 
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(list.scrollTop).toBe(700);
+
     const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     sticky?.click();
     expect(sticky?.classList.contains('is-loading')).toBe(true);
-    expect(sticky?.textContent).toContain('Loading…');
+    expect(sticky?.textContent).not.toContain('Loading…');
+    expect(sticky?.querySelector('.latest-user-message-sticky-spinner')).not.toBeNull();
     await vi.waitFor(() => {
       expect(state.messages.some((message) => message.info.id === 'boundary-user')).toBe(true);
     });
     expect(sticky?.isConnected).toBe(true);
     expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
     expect(sticky?.classList.contains('is-loading')).toBe(true);
-    animationFrames.flush();
-    await Promise.resolve();
+    for (let frame = 0; frame < 5; frame += 1) {
+      animationFrames.flush();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
 
     expect(client.session.messages).toHaveBeenCalledWith('session-1', {
       limit: 50,
       before: 'cursor-1',
     });
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(list.scrollTop).toBe(120);
     animationFrames.restore();
   });
 
@@ -1204,13 +1219,16 @@ describe('shouldShowStickyUserMessagePreview', () => {
     animationFrames.flush();
     await Promise.resolve();
     await Promise.resolve();
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(sticky?.isConnected).toBe(true);
     expect(sticky?.classList.contains('is-loading')).toBe(true);
 
-    animationFrames.flush();
-    await Promise.resolve();
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    for (let frame = 0; frame < 5; frame += 1) {
+      animationFrames.flush();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
     animationFrames.restore();
   });

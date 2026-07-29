@@ -577,6 +577,77 @@ test.describe('diff preview anchoring', () => {
       100
     );
   });
+
+  test('loads and navigates to an unloaded sticky boundary prompt on the first click', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&boundarySticky=1'
+    );
+    const list = page.locator('.interactive-list');
+    const target = page.locator('[data-msg-id="message-diff-preview-user-35"]');
+    const sticky = page.locator('.latest-user-message-sticky');
+    await expect(list).toBeVisible();
+    await expect(target).toHaveCount(0);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      element.scrollTop = 32;
+      element.dispatchEvent(new Event('scroll'));
+    });
+
+    await expect(sticky).toContainText('Review asynchronous report change 35.');
+    const sawLoading = await sticky.evaluate((card) => {
+      (card as HTMLElement).click();
+      const loading = card.querySelector<HTMLElement>('.latest-user-message-sticky-loading');
+      const spinner = card.querySelector<HTMLElement>('.latest-user-message-sticky-spinner');
+      const bounds = loading?.getBoundingClientRect();
+      return (
+        !(loading?.textContent?.includes('Loading…') ?? false) &&
+        !!spinner &&
+        !!bounds &&
+        bounds.width > 0 &&
+        bounds.height > 0
+      );
+    });
+    expect(sawLoading).toBe(true);
+
+    await expect(target).toBeAttached();
+    await expect
+      .poll(() =>
+        target.evaluate((row) => {
+          const scrollList = row.closest<HTMLElement>('.interactive-list')!;
+          return Math.abs(row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top);
+        })
+      )
+      .toBeLessThan(80);
+  });
+
+  test('navigates after loading assistant-heavy paginated history', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1');
+    const list = page.locator('.interactive-list');
+    const sticky = page.locator('.latest-user-message-sticky');
+    const target = page.locator('[data-msg-id="message-assistant-heavy-target"]');
+    await expect(list).toBeVisible();
+    await expect(target).toHaveCount(0);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      element.scrollTop = 32;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(sticky).toContainText('Apply the needed fixes/improvements');
+    await sticky.click();
+
+    await expect(target).toBeAttached();
+    await page.waitForTimeout(500);
+    await expect(target).toBeAttached();
+    const targetTop = await target.evaluate((row) => {
+      const scrollList = row.closest<HTMLElement>('.interactive-list')!;
+      return Math.abs(row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top);
+    });
+    expect(targetTop).toBeLessThan(80);
+  });
 });
 
 test.describe('sticky preview overlap', () => {

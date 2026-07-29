@@ -8,6 +8,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
   await expect(page.getByRole('button', { name: 'Open plan' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeVisible();
   await expect(page.locator('.assistant-turn-content').last()).toContainText('Migration Plan');
+  await expect(page.getByRole('heading', { name: 'Migration Plan' })).toHaveCSS('margin-top', '0px');
   await expect(page.locator('.assistant-turn-content').last()).toContainText(
     'Validate default-permission flows with a real bash request'
   );

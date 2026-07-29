@@ -122,6 +122,10 @@ const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 // below the viewport; a barely-scrolled list doesn't need the button.
 const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;
 
+function waitForAnimationFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 export function getInlinePreviewLayoutSignatures(
   messages: readonly { info: { id: string }; parts: readonly Part[] }[],
   enabled: boolean
@@ -1001,7 +1005,9 @@ export function MessageList() {
 
     setMeasurementVersion((version) => version + 1);
 
-    queueMicrotask(() => restoreVisibleScrollAnchor(anchor));
+    queueMicrotask(() => {
+      if (!pendingStickyJump()) restoreVisibleScrollAnchor(anchor);
+    });
   }
 
   function observeMeasuredRow(element: HTMLDivElement, messageId: string, active: boolean) {
@@ -1207,7 +1213,7 @@ export function MessageList() {
   }
 
   function shouldCorrectBottomAfterResize() {
-    if (!containerRef || !autoScroll()) return false;
+    if (!containerRef || !autoScroll() || pendingStickyJump()) return false;
 
     const nextBottomScrollTop = bottomScrollTop();
     return nextBottomScrollTop > containerRef.scrollTop + 1;
@@ -1221,6 +1227,7 @@ export function MessageList() {
   }
 
   function performScroll(options?: { force?: boolean }) {
+    if (pendingStickyJump()) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
     const now = performance.now();
@@ -1261,6 +1268,9 @@ export function MessageList() {
   }
 
   function disengageBottomFollow() {
+    pendingInitialScrollSessionId = null;
+    pendingScrollToBottomRequest = false;
+    pendingExpansionScrollAnchor = null;
     followModeLocked = false;
     pinnedToBottom = false;
     expectedScrollTop = -1;
@@ -1270,6 +1280,10 @@ export function MessageList() {
   }
 
   function startFollowLoop(sessionId: string, options?: { immediate?: boolean }) {
+    if (pendingStickyJump()) {
+      activeFollowLoopSessionId = null;
+      return;
+    }
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
@@ -1283,7 +1297,7 @@ export function MessageList() {
 
     function tick() {
       initialScrollRafId = 0;
-      if (!containerRef || !trackRef) {
+      if (!containerRef || !trackRef || pendingStickyJump()) {
         activeFollowLoopSessionId = null;
         return;
       }
@@ -1386,7 +1400,11 @@ export function MessageList() {
     }
     // Resize corrections can look like downward movement after an upward wheel.
     const shouldReattachToBottom =
-      !autoScrollEnabled && !userScrolledUp && distance <= REATTACH_THRESHOLD_PX && scrollDelta > 1;
+      !pendingStickyJump() &&
+      !autoScrollEnabled &&
+      !userScrolledUp &&
+      distance <= REATTACH_THRESHOLD_PX &&
+      scrollDelta > 1;
     const decision = resolveAutoScrollOnUserScroll({
       top,
       distanceFromBottom: distance,
@@ -1429,6 +1447,7 @@ export function MessageList() {
     if (
       top <= 24 &&
       showTruncatedHistoryBanner() &&
+      !pendingStickyJump() &&
       (!autoScrollEnabled || decision.nextAutoScroll === false)
     ) {
       void handleLoadOlderHistory();
@@ -1796,6 +1815,7 @@ export function MessageList() {
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       scheduleVisibleMeasurement();
+      if (pendingStickyJump()) return;
       if (sessionId && pendingInitialScrollSessionId === sessionId) {
         pendingInitialScrollSessionId = null;
         performScroll();
@@ -1817,11 +1837,21 @@ export function MessageList() {
   createEffect(() => {
     const sessionId = state.activeSessionId;
     const currentStreamingTextLength = streamingTextLength();
-    if (!sessionId || currentStreamingTextLength === 0 || (!autoScroll() && !pinnedToBottom))
+    if (
+      !sessionId ||
+      pendingStickyJump() ||
+      currentStreamingTextLength === 0 ||
+      (!autoScroll() && !pinnedToBottom)
+    )
       return;
 
     queueMicrotask(() => {
-      if (state.activeSessionId !== sessionId || (!autoScroll() && !pinnedToBottom)) return;
+      if (
+        state.activeSessionId !== sessionId ||
+        pendingStickyJump() ||
+        (!autoScroll() && !pinnedToBottom)
+      )
+        return;
       followModeLocked = true;
       setAutoScroll(true);
       startFollowLoop(sessionId, { immediate: true });
@@ -1833,6 +1863,7 @@ export function MessageList() {
     const requestKey = messageListScrollRequestKey();
     if (previousRequestKey === undefined) return requestKey;
     if (!sessionId || !containerRef) return requestKey;
+    if (pendingStickyJump()) return requestKey;
     if (diffFocusPauseActive) {
       resumeAutoScrollAfterDiffFocus = true;
       return requestKey;
@@ -2016,36 +2047,56 @@ export function MessageList() {
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
 
-  async function scrollMessageIntoView(preview: StickyUserMessagePreview): Promise<boolean> {
+  async function waitForMessageRow(
+    preview: StickyUserMessagePreview,
+    isCurrent: () => boolean = () => true
+  ): Promise<HTMLElement | null> {
     const container = containerRef;
-    if (!container) return false;
+    if (!container) return null;
+    const sessionId = state.activeSessionId;
     const findRow = () =>
       [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
         (element) => element.dataset.msgId === preview.id
       );
-    let row = findRow();
-    if (row) {
-      row.scrollIntoView({ block: 'start' });
-    } else {
+    let previousMeasurementVersion = -1;
+    while (state.activeSessionId === sessionId && isCurrent()) {
       const messageIndex = messages().findIndex((entry) => entry.info.id === preview.id);
-      if (messageIndex < 0) return false;
-      for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
+      if (messageIndex < 0) return null;
+
+      if (shouldMeasureRows() && !hasMeasuredEveryMessage()) {
+        previousMeasurementVersion = -1;
+        await waitForAnimationFrame();
+        continue;
+      }
+
+      const row = findRow();
+      if (!row) {
+        previousMeasurementVersion = -1;
         if (shouldVirtualize()) {
           const nextScrollTop = virtualMetrics().prefix[messageIndex] ?? 0;
           container.scrollTop = nextScrollTop;
           setScrollTop(nextScrollTop);
           setStickyPreviewScrollTop(nextScrollTop);
         }
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        row = findRow();
+        await waitForAnimationFrame();
+        continue;
       }
-      if (!row) return false;
-      row.scrollIntoView({ block: 'start' });
-    }
 
-    // Let prepend measurements and anchor corrections settle, then make the explicit jump final.
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    findRow()?.scrollIntoView({ block: 'start' });
+      const currentMeasurementVersion = measurementVersion();
+      if (currentMeasurementVersion === previousMeasurementVersion) return row;
+      previousMeasurementVersion = currentMeasurementVersion;
+      await waitForAnimationFrame();
+    }
+    return null;
+  }
+
+  function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
+    disengageBottomFollow();
+    const row = [...(containerRef?.querySelectorAll<HTMLElement>('[data-msg-id]') ?? [])].find(
+      (element) => element.dataset.msgId === preview.id
+    );
+    if (!row) return false;
+    row.scrollIntoView({ block: 'start' });
     return true;
   }
 
@@ -2054,7 +2105,7 @@ export function MessageList() {
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
     if (messages().some((entry) => entry.info.id === preview.id) && !activeOlderHistoryLoad) {
-      void scrollMessageIntoView(preview);
+      if (!navigateToMountedMessage(preview)) void waitAndNavigateToMessage(preview);
       return;
     }
     const sessionId = state.activeSessionId;
@@ -2063,6 +2114,15 @@ export function MessageList() {
       setPendingStickyJump(jump);
       void loadAndScrollToStickyPreview(jump);
     }
+  }
+
+  async function waitAndNavigateToMessage(
+    preview: StickyUserMessagePreview,
+    isCurrent?: () => boolean
+  ): Promise<boolean> {
+    disengageBottomFollow();
+    if (!(await waitForMessageRow(preview, isCurrent))) return false;
+    return navigateToMountedMessage(preview);
   }
 
   async function loadAndScrollToStickyPreview(jump: {
@@ -2099,8 +2159,11 @@ export function MessageList() {
       clearPendingJump();
       return;
     }
-    await scrollMessageIntoView(preview);
+    const ready = await waitForMessageRow(preview, () => pendingStickyJump() === jump);
     clearPendingJump();
+    if (!ready || state.activeSessionId !== sessionId) return;
+    await waitForAnimationFrame();
+    if (state.activeSessionId === sessionId) await waitAndNavigateToMessage(preview);
   }
 
   const stickyPreviewTitle = 'Click to scroll to message';
@@ -2140,6 +2203,7 @@ export function MessageList() {
         setPreservedScrollTop(previousScrollTop + Math.max(0, heightDelta));
       } else if (anchor) {
         queueMicrotask(() => {
+          if (pendingStickyJump()) return;
           const mountedAnchor = containerRef?.querySelector(
             `[data-msg-id="${CSS.escape(anchor.messageId)}"]`
           );
