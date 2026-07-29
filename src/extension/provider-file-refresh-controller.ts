@@ -28,7 +28,7 @@ type ProviderFileRefreshDependencies = {
   server: Pick<OpenCodeServer, 'status' | 'request' | 'restart' | 'readServerInfo'>;
   hasLocallyActiveWork(): boolean;
   clearProviderLimitCache(): void;
-  postRefresh(): void;
+  postRefresh(options?: { revalidateAuth: true }): void;
 };
 
 export class ProviderFileRefreshController {
@@ -43,6 +43,8 @@ export class ProviderFileRefreshController {
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
   private restartPending = false;
+  private authChangePending = false;
+  private authRevalidationPending = false;
   private unmanagedServerSynchronized = false;
   private disposed = false;
 
@@ -69,7 +71,7 @@ export class ProviderFileRefreshController {
       if (this.configWatchers.length > 0 || this.authWatcher) return;
       const generation = ++this.refreshGeneration;
       this.configWatchers = getOpenCodeConfigPaths().map((path) => this.createFileWatcher(path));
-      this.authWatcher = this.createFileWatcher(getOpenCodeAuthFilePath());
+      this.authWatcher = this.createFileWatcher(getOpenCodeAuthFilePath(), true);
       void this.activate(generation).catch((err) => {
         logger.warn(
           `Failed to activate provider file observation: ${err instanceof Error ? err.message : String(err)}`
@@ -101,6 +103,8 @@ export class ProviderFileRefreshController {
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (requireSignatureChange && this.observedFilesSignature === null) {
       this.observedFilesSignature = signature;
+      this.authRevalidationPending ||= this.authChangePending;
+      this.authChangePending = false;
       this.dependencies.clearProviderLimitCache();
       this.restartPending = true;
       this.dependencies.postRefresh();
@@ -108,6 +112,7 @@ export class ProviderFileRefreshController {
       return;
     }
     if (requireSignatureChange && signature === this.observedFilesSignature) {
+      this.authChangePending = false;
       if (this.restartPending) {
         await this.maybeRestart(generation, 0);
       }
@@ -115,6 +120,8 @@ export class ProviderFileRefreshController {
     }
     this.dependencies.clearProviderLimitCache();
     this.observedFilesSignature = signature;
+    this.authRevalidationPending ||= this.authChangePending;
+    this.authChangePending = false;
     this.restartPending = true;
     this.dependencies.postRefresh();
     await this.maybeRestart(generation, 0);
@@ -151,13 +158,13 @@ export class ProviderFileRefreshController {
     return signatures.join('|');
   }
 
-  private createFileWatcher(path: string) {
+  private createFileWatcher(path: string, watchesAuth = false) {
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(dirname(path)), basename(path))
     );
-    watcher.onDidCreate(() => this.scheduleRefresh());
-    watcher.onDidChange(() => this.scheduleRefresh());
-    watcher.onDidDelete(() => this.scheduleRefresh());
+    watcher.onDidCreate(() => this.scheduleRefresh(watchesAuth));
+    watcher.onDidChange(() => this.scheduleRefresh(watchesAuth));
+    watcher.onDidDelete(() => this.scheduleRefresh(watchesAuth));
     return watcher;
   }
 
@@ -173,7 +180,8 @@ export class ProviderFileRefreshController {
     this.authWatcher = null;
   }
 
-  private scheduleRefresh() {
+  private scheduleRefresh(authChanged: boolean) {
+    this.authChangePending ||= authChanged;
     const generation = ++this.refreshGeneration;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
@@ -280,8 +288,10 @@ export class ProviderFileRefreshController {
       // by the next activation's signature comparison.
       this.restartPending = false;
       if (this.disposed || generation !== this.refreshGeneration) return;
+      const revalidateAuth = this.authRevalidationPending;
+      this.authRevalidationPending = false;
       this.dependencies.clearProviderLimitCache();
-      this.dependencies.postRefresh();
+      this.dependencies.postRefresh(revalidateAuth ? { revalidateAuth: true } : undefined);
     } catch (err) {
       if (this.disposed || generation !== this.refreshGeneration) return;
       logger.warn(

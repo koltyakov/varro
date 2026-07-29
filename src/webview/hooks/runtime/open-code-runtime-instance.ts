@@ -594,6 +594,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         refreshProviders: () => {
           void Promise.all([loadProviders(), loadCompatibilityState()]);
         },
+        revalidateProviderAuth: sessionSendOperations.revalidateProviderAuth,
         applyTheme,
       });
 

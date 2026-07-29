@@ -207,7 +207,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.sessionState.pending.size > 0 ||
           this.ralphHost.getStatePayload().activeIds.length > 0,
         clearProviderLimitCache: () => this.providerLimitService.clearCache(),
-        postRefresh: () => this.post({ type: 'providers/refresh' }),
+        postRefresh: (options) =>
+          this.post(
+            options?.revalidateAuth
+              ? { type: 'providers/refresh', payload: { revalidateAuth: true } }
+              : { type: 'providers/refresh' }
+          ),
       },
       providerSignatureFileSystem
     );

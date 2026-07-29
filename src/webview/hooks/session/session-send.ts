@@ -1,4 +1,5 @@
 import type { DroppedFile, EditorContext, PermissionMode } from '../../../shared/protocol';
+import { isProviderAuthFailure } from '../../../shared/error-classification';
 import {
   formatSelectionReference,
   getSelectionRangesFromEditorContext,
@@ -600,6 +601,18 @@ export class SessionSendOperations {
       sessionId
     );
   };
+
+  readonly revalidateProviderAuth = () => {
+    return revalidateProviderAuthWithDependencies({
+      getActiveSessionId: () => appStore.state.activeSessionId,
+      getMessages: () => appStore.state.messages,
+      isSessionWorking: (sessionId) =>
+        uiStore.isLoading() ||
+        appStore.state.sessionStatus[sessionId]?.type === 'busy' ||
+        appStore.state.sessionStatus[sessionId]?.type === 'retry',
+      retryMessage: this.retryMessage,
+    });
+  };
 }
 
 export async function sendMessageWithDependencies(
@@ -925,4 +938,26 @@ export async function retryMessageWithDependencies(
     deps.setSessionFailed(sessionId, true);
     deps.setError(err instanceof Error ? err.message : 'Failed to retry message');
   }
+}
+
+export function revalidateProviderAuthWithDependencies(deps: {
+  getActiveSessionId(): string | null;
+  getMessages(): MessageEntry[];
+  isSessionWorking(sessionId: string): boolean;
+  retryMessage(messageId: string, sessionId: string): Promise<void>;
+}) {
+  const sessionId = deps.getActiveSessionId();
+  if (!sessionId || deps.isSessionWorking(sessionId)) return false;
+
+  const messages = deps.getMessages();
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.info.sessionID !== sessionId) continue;
+    if (message.info.role !== 'assistant' || !isProviderAuthFailure(message.info.error))
+      return false;
+    void deps.retryMessage(message.info.id, sessionId);
+    return true;
+  }
+
+  return false;
 }

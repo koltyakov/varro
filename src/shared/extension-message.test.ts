@@ -43,6 +43,24 @@ describe('parseExtensionMessage', () => {
     expect(parseExtensionMessage({ type: 'command/abort' })).toEqual({ type: 'command/abort' });
   });
 
+  it('parses provider refresh re-validation requests', () => {
+    expect(parseExtensionMessage({ type: 'providers/refresh' })).toEqual({
+      type: 'providers/refresh',
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'providers/refresh',
+        payload: { revalidateAuth: true },
+      })
+    ).toEqual({ type: 'providers/refresh', payload: { revalidateAuth: true } });
+    expect(
+      parseExtensionMessage({
+        type: 'providers/refresh',
+        payload: { revalidateAuth: false },
+      })
+    ).toBeNull();
+  });
+
   it('parses server/status and rejects malformed variants', () => {
     expect(
       parseExtensionMessage({

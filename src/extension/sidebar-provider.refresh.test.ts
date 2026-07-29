@@ -68,6 +68,10 @@ describe('SidebarProvider provider refresh', () => {
 
     expect(server.restart).toHaveBeenCalledOnce();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
+    expect(posted).toContainEqual({
+      type: 'providers/refresh',
+      payload: { revalidateAuth: true },
+    });
     await provider.dispose();
   });
 

@@ -20,6 +20,7 @@ export function createMountBridgeOperations(deps: {
   abortSession(): void;
   refreshMcps(): void;
   refreshProviders(): void;
+  revalidateProviderAuth?(): void;
   applyTheme(theme: WebviewThemeKind): void;
 }) {
   const handleExtensionMessage = (msg: ExtensionMessage) => {
@@ -84,6 +85,7 @@ export function createMountBridgeOperations(deps: {
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
         refreshProviders: deps.refreshProviders,
+        revalidateProviderAuth: deps.revalidateProviderAuth,
         openExternal: (url) => postMessage({ type: 'vscode/open-external', payload: { url } }),
         setWorkspaceStatusSummary: (summary) =>
           appStore.setState('workspaceStatusSummary', summary),
@@ -126,6 +128,7 @@ export function handleExtensionMessageWithDependencies(
     abortSession(): void;
     refreshMcps(): void;
     refreshProviders(): void;
+    revalidateProviderAuth?(): void;
     openExternal?(url: string): void;
     setWorkspaceStatusSummary(summary: ReturnType<typeof getWorkspaceStatusEventSummary>): void;
     setWorkspaceStatuses(
@@ -221,6 +224,7 @@ export function handleExtensionMessageWithDependencies(
       break;
     case 'providers/refresh':
       deps.refreshProviders();
+      if (msg.payload?.revalidateAuth) deps.revalidateProviderAuth?.();
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);

@@ -486,7 +486,7 @@ export type RalphStatePayload = {
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
   | { type: 'server/event'; payload: ServerEvent }
-  | { type: 'providers/refresh' }
+  | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }

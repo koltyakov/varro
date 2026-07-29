@@ -63,8 +63,14 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     case 'command/search-sessions':
     case 'command/open-attention-sessions':
     case 'command/abort':
-    case 'providers/refresh':
       return { type };
+
+    case 'providers/refresh': {
+      if (record.payload === undefined) return { type };
+      const payload = asRecord(record.payload);
+      if (payload?.revalidateAuth !== true) return null;
+      return { type, payload: { revalidateAuth: true } };
+    }
 
     case 'command/switch-session': {
       const payload = asRecord(record.payload);

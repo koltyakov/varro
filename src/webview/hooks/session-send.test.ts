@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
-import type { Message, Part, PermissionRule, Provider } from '../types';
+import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import {
   buildSessionSendBody,
   ensureSessionPermissionWithDependencies,
   getAttachmentReference,
   getQueuedAttachmentSnapshot,
+  revalidateProviderAuthWithDependencies,
   retryMessageWithDependencies,
   sendMessageWithDependencies,
 } from './session/session-send';
@@ -1024,5 +1025,74 @@ describe('session-send helpers', () => {
     );
 
     expect(continueInterruptedSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('retries the latest active provider-auth failure after credentials refresh', () => {
+    const retryMessage = vi.fn(async () => {});
+    const messages = [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant',
+          time: { created: 1 },
+          error: { name: 'ProviderAuthError', data: { message: 'Token expired' } },
+        },
+        parts: [],
+      },
+    ] as MessageEntry[];
+
+    expect(
+      revalidateProviderAuthWithDependencies({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => messages,
+        isSessionWorking: () => false,
+        retryMessage,
+      })
+    ).toBe(true);
+    expect(retryMessage).toHaveBeenCalledWith('assistant-1', 'session-1');
+  });
+
+  it('does not replay a provider-auth failure while working or after a newer turn', () => {
+    const retryMessage = vi.fn(async () => {});
+    const authFailure = {
+      info: {
+        id: 'assistant-1',
+        sessionID: 'session-1',
+        role: 'assistant',
+        time: { created: 1 },
+        error: { name: 'ProviderAuthError', data: { message: 'Token expired' } },
+      },
+      parts: [],
+    } as MessageEntry;
+    const newerUserMessage = {
+      info: {
+        id: 'user-2',
+        sessionID: 'session-1',
+        role: 'user',
+        time: { created: 2 },
+        agent: 'build',
+        model: { providerID: 'openai', modelID: 'gpt-5' },
+      },
+      parts: [],
+    } as MessageEntry;
+
+    expect(
+      revalidateProviderAuthWithDependencies({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [authFailure],
+        isSessionWorking: () => true,
+        retryMessage,
+      })
+    ).toBe(false);
+    expect(
+      revalidateProviderAuthWithDependencies({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [authFailure, newerUserMessage],
+        isSessionWorking: () => false,
+        retryMessage,
+      })
+    ).toBe(false);
+    expect(retryMessage).not.toHaveBeenCalled();
   });
 });

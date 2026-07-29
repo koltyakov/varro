@@ -244,6 +244,7 @@ describe('mount bridge helpers', () => {
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
     const refreshProviders = vi.fn();
+    const revalidateProviderAuth = vi.fn();
     const openExternal = vi.fn();
     const addDroppedContextFiles = vi.fn();
     const removeDroppedContextFile = vi.fn();
@@ -272,6 +273,7 @@ describe('mount bridge helpers', () => {
       abortSession,
       refreshMcps,
       refreshProviders,
+      revalidateProviderAuth,
       openExternal,
       setWorkspaceStatusSummary: vi.fn(),
       setWorkspaceStatuses: vi.fn(),
@@ -306,6 +308,10 @@ describe('mount bridge helpers', () => {
       },
     });
     handleExtensionMessageWithDependencies(deps, { type: 'providers/refresh' });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'providers/refresh',
+      payload: { revalidateAuth: true },
+    });
 
     expect(createSession).toHaveBeenNthCalledWith(1, undefined);
     expect(createSession).toHaveBeenNthCalledWith(2, '/init');
@@ -316,7 +322,8 @@ describe('mount bridge helpers', () => {
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(2);
-    expect(refreshProviders).toHaveBeenCalledTimes(1);
+    expect(refreshProviders).toHaveBeenCalledTimes(2);
+    expect(revalidateProviderAuth).toHaveBeenCalledTimes(1);
     expect(openExternal).toHaveBeenCalledWith('https://mcp.example.com/authorize');
   });
 
