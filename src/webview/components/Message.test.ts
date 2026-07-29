@@ -1406,6 +1406,95 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
+  it('pulses the final mark when a mounted response becomes final', () => {
+    const [info, setInfo] = createSignal({
+      ...assistantMessage('message-final-pulse'),
+      time: { created: 0 },
+    });
+    const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
+
+    cleanup = render(
+      () =>
+        Message({
+          get info() {
+            return info();
+          },
+          parts: [textPart('text-final-pulse', 'Final answer.')],
+          get highlightFinalAnswer() {
+            return highlightFinalAnswer();
+          },
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
+
+    setInfo(assistantMessage('message-final-pulse'));
+    setHighlightFinalAnswer(true);
+
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
+      HTMLDivElement
+    );
+
+    const animationEnd = new Event('animationend', { bubbles: true });
+    Object.defineProperty(animationEnd, 'animationName', { value: 'assistant-final-mark-pulse' });
+    container?.querySelector('.assistant-message-flow-item-final')?.dispatchEvent(animationEnd);
+
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
+  });
+
+  it('does not pulse an existing final response when a follow-up changes its highlight', () => {
+    const [info, setInfo] = createSignal({
+      ...assistantMessage('message-final-follow-up'),
+      time: { created: 0 },
+    });
+    const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
+
+    cleanup = render(
+      () =>
+        Message({
+          get info() {
+            return info();
+          },
+          parts: [textPart('text-final-follow-up', 'Existing final answer.')],
+          get highlightFinalAnswer() {
+            return highlightFinalAnswer();
+          },
+        }),
+      container!
+    );
+
+    setInfo(assistantMessage('message-final-follow-up'));
+    setHighlightFinalAnswer(true);
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeInstanceOf(HTMLDivElement);
+
+    setHighlightFinalAnswer(false);
+    setHighlightFinalAnswer(true);
+
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
+  });
+
+  it('does not replay the final mark pulse for an already completed response', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: assistantMessage('message-final-restored'),
+          parts: [textPart('text-final-restored', 'Restored final answer.')],
+          highlightFinalAnswer: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
+  });
+
   it('does not mark text as a dedicated final answer block when a visible tool call follows it', () => {
     cleanup = render(
       () =>

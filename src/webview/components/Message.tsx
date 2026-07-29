@@ -1,4 +1,4 @@
-import { Show, createMemo, createResource } from 'solid-js';
+import { Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
 import { friendlyErrorName, isAbortedAssistantError } from '../../shared/error-classification';
 import { retryMessage } from '../hooks/useOpenCode';
 import { client } from '../lib/client';
@@ -69,6 +69,35 @@ export function Message(props: {
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
+  const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
+  let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
+  let finalMarkPulsePending = false;
+
+  createEffect(() => {
+    const completed = props.info.role === 'assistant' && props.info.time.completed !== undefined;
+    if (!completed) {
+      wasCompleted = false;
+      finalMarkPulsePending = false;
+      setPulseFinalMark(false);
+      return;
+    }
+
+    if (!wasCompleted) {
+      wasCompleted = true;
+      finalMarkPulsePending = true;
+    }
+
+    if (finalMarkPulsePending && props.highlightFinalAnswer) {
+      finalMarkPulsePending = false;
+      setPulseFinalMark(true);
+      return;
+    }
+
+    if (!props.highlightFinalAnswer) {
+      setPulseFinalMark(false);
+    }
+  });
+
   const isUser = () => props.info.role === 'user';
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   // While the composer's usage-limit banner is up for this session, the latest
@@ -238,7 +267,10 @@ export function Message(props: {
         fallback={<CompactionDivider part={compactionDivider()!} />}
       >
         <div
-          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}`}
+          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}${pulseFinalMark() ? ' assistant-final-mark-pulse' : ''}`}
+          onAnimationEnd={(event) => {
+            if (event.animationName === 'assistant-final-mark-pulse') setPulseFinalMark(false);
+          }}
         >
           <div
             class={`value chat-turn-content ${
