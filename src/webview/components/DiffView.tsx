@@ -1,5 +1,7 @@
 import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { postMessage } from '../lib/bridge';
+import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { getLeafPathName } from '../lib/path-display';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
 import { state } from '../lib/state';
@@ -58,6 +60,11 @@ type MeasuredText = {
 type PreparedDiff = {
   diff: DiffViewFile;
   preview: DiffPreviewResult | null;
+};
+
+type RenderedDiffLine = {
+  line: DiffDisplayLine;
+  index: number;
 };
 
 type DiffScrollThumb = {
@@ -143,6 +150,32 @@ function getDiffFileType(file: string | undefined) {
   };
 }
 
+function DiffFileFormatIcon(props: { type: { label: string; language?: string } | null }) {
+  return (
+    <Show
+      when={props.type}
+      fallback={
+        <svg
+          class="diff-view-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 32 32"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M13 4 6 11v17h20V4H13Zm-1 3.828V10H9.828L12 7.828ZM24 26H8V12h6V6h10v20Z" />
+        </svg>
+      }
+    >
+      {(type) => (
+        <span class="diff-view-file-type" aria-hidden="true">
+          {type().label}
+        </span>
+      )}
+    </Show>
+  );
+}
+
 function parseUnifiedHunk(line: string): UnifiedDiffHunk | null {
   const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
   if (!match) return null;
@@ -198,6 +231,13 @@ function getScrollThumb(
   const maxScrollOffset = scrollSize - viewportSize;
   const offset = 2 + ((trackSize - size) * scrollOffset) / maxScrollOffset;
   return { size, offset };
+}
+
+function scrollDiffToFirstChange(viewport: HTMLDivElement | undefined) {
+  const anchor = viewport?.querySelector<HTMLElement>('.diff-view-scroll-anchor');
+  if (!viewport || !anchor) return;
+  viewport.scrollTop = anchor.offsetTop;
+  viewport.scrollLeft = 0;
 }
 
 export function parseUnifiedPatch(
@@ -541,6 +581,46 @@ function getDiffLineAriaLabel(line: UnifiedDiffLine) {
   return `${label}${lineNumber === null ? ' line' : ` line ${lineNumber}`}: ${line.content}`;
 }
 
+function DiffLinesContent(props: {
+  entries: readonly RenderedDiffLine[];
+  firstChangeIndex: number;
+  language?: string;
+}) {
+  return (
+    <div class="diff-view-lines-content" role="list">
+      <For each={props.entries}>
+        {(entry) =>
+          entry.line.kind === 'gap' ? (
+            <div
+              class={`diff-view-gap${entry.index === Math.max(0, props.firstChangeIndex) ? ' diff-view-scroll-anchor' : ''}`}
+              role="listitem"
+            >
+              {entry.line.content}
+            </div>
+          ) : (
+            <div
+              class={`diff-view-line diff-view-line-${entry.line.kind}${entry.index === Math.max(0, props.firstChangeIndex) ? ' diff-view-scroll-anchor' : ''}`}
+              role="listitem"
+              aria-label={getDiffLineAriaLabel(entry.line)}
+            >
+              <span class="diff-view-line-number" aria-hidden="true">
+                {entry.line.newLine ?? entry.line.oldLine ?? ''}
+              </span>
+              <span class="diff-view-line-marker" aria-hidden="true">
+                {entry.line.kind === 'addition' ? '+' : entry.line.kind === 'deletion' ? '-' : ' '}
+              </span>
+              <span
+                class="diff-view-line-content hljs"
+                innerHTML={renderHighlightedCodeHtml(entry.line.content, props.language)}
+              />
+            </div>
+          )
+        }
+      </For>
+    </div>
+  );
+}
+
 export function DiffView(props: {
   diffs: readonly DiffViewFile[];
   showChanges?: boolean;
@@ -586,9 +666,15 @@ function DiffItem(props: {
   stateKey?: string;
 }) {
   let linesViewport: HTMLDivElement | undefined;
+  let overlayViewport: HTMLDivElement | undefined;
+  let fileElement: HTMLDivElement | undefined;
+  let toggleButton: HTMLButtonElement | undefined;
+  let closeButton: HTMLButtonElement | undefined;
   const [viewportElement, setViewportElement] = createSignal<HTMLDivElement>();
+  const [overlayViewportElement, setOverlayViewportElement] = createSignal<HTMLDivElement>();
+  const [overlayMount, setOverlayMount] = createSignal<HTMLElement>();
+  const overlayOwner = Symbol();
   let scrollDrag: DiffScrollDrag | null = null;
-  let scrollbarActivityTimer: ReturnType<typeof setTimeout> | undefined;
   // The parent builds `stateKey` from a dynamic expression, so reading
   // `props.stateKey` allocates a fresh computation on every access. Scroll and
   // resize callbacks run without an owner, where those computations would never
@@ -598,6 +684,7 @@ function DiffItem(props: {
   let renderedStateKey = stateKey();
   let previewStateReady = !stateKey();
   const initialPreviewState = stateKey() ? getToolDiffPreviewState(stateKey()!) : null;
+  let restoreExpandedScroll = initialPreviewState?.expanded ?? false;
   const file = () => props.diff.file;
   const fromFile = () => props.diff.fromFile;
   const displayName = () => {
@@ -619,20 +706,16 @@ function DiffItem(props: {
     () => displayLines().length > COLLAPSED_DIFF_LINE_COUNT || firstChangeIndex() > 0
   );
   const [expanded, setExpanded] = createSignal(initialPreviewState?.expanded ?? false);
-  const [scrollbarsActive, setScrollbarsActive] = createSignal(false);
   const [verticalThumb, setVerticalThumb] = createSignal<DiffScrollThumb | null>(null);
   const [horizontalThumb, setHorizontalThumb] = createSignal<DiffScrollThumb | null>(null);
   const renderedDisplayLines = createMemo(() => {
     const allLines = displayLines();
-    if (expanded()) {
-      return allLines.map((line, index) => ({ line, index }));
-    }
-
     const start = Math.max(0, firstChangeIndex());
     return allLines
       .slice(start, start + COLLAPSED_DIFF_LINE_COUNT)
       .map((line, index) => ({ line, index: start + index }));
   });
+  const allDisplayLines = createMemo(() => displayLines().map((line, index) => ({ line, index })));
   const hasLineNumbers = createMemo(() =>
     renderedDisplayLines().some(({ line }) => line.oldLine !== null || line.newLine !== null)
   );
@@ -640,12 +723,17 @@ function DiffItem(props: {
     props.showChanges && props.preview?.status !== 'ready' ? props.preview : null;
   const savePreviewState = () => {
     const key = stateKey();
-    if (!key || !previewStateReady || !linesViewport) return;
+    const viewport = expanded() ? overlayViewport : linesViewport;
+    if (!key || !previewStateReady || !viewport) return;
     setToolDiffPreviewState(key, {
       expanded: expanded(),
-      scrollTop: linesViewport.scrollTop,
-      scrollLeft: linesViewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      scrollLeft: viewport.scrollLeft,
     });
+  };
+  const resolveOverlayMount = () => {
+    if (!fileElement?.isConnected) return;
+    setOverlayMount(fileElement.closest<HTMLElement>('.interactive-list-shell') ?? document.body);
   };
   const updateScrollThumbs = () => {
     if (!linesViewport) return;
@@ -667,31 +755,25 @@ function DiffItem(props: {
     );
     savePreviewState();
   };
-  const scrollToFirstChange = () => {
-    const anchor = linesViewport?.querySelector<HTMLElement>('.diff-view-scroll-anchor');
-    if (!linesViewport || !anchor) return;
-    linesViewport.scrollTop = anchor.offsetTop;
-    linesViewport.scrollLeft = 0;
-  };
-  const toggleExpanded = () => {
-    const nextExpanded = !expanded();
+  const setExpandedState = (nextExpanded: boolean, restoreToggleFocus = true) => {
+    restoreExpandedScroll = false;
+    if (nextExpanded) resolveOverlayMount();
     setExpanded(nextExpanded);
     queueMicrotask(() => {
-      if (!nextExpanded && linesViewport) {
+      if (nextExpanded) {
+        closeButton?.focus({ preventScroll: true });
+      } else if (linesViewport) {
         linesViewport.scrollTop = 0;
         linesViewport.scrollLeft = 0;
+        if (restoreToggleFocus) toggleButton?.focus({ preventScroll: true });
       }
+      savePreviewState();
       updateScrollThumbs();
     });
   };
-  const showScrollbarsTemporarily = () => {
-    if (!expanded()) return;
-    setScrollbarsActive(true);
-    if (scrollbarActivityTimer !== undefined) clearTimeout(scrollbarActivityTimer);
-    scrollbarActivityTimer = setTimeout(() => {
-      scrollbarActivityTimer = undefined;
-      setScrollbarsActive(false);
-    }, 900);
+  const toggleExpanded = () => setExpandedState(!expanded());
+  const collapseExpanded = () => {
+    if (expanded()) setExpandedState(false, false);
   };
   const scrollFromTrack = (
     axis: DiffScrollAxis,
@@ -788,6 +870,7 @@ function DiffItem(props: {
     if (itemChanged) {
       const previewState = nextStateKey ? getToolDiffPreviewState(nextStateKey) : null;
       previewStateReady = !nextStateKey;
+      restoreExpandedScroll = previewState?.expanded ?? false;
       setExpanded(previewState?.expanded ?? false);
       return;
     }
@@ -798,21 +881,12 @@ function DiffItem(props: {
 
   createEffect(() => {
     const viewport = viewportElement();
-    const key = stateKey();
     if (!viewport) return;
-    const previewState = key ? getToolDiffPreviewState(key) : null;
 
     queueMicrotask(() => {
       if (viewport !== linesViewport || !viewport.isConnected) return;
-      if (previewState?.expanded) {
-        viewport.scrollTop = previewState.scrollTop;
-        viewport.scrollLeft = previewState.scrollLeft;
-      } else if (expanded()) {
-        scrollToFirstChange();
-      } else {
-        viewport.scrollTop = 0;
-        viewport.scrollLeft = 0;
-      }
+      viewport.scrollTop = 0;
+      viewport.scrollLeft = 0;
       previewStateReady = true;
       updateScrollThumbs();
     });
@@ -823,39 +897,58 @@ function DiffItem(props: {
     onCleanup(() => observer.disconnect());
   });
 
-  onCleanup(() => {
-    if (scrollbarActivityTimer !== undefined) clearTimeout(scrollbarActivityTimer);
+  createEffect(() => {
+    const viewport = overlayViewportElement();
+    if (!expanded() || !viewport) return;
+    const previewState = stateKey() ? getToolDiffPreviewState(stateKey()!) : null;
+
+    queueMicrotask(() => {
+      if (viewport !== overlayViewport || !viewport.isConnected || !expanded()) return;
+      if (restoreExpandedScroll && previewState?.expanded) {
+        viewport.scrollTop = previewState.scrollTop;
+        viewport.scrollLeft = previewState.scrollLeft;
+      } else {
+        scrollDiffToFirstChange(viewport);
+      }
+      restoreExpandedScroll = true;
+      previewStateReady = true;
+      savePreviewState();
+    });
   });
 
+  createEffect(() => {
+    if (!expanded()) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleExpanded();
+    };
+    document.addEventListener('keydown', closeOnEscape, true);
+    onCleanup(() => document.removeEventListener('keydown', closeOnEscape, true));
+  });
+
+  createEffect(() => {
+    setExpandedDiffOverlay(overlayOwner, expanded(), collapseExpanded);
+  });
+
+  onCleanup(() => setExpandedDiffOverlay(overlayOwner, false));
+
   return (
-    <div class="diff-view-file">
+    <div
+      class="diff-view-file"
+      ref={(element) => {
+        fileElement = element;
+        queueMicrotask(resolveOverlayMount);
+      }}
+    >
       <div
         class={`diff-view-item${canExpand() ? ' diff-view-item-expandable' : ''}`}
         onClick={() => {
           if (canExpand()) toggleExpanded();
         }}
       >
-        <Show
-          when={fileType()}
-          fallback={
-            <svg
-              class="diff-view-icon"
-              width="14"
-              height="14"
-              viewBox="0 0 32 32"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path d="M13 4 6 11v17h20V4H13Zm-1 3.828V10H9.828L12 7.828ZM24 26H8V12h6V6h10v20Z" />
-            </svg>
-          }
-        >
-          {(type) => (
-            <span class="diff-view-file-type" aria-hidden="true">
-              {type().label}
-            </span>
-          )}
-        </Show>
+        <DiffFileFormatIcon type={fileType()} />
         <span class="diff-view-filename-slot">
           <button
             type="button"
@@ -886,6 +979,9 @@ function DiffItem(props: {
         </Show>
         <Show when={canExpand()}>
           <button
+            ref={(element) => {
+              toggleButton = element;
+            }}
             type="button"
             class="diff-view-toggle"
             aria-expanded={expanded()}
@@ -917,61 +1013,26 @@ function DiffItem(props: {
       </Show>
       <Show when={props.showChanges && displayLines().length > 0}>
         <div
-          class={`diff-view-lines-shell${canExpand() ? ' diff-view-lines-shell-expandable' : ''}${expanded() ? ' diff-view-lines-shell-expanded' : ''}${scrollbarsActive() ? ' diff-view-lines-shell-scrolling' : ''}`}
+          class={`diff-view-lines-shell${canExpand() ? ' diff-view-lines-shell-expandable' : ''}`}
         >
           <div
             ref={(element) => {
               linesViewport = element;
               setViewportElement(element);
             }}
-            class={`diff-view-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}${expanded() ? ' diff-view-lines-expanded' : ''}`}
+            class={`diff-view-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}`}
             role="region"
             tabIndex={0}
             aria-label={`Changes in ${file() || 'file'}`}
             onClick={() => linesViewport?.focus({ preventScroll: true })}
             onFocus={updateScrollThumbs}
             onScroll={updateScrollThumbs}
-            onTouchMove={showScrollbarsTemporarily}
-            onWheel={showScrollbarsTemporarily}
           >
-            <div class="diff-view-lines-content" role="list">
-              <For each={renderedDisplayLines()}>
-                {(entry) =>
-                  entry.line.kind === 'gap' ? (
-                    <div
-                      class={`diff-view-gap${entry.index === Math.max(0, firstChangeIndex()) ? ' diff-view-scroll-anchor' : ''}`}
-                      role="listitem"
-                    >
-                      {entry.line.content}
-                    </div>
-                  ) : (
-                    <div
-                      class={`diff-view-line diff-view-line-${entry.line.kind}${entry.index === Math.max(0, firstChangeIndex()) ? ' diff-view-scroll-anchor' : ''}`}
-                      role="listitem"
-                      aria-label={getDiffLineAriaLabel(entry.line)}
-                    >
-                      <span class="diff-view-line-number" aria-hidden="true">
-                        {entry.line.newLine ?? entry.line.oldLine ?? ''}
-                      </span>
-                      <span class="diff-view-line-marker" aria-hidden="true">
-                        {entry.line.kind === 'addition'
-                          ? '+'
-                          : entry.line.kind === 'deletion'
-                            ? '-'
-                            : ' '}
-                      </span>
-                      <span
-                        class="diff-view-line-content hljs"
-                        innerHTML={renderHighlightedCodeHtml(
-                          entry.line.content,
-                          fileType()?.language
-                        )}
-                      />
-                    </div>
-                  )
-                }
-              </For>
-            </div>
+            <DiffLinesContent
+              entries={renderedDisplayLines()}
+              firstChangeIndex={firstChangeIndex()}
+              language={fileType()?.language}
+            />
           </div>
           <Show when={verticalThumb()}>
             {(thumb) => (
@@ -994,7 +1055,7 @@ function DiffItem(props: {
               </div>
             )}
           </Show>
-          <Show when={expanded() || !canExpand() ? horizontalThumb() : null}>
+          <Show when={!canExpand() ? horizontalThumb() : null}>
             {(thumb) => (
               <div
                 class="diff-view-scrollbar diff-view-scrollbar-horizontal"
@@ -1016,6 +1077,84 @@ function DiffItem(props: {
             )}
           </Show>
         </div>
+      </Show>
+      <Show when={expanded() ? overlayMount() : undefined}>
+        {(mount) => (
+          <Portal mount={mount()}>
+            <section
+              class="diff-view-overlay animate-fade-in"
+              role="dialog"
+              aria-label={`Expanded changes in ${displayName()}`}
+              onClick={toggleExpanded}
+            >
+              <div class="diff-view-overlay-panel" onClick={(event) => event.stopPropagation()}>
+                <header class="diff-view-overlay-header" onClick={toggleExpanded}>
+                  <div class="diff-view-overlay-title">
+                    <DiffFileFormatIcon type={fileType()} />
+                    <span class="diff-view-overlay-filename" title={file()}>
+                      {displayName()}
+                    </span>
+                    <Show when={props.diff.additions > 0 || props.diff.deletions > 0}>
+                      <span class="diff-view-stats">
+                        <Show when={props.diff.additions > 0}>
+                          <span class="diff-lines-added">+{props.diff.additions}</span>
+                        </Show>
+                        <Show when={props.diff.deletions > 0}>
+                          <span class="diff-lines-removed">-{props.diff.deletions}</span>
+                        </Show>
+                      </span>
+                    </Show>
+                  </div>
+                  <button
+                    ref={(element) => {
+                      closeButton = element;
+                    }}
+                    type="button"
+                    class="diff-view-overlay-close"
+                    aria-label="Close expanded diff"
+                    title="Close expanded diff"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleExpanded();
+                    }}
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                </header>
+                <div class="diff-view-overlay-content">
+                  <div
+                    ref={(element) => {
+                      overlayViewport = element;
+                      setOverlayViewportElement(element);
+                    }}
+                    class={`diff-view-lines diff-view-overlay-lines${hasLineNumbers() ? '' : ' diff-view-lines-unnumbered'}`}
+                    role="region"
+                    tabIndex={0}
+                    aria-label={`All changes in ${file() || 'file'}`}
+                    onScroll={savePreviewState}
+                  >
+                    <DiffLinesContent
+                      entries={allDisplayLines()}
+                      firstChangeIndex={firstChangeIndex()}
+                      language={fileType()?.language}
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+          </Portal>
+        )}
       </Show>
     </div>
   );

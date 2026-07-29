@@ -33,6 +33,7 @@ import { isAssistantMessage } from '../lib/message-metrics';
 import type { AssistantMessage, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
+import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
   getPrefetchedSessionHistory,
   getSessionHistoryPrompts,
@@ -2341,7 +2342,7 @@ export function MessageList() {
         </div>
       </div>
       <ChatContentBottomFade />
-      <Show when={showJumpToLatest()}>
+      <Show when={showJumpToLatest() && !hasExpandedDiffOverlay()}>
         <button
           type="button"
           class="jump-to-latest-button"

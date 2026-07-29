@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
+import type * as OsModule from 'os';
 import { dirname } from 'path';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
@@ -44,6 +45,13 @@ const { getConfigurationMock, loggerMock, mkdirMock, spawnMock, vscodeMock, writ
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 vi.mock('child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof OsModule>('os');
+  return {
+    ...actual,
+    tmpdir: () => `${actual.tmpdir()}/varro-server-test-${process.pid}`,
+  };
+});
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof FsModule>('fs');
   return {

@@ -1693,6 +1693,14 @@
   color: var(--color-vscode-fg);
 }
 
+.chat-queue-icon-action:focus-visible,
+.chat-queue-remove:focus-visible {
+  outline: none;
+  border-radius: var(--radius-inset);
+  background: color-mix(in srgb, var(--color-vscode-accent) 14%, transparent);
+  color: var(--color-vscode-fg);
+}
+
 .chat-queue-icon-action.is-active {
   color: var(--color-vscode-accent);
   background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);

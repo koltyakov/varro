@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { DiffView, getDiffLines, parseUnifiedPatch } from './DiffView';
 
 declare global {
@@ -11,6 +12,7 @@ declare global {
 }
 
 let container: HTMLDivElement | null = null;
+let messageListShell: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
 function makeAddedPatch(lineCount: number) {
@@ -21,8 +23,11 @@ function makeAddedPatch(lineCount: number) {
 }
 
 beforeEach(() => {
+  messageListShell = document.createElement('div');
+  messageListShell.className = 'interactive-list-shell';
   container = document.createElement('div');
-  document.body.appendChild(container);
+  messageListShell.appendChild(container);
+  document.body.appendChild(messageListShell);
   delete window.__sendToExtension;
   resetToolCallExpansionState();
 });
@@ -32,6 +37,8 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  messageListShell?.remove();
+  messageListShell = null;
   delete window.__sendToExtension;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -271,44 +278,44 @@ describe('DiffView', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(toggle?.getAttribute('aria-label')).toBe('Expand changes in example.ts');
     expect(toggle?.title).toBe('Expand diff preview');
-    expect(viewport?.classList.contains('diff-view-lines-expanded')).toBe(false);
-    expect(container?.querySelector('.diff-view-lines-shell-scrolling')).toBeNull();
 
     viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
-
-    expect(container?.querySelector('.diff-view-lines-shell-scrolling')).toBeNull();
 
     viewport?.click();
     expect(document.activeElement).toBe(viewport);
     viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
 
-    expect(container?.querySelector('.diff-view-lines-shell-scrolling')).toBeNull();
-
     header?.click();
+    await Promise.resolve();
 
+    const overlay = document.querySelector<HTMLElement>('.diff-view-overlay');
+    const overlayViewport = overlay?.querySelector<HTMLElement>('.diff-view-overlay-lines');
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(toggle?.getAttribute('aria-label')).toBe('Collapse changes in example.ts');
     expect(toggle?.title).toBe('Collapse diff preview');
-    expect(viewport?.classList.contains('diff-view-lines-expanded')).toBe(true);
-    expect(container?.textContent).toContain('final context');
+    expect(overlay).toBeInstanceOf(HTMLElement);
+    expect(overlay?.closest('.interactive-list-shell')).toBe(messageListShell);
+    expect(hasExpandedDiffOverlay()).toBe(true);
+    expect(overlayViewport?.scrollTop).toBe(57);
+    expect(overlay?.textContent).toContain('final context');
     expect(
-      container?.querySelector<HTMLElement>(
-        '.diff-view-scrollbar-horizontal .diff-view-scrollbar-thumb'
-      )?.style.width
-    ).toBe('148px');
+      overlay?.querySelector('.diff-view-overlay-title .diff-view-file-type')?.textContent
+    ).toBe('TS');
+    expect(overlay?.querySelector('.diff-view-overlay-close svg')?.getAttribute('width')).toBe(
+      '10'
+    );
 
     toggle?.focus();
     expect(document.activeElement).toBe(toggle);
-    viewport?.click();
-    expect(document.activeElement).toBe(viewport);
 
-    if (viewport) viewport.scrollTop = 200;
-    toggle?.click();
+    overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close')?.click();
     await Promise.resolve();
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-    expect(viewport?.classList.contains('diff-view-lines-expanded')).toBe(false);
     expect(viewport?.scrollTop).toBe(0);
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    expect(hasExpandedDiffOverlay()).toBe(false);
+    expect(document.activeElement).toBe(toggle);
   });
 
   it('preserves expansion and scroll position when the same file diff updates', async () => {
@@ -327,10 +334,12 @@ describe('DiffView', () => {
     );
     await Promise.resolve();
 
-    const viewport = container?.querySelector<HTMLElement>('.diff-view-lines');
     const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
     toggle?.click();
-    if (viewport) viewport.scrollTop = 44;
+    await Promise.resolve();
+    const overlayViewport = document.querySelector<HTMLElement>('.diff-view-overlay-lines');
+    if (overlayViewport) overlayViewport.scrollTop = 44;
+    overlayViewport?.dispatchEvent(new Event('scroll'));
 
     setDiffs([
       {
@@ -342,10 +351,9 @@ describe('DiffView', () => {
     ]);
     await Promise.resolve();
 
-    const updatedViewport = container?.querySelector<HTMLElement>('.diff-view-lines');
-    expect(updatedViewport).toBe(viewport);
+    const updatedViewport = document.querySelector<HTMLElement>('.diff-view-overlay-lines');
+    expect(updatedViewport).toBe(overlayViewport);
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(updatedViewport?.classList.contains('diff-view-lines-expanded')).toBe(true);
     expect(updatedViewport?.scrollTop).toBe(44);
 
     cleanup();
@@ -354,11 +362,11 @@ describe('DiffView', () => {
       container!
     );
     await Promise.resolve();
+    await Promise.resolve();
 
-    const remountedViewport = container?.querySelector<HTMLElement>('.diff-view-lines');
+    const remountedViewport = document.querySelector<HTMLElement>('.diff-view-overlay-lines');
     const remountedToggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
     expect(remountedToggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(remountedViewport?.classList.contains('diff-view-lines-expanded')).toBe(true);
     expect(remountedViewport?.scrollTop).toBe(44);
   });
 
@@ -643,7 +651,86 @@ describe('DiffView', () => {
 
     toggle?.click();
 
-    expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(500);
+    expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(6);
+    expect(document.querySelectorAll('.diff-view-overlay .diff-view-line')).toHaveLength(500);
+  });
+
+  it('closes an expanded preview from its header or with Escape', async () => {
+    cleanup = render(
+      () =>
+        DiffView({
+          showChanges: true,
+          diffs: [
+            {
+              file: 'src/example.ts',
+              patch: makeAddedPatch(7),
+              additions: 7,
+              deletions: 0,
+            },
+          ],
+        }),
+      container!
+    );
+
+    const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
+    toggle?.click();
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeInstanceOf(HTMLElement);
+
+    document.querySelector<HTMLElement>('.diff-view-overlay-panel')?.click();
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeInstanceOf(HTMLElement);
+
+    document.querySelector<HTMLElement>('.diff-view-overlay')?.click();
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+
+    toggle?.click();
+    await Promise.resolve();
+
+    document.querySelector<HTMLElement>('.diff-view-overlay-header')?.click();
+    await Promise.resolve();
+
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+
+    toggle?.click();
+    await Promise.resolve();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await Promise.resolve();
+
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it('closes an expanded preview through the shared collapse action', async () => {
+    cleanup = render(
+      () =>
+        DiffView({
+          showChanges: true,
+          diffs: [
+            {
+              file: 'src/example.ts',
+              patch: makeAddedPatch(7),
+              additions: 7,
+              deletions: 0,
+            },
+          ],
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.diff-view-toggle')?.click();
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeInstanceOf(HTMLElement);
+
+    collapseExpandedDiffOverlays();
+    await Promise.resolve();
+
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    expect(hasExpandedDiffOverlay()).toBe(false);
   });
 
   it('shows an explicit truncated state instead of parsing oversized patches', () => {

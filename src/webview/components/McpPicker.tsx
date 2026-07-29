@@ -117,6 +117,8 @@ export function McpPicker(props: {
         onClick={(e) => e.stopPropagation()}
         style={{ outline: 'none' }}
       >
+        <div class="dropdown-header">MCPs</div>
+
         <Show when={allItems().length > 8}>
           <div class="dropdown-search">
             <input

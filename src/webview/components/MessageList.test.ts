@@ -61,6 +61,7 @@ import {
   setSessionHistoryPrompts,
 } from '../lib/message-window';
 import { client } from '../lib/client';
+import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -69,6 +70,7 @@ let originalIntersectionObserver: typeof globalThis.IntersectionObserver | undef
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
+const testDiffOverlayOwner = Symbol();
 
 function installQueuedAnimationFrameMocks() {
   const originalGlobalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -662,6 +664,7 @@ afterEach(async () => {
   setShowThinkingPreference(true);
   stopLoading();
   resetMessageEditState();
+  setExpandedDiffOverlay(testDiffOverlayOwner, false);
   globalThis.ResizeObserver = originalResizeObserver;
   if (originalIntersectionObserver) {
     globalThis.IntersectionObserver = originalIntersectionObserver;
@@ -5397,7 +5400,16 @@ describe('MessageList auto-scroll', () => {
     const button = container?.querySelector('.jump-to-latest-button') as HTMLButtonElement | null;
     expect(button).toBeInstanceOf(HTMLButtonElement);
 
-    button?.click();
+    setExpandedDiffOverlay(testDiffOverlayOwner, true);
+    expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
+
+    setExpandedDiffOverlay(testDiffOverlayOwner, false);
+    const restoredButton = container?.querySelector(
+      '.jump-to-latest-button'
+    ) as HTMLButtonElement | null;
+    expect(restoredButton).toBeInstanceOf(HTMLButtonElement);
+
+    restoredButton?.click();
     await Promise.resolve();
     animationFrames.flush();
 

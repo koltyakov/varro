@@ -21,6 +21,7 @@ import {
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { setSessionHistoryPrompts } from '../lib/message-window';
+import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 
 const {
   abortSessionMock,
@@ -114,6 +115,7 @@ vi.mock('../lib/client', () => ({
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+const testDiffOverlayOwner = Symbol();
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -167,6 +169,7 @@ afterEach(() => {
   setState('queuedMessageDispatchingId', null);
   setState('failedQueuedMessageIds', []);
   setState('queuedMessageEdit', null);
+  setState('todos', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   setSessionHistoryPrompts('session-1', []);
@@ -195,6 +198,7 @@ afterEach(() => {
     activeStartedAt: null,
   });
   vi.mocked(client.varro.resolveWorkspacePath).mockClear();
+  setExpandedDiffOverlay(testDiffOverlayOwner, false);
 });
 
 function setupModelState() {
@@ -336,6 +340,42 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it('hides pre-input status blocks while a diff overlay is expanded', () => {
+    setState('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'medium' },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.todo-block')).toBeInstanceOf(HTMLElement);
+    expect(container?.querySelector('.chat-input-shell')).toBeInstanceOf(HTMLElement);
+
+    setExpandedDiffOverlay(testDiffOverlayOwner, true);
+
+    expect(container?.querySelector('.todo-block')).toBeNull();
+    expect(container?.querySelector('.chat-input-shell')).toBeInstanceOf(HTMLElement);
+
+    setExpandedDiffOverlay(testDiffOverlayOwner, false);
+
+    expect(container?.querySelector('.todo-block')).toBeInstanceOf(HTMLElement);
+  });
+
+  it('collapses an expanded diff overlay when sending a message', async () => {
+    const collapse = vi.fn(() => setExpandedDiffOverlay(testDiffOverlayOwner, false));
+    setExpandedDiffOverlay(testDiffOverlayOwner, true, collapse);
+    setState('activeSessionId', 'session-1');
+    setInputText('Continue with this change');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(collapse).toHaveBeenCalledTimes(1);
+    expect(hasExpandedDiffOverlay()).toBe(false);
+    expect(sendMessageMock).toHaveBeenCalledWith('Continue with this change', { noReply: false });
+  });
+
   it('sends at most 20 dropped content files in individual messages', async () => {
     const originalFileReader = globalThis.FileReader;
     const bridgeWindow = window as typeof window & {

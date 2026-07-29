@@ -95,6 +95,7 @@ describe('McpPicker', () => {
       container!
     );
 
+    expect(container?.querySelector('.dropdown-header')?.textContent).toBe('MCPs');
     expect(container?.textContent).toContain('No MCPs found');
     expect(container?.querySelector('input[aria-label="Search MCPs"]')).toBeNull();
   });

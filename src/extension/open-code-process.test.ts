@@ -45,8 +45,9 @@ const originalPlatform = process.platform;
 const originalOpenCodeConfig = process.env.OPENCODE_CONFIG;
 const originalOpenCodeConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
 const originalPath = process.env.PATH;
-// Linux caps PIDs well below this, so birth-identity tests cannot read a real /proc entry.
-const MOCK_LINUX_PID = 1_073_741_824;
+// Keep fake identities outside the real PID range and unique across concurrent test processes.
+const MOCK_LINUX_PID = 1_073_000_000 + process.pid;
+const MOCK_WINDOWS_PID = 100_000 + process.pid;
 
 beforeEach(() => {
   delete process.env.OPENCODE_CONFIG;
@@ -462,8 +463,8 @@ describe('OpenCodeProcess server ownership leases', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     const procRoot = join(directory, 'proc');
-    const wrapperPid = 43_210;
-    const listenerPid = 43_211;
+    const wrapperPid = MOCK_WINDOWS_PID;
+    const listenerPid = MOCK_WINDOWS_PID + 1;
     const socketInode = '987654';
     const child = Object.assign(new EventEmitter(), {
       pid: wrapperPid,
@@ -568,7 +569,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     let listening = true;
     let serverEnv: NodeJS.ProcessEnv | undefined;
     const child = Object.assign(new EventEmitter(), {
-      pid: 43_210,
+      pid: MOCK_WINDOWS_PID,
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
       kill: vi.fn(),
@@ -588,7 +589,7 @@ describe('OpenCodeProcess server ownership leases', () => {
         });
         queueMicrotask(() => {
           if (command === 'lsof' && listening) {
-            result.stdout.emit('data', Buffer.from('43210\n'));
+            result.stdout.emit('data', Buffer.from(`${MOCK_WINDOWS_PID}\n`));
           } else if (command === 'ps' && args.includes('comm=')) {
             result.stdout.emit('data', Buffer.from('/usr/local/bin/opencode\n'));
           } else if (command === 'ps' && args.includes('lstart=')) {
@@ -628,7 +629,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     };
     expect(lease).toEqual({
       version: 1,
-      pid: 43_210,
+      pid: MOCK_WINDOWS_PID,
       port: 4096,
       executable: '/usr/local/bin/opencode',
       birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
@@ -665,7 +666,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     ).resolves.toEqual([true, true]);
     expect(second.managedProcess).toBe(true);
     expect(second.hasForeignActiveOwnership).toBe(false);
-    expect(second.managedProcessId).toBe(43_210);
+    expect(second.managedProcessId).toBe(MOCK_WINDOWS_PID);
 
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
       listening = false;
@@ -673,7 +674,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     });
     await second.stopServerForRestart();
 
-    expect(kill).toHaveBeenCalledWith(43_210, 'SIGTERM');
+    expect(kill).toHaveBeenCalledWith(MOCK_WINDOWS_PID, 'SIGTERM');
     await expect(stat(leasePath)).rejects.toThrow();
     await expect(stat(`${leasePath}.managed`)).rejects.toThrow();
     kill.mockRestore();
@@ -734,7 +735,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     const child = Object.assign(new EventEmitter(), {
-      pid: 43_210,
+      pid: MOCK_WINDOWS_PID,
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
       kill: vi.fn(),
@@ -753,7 +754,9 @@ describe('OpenCodeProcess server ownership leases', () => {
         const script = args.at(-1) || '';
         if (command === 'powershell.exe' && script.includes('Get-NetTCPConnection')) {
           listenerQueries += 1;
-          if (listenerQueries > 1) result.stdout.emit('data', Buffer.from('43210\n'));
+          if (listenerQueries > 1) {
+            result.stdout.emit('data', Buffer.from(`${MOCK_WINDOWS_PID}\n`));
+          }
         } else if (command === 'powershell.exe' && script.includes('ExecutablePath')) {
           result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
         } else if (command === 'powershell.exe' && script.includes('CreationDate')) {
@@ -784,7 +787,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     expect(listenerQueries).toBe(2);
     expect(manager.managedProcess).toBe(true);
     expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toEqual(
-      expect.objectContaining({ pid: 43_210, state: 'active' })
+      expect.objectContaining({ pid: MOCK_WINDOWS_PID, state: 'active' })
     );
     await rm(directory, { recursive: true, force: true });
   });
@@ -795,7 +798,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
     const child = Object.assign(new EventEmitter(), {
-      pid: 43_210,
+      pid: MOCK_WINDOWS_PID,
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
       kill: vi.fn(),
@@ -815,7 +818,7 @@ describe('OpenCodeProcess server ownership leases', () => {
       setTimeout(() => {
         const script = args.at(-1) || '';
         if (script.includes('Get-NetTCPConnection')) {
-          result.stdout.emit('data', Buffer.from('43210\n'));
+          result.stdout.emit('data', Buffer.from(`${MOCK_WINDOWS_PID}\n`));
         } else if (script.includes('ExecutablePath')) {
           result.stdout.emit('data', Buffer.from('C:\\OpenCode\\opencode.exe\n'));
         } else if (script.includes('CreationDate')) {
@@ -1263,7 +1266,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
     const leasePath = join(directory, 'lease.json');
     const configPath = join(configDirectory, 'opencode.json');
-    const pid = 43_210;
+    const pid = MOCK_WINDOWS_PID;
     await Promise.all([
       writeFile(configPath, '{}', 'utf-8'),
       writeFile(
@@ -1326,7 +1329,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     const configDirectory = await mkdtemp(join(tmpdir(), 'varro-opencode-config-'));
     const leasePath = join(directory, 'lease.json');
     const configPath = join(configDirectory, 'opencode.json');
-    const pid = 43_210;
+    const pid = MOCK_WINDOWS_PID;
     await Promise.all([
       writeFile(configPath, '{}', 'utf-8'),
       writeFile(
@@ -1580,7 +1583,7 @@ describe('OpenCodeProcess config ownership', () => {
 
   it('preserves a child-owned config when disconnect leaves the child alive', async () => {
     const child = Object.assign(new EventEmitter(), {
-      pid: 43210,
+      pid: MOCK_WINDOWS_PID,
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
       kill: vi.fn(),
@@ -1606,14 +1609,14 @@ describe('OpenCodeProcess config ownership', () => {
     expect(child.kill).not.toHaveBeenCalled();
     await expect(stat(configPath)).resolves.toBeTruthy();
     await expect(readFile(join(dirname(configPath), 'owner.json'), 'utf-8')).resolves.toContain(
-      '"pid":43210'
+      `"pid":${MOCK_WINDOWS_PID}`
     );
     await rm(dirname(configPath), { recursive: true, force: true });
   });
 
   it('cleans a disconnected child-owned config when that child exits', async () => {
     const child = Object.assign(new EventEmitter(), {
-      pid: 43211,
+      pid: MOCK_WINDOWS_PID + 1,
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
       kill: vi.fn(),

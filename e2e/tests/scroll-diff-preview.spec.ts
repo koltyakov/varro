@@ -85,6 +85,51 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
 }
 
 test.describe('diff preview anchoring', () => {
+  test('centers the expanded diff and strongly obscures the transcript', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    const messageId = 'message-diff-preview-assistant-59';
+    await updateExpandableDiffPreview(page, messageId);
+
+    await page
+      .locator(`[data-msg-id="${messageId}"] .diff-view-toggle`)
+      .evaluate((button) => (button as HTMLButtonElement).click());
+
+    const overlay = page.locator('.diff-view-overlay');
+    await expect(overlay).toBeVisible();
+
+    const layout = await overlay.evaluate((element) => {
+      const overlayRect = element.getBoundingClientRect();
+      const panelRect = element
+        .querySelector<HTMLElement>('.diff-view-overlay-panel')!
+        .getBoundingClientRect();
+      const composerRect = document
+        .querySelector<HTMLElement>('.chat-input-container')!
+        .getBoundingClientRect();
+      const list = element
+        .closest<HTMLElement>('.interactive-list-shell')
+        ?.querySelector<HTMLElement>(':scope > .interactive-list');
+
+      return {
+        centerDelta:
+          panelRect.top + panelRect.height / 2 - (overlayRect.top + overlayRect.height / 2),
+        leftEdgeDelta: panelRect.left - composerRect.left,
+        rightEdgeDelta: panelRect.right - composerRect.right,
+        listFilter: list ? getComputedStyle(list).filter : '',
+        listOpacity: list ? getComputedStyle(list).opacity : '',
+      };
+    });
+
+    expect(Math.abs(layout.centerDelta)).toBeLessThan(1);
+    expect(Math.abs(layout.leftEdgeDelta)).toBeLessThan(1);
+    expect(Math.abs(layout.rightEdgeDelta)).toBeLessThan(1);
+    expect(layout.listFilter).toBe('blur(40px)');
+    expect(layout.listOpacity).toBe('0.1');
+    await expect(overlay.locator('.diff-view-overlay-title .diff-view-file-type')).toHaveText('TS');
+
+    await overlay.click({ position: { x: 2, y: 2 } });
+    await expect(overlay).toHaveCount(0);
+  });
+
   test('keeps visible content anchored while diff previews resize asynchronously', async ({
     page,
   }) => {
@@ -233,7 +278,7 @@ test.describe('diff preview anchoring', () => {
     expect(topOffset).toBeLessThan(2);
   });
 
-  test('overlays the diff toggle without obscuring horizontal scrolling', async ({ page }) => {
+  test('opens the diff dialog without obscuring horizontal scrolling', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     await expect(page.locator('.interactive-list')).toBeVisible();
 
@@ -301,24 +346,34 @@ test.describe('diff preview anchoring', () => {
     );
     expect(Math.abs(headerTopAfterExpansion - headerTopBeforeExpansion)).toBeLessThan(2);
 
-    const expandedLayout = await preview.evaluate((viewport) => {
-      const shell = viewport.closest<HTMLElement>('.diff-view-lines-shell')!;
-
+    const expandedPreview = page.locator('.diff-view-overlay-lines');
+    await expect(expandedPreview).toBeVisible();
+    const expandedLayout = await expandedPreview.evaluate((viewport) => {
+      viewport.scrollLeft = viewport.scrollWidth;
       return {
-        fadeContent: getComputedStyle(shell, '::after').content,
-        hasHorizontalScrollbar: !!shell.querySelector('.diff-view-scrollbar-horizontal'),
-        shellHeight: shell.getBoundingClientRect().height,
-        viewportHeight: viewport.getBoundingClientRect().height,
+        clientWidth: viewport.clientWidth,
+        overflowX: getComputedStyle(viewport).overflowX,
+        scrollLeft: viewport.scrollLeft,
+        scrollWidth: viewport.scrollWidth,
       };
     });
 
-    expect(expandedLayout.shellHeight).toBe(expandedLayout.viewportHeight);
-    expect(expandedLayout.hasHorizontalScrollbar).toBe(true);
-    expect(expandedLayout.fadeContent).toBe('none');
+    expect(expandedLayout.scrollWidth).toBeGreaterThan(expandedLayout.clientWidth);
+    expect(expandedLayout.scrollLeft).toBeGreaterThan(0);
+    expect(expandedLayout.overflowX).toBe('auto');
 
     await page.waitForTimeout(300);
     const list = page.locator('.interactive-list');
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 400);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
     const scrollTopAfterExpansion = await list.evaluate((element) => element.scrollTop);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      200
+    );
 
     await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(30));
     await waitForAnimationFrames(page, 4);
@@ -326,10 +381,13 @@ test.describe('diff preview anchoring', () => {
     const expandedMetrics = await getScrollMetrics(page, '.interactive-list');
     expect(Math.abs(expandedMetrics.scrollTop - scrollTopAfterExpansion)).toBeLessThan(2);
     expect(expandedMetrics.distanceFromBottom).toBeGreaterThan(200);
+    await expect(page.locator('.jump-to-latest-button')).toHaveCount(0);
 
-    await page
-      .locator('.jump-to-latest-button')
-      .evaluate((button) => (button as HTMLButtonElement).click());
+    await page.locator('.diff-view-overlay-close').click();
+    await expect(page.locator('.diff-view-overlay')).toHaveCount(0);
+    const jumpToLatest = page.locator('.jump-to-latest-button');
+    await expect(jumpToLatest).toBeVisible();
+    await jumpToLatest.click();
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)

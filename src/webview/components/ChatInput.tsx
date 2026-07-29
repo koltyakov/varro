@@ -121,6 +121,7 @@ import {
   type ComposerSnapshot,
 } from '../lib/composer-history';
 import { getSessionHistoryPrompts } from '../lib/message-window';
+import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
@@ -1211,6 +1212,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       !state.attachedDiagnostics
     )
       return;
+
+    collapseExpandedDiffOverlays();
 
     const queuedAttachments = getQueuedAttachmentSnapshot({
       droppedFiles: state.droppedFiles,
@@ -2398,7 +2401,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <DropOverlay />
       </Show>
 
-      <Show when={queuedForSession().length > 0 && !composerEditingMessage()}>
+      <Show
+        when={
+          !hasExpandedDiffOverlay() && queuedForSession().length > 0 && !composerEditingMessage()
+        }
+      >
         <QueuedMessages
           items={queuedForSession()}
           dispatchingItemId={dispatchingQueuedMessageId()}
@@ -2418,6 +2425,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       <Show
         when={
+          !hasExpandedDiffOverlay() &&
           !props.newSession &&
           state.todos.length > 0 &&
           !showModelPicker() &&
@@ -2427,11 +2435,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <TodoList />
       </Show>
 
-      <Show when={!props.newSession && !showModelPicker() && !composerEditingMessage()}>
+      <Show
+        when={
+          !hasExpandedDiffOverlay() &&
+          !props.newSession &&
+          !showModelPicker() &&
+          !composerEditingMessage()
+        }
+      >
         <ChangedFilesList />
       </Show>
 
-      <Show when={composerEditingMessage()}>
+      <Show when={!hasExpandedDiffOverlay() && composerEditingMessage()}>
         <div class="composer-edit-banner">
           <svg
             class="composer-edit-banner-icon"
@@ -2455,7 +2470,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         </div>
       </Show>
 
-      <Show when={visibleUsageLimit()}>
+      <Show when={!hasExpandedDiffOverlay() && visibleUsageLimit()}>
         <UsageLimitBanner
           message={visibleUsageLimit()!.message}
           meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}

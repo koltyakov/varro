@@ -474,7 +474,8 @@
   background: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-result-editor-bg));
 }
 
-.diff-view-widget-inline :is(.diff-view-icon, .diff-view-file-type) {
+.diff-view-widget-inline :is(.diff-view-icon, .diff-view-file-type),
+.diff-view-overlay-title :is(.diff-view-icon, .diff-view-file-type) {
   opacity: 0.7;
 }
 
@@ -505,9 +506,127 @@
   tab-size: 2;
 }
 
-.diff-view-lines-expanded {
-  max-height: 480px;
+.diff-view-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: var(--chat-horizontal-padding);
+  background: color-mix(in srgb, var(--color-vscode-list-bg) 75%, transparent);
+  backdrop-filter: blur(40px) brightness(0.3);
+  -webkit-backdrop-filter: blur(40px) brightness(0.3);
+}
+
+.interactive-list-shell:has(.diff-view-overlay) > .interactive-list {
+  filter: blur(40px);
+  opacity: 0.1;
+}
+
+.diff-view-overlay-panel {
+  display: flex;
+  width: min(100%, calc(var(--chat-content-max-width) - (var(--chat-horizontal-padding) * 2)));
+  max-height: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-vscode-border-default);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-result-editor-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.diff-view-overlay-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--color-vscode-border-default);
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, var(--color-vscode-result-editor-bg));
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.diff-view-overlay-title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.diff-view-overlay-filename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-vscode-fg);
+}
+
+.diff-view-overlay-close {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--color-vscode-fg);
+  opacity: 0.35;
+}
+
+.diff-view-overlay-close:hover {
+  opacity: 0.8;
+}
+
+.diff-view-overlay-close:focus-visible {
+  outline: none;
+  border-radius: var(--radius-inset);
+  background: color-mix(in srgb, var(--color-vscode-accent) 14%, transparent);
+  opacity: 1;
+}
+
+.diff-view-overlay-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.diff-view-overlay .diff-view-overlay-lines {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
+  border-top: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+  overscroll-behavior: contain;
+}
+
+.diff-view-overlay .diff-view-overlay-lines::-webkit-scrollbar {
+  display: block;
+  width: 10px;
+  height: 10px;
+}
+
+.diff-view-overlay .diff-view-overlay-lines::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--color-vscode-chat-scrollbar-thumb) padding-box;
 }
 
 .diff-view-lines:focus {
@@ -531,8 +650,6 @@
   pointer-events: none;
 }
 
-.diff-view-lines-shell-expanded .diff-view-scrollbar,
-.diff-view-lines-shell-scrolling .diff-view-scrollbar,
 .diff-view-lines-shell:has(.diff-view-lines:focus) .diff-view-scrollbar {
   opacity: 1;
   pointer-events: auto;
@@ -614,7 +731,7 @@
   line-height: 1;
 }
 
-.diff-view-lines-shell-expandable:not(.diff-view-lines-shell-expanded)::after {
+.diff-view-lines-shell-expandable::after {
   position: absolute;
   z-index: var(--z-chrome);
   right: 0;
