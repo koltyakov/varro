@@ -119,6 +119,19 @@ function imageTag(version) {
   return `varro-opencode-compat:${version.replace(/[^a-zA-Z0-9_.-]/g, '-')}`;
 }
 
+function summarizeChecks(checks) {
+  const required = checks.filter((check) => check.required !== false);
+  const advisory = checks.filter((check) => check.required === false);
+  const failedRequired = required.filter((check) => !check.ok);
+  const failedAdvisory = advisory.filter((check) => !check.ok);
+  return {
+    required,
+    advisory,
+    failedRequired,
+    failedAdvisory,
+  };
+}
+
 function testVersion(version, declaredCeiling) {
   const tag = imageTag(version);
   process.stdout.write(`\n[${version}] Building compatibility image...\n`);
@@ -149,12 +162,22 @@ function testVersion(version, declaredCeiling) {
     throw new Error(`Compatibility container failed for OpenCode ${version}:\n${output.trim()}`);
   }
   const result = JSON.parse(resultLine.slice(RESULT_PREFIX.length));
-  const failedChecks = result.checks.filter((check) => !check.ok);
+  const { required, advisory, failedRequired, failedAdvisory } = summarizeChecks(result.checks);
+  const status = result.compatible
+    ? failedAdvisory.length > 0
+      ? 'COMPATIBLE WITH CAVEATS'
+      : 'COMPATIBLE'
+    : 'INCOMPATIBLE';
+  const advisorySummary =
+    advisory.length > 0
+      ? `; ${advisory.length - failedAdvisory.length}/${advisory.length} advisory checks passed`
+      : '';
   process.stdout.write(
-    `[${version}] ${result.compatible ? 'COMPATIBLE' : 'INCOMPATIBLE'} (${result.checks.length - failedChecks.length}/${result.checks.length} checks passed)\n`
+    `[${version}] ${status} (${required.length - failedRequired.length}/${required.length} required checks passed${advisorySummary})\n`
   );
-  for (const check of failedChecks) {
-    process.stdout.write(`  - ${check.name}: ${check.error}\n`);
+  for (const check of [...failedRequired, ...failedAdvisory]) {
+    const label = check.required === false ? 'advisory' : 'required';
+    process.stdout.write(`  - ${label}: ${check.name}: ${check.error}\n`);
   }
   if (result.harnessError) {
     throw new Error(`Probe harness failed for OpenCode ${version}: ${result.harnessError}`);
@@ -228,14 +251,17 @@ if (options.report) await writeReport(options.report, report);
 
 process.stdout.write('\nCompatibility summary\n');
 for (const result of results) {
+  const { failedAdvisory } = summarizeChecks(result.checks);
+  const caveat =
+    failedAdvisory.length > 0 ? ` with ${failedAdvisory.length} advisory failure(s)` : '';
   process.stdout.write(
-    `  ${result.requestedVersion}: ${result.compatible ? 'compatible' : 'incompatible'}\n`
+    `  ${result.requestedVersion}: ${result.compatible ? `compatible${caveat}` : 'incompatible'}\n`
   );
 }
 
 if (!analysis.boundaryFound) {
   process.stdout.write(
-    `No incompatibility boundary found in ${versions.length} releases; tested compatibility extends through ${analysis.oldestTestedCompatible}.\n`
+    `No required-check incompatibility boundary found in ${versions.length} releases; required compatibility checks pass through ${analysis.oldestTestedCompatible}.\n`
   );
 } else {
   process.stdout.write(

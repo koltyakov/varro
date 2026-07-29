@@ -7,6 +7,8 @@ const DIRECTORY = '/workspace';
 const MCP_FIXTURE_NAME = 'varro-compat';
 const MCP_FIXTURE_PATH = '/opt/varro/mcp-fixture.mjs';
 const MCP_PAGE_MARKER_PATH = '/tmp/varro-mcp-pages';
+const MISSING_PERMISSION_ID = 'per_varro_missing_permission';
+const MISSING_QUESTION_ID = 'que_varro_missing_question';
 const MCP_CHECK_REQUIRED = TESTED_VERSION === process.env.DECLARED_OPENCODE_CEILING;
 const RESULT_PREFIX = 'VARRO_COMPAT_RESULT=';
 const START_TIMEOUT_MS = 30_000;
@@ -200,7 +202,7 @@ async function requestExpectedMissingRequest(
           required: false,
           advisory: true,
           durationMs: Date.now() - startedAt,
-          error: '400 response did not expose a route-specific missing-request contract',
+          error: `400 response did not expose a route-specific missing-request contract${text ? `: ${text.slice(0, 300)}` : ''}`,
         });
         return;
       }
@@ -209,8 +211,6 @@ async function requestExpectedMissingRequest(
     checks.push({
       name,
       ok: true,
-      required: false,
-      advisory: true,
       durationMs: Date.now() - startedAt,
     });
   } catch (error) {
@@ -513,20 +513,27 @@ async function runProbe() {
         validate: (value) => value === true,
       });
       await requestExpectedMissingRequest(
-        'POST /permission/:id/reply accepts reply payload (advisory)',
+        'POST /permission/:id/reply accepts reply payload',
         'POST',
-        '/permission/varro-missing-permission/reply',
+        `/permission/${MISSING_PERMISSION_ID}/reply`,
         'permission',
-        'varro-missing-permission',
+        MISSING_PERMISSION_ID,
         { body: { reply: 'reject' } }
       );
       await requestExpectedMissingRequest(
-        'POST /question/:id/reply accepts answers payload (advisory)',
+        'POST /question/:id/reply accepts answers payload',
         'POST',
-        '/question/varro-missing-question/reply',
+        `/question/${MISSING_QUESTION_ID}/reply`,
         'question',
-        'varro-missing-question',
+        MISSING_QUESTION_ID,
         { body: { answers: [['No']] } }
+      );
+      await requestExpectedMissingRequest(
+        'POST /question/:id/reject recognizes a missing request',
+        'POST',
+        `/question/${MISSING_QUESTION_ID}/reject`,
+        'question',
+        MISSING_QUESTION_ID
       );
     }
   } finally {
