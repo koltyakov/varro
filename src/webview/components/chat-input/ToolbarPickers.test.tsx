@@ -423,4 +423,31 @@ describe('ToolbarPickers', () => {
 
     expect(onClick).toHaveBeenCalledOnce();
   });
+
+  it('handles provider limit clicks before bubbling can be interrupted', () => {
+    const onClick = vi.fn();
+
+    cleanup = render(
+      () => (
+        <div
+          ref={(element) =>
+            element.addEventListener('click', (event) => event.stopPropagation())
+          }
+        >
+          <ProviderLimitChip
+            badges={[{ label: '40%', tone: 'default' }]}
+            title="Daily requests remaining"
+            onClick={onClick}
+          />
+        </div>
+      ),
+      container!
+    );
+
+    container
+      ?.querySelector<HTMLButtonElement>('.toolbar-limit-chip')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(onClick).toHaveBeenCalledOnce();
+  });
 });

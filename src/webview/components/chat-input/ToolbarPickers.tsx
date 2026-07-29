@@ -364,7 +364,7 @@ export function ProviderLimitChip(props: {
         class="toolbar-limit-chip"
         title={props.title ?? undefined}
         aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
-        onClick={props.onClick}
+        on:click={props.onClick}
       >
         <span class="toolbar-limit-chip-label">Limits:</span>
         <For each={props.badges}>

@@ -16,6 +16,19 @@ test('exhausted provider limit shows retry context and a descriptive toolbar chi
   await expect(chip).toHaveAttribute('title', /40/);
 });
 
+test('provider limit popup responds to repeated clicks', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=usage-limit');
+
+  const chip = page.locator('.toolbar-limit-chip');
+  const popup = page.locator('.provider-limit-popup');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await chip.click();
+    await expect(popup).toBeVisible();
+    await chip.click();
+    await expect(popup).toHaveCount(0);
+  }
+});
+
 test('provider limit chip is absent for scenarios without a rate-limited provider', async ({
   page,
 }) => {
