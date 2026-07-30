@@ -43,7 +43,7 @@ jobs:
         run: npm run build
 
       - name: Package
-        run: npx vsce package --no-dependencies
+        run: npm run package:vsix
 
   windows:
     runs-on: windows-latest
