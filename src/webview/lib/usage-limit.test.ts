@@ -5,6 +5,7 @@ import {
   getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
   parseUsageLimitNotice,
+  shouldDisplayUsageLimitNotice,
 } from './usage-limit';
 import type { UsageLimitNotice } from './usage-limit';
 
@@ -579,6 +580,10 @@ describe('usage limit helpers', () => {
     expect(notice?.statusCode).toBe(429);
   });
 
+  it('detects plain service-unavailable text', () => {
+    expect(parseUsageLimitNotice('Service temporarily unavailable')).not.toBeNull();
+  });
+
   it('presents explicit quota exhaustion as a reached usage limit', () => {
     expect(getUsageLimitPresentation({ message: 'messages exhausted', unit: 'messages' })).toEqual({
       title: 'Usage limit reached',
@@ -605,6 +610,33 @@ describe('usage limit helpers', () => {
       title: 'Service temporarily unavailable',
       summary: 'service disruption',
     });
+  });
+
+  it('suppresses temporary service failures for the first three retries', () => {
+    for (const attempt of [1, 2, 3]) {
+      expect(
+        shouldDisplayUsageLimitNotice({
+          message: 'Our servers are currently overloaded. Please try again later.',
+          attempt,
+        })
+      ).toBe(false);
+    }
+
+    expect(
+      shouldDisplayUsageLimitNotice({
+        message: 'Our servers are currently overloaded. Please try again later.',
+        attempt: 4,
+      })
+    ).toBe(true);
+  });
+
+  it('does not suppress quota failures or service failures without a retry attempt', () => {
+    expect(shouldDisplayUsageLimitNotice({ message: '429 usage limit reached', attempt: 1 })).toBe(
+      true
+    );
+    expect(
+      shouldDisplayUsageLimitNotice({ message: 'Service temporarily unavailable', attempt: null })
+    ).toBe(true);
   });
 
   // -- createUsageLimitProviderLimit --

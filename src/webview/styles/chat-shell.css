@@ -464,6 +464,12 @@ input:focus-visible {
   -webkit-user-select: text;
 }
 
+.interactive-item-container::after {
+  content: '';
+  flex: 0 0 var(--interactive-item-block-correction, 0px);
+  width: 0;
+}
+
 .interactive-list-track.virtualized .interactive-item-container {
   contain: layout style paint;
   flex: 0 0 auto;
@@ -491,6 +497,10 @@ input:focus-visible {
    non-empty rows from the canonical 12px to ~24px. */
 .interactive-item-container:empty {
   padding: 0;
+}
+
+.interactive-item-container:empty::after {
+  display: none;
 }
 
 .interactive-item-container.interactive-request {

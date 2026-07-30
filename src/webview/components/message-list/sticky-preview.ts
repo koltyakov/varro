@@ -22,6 +22,10 @@ export function getStickyUserMessageCounts(parts: Part[]): {
 const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
 
+export function hasStickyUserMessageContent(parts: Part[]) {
+  return getUserMessagePreviewText(parts) !== EMPTY_USER_MESSAGE_PREVIEW;
+}
+
 export function getStickyUserMessagePreview(
   messages: MessageEntry[],
   firstVisibleMessageIndex: number | null
@@ -45,7 +49,7 @@ export function getStickyUserMessagePreview(
     );
     if (isChildSessionPrompt) continue;
     const text = getUserMessagePreviewText(entry.parts);
-    if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
+    if (!hasStickyUserMessageContent(entry.parts)) continue;
     return {
       id: entry.info.id,
       index: i,

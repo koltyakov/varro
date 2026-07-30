@@ -10,7 +10,7 @@ import type { PreviewImage } from './ImagePreview';
 import { ToolCall } from './ToolCall';
 import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
-import { parseUsageLimitNotice } from '../lib/usage-limit';
+import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { hasVisibleReasoningContent } from '../lib/part-utils';
 import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
 
@@ -91,22 +91,26 @@ export function MessagePart(props: {
 }
 
 function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
-  const usageLimit = createMemo(() => parseUsageLimitNotice(props.part.error?.data?.message));
+  const usageLimit = createMemo(() =>
+    parseUsageLimitNotice(props.part.error?.data?.message, { attempt: props.part.attempt })
+  );
 
   return (
-    <div class={`chat-retry-notice${usageLimit() ? ' usage-limit' : ''}`}>
-      <span>↻ Retry attempt {props.part.attempt}</span>
-      <Show
-        when={usageLimit()}
-        fallback={
-          <Show when={props.part.error?.data?.message}>
-            <span class="chat-retry-error">- {props.part.error!.data.message}</span>
-          </Show>
-        }
-      >
-        <span class="chat-retry-error">- usage limit reached</span>
-      </Show>
-    </div>
+    <Show when={!usageLimit() || shouldDisplayUsageLimitNotice(usageLimit()!)}>
+      <div class={`chat-retry-notice${usageLimit() ? ' usage-limit' : ''}`}>
+        <span>↻ Retry attempt {props.part.attempt}</span>
+        <Show
+          when={usageLimit()}
+          fallback={
+            <Show when={props.part.error?.data?.message}>
+              <span class="chat-retry-error">- {props.part.error!.data.message}</span>
+            </Show>
+          }
+        >
+          <span class="chat-retry-error">- usage limit reached</span>
+        </Show>
+      </div>
+    </Show>
   );
 }
 

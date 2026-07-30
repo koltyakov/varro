@@ -9,7 +9,16 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   const nextPrompt = page.locator('[data-msg-id="message-sticky-user-2"] .user-message-card');
 
   await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight / 2;
+    const nextPromptElement = element.querySelector(
+      '[data-msg-id="message-sticky-user-2"] .user-message-card'
+    );
+    if (!nextPromptElement) throw new Error('Next prompt is not mounted');
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop +=
+      nextPromptElement.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight -
+      20;
     element.dispatchEvent(new Event('scroll'));
   });
 
@@ -104,7 +113,7 @@ test('sticky preview follows live prompt geometry when the assistant row grows',
   await expect(sticky).toHaveCount(0);
 
   await page.locator('[data-msg-id="message-sticky-assistant-1"]').evaluate((row) => {
-    row.setAttribute('style', 'padding-bottom: 220px');
+    row.setAttribute('style', 'padding-bottom: 700px');
   });
   await page.evaluate(
     () =>
@@ -118,81 +127,91 @@ test('sticky preview follows live prompt geometry when the assistant row grows',
     if (!scrollList) throw new Error('Message list is missing');
     return prompt.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
   });
-  expect(promptTop).toBeGreaterThan(200);
+  expect(promptTop).toBeGreaterThan(600);
   await expect(sticky).toBeVisible();
   await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
 });
 
-test('virtualized long sticky preview never overlaps the next prompt', async ({ page }) => {
-  await page.setViewportSize({ width: 900, height: 800 });
+test('virtualized long sticky preview yields while scrolling at narrow width', async ({ page }) => {
+  await page.setViewportSize({ width: 460, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview-large-transcript');
 
   const list = page.locator('.interactive-list');
-  const track = page.locator('.interactive-list-track');
-  const sticky = page.locator('.latest-user-message-sticky');
-  const nextPrompt = page.locator('[data-msg-id="message-sticky-large-user-2"] .user-message-card');
-  await expect(track).toHaveClass(/virtualized/);
+  const nextPromptSelector = '[data-msg-id="message-sticky-large-user-2"] .user-message-card';
+  const nextPrompt = page.locator(nextPromptSelector);
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
   await expect(nextPrompt).toBeAttached();
 
-  await list.evaluate((element) => {
-    const prompt = element.querySelector(
-      '[data-msg-id="message-sticky-large-user-2"] .user-message-card'
-    );
+  await list.evaluate((element, selector) => {
+    const prompt = element.querySelector(selector);
     if (!prompt) throw new Error('Next prompt is not mounted');
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
     element.scrollTop +=
-      prompt.getBoundingClientRect().top - element.getBoundingClientRect().top - 180;
+      prompt.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight -
+      100;
     element.dispatchEvent(new Event('scroll'));
-  });
-  await expect(sticky).toBeVisible();
-  await expect(sticky).toContainText('Do not animate text in agent calls');
+  }, nextPromptSelector);
 
-  await list.evaluate((element) => {
-    const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
-    const prompt = document.querySelector<HTMLElement>(
-      '[data-msg-id="message-sticky-large-user-2"] .user-message-card'
-    );
-    if (!overlay || !prompt) throw new Error('Sticky collision targets are not mounted');
-    element.scrollTop +=
-      prompt.getBoundingClientRect().top - overlay.getBoundingClientRect().bottom - 12;
-    element.dispatchEvent(new Event('scroll'));
-  });
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  await expect(sticky).toBeVisible();
-  const initialGap = await page.evaluate(() => {
-    const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay')!;
-    const prompt = document.querySelector<HTMLElement>(
-      '[data-msg-id="message-sticky-large-user-2"] .user-message-card'
-    )!;
-    return prompt.getBoundingClientRect().top - overlay.getBoundingClientRect().bottom;
-  });
-  expect(initialGap).toBeGreaterThanOrEqual(0);
-  expect(initialGap).toBeLessThan(24);
+  const result = await list.evaluate(async (element, selector) => {
+    let sawSticky = false;
+    let lastSafeGap: number | null = null;
+    for (let frame = 0; frame < 500; frame += 1) {
+      element.scrollTop += 2;
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-  await page.setViewportSize({ width: 460, height: 800 });
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      )
-  );
-  await expect(nextPrompt).toBeAttached();
-  const result = await page.evaluate(() => {
-    const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
-    const prompt = document.querySelector<HTMLElement>(
-      '[data-msg-id="message-sticky-large-user-2"] .user-message-card'
-    );
-    if (!overlay) return { overlap: false, stickyHidden: true };
-    if (!prompt) return { overlap: true, stickyHidden: false, reason: 'next prompt unmounted' };
-    const overlayBottom = overlay.getBoundingClientRect().bottom;
-    const promptTop = prompt.getBoundingClientRect().top;
+      const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+      const prompt = document.querySelector<HTMLElement>(selector);
+      if (!prompt)
+        return {
+          overlap: true,
+          stickyHidden: false,
+          sawSticky,
+          hideGapFromOverlay: null,
+          reason: 'next prompt unmounted',
+        };
+      if (!overlay) {
+        if (sawSticky) {
+          return {
+            overlap: false,
+            stickyHidden: true,
+            sawSticky,
+            hideGapFromOverlay: lastSafeGap,
+          };
+        }
+        continue;
+      }
+      sawSticky = true;
+
+      const overlayBottom = overlay.getBoundingClientRect().bottom;
+      const promptTop = prompt.getBoundingClientRect().top;
+      const gap = promptTop - overlayBottom;
+      if (promptTop < overlayBottom) {
+        return {
+          overlap: true,
+          stickyHidden: false,
+          sawSticky,
+          hideGapFromOverlay: gap,
+          overlayBottom,
+          promptTop,
+        };
+      }
+      lastSafeGap = gap;
+    }
     return {
-      overlap: promptTop < overlayBottom,
+      overlap: false,
       stickyHidden: false,
-      overlayBottom,
-      promptTop,
+      sawSticky,
+      hideGapFromOverlay: null,
     };
-  });
+  }, nextPromptSelector);
 
   expect(result.overlap, JSON.stringify(result)).toBe(false);
+  expect(result.sawSticky, JSON.stringify(result)).toBe(true);
   expect(result.stickyHidden, JSON.stringify(result)).toBe(true);
+  expect(result.hideGapFromOverlay, JSON.stringify(result)).not.toBeNull();
+  expect(Math.abs(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
+  await expect(nextPrompt).toContainText('Continue if you have next steps');
 });

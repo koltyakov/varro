@@ -248,6 +248,29 @@ describe('MessagePart', () => {
     expect(notice?.textContent).toContain('usage limit reached');
   });
 
+  it('hides service-unavailable notices until the fourth retry', () => {
+    const part = {
+      id: 'retry-service',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'retry' as const,
+      attempt: 3,
+      error: { name: 'ServiceUnavailable', data: { message: 'Server is overloaded' } },
+      time: { created: 0 },
+    };
+
+    renderPart(part);
+    expect(container?.querySelector('.chat-retry-notice')).toBeNull();
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.textContent = '';
+    renderPart({ ...part, attempt: 4 });
+    expect(container?.querySelector('.chat-retry-notice')?.textContent).toContain(
+      'Retry attempt 4'
+    );
+  });
+
   it('renders non-limit retry messages verbatim', () => {
     renderPart({
       id: 'retry-2',

@@ -12,7 +12,7 @@ import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metr
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
 import { openProviderSetup } from '../lib/provider-setup';
 import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
-import { parseUsageLimitNotice } from '../lib/usage-limit';
+import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import type {
   AssistantMessage,
@@ -110,7 +110,8 @@ export function Message(props: {
     const error = assistant()?.error;
     if (!error || isAbortedAssistantError(error)) return false;
     if (!parseUsageLimitNotice(error.data?.message || error.name)) return false;
-    return !!getActiveUsageLimitNotice(props.info.sessionID);
+    const activeNotice = getActiveUsageLimitNotice(props.info.sessionID);
+    return !!activeNotice && shouldDisplayUsageLimitNotice(activeNotice);
   });
   const providerAuthRequired = createMemo(() => {
     const error = assistant()?.error;

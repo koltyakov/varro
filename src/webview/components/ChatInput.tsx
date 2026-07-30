@@ -151,7 +151,11 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
-import { getUsageLimitPresentation, isUsageLimitNoticeVisibleForModel } from '../lib/usage-limit';
+import {
+  getUsageLimitPresentation,
+  isUsageLimitNoticeVisibleForModel,
+  shouldDisplayUsageLimitNotice,
+} from '../lib/usage-limit';
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
@@ -2189,7 +2193,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const visibleUsageLimit = createMemo(() => {
     const notice = activeUsageLimit();
     const hasActiveAssistantContext = getLatestAssistantMessageInfo(state.messages) !== null;
-    return isUsageLimitNoticeVisibleForModel(notice, currentModel(), hasActiveAssistantContext)
+    return notice &&
+      shouldDisplayUsageLimitNotice(notice) &&
+      isUsageLimitNoticeVisibleForModel(notice, currentModel(), hasActiveAssistantContext)
       ? notice
       : null;
   });

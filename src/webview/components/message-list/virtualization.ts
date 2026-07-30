@@ -1,5 +1,6 @@
 const DEFAULT_ITEM_HEIGHT = 160;
 const OVERSCAN = 9;
+const PIXEL_ALIGNMENT_EPSILON = 0.001;
 
 export type VirtualMetrics = {
   prefix: number[];
@@ -15,6 +16,15 @@ export type VisibleRange = {
   coreStart: number;
   coreEnd: number;
 };
+
+export function alignBlockSizeToPixel(blockSize: number) {
+  if (!Number.isFinite(blockSize) || blockSize <= 0) return 0;
+  const nearestInteger = Math.round(blockSize);
+  if (Math.abs(blockSize - nearestInteger) < PIXEL_ALIGNMENT_EPSILON) {
+    return nearestInteger;
+  }
+  return Math.ceil(blockSize);
+}
 
 export function buildVirtualMetrics(args: {
   itemIds: string[];
@@ -36,7 +46,9 @@ export function buildVirtualMetrics(args: {
   dirtyFromIndex?: number;
 }): VirtualMetrics {
   const itemCount = args.itemIds.length;
-  const defaultItemHeight = args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT;
+  const defaultItemHeight = alignBlockSizeToPixel(
+    args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT
+  );
 
   let rebuildFrom = 0;
   let prefix: number[];
@@ -67,7 +79,10 @@ export function buildVirtualMetrics(args: {
 
   for (let index = rebuildFrom; index < itemCount; index += 1) {
     const id = args.itemIds[index]!;
-    prefix[index + 1] = prefix[index]! + (args.measuredHeights.get(id) ?? defaultItemHeight);
+    const measuredHeight = args.measuredHeights.get(id);
+    const itemHeight =
+      measuredHeight === undefined ? defaultItemHeight : alignBlockSizeToPixel(measuredHeight);
+    prefix[index + 1] = prefix[index]! + itemHeight;
   }
 
   return {

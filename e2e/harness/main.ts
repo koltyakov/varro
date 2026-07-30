@@ -1147,19 +1147,47 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 20_000
     );
     messages.push(stickyUser);
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       messages.push(
         makeAssistantMessage(
           session.id,
           `message-sticky-large-assistant-${index}`,
           stickyUser.info.id,
-          index === 7
+          index === 1
             ? 'The implementation is in place. Verifying targeted behavior and validation now.'
             : `Implementation detail ${index + 1}: checking the agent-call icon and status behavior.`,
           BASE_TIME - 19_000 + index
         )
       );
     }
+    const compactionUser = makeUserMessage(
+      session.id,
+      'message-sticky-large-compaction-user',
+      [],
+      BASE_TIME - 10_000
+    );
+    compactionUser.parts = [
+      {
+        id: 'message-sticky-large-compaction-part',
+        sessionID: session.id,
+        messageID: compactionUser.info.id,
+        type: 'compaction',
+        auto: true,
+        overflow: false,
+      },
+    ];
+    const compactionAssistant = makeAssistantMessage(
+      session.id,
+      'message-sticky-large-compaction-assistant',
+      compactionUser.info.id,
+      Array.from(
+        { length: 18 },
+        (_, index) =>
+          `Compacted implementation detail ${index + 1}: preserve the requested tool visuals and verification context.`
+      ).join('\n\n'),
+      BASE_TIME - 9_000
+    );
+    messages.push(compactionUser, compactionAssistant);
     const nextUser = makeUserMessage(
       session.id,
       'message-sticky-large-user-2',

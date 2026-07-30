@@ -30,6 +30,7 @@ import {
   showInlineFileChanges,
 } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
+import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
@@ -59,6 +60,7 @@ import {
 } from './message-list/MessageListChrome';
 import {
   getStickyUserMessagePreview,
+  hasStickyUserMessageContent,
   isMessageHiddenBehindStickyPreview,
   shouldShowStickyUserMessagePreview,
   type StickyUserMessagePreview,
@@ -69,6 +71,7 @@ import {
   hasVisibleBlockingStreamingPart,
 } from './message-list/streaming';
 import {
+  alignBlockSizeToPixel,
   buildVirtualMetrics,
   calculateVirtualRangeFromMetrics,
   getFirstVisibleMessageIndexFromVirtualMetrics,
@@ -243,7 +246,10 @@ export function MessageList() {
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
   const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
-  const activeUsageLimit = createMemo(() => getActiveUsageLimitNotice(state.activeSessionId));
+  const activeUsageLimit = createMemo(() => {
+    const notice = getActiveUsageLimitNotice(state.activeSessionId);
+    return notice && shouldDisplayUsageLimitNotice(notice) ? notice : null;
+  });
   const activeSessionWorking = createMemo(() => isActiveSessionWorking());
   const shouldShowStarterLogo = createMemo(() => {
     if (state.messages.length > 0) return false;
@@ -343,6 +349,9 @@ export function MessageList() {
   }
 
   const measuredHeights = new Map<string, number>();
+  const appliedRowHeightCorrections = new WeakMap<HTMLElement, number>();
+  const pendingRowHeightCorrections = new Map<HTMLElement, number>();
+  let rowHeightCorrectionScheduled = false;
   let lastTrackHeight = 0;
   let cachedVirtualMetrics: VirtualMetrics | null = null;
   let cachedVirtualMetricsItemIds: string[] | null = null;
@@ -351,6 +360,33 @@ export function MessageList() {
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let trailingSummarySettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowHiddenByVisibleStream = false;
+
+  function flushRowHeightCorrections() {
+    rowHeightCorrectionScheduled = false;
+    for (const [element, correction] of pendingRowHeightCorrections) {
+      if (!element.isConnected) continue;
+      if (correction > 0) {
+        element.style.setProperty('--interactive-item-block-correction', `${correction}px`);
+      } else {
+        element.style.removeProperty('--interactive-item-block-correction');
+      }
+      appliedRowHeightCorrections.set(element, correction);
+    }
+    pendingRowHeightCorrections.clear();
+  }
+
+  function alignMeasuredRowBlockSize(element: HTMLElement, measuredBlockSize: number) {
+    const appliedCorrection = appliedRowHeightCorrections.get(element) ?? 0;
+    const naturalBlockSize = Math.max(0, measuredBlockSize - appliedCorrection);
+    const alignedBlockSize = alignBlockSizeToPixel(naturalBlockSize);
+    const correction = Math.max(0, alignedBlockSize - naturalBlockSize);
+    pendingRowHeightCorrections.set(element, correction);
+    if (!rowHeightCorrectionScheduled) {
+      rowHeightCorrectionScheduled = true;
+      queueMicrotask(flushRowHeightCorrections);
+    }
+    return alignedBlockSize;
+  }
 
   function clearLoadingRowReappearTimer() {
     if (!loadingRowReappearTimer) return;
@@ -831,7 +867,10 @@ export function MessageList() {
     items.forEach((el, index) => {
       const id = el.dataset.msgId;
       if (!id) return;
-      const h = hasLayoutMeasurements ? measuredHeightsFromLayout[index]! : noLayoutFallbackHeight;
+      const measuredHeight = hasLayoutMeasurements
+        ? measuredHeightsFromLayout[index]!
+        : noLayoutFallbackHeight;
+      const h = alignMeasuredRowBlockSize(el, measuredHeight);
       if ((measuredHeights.get(id) ?? -1) !== h) {
         measuredHeights.set(id, h);
         markVirtualMetricsDirty(id);
@@ -846,7 +885,10 @@ export function MessageList() {
     // Principle: mount-time measurement is part of the exact-height bootstrap. Tests and no-layout
     // environments may never deliver ResizeObserver entries, so virtualization must not depend on
     // observer callbacks alone.
-    const height = element.getBoundingClientRect().height || 160;
+    const height = alignMeasuredRowBlockSize(
+      element,
+      element.getBoundingClientRect().height || 160
+    );
     if (!applyRowHeightMeasurements([{ messageId, height }])) return;
     if (hasMeasuredEveryMessage()) scheduleMeasurementDebounce();
   }
@@ -892,10 +934,14 @@ export function MessageList() {
     for (const entry of entries) {
       const element = entry.target as HTMLDivElement;
       const messageId = element.dataset.msgId;
-      const height = entry.borderBoxSize?.[0]?.blockSize ?? element.getBoundingClientRect().height;
-      if (!messageId || !element.isConnected || height <= 0) continue;
+      const measuredHeight =
+        entry.borderBoxSize?.[0]?.blockSize ?? element.getBoundingClientRect().height;
+      if (!messageId || !element.isConnected || measuredHeight <= 0) continue;
 
-      measurements.push({ messageId, height });
+      measurements.push({
+        messageId,
+        height: alignMeasuredRowBlockSize(element, measuredHeight),
+      });
     }
 
     if (!applyRowHeightMeasurements(measurements)) return;
@@ -1099,6 +1145,7 @@ export function MessageList() {
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
       if (nextMessage?.info.role !== 'user') continue;
+      if (!hasStickyUserMessageContent(nextMessage.parts)) continue;
 
       const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
       const nextRect = nextElement?.getBoundingClientRect();
@@ -1155,6 +1202,7 @@ export function MessageList() {
     for (let index = messageIndex + 1; index < messages().length; index += 1) {
       const nextMessage = messages()[index];
       if (nextMessage?.info.role !== 'user') continue;
+      if (!hasStickyUserMessageContent(nextMessage.parts)) continue;
 
       const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
       const nextRect = nextElement?.getBoundingClientRect();
@@ -1665,7 +1713,8 @@ export function MessageList() {
       if (!containerRef) return;
       const containerChanged =
         entries.length === 0 || entries.some((entry) => entry.target === containerRef);
-      const trackChanged = entries.length === 0 || entries.some((entry) => entry.target === trackRef);
+      const trackChanged =
+        entries.length === 0 || entries.some((entry) => entry.target === trackRef);
       // Below the virtualization threshold rows have no individual ResizeObserver. Invalidate the
       // sticky DOM pass when the track changes so streamed assistant growth can reveal it again.
       if (trackChanged && !shouldMeasureRows() && !autoScroll()) {

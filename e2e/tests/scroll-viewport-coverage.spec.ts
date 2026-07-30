@@ -123,6 +123,39 @@ test.describe('viewport content coverage', () => {
     }
   });
 
+  test('virtualized message blocks stay aligned to whole CSS pixels', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
+    const track = page.locator('.interactive-list-track');
+    await expect(track).toHaveClass(/virtualized/);
+
+    const geometry = await track.evaluate((element) => {
+      const blocks = [...element.children].filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement &&
+          (child.matches('[data-msg-id]') || child.matches('.virtual-spacer'))
+      );
+      const rects = blocks.map((block) => block.getBoundingClientRect());
+      return {
+        heights: rects.map((rect) => rect.height),
+        boundaryGaps: rects.slice(1).map((rect, index) => rect.top - rects[index]!.bottom),
+        spacerStyleHeights: blocks
+          .filter((block) => block.matches('.virtual-spacer'))
+          .map((block) => Number.parseFloat(block.style.height)),
+      };
+    });
+
+    expect(geometry.heights.length).toBeGreaterThan(1);
+    for (const height of geometry.heights) {
+      expect(Math.abs(height - Math.round(height))).toBeLessThan(0.001);
+    }
+    for (const gap of geometry.boundaryGaps) {
+      expect(Math.abs(gap)).toBeLessThan(0.001);
+    }
+    for (const height of geometry.spacerStyleHeights) {
+      expect(Number.isInteger(height)).toBe(true);
+    }
+  });
+
   test('huge transcript has a measured scrollbar range', async ({ page }) => {
     // Principle: dragging the native scrollbar in a huge chat must map to real message position.
     // The range must be established from measured layout before virtualization owns the scrollbar.

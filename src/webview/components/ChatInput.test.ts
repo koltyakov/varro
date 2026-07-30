@@ -3253,6 +3253,28 @@ describe('ChatInput', () => {
     expect(container?.textContent).toContain('Stop retrying');
     expect(container?.textContent).toContain('Switch provider');
   });
+
+  it('shows a temporary service failure only from the fourth retry', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: 'Our servers are currently overloaded. Please try again later.',
+        unit: 'unknown',
+        retryAt: null,
+        attempt: 3,
+        sessionID: 'session-1',
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.textContent).not.toContain('Service temporarily unavailable');
+
+    setState('sessionUsageLimits', 'session-1', 'attempt', 4);
+    expect(container?.textContent).toContain('Service temporarily unavailable');
+  });
 });
 
 function pressKey(editor: HTMLDivElement | null | undefined, init: KeyboardEventInit) {

@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignBlockSizeToPixel,
   buildVirtualMetrics,
   calculateVirtualRange,
   getFirstVisibleMessageIndexFromVirtualMetrics,
   pruneMeasuredHeights,
 } from './virtualization';
+
+describe('alignBlockSizeToPixel', () => {
+  it('rounds positive block sizes up to whole CSS pixels', () => {
+    expect(alignBlockSizeToPixel(59.59375)).toBe(60);
+    expect(alignBlockSizeToPixel(60)).toBe(60);
+    expect(alignBlockSizeToPixel(0)).toBe(0);
+  });
+});
 
 describe('buildVirtualMetrics', () => {
   it('builds prefix offsets from measured and default heights', () => {
@@ -45,6 +54,23 @@ describe('buildVirtualMetrics', () => {
     ).toEqual({
       prefix: [0, 40, 120, 180],
       totalHeight: 180,
+      itemCount: 3,
+    });
+  });
+
+  it('keeps prefix offsets and spacers on whole CSS pixels', () => {
+    expect(
+      buildVirtualMetrics({
+        itemIds: ['a', 'b', 'c'],
+        measuredHeights: new Map([
+          ['a', 40.25],
+          ['b', 59.5],
+        ]),
+        defaultItemHeight: 50.25,
+      })
+    ).toEqual({
+      prefix: [0, 41, 101, 152],
+      totalHeight: 152,
       itemCount: 3,
     });
   });

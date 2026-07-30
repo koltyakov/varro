@@ -18,20 +18,13 @@ export type UsageLimitPresentation = {
   summary: string;
 };
 
+const SILENT_SERVICE_RETRY_ATTEMPTS = 3;
+
 export function getUsageLimitPresentation(
   notice: Pick<UsageLimitNotice, 'message' | 'unit'>
 ): UsageLimitPresentation {
   const normalized = notice.message.toLowerCase();
-  const isServiceIssue =
-    normalized.includes('overloaded') ||
-    normalized.includes('service unavailable') ||
-    normalized.includes('server unavailable') ||
-    normalized.includes('temporarily unavailable') ||
-    normalized.includes('server is busy') ||
-    normalized.includes('servers are busy') ||
-    normalized.includes('at capacity');
-
-  if (isServiceIssue) {
+  if (isServiceUnavailableMessage(notice.message)) {
     return {
       title: 'Service temporarily unavailable',
       summary: 'service disruption',
@@ -56,6 +49,16 @@ export function getUsageLimitPresentation(
   };
 }
 
+export function shouldDisplayUsageLimitNotice(
+  notice: Pick<UsageLimitNotice, 'message' | 'attempt'>
+): boolean {
+  return (
+    !isServiceUnavailableMessage(notice.message) ||
+    notice.attempt === null ||
+    notice.attempt > SILENT_SERVICE_RETRY_ATTEMPTS
+  );
+}
+
 export function parseUsageLimitNotice(
   message: string | null | undefined,
   options?: { retryAt?: number | null; attempt?: number | null }
@@ -76,7 +79,7 @@ export function parseUsageLimitNotice(
     normalized.includes('rate limit') ||
     normalized.includes('too many requests') ||
     normalized.includes('rate increased too quickly') ||
-    normalized.includes('overloaded') ||
+    isServiceUnavailableMessage(normalizedMessage) ||
     /\bexhausted\b/.test(normalized);
 
   if (!isTextLimitError) return null;
@@ -186,6 +189,19 @@ function inferUsageLimitUnit(message: string): ProviderLimitUnit {
   if (normalized.includes('usage limit') || normalized.includes('usage exceeded'))
     return 'messages';
   return 'unknown';
+}
+
+function isServiceUnavailableMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('overloaded') ||
+    normalized.includes('service unavailable') ||
+    normalized.includes('server unavailable') ||
+    normalized.includes('temporarily unavailable') ||
+    normalized.includes('server is busy') ||
+    normalized.includes('servers are busy') ||
+    normalized.includes('at capacity')
+  );
 }
 
 function extractRetryAttempt(message: string) {
