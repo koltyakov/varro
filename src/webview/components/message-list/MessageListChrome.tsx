@@ -1,4 +1,5 @@
 import { For, Show, createEffect, onCleanup } from 'solid-js';
+import { observeSettledResize } from '../../lib/settled-resize-observer';
 import type { Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
@@ -18,16 +19,14 @@ function bindStickyTextOverflowFade(
   };
 
   text.addEventListener('scroll', update, { passive: true });
-  const resizeObserver =
-    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateAfterResize);
-  resizeObserver?.observe(text);
+  const stopObservingResize = observeSettledResize(text, updateAfterResize);
   createEffect(() => {
     trackText();
     queueMicrotask(update);
   });
   onCleanup(() => {
     text.removeEventListener('scroll', update);
-    resizeObserver?.disconnect();
+    stopObservingResize();
   });
 }
 

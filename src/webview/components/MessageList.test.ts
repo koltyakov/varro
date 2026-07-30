@@ -4153,6 +4153,79 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('cancels pending width work when async initial messages arrive or the list unmounts', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    let listWidth = 500;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, listWidth, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, listWidth, 6000);
+      }
+      return new DOMRect(0, 0, listWidth, 500);
+    });
+
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => MessageList(), container!);
+    const list = container!.querySelector('.interactive-list')!;
+    const track = container!.querySelector('.interactive-list-track')!;
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(list) && observer.targets.has(track)
+    );
+    expect(layoutObserver).toBeDefined();
+
+    listWidth = 420;
+    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.interactive-list-track.virtualized')).toBeTruthy();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(container?.querySelector('.interactive-list-track.virtualized')).toBeTruthy();
+
+    listWidth = 400;
+    const timersBeforeResize = vi.getTimerCount();
+    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    expect(vi.getTimerCount()).toBeGreaterThan(timersBeforeResize);
+    cleanup();
+    cleanup = undefined;
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(timersBeforeResize);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(timersBeforeResize);
+  });
+
   it('stays pinned to the real bottom when virtualized messages update in place', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
 
@@ -4324,6 +4397,56 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
 
     expect(scrollTopValue).toBe(1200);
+    animationFrames.restore();
+  });
+
+  it('restarts bottom follow after a downward wheel cancels its pending frame', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(800);
+
+    trackHeight = 1600;
+    scrollHeightValue = 1600;
+    list?.dispatchEvent(new WheelEvent('wheel', { deltaY: 80, bubbles: true }));
+    setState('streamingPartId', 'text-2');
+    setState('streamingText', 'Streaming growth');
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(1200);
+    animationFrames.flush();
     animationFrames.restore();
   });
 

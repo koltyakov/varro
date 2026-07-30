@@ -46,9 +46,7 @@ export function buildVirtualMetrics(args: {
   dirtyFromIndex?: number;
 }): VirtualMetrics {
   const itemCount = args.itemIds.length;
-  const defaultItemHeight = alignBlockSizeToPixel(
-    args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT
-  );
+  const defaultItemHeight = alignBlockSizeToPixel(args.defaultItemHeight ?? DEFAULT_ITEM_HEIGHT);
 
   let rebuildFrom = 0;
   let prefix: number[];

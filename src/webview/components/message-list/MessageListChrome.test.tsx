@@ -34,6 +34,7 @@ describe('MessageListChrome', () => {
     cleanup = undefined;
     container?.remove();
     container = null;
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -96,7 +97,8 @@ describe('MessageListChrome', () => {
     expect(clip?.classList.contains('has-more-below')).toBe(false);
   });
 
-  it('reports sticky text geometry changes from its resize observer', () => {
+  it('coalesces sticky text geometry changes until resizing settles', async () => {
+    vi.useFakeTimers();
     let resizeCallback: ResizeObserverCallback | undefined;
     vi.stubGlobal(
       'ResizeObserver',
@@ -125,8 +127,17 @@ describe('MessageListChrome', () => {
       container!
     );
 
-    resizeCallback?.([], {} as ResizeObserver);
+    for (let index = 0; index < 20; index += 1) {
+      resizeCallback?.(
+        [
+          { target: container!.querySelector('.latest-user-message-sticky-text')! },
+        ] as ResizeObserverEntry[],
+        {} as ResizeObserver
+      );
+    }
 
+    expect(onGeometryChange).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
     expect(onGeometryChange).toHaveBeenCalledOnce();
   });
 

@@ -155,6 +155,7 @@ describe('MessageList virtualization perf guards', () => {
     });
 
     resetDefaultAppState();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -189,6 +190,7 @@ describe('MessageList virtualization perf guards', () => {
   });
 
   it('keeps the rendered row window bounded across width changes', async () => {
+    vi.useFakeTimers();
     const observers: Array<{
       callback: ResizeObserverCallback;
       targets: Set<Element>;
@@ -224,15 +226,19 @@ describe('MessageList virtualization perf guards', () => {
     });
 
     let listWidth = 500;
+    let fontHeightAdjustment = 0;
+    const getRowHeight = () => 120 + Math.round((500 - listWidth) * 0.5) + fontHeightAdjustment;
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
       return this.classList.contains('interactive-list') ? listWidth : 500;
     });
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
       if (this.classList.contains('interactive-item-container')) {
-        return new DOMRect(0, 0, listWidth, 120);
+        const index = Number(this.getAttribute('data-msg-id')?.replace('message-', '') ?? 0);
+        const rowHeight = getRowHeight();
+        return new DOMRect(0, index * rowHeight, listWidth, rowHeight);
       }
       if (this.classList.contains('interactive-list-track')) {
-        return new DOMRect(0, 0, listWidth, 24_000);
+        return new DOMRect(0, 0, listWidth, getRowHeight() * 200);
       }
       return new DOMRect(0, 0, listWidth, 500);
     });
@@ -253,19 +259,27 @@ describe('MessageList virtualization perf guards', () => {
     const track = container!.querySelector<HTMLElement>('.interactive-list-track')!;
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
 
-    let maxAddedRows = 0;
+    const initialBottomSpacerHeight = container
+      ?.querySelector<HTMLElement>('.virtual-spacer-bottom')
+      ?.style.getPropertyValue('height');
+    let maxRenderedRows = container?.querySelectorAll('[data-msg-id]').length ?? 0;
+    let totalAddedRows = 0;
+    let totalRemovedRows = 0;
     const mutationObserver = new MutationObserver((records) => {
-      let addedRows = 0;
       for (const record of records) {
         for (const node of record.addedNodes) {
           if (!(node instanceof Element)) continue;
-          addedRows += node.matches('[data-msg-id]') ? 1 : 0;
-          addedRows += node.querySelectorAll('[data-msg-id]').length;
+          totalAddedRows += node.matches('[data-msg-id]') ? 1 : 0;
+          totalAddedRows += node.querySelectorAll('[data-msg-id]').length;
+        }
+        for (const node of record.removedNodes) {
+          if (!(node instanceof Element)) continue;
+          totalRemovedRows += node.matches('[data-msg-id]') ? 1 : 0;
+          totalRemovedRows += node.querySelectorAll('[data-msg-id]').length;
         }
       }
-      maxAddedRows = Math.max(
-        maxAddedRows,
-        addedRows,
+      maxRenderedRows = Math.max(
+        maxRenderedRows,
         container?.querySelectorAll('[data-msg-id]').length ?? 0
       );
     });
@@ -275,13 +289,95 @@ describe('MessageList virtualization perf guards', () => {
       (observer) => observer.targets.has(list) && observer.targets.has(track)
     );
     expect(layoutObserver).toBeDefined();
-    listWidth = 420;
-    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    const rowObserver = observers.find((observer) =>
+      [...observer.targets].some((target) => target.hasAttribute('data-msg-id'))
+    );
+    expect(rowObserver).toBeDefined();
+
+    for (let step = 1; step <= 20; step += 1) {
+      listWidth = 500 - step * 4;
+      layoutObserver!.callback(
+        [
+          {
+            target: list,
+            borderBoxSize: [{ inlineSize: listWidth, blockSize: 500 }],
+          },
+          {
+            target: track,
+            borderBoxSize: [{ inlineSize: listWidth, blockSize: getRowHeight() * 200 }],
+          },
+        ] as ResizeObserverEntry[],
+        layoutObserver as unknown as ResizeObserver
+      );
+      rowObserver!.callback(
+        [...rowObserver!.targets]
+          .filter((target) => target.isConnected)
+          .map((target) => ({
+            target,
+            borderBoxSize: [{ inlineSize: listWidth, blockSize: getRowHeight() }],
+          })) as ResizeObserverEntry[],
+        rowObserver as unknown as ResizeObserver
+      );
+      await vi.advanceTimersByTimeAsync(16);
+    }
+
+    await Promise.resolve();
+    expect(container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height).toBe(
+      initialBottomSpacerHeight
+    );
+    expect(totalAddedRows).toBe(0);
+    expect(totalRemovedRows).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(83);
+    expect(container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height).toBe(
+      initialBottomSpacerHeight
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    await settlePerfEffects();
+    await Promise.resolve();
+
+    const widthSettledBottomSpacerHeight =
+      container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height;
+    expect(widthSettledBottomSpacerHeight).not.toBe(initialBottomSpacerHeight);
+
+    // Row observers are created before the layout observer, so a font-only reflow can arrive first.
+    // It must still enter the settled width path rather than publishing once per row delivery.
+    fontHeightAdjustment = 20;
+    list.style.fontSize = '18px';
+    rowObserver!.callback(
+      [...rowObserver!.targets]
+        .filter((target) => target.isConnected)
+        .map((target) => ({
+          target,
+          borderBoxSize: [{ inlineSize: listWidth, blockSize: getRowHeight() }],
+        })) as ResizeObserverEntry[],
+      rowObserver as unknown as ResizeObserver
+    );
+    layoutObserver!.callback(
+      [
+        {
+          target: track,
+          borderBoxSize: [{ inlineSize: listWidth, blockSize: getRowHeight() * 200 }],
+        },
+      ] as ResizeObserverEntry[],
+      layoutObserver as unknown as ResizeObserver
+    );
+    await vi.advanceTimersByTimeAsync(99);
+    expect(container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height).toBe(
+      widthSettledBottomSpacerHeight
+    );
+    await vi.advanceTimersByTimeAsync(1);
     await settlePerfEffects();
     await Promise.resolve();
     mutationObserver.disconnect();
 
-    expect(maxAddedRows).toBeLessThan(80);
+    expect(container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height).not.toBe(
+      widthSettledBottomSpacerHeight
+    );
+    expect(maxRenderedRows).toBeLessThan(80);
+    expect(totalAddedRows).toBeLessThan(80);
+    expect(totalRemovedRows).toBeLessThan(80);
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+    expect(container?.querySelector('.interactive-list-track.virtualized')).toBeTruthy();
   });
 });

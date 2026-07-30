@@ -36,6 +36,17 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   expect(overflowFade.maskImage).not.toBe('none');
   expect(overflowFade.overlayContent).toBe('none');
 
+  await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
+    shell.style.maxWidth = 'none';
+    for (let frame = 0; frame <= 20; frame += 1) {
+      shell.style.width = `${760 - frame * 7}px`;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
+  await page.waitForTimeout(120);
+  await expect(sticky).toBeVisible();
+  await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
+
   const gaps = await getE2EState(page, () => {
     const header = document.querySelector(
       '.interactive-session > .chat-header'

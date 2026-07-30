@@ -604,6 +604,13 @@ test.describe('diff preview anchoring', () => {
     }
     await waitForAnimationFrames(page, 4);
 
+    await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
+      shell.style.maxWidth = 'none';
+      for (let frame = 0; frame <= 8; frame += 1) {
+        shell.style.width = `${760 - frame * 30}px`;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -1000, bubbles: true }));
       element.scrollTop = 0;
@@ -655,7 +662,13 @@ test.describe('diff preview anchoring', () => {
     });
 
     await expect(sticky).toContainText('Review asynchronous report change 35.');
-    await page.setViewportSize({ width: 520, height: 800 });
+    await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
+      shell.style.maxWidth = 'none';
+      for (let frame = 0; frame <= 12; frame += 1) {
+        shell.style.width = `${760 - frame * 20}px`;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
     const sawLoading = await sticky.evaluate((card) => {
       (card as HTMLElement).click();
       const loading = card.querySelector<HTMLElement>('.latest-user-message-sticky-loading');

@@ -19,8 +19,18 @@ export function getStickyUserMessageCounts(parts: Part[]): {
   return { attachmentCount, imageCount };
 }
 
-const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
+export const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
+
+function getSubagentSessionIds(messages: Array<{ info: Message }>) {
+  const result = new Set<string>();
+  for (const entry of messages) {
+    if (entry.info.role === 'assistant' && 'mode' in entry.info && entry.info.mode === 'subagent') {
+      result.add(entry.info.sessionID);
+    }
+  }
+  return result;
+}
 
 export function hasStickyUserMessageContent(parts: Part[]) {
   return getUserMessagePreviewText(parts) !== EMPTY_USER_MESSAGE_PREVIEW;
@@ -34,22 +44,15 @@ export function getStickyUserMessagePreview(
   const firstVisibleEntry = messages[firstVisibleMessageIndex];
   if (!firstVisibleEntry) return null;
   if (firstVisibleEntry.info.role === 'user') return null;
+  const subagentSessionIds = getSubagentSessionIds(messages);
 
   for (let i = firstVisibleMessageIndex; i >= 0; i--) {
     const entry = messages[i];
     if (!entry) continue;
     if (entry.info.role !== 'user') continue;
-    const session = entry.info.sessionID;
-    const isChildSessionPrompt = messages.some(
-      (candidate) =>
-        candidate.info.sessionID === session &&
-        candidate.info.role === 'assistant' &&
-        'mode' in candidate.info &&
-        candidate.info.mode === 'subagent'
-    );
-    if (isChildSessionPrompt) continue;
+    if (subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);
-    if (!hasStickyUserMessageContent(entry.parts)) continue;
+    if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
     return {
       id: entry.info.id,
       index: i,
@@ -66,6 +69,7 @@ export function getNextVisibleUserMessageTopMap(
   observedVisibleMessageBounds: ReadonlyMap<string, { top: number; bottom: number }>
 ) {
   const result = new Map<string, number | null>();
+  const subagentSessionIds = getSubagentSessionIds(messages);
   let nextVisibleUserMessageTop: number | null = null;
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -73,15 +77,7 @@ export function getNextVisibleUserMessageTopMap(
     result.set(entry.info.id, nextVisibleUserMessageTop);
     if (entry.info.role !== 'user') continue;
 
-    const session = entry.info.sessionID;
-    const isChildSessionPrompt = messages.some(
-      (candidate) =>
-        candidate.info.sessionID === session &&
-        candidate.info.role === 'assistant' &&
-        'mode' in candidate.info &&
-        candidate.info.mode === 'subagent'
-    );
-    if (isChildSessionPrompt) continue;
+    if (subagentSessionIds.has(entry.info.sessionID)) continue;
 
     const bounds = observedVisibleMessageBounds.get(entry.info.id);
     if (bounds && bounds.bottom > 0) {
