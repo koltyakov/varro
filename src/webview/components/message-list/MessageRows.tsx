@@ -36,7 +36,6 @@ export type MessageRowSharedProps = {
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
-  highlightedAssistantMessageIds?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   claimMessageEntrance?: (messageId: string) => boolean;
@@ -105,10 +104,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
       return false;
     }
 
-    return (
-      props.highlightedAssistantMessageIds?.has(info.id) ??
-      props.assistantDialogSummaryMap.has(info.id)
-    );
+    return props.assistantDialogSummaryMap.has(info.id);
   };
   const streamingPartId = createMemo(() => {
     const partId = state.streamingPartId;

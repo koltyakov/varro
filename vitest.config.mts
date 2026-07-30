@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [solid({ hot: false })],
   resolve: {
     alias: {
-      vscode: resolve(__dirname, 'src/test/vscode.ts'),
+      vscode: resolve(import.meta.dirname, 'src/test/vscode.ts'),
     },
   },
   test: {

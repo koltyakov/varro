@@ -175,10 +175,15 @@ export function upsertPart(part: Part) {
         }
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
-          msgs[idx]!.parts[location.partIdx] = mergePartUpdate(
-            msgs[idx]!.parts[location.partIdx],
-            nextPart
-          );
+          const currentPart = msgs[idx]!.parts[location.partIdx];
+          const mergedPart = mergePartUpdate(currentPart, nextPart);
+          msgs[idx]!.parts[location.partIdx] = mergedPart;
+          if (
+            getAssistantDialogPartSignature(currentPart) !==
+            getAssistantDialogPartSignature(mergedPart)
+          ) {
+            messageIndex.notifyPartContentChange();
+          }
           return;
         }
 
@@ -195,6 +200,33 @@ export function upsertPart(part: Part) {
       setState('streamingText', '');
     }
   });
+}
+
+function getAssistantDialogPartSignature(part: Part | undefined): string | null {
+  if (!part) return null;
+  if (part.type === 'agent') return `agent:${part.name.trim().length > 0}`;
+  if (part.type === 'subtask') return 'subtask';
+  if (part.type !== 'tool') return null;
+
+  const normalizedTool = part.tool.trim().toLowerCase().split('.').at(-1) || '';
+  if (normalizedTool !== 'task') {
+    return `tool:${part.state.status === 'running'}`;
+  }
+
+  const metadata = 'metadata' in part.state ? part.state.metadata : undefined;
+  const metadataSessionId = metadata?.sessionId ?? metadata?.sessionID;
+  const description = part.state.input.description;
+  const title = 'title' in part.state ? part.state.title : undefined;
+  return JSON.stringify([
+    normalizedTool,
+    part.callID,
+    part.sessionID,
+    part.messageID,
+    part.state.status,
+    typeof metadataSessionId === 'string' ? metadataSessionId : '',
+    typeof description === 'string' ? description : '',
+    typeof title === 'string' ? title : '',
+  ]);
 }
 
 function mergePartUpdate(current: Part | undefined, incoming: Part): Part {

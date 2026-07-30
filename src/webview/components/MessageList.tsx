@@ -95,7 +95,6 @@ import {
   getStandaloneQuestionPrompts,
 } from './message-list/pending-prompts';
 import {
-  getMessageIdSet,
   getRenderedMessages,
   getVisibleThreadMessages,
   hasVisibleRunningToolPart,
@@ -225,12 +224,12 @@ export function MessageList() {
   let pendingMeasurementAfterWidthResize = false;
   let pendingMeasurementAfterContentResize = false;
   let suppressSyncScrollTop = false;
-  let stickyPreviewRafId = 0;
-  let stickyPreviewViewportStateScheduled = false;
+  let stickyPreviewFrameRafId = 0;
+  let stickyPreviewFrameScheduled = false;
+  let stickyPreviewViewportStatePending = false;
   let pendingStickyPreviewScrollTop = 0;
   let pendingStickyPreviewViewportHeight = 0;
-  let stickyPreviewGeometryRafId = 0;
-  let stickyPreviewGeometryScheduled = false;
+  let stickyPreviewGeometryRefreshPending = false;
   let forceStickyPreviewGeometryRefresh = false;
   let lastScrollbarInset = -1;
   let lastContainerClientHeight = -1;
@@ -349,31 +348,6 @@ export function MessageList() {
     observedVisibleMessageBounds.clear();
   }
 
-  function flushStickyPreviewViewportState() {
-    stickyPreviewViewportStateScheduled = false;
-    stickyPreviewRafId = 0;
-    batch(() => {
-      setStickyPreviewScrollTop(pendingStickyPreviewScrollTop);
-      setStickyPreviewViewportHeight(pendingStickyPreviewViewportHeight);
-    });
-  }
-
-  function scheduleStickyPreviewViewportState(nextScrollTop: number, nextViewportHeight: number) {
-    pendingStickyPreviewScrollTop = nextScrollTop;
-    pendingStickyPreviewViewportHeight = nextViewportHeight;
-    if (stickyPreviewViewportStateScheduled) return;
-
-    stickyPreviewViewportStateScheduled = true;
-    stickyPreviewRafId = requestAnimationFrame(flushStickyPreviewViewportState);
-  }
-
-  function cancelScheduledStickyPreviewViewportState() {
-    stickyPreviewViewportStateScheduled = false;
-    if (!stickyPreviewRafId) return;
-    cancelAnimationFrame(stickyPreviewRafId);
-    stickyPreviewRafId = 0;
-  }
-
   function syncObservedVisibleMessages() {
     if (!firstVisibleMessageObserver || !containerRef || shouldVirtualize()) return;
     firstVisibleMessageObserver.disconnect();
@@ -383,22 +357,49 @@ export function MessageList() {
     }
   }
 
-  function cancelScheduledStickyPreviewGeometryRefresh() {
-    stickyPreviewGeometryScheduled = false;
+  function cancelScheduledStickyPreviewFrame() {
+    stickyPreviewFrameScheduled = false;
+    stickyPreviewViewportStatePending = false;
+    stickyPreviewGeometryRefreshPending = false;
     forceStickyPreviewGeometryRefresh = false;
-    if (!stickyPreviewGeometryRafId) return;
-    cancelAnimationFrame(stickyPreviewGeometryRafId);
-    stickyPreviewGeometryRafId = 0;
+    if (!stickyPreviewFrameRafId) return;
+    cancelAnimationFrame(stickyPreviewFrameRafId);
+    stickyPreviewFrameRafId = 0;
   }
 
-  function flushStickyPreviewGeometryRefresh() {
-    stickyPreviewGeometryScheduled = false;
-    stickyPreviewGeometryRafId = 0;
+  function flushStickyPreviewFrame() {
+    stickyPreviewFrameScheduled = false;
+    stickyPreviewFrameRafId = 0;
+    const viewportStatePending = stickyPreviewViewportStatePending;
+    stickyPreviewViewportStatePending = false;
+    const geometryRefreshPending = stickyPreviewGeometryRefreshPending;
+    stickyPreviewGeometryRefreshPending = false;
     const forceRefresh = forceStickyPreviewGeometryRefresh;
     forceStickyPreviewGeometryRefresh = false;
+    const viewportChanged =
+      viewportStatePending &&
+      (pendingStickyPreviewScrollTop !== untrack(stickyPreviewScrollTop) ||
+        pendingStickyPreviewViewportHeight !== untrack(stickyPreviewViewportHeight));
+    const publishGeometry = geometryRefreshPending && (!widthResizeActive || forceRefresh);
 
-    if (widthResizeActive && !forceRefresh) {
+    if (geometryRefreshPending && !publishGeometry) {
       pendingWidthStickyRefresh = true;
+    }
+
+    if (viewportChanged || publishGeometry) {
+      batch(() => {
+        if (viewportChanged) {
+          setStickyPreviewScrollTop(pendingStickyPreviewScrollTop);
+          setStickyPreviewViewportHeight(pendingStickyPreviewViewportHeight);
+        }
+        if (publishGeometry) {
+          setStickyPreviewGeometryVersion((version) => version + 1);
+        }
+      });
+      return;
+    }
+
+    if (geometryRefreshPending && widthResizeActive) {
       const current = untrack(stickyUserMessagePreview);
       if (!current || !shouldHideStickyUserMessagePreviewImmediately(current)) return;
 
@@ -409,24 +410,28 @@ export function MessageList() {
         clearTimeout(stickyPreviewDebounceTimer);
         stickyPreviewDebounceTimer = 0;
       }
-      return;
     }
+  }
 
-    if (containerRef) {
-      previousStickyPreviewBounds =
-        getStickyUserMessagePreviewBounds(containerRef.getBoundingClientRect()) ??
-        previousStickyPreviewBounds;
-    }
-    setStickyPreviewGeometryVersion((version) => version + 1);
+  function scheduleStickyPreviewFrame() {
+    if (stickyPreviewFrameScheduled) return;
+
+    stickyPreviewFrameScheduled = true;
+    const rafId = requestAnimationFrame(flushStickyPreviewFrame);
+    stickyPreviewFrameRafId = stickyPreviewFrameScheduled ? rafId : 0;
+  }
+
+  function scheduleStickyPreviewViewportState(nextScrollTop: number, nextViewportHeight: number) {
+    pendingStickyPreviewScrollTop = nextScrollTop;
+    pendingStickyPreviewViewportHeight = nextViewportHeight;
+    stickyPreviewViewportStatePending = true;
+    scheduleStickyPreviewFrame();
   }
 
   function scheduleStickyPreviewGeometryRefresh(options?: { force?: boolean }) {
     if (options?.force) forceStickyPreviewGeometryRefresh = true;
-    if (stickyPreviewGeometryScheduled) return;
-
-    stickyPreviewGeometryScheduled = true;
-    const rafId = requestAnimationFrame(flushStickyPreviewGeometryRefresh);
-    stickyPreviewGeometryRafId = stickyPreviewGeometryScheduled ? rafId : 0;
+    stickyPreviewGeometryRefreshPending = true;
+    scheduleStickyPreviewFrame();
   }
 
   function publishPendingWidthMeasurements() {
@@ -896,7 +901,6 @@ export function MessageList() {
   const renderedMessages = createMemo(() =>
     getRenderedMessages(messages(), visibleRange(), shouldVirtualize())
   );
-  const renderedMessageIds = createMemo(() => getMessageIdSet(renderedMessages()));
   const linkedToolCalls = createMemo(() => {
     messageStructureVersion();
     return getLinkedToolCallKeys(renderedMessages());
@@ -1400,8 +1404,9 @@ export function MessageList() {
 
   function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
     if (!containerRef) return null;
-    for (let index = messageIndex + 1; index < messages().length; index += 1) {
-      const nextMessage = messages()[index];
+    const currentMessages = messages();
+    for (let index = messageIndex + 1; index < currentMessages.length; index += 1) {
+      const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
       if (!hasStickyUserMessageContent(nextMessage.parts)) continue;
 
@@ -1452,37 +1457,20 @@ export function MessageList() {
     return true;
   }
 
-  function getNextUserMessageTopFromDOM(
-    messageIndex: number,
-    containerRect: DOMRect
-  ): number | null {
-    if (!containerRef) return null;
-    for (let index = messageIndex + 1; index < messages().length; index += 1) {
-      const nextMessage = messages()[index];
-      if (nextMessage?.info.role !== 'user') continue;
-      if (!hasStickyUserMessageContent(nextMessage.parts)) continue;
-
-      const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
-      const nextRect = nextElement?.getBoundingClientRect();
-      if (!nextRect) return null;
-
-      const nextTop = nextRect.top - containerRect.top;
-      const nextBottom = nextRect.bottom - containerRect.top;
-      if (nextBottom <= 0) continue;
-
-      return nextTop;
+  function shouldHideStickyUserMessagePreviewImmediately(
+    preview: StickyUserMessagePreview | null,
+    geometry?: {
+      containerRect: DOMRect;
+      stickyBounds: { top: number; bottom: number };
     }
-    return null;
-  }
-
-  function shouldHideStickyUserMessagePreviewImmediately(preview: StickyUserMessagePreview | null) {
+  ) {
     if (!containerRef || !preview) return false;
 
-    const containerRect = containerRef.getBoundingClientRect();
-    const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
+    const containerRect = geometry?.containerRect ?? containerRef.getBoundingClientRect();
+    const stickyBounds = geometry?.stickyBounds ?? getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getNextUserMessageTopFromDOM(preview.index, containerRect);
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -2042,10 +2030,9 @@ export function MessageList() {
       clearTrailingSummarySettleTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
-      cancelScheduledStickyPreviewGeometryRefresh();
+      cancelScheduledStickyPreviewFrame();
       cancelWidthResize();
       activeFollowLoopSessionId = null;
-      cancelScheduledStickyPreviewViewportState();
     });
   });
 
@@ -2138,8 +2125,17 @@ export function MessageList() {
       if (!activePreview || activePreview.id !== current.id || !containerRef) return;
 
       const containerRect = containerRef.getBoundingClientRect();
-      previousStickyPreviewBounds = getStickyUserMessagePreviewBounds(containerRect);
-      if (!shouldHideStickyUserMessagePreviewImmediately(activePreview)) return;
+      const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
+      previousStickyPreviewBounds = stickyBounds;
+      if (
+        !stickyBounds ||
+        !shouldHideStickyUserMessagePreviewImmediately(activePreview, {
+          containerRect,
+          stickyBounds,
+        })
+      ) {
+        return;
+      }
 
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = activePreview.id;
@@ -2147,23 +2143,8 @@ export function MessageList() {
   });
 
   createEffect(() => {
-    stickyPreviewScrollTop();
-    const current = untrack(stickyUserMessagePreview);
-    if (!current) return;
-    if (shouldHideStickyUserMessagePreviewImmediately(current)) {
-      setStickyUserMessagePreview(null);
-      previousStickyPreviewId = current.id;
-      previousStickyPreviewBounds = null;
-      if (stickyPreviewDebounceTimer) {
-        clearTimeout(stickyPreviewDebounceTimer);
-        stickyPreviewDebounceTimer = 0;
-      }
-    }
-  });
-
-  createEffect(() => {
     const sessionId = state.activeSessionId;
-    cancelScheduledStickyPreviewGeometryRefresh();
+    cancelScheduledStickyPreviewFrame();
     cancelWidthResize();
     measuredHeights.clear();
     setMeasurementVersion((version) => version + 1);
@@ -2384,33 +2365,13 @@ export function MessageList() {
         : undefined,
     }));
     const dialogMessages = assistantDialogMessages();
-    const targetMessageIds = renderedMessageIds();
     const collectLeadingSummaryStats = collectingLeadingDialogStats();
     return untrack(() =>
-      getAssistantDialogSummaryMap(dialogMessages, targetMessageIds, {
+      getAssistantDialogSummaryMap(dialogMessages, undefined, {
         sessions,
         suppressTrailingSummary,
         collectLeadingSummaryStats,
       })
-    );
-  });
-  const highlightedAssistantMessageIds = createMemo(() => {
-    messageStructureVersion();
-    const activeStatusType = state.activeSessionId
-      ? state.sessionStatus[state.activeSessionId]?.type
-      : undefined;
-    const suppressTrailingSummary =
-      activeSessionWorking() ||
-      activeStatusType === 'busy' ||
-      activeStatusType === 'retry' ||
-      !trailingSummarySettled();
-    return untrack(
-      () =>
-        new Set(
-          getAssistantDialogSummaryMap(assistantDialogMessages(), undefined, {
-            suppressTrailingSummary,
-          }).keys()
-        )
     );
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
@@ -2690,7 +2651,6 @@ export function MessageList() {
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
               assistantDialogSummaryMap={assistantDialogSummaryMap()}
-              highlightedAssistantMessageIds={highlightedAssistantMessageIds()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

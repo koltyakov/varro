@@ -88,27 +88,16 @@ test.describe('multi-agent scroll stability', () => {
     });
     await waitForAnimationFrame(page);
 
-    const positions: number[] = [];
     for (let i = 0; i < 20; i += 1) {
       await appendDeltaToMultiAgentStreaming(
         page,
         `\n\nMulti-agent streaming chunk ${i}: ${`Streaming into a chat with multiple completed agent turns. This exercises the scroll anchoring logic. `.repeat(4)}`
       );
       await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(15);
     }
-
-    let maxFrameDelta = 0;
-    for (let i = 1; i < positions.length; i += 1) {
-      const frameDelta = Math.abs(positions[i]! - positions[i - 1]!);
-      maxFrameDelta = Math.max(maxFrameDelta, frameDelta);
-    }
-
-    expect(maxFrameDelta).toBeLessThan(120);
-
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
   });
 
   test('no jump to previous agent message during streaming', async ({ page }) => {

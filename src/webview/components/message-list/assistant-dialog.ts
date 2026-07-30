@@ -17,6 +17,11 @@ export function getAssistantDialogSummaryMap(
   options?: AssistantDialogOptions
 ) {
   const result = new Map<string, AssistantDialogSummaryInfo>();
+  const entriesById = new Map<string, MessageEntry>();
+  for (const entry of messages) {
+    // Preserve Array.find's first-match behavior if malformed history contains duplicate IDs.
+    if (!entriesById.has(entry.info.id)) entriesById.set(entry.info.id, entry);
+  }
   let childRunsByParentId: Map<string, Array<MessageEntry<AssistantMessage>>> | null = null;
   let currentMessages: AssistantMessage[] = [];
   let currentPrimaryMessageIds: string[] = [];
@@ -57,7 +62,7 @@ export function getAssistantDialogSummaryMap(
       return;
     }
 
-    const lastEntry = messages.find((entry) => entry.info.id === lastMessage.id);
+    const lastEntry = entriesById.get(lastMessage.id);
     if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
@@ -83,6 +88,7 @@ export function getAssistantDialogSummaryMap(
       currentMessages,
       currentPrimaryMessageIds,
       messages,
+      entriesById,
       options?.sessions || [],
       dialogStartedAt,
       args?.nextUserRequestCreated
@@ -146,6 +152,7 @@ function sumAssistantDialogTokens(
   primaryMessages: AssistantMessage[],
   primaryMessageIds: string[],
   allMessages: MessageEntry[],
+  entriesById: ReadonlyMap<string, MessageEntry>,
   sessions: readonly TaskSessionInfo[],
   dialogStartedAt: number,
   nextUserRequestCreated?: number
@@ -168,7 +175,7 @@ function sumAssistantDialogTokens(
   }
 
   for (const messageId of primaryMessageIds) {
-    const entry = allMessages.find((candidate) => candidate.info.id === messageId);
+    const entry = entriesById.get(messageId);
     if (!entry) continue;
     for (const part of entry.parts) {
       if (part.type !== 'tool') continue;

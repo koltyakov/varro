@@ -81,7 +81,7 @@ Varro connects to `http://127.0.0.1:4096` by default. To manage the server manua
 
 - [VS Code](https://code.visualstudio.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.12+ or 24+
-- The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`. This Varro release is compatibility-tested through OpenCode 1.18.9.
+- The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`.
 
 ## Documentation
 

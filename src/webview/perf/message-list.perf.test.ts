@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { MessageList } from '../components/MessageList';
+import { getAssistantDialogSummaryMap } from '../components/message-list/assistant-dialog';
 import { replaceMessages, resetDefaultAppState, setState } from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart } from '../types';
 import { settlePerfEffects } from './harness';
@@ -204,5 +205,31 @@ describe('MessageList perf guards', () => {
 
     expect(messageRowPassCounts.get('message-2')).toBe(1);
     expect(messageRowPassCounts.get('message-3')).toBe(1);
+  });
+
+  it('builds assistant dialog summaries with linear message-id access', () => {
+    const countIdReads = (messageCount: number) => {
+      let idReads = 0;
+      const messages = Array.from({ length: messageCount }, (_, index) => {
+        const id = `message-${index}`;
+        const info = createAssistantMessage(id);
+        Object.defineProperty(info, 'id', {
+          configurable: true,
+          get() {
+            idReads += 1;
+            return id;
+          },
+        });
+        return entry(info, []);
+      });
+
+      getAssistantDialogSummaryMap(messages);
+      return idReads;
+    };
+
+    const smallTranscriptReads = countIdReads(100);
+    const largeTranscriptReads = countIdReads(1_000);
+
+    expect(largeTranscriptReads).toBeLessThan(smallTranscriptReads * 15);
   });
 });

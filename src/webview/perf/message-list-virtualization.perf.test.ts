@@ -1,7 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import type * as AssistantDialogModule from '../components/message-list/assistant-dialog';
+import type * as StickyPreviewModule from '../components/message-list/sticky-preview';
+
+const { assistantDialogSummaryPasses, stickyPreviewSelectionPasses } = vi.hoisted(() => ({
+  assistantDialogSummaryPasses: { value: 0 },
+  stickyPreviewSelectionPasses: { value: 0 },
+}));
+
+vi.mock('../components/message-list/assistant-dialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof AssistantDialogModule>();
+  return {
+    ...actual,
+    getAssistantDialogSummaryMap: (
+      ...args: Parameters<typeof actual.getAssistantDialogSummaryMap>
+    ) => {
+      assistantDialogSummaryPasses.value += 1;
+      return actual.getAssistantDialogSummaryMap(...args);
+    },
+  };
+});
+
+vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
+  const actual = await importOriginal<typeof StickyPreviewModule>();
+  return {
+    ...actual,
+    getStickyUserMessagePreview: (
+      ...args: Parameters<typeof actual.getStickyUserMessagePreview>
+    ) => {
+      stickyPreviewSelectionPasses.value += 1;
+      return actual.getStickyUserMessagePreview(...args);
+    },
+  };
+});
+
 import { MessageList } from '../components/MessageList';
-import { replaceMessages, resetDefaultAppState, setState } from '../lib/state';
+import { replaceMessages, resetDefaultAppState, setState, upsertMessageInfo } from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
 import { settlePerfEffects } from './harness';
 
@@ -63,6 +97,8 @@ function entry(info: Message, parts: Part[]) {
 describe('MessageList virtualization perf guards', () => {
   beforeEach(() => {
     resetDefaultAppState();
+    assistantDialogSummaryPasses.value = 0;
+    stickyPreviewSelectionPasses.value = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
 
@@ -187,6 +223,129 @@ describe('MessageList virtualization perf guards', () => {
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.interactive-item-off-core')).toBeTruthy();
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
+  });
+
+  it('does not rebuild assistant dialog summaries as the virtual window scrolls', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
+
+    replaceMessages(
+      Array.from({ length: 200 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
+      })
+    );
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+
+    const list = container!.querySelector<HTMLElement>('.interactive-list')!;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 24_000 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+    const initialPasses = assistantDialogSummaryPasses.value;
+
+    for (let step = 1; step <= 10; step += 1) {
+      list.scrollTop = step * 1_200;
+      list.dispatchEvent(new Event('scroll'));
+      await settlePerfEffects();
+    }
+
+    expect(assistantDialogSummaryPasses.value).toBe(initialPasses);
+
+    upsertMessageInfo({
+      ...createAssistantMessage('message-199'),
+      tokens: {
+        input: 10,
+        output: 5,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    });
+    await settlePerfEffects();
+
+    expect(assistantDialogSummaryPasses.value).toBe(initialPasses + 1);
+  });
+
+  it('coalesces sticky viewport and virtual-range work into one frame pass', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, 500, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 24_000);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
+
+    replaceMessages(
+      Array.from({ length: 200 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
+      })
+    );
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+
+    const list = container!.querySelector<HTMLElement>('.interactive-list')!;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 24_000 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 6_000 });
+    list.dispatchEvent(new Event('scroll'));
+    await settlePerfEffects();
+
+    let nextFrameId = 1;
+    const pendingFrames = new Map<number, FrameRequestCallback>();
+    const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+      const id = nextFrameId++;
+      pendingFrames.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameMock = vi.fn((id: number) => pendingFrames.delete(id));
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: requestAnimationFrameMock,
+    });
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: requestAnimationFrameMock,
+    });
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: cancelAnimationFrameMock,
+    });
+    Object.defineProperty(window, 'cancelAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: cancelAnimationFrameMock,
+    });
+
+    stickyPreviewSelectionPasses.value = 0;
+    list.scrollTop = 7_200;
+    list.dispatchEvent(new Event('scroll'));
+    await settlePerfEffects();
+
+    const frames = [...pendingFrames.entries()];
+    pendingFrames.clear();
+    for (const [, callback] of frames) callback(0);
+    await settlePerfEffects();
+
+    expect(stickyPreviewSelectionPasses.value).toBe(1);
   });
 
   it('keeps the rendered row window bounded across width changes', async () => {

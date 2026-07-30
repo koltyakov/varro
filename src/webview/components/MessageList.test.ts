@@ -12,6 +12,7 @@ import {
   skipPlanSession,
   startLoading,
   stopLoading,
+  upsertPart,
 } from '../lib/state';
 import type {
   AssistantMessage,
@@ -2817,6 +2818,44 @@ describe('MessageList sticky prompt preview', () => {
       inputTokens: 100,
       outputTokens: 10,
     });
+  });
+
+  it('updates the cached assistant summary when an existing tool completes', async () => {
+    const runningTool = toolPart('tool-1', 'assistant-1');
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 5_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [runningTool],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+    upsertPart({
+      ...runningTool,
+      type: 'tool',
+      state: {
+        status: 'completed',
+        input: { command: 'pwd' },
+        output: '/workspace',
+        title: 'Run pwd',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    });
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 100 · ↓ 10');
   });
 
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
