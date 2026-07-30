@@ -895,12 +895,23 @@ describe('OpenCodeServer maintenance', () => {
     api.managedProcess = false;
     api.readInstalledCliVersion = vi.fn().mockResolvedValue('1.18.2');
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.17.18' });
-    api.request = vi.fn().mockImplementation(async () => {
-      return {
-        'session-1': { type: 'busy' },
-        'session-2': { type: 'retry' },
-        'session-3': { type: 'idle' },
-      };
+    api.request = vi.fn().mockImplementation(async (_method, path) => {
+      if (path === '/experimental/session?limit=100') {
+        return [{ directory: '/repo-a' }, { directory: '/repo-b' }];
+      }
+      if (path === '/session/status?directory=%2Frepo-a') {
+        return {
+          'session-1': { type: 'busy' },
+          'session-3': { type: 'idle' },
+        };
+      }
+      if (path === '/session/status?directory=%2Frepo-b') {
+        return {
+          'session-1': { type: 'busy' },
+          'session-2': { type: 'retry' },
+        };
+      }
+      throw new Error(`Unexpected request: ${path}`);
     });
 
     const info = await server.readServerInfo();
@@ -908,6 +919,9 @@ describe('OpenCodeServer maintenance', () => {
     expect(info.managedProcess).toBe(false);
     expect(info.activeAgentCount).toBe(2);
     expect(info.activeAgentError).toBeNull();
+    expect(api.request).toHaveBeenCalledWith('GET', '/experimental/session?limit=100', undefined, {
+      unscoped: true,
+    });
   });
 
   it('restarts a managed idle server when the installed CLI is newer', async () => {

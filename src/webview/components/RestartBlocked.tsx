@@ -35,13 +35,20 @@ export function RestartBlocked() {
     <div class="server-status-surface relative flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-8">
       <button
         type="button"
-        class="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded text-vscode-muted transition-colors hover:bg-vscode-list-hover hover:text-vscode-fg"
+        class="chat-image-preview-close server-status-close"
         aria-label="Close restart status"
         title="Close"
         onClick={() => defaultAppState.setState('restartBlocked', null)}
       >
-        <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06z" />
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          aria-hidden="true"
+        >
+          <path d="m4 4 8 8" stroke-linecap="round" />
+          <path d="m12 4-8 8" stroke-linecap="round" />
         </svg>
       </button>
 

@@ -76,15 +76,13 @@ function getUpgradeErrorMessage(value: unknown) {
   return typeof error === 'string' ? error : '';
 }
 
-function countActiveAgents(value: unknown) {
-  if (!value || typeof value !== 'object') return 0;
-  let count = 0;
-  for (const status of Object.values(value as Record<string, unknown>)) {
+function addActiveAgentIDs(value: unknown, activeAgentIDs: Set<string>) {
+  if (!value || typeof value !== 'object') return;
+  for (const [sessionID, status] of Object.entries(value as Record<string, unknown>)) {
     const entry = status && typeof status === 'object' ? (status as Record<string, unknown>) : null;
     const type = typeof entry?.type === 'string' ? entry.type : undefined;
-    if (type === 'busy' || type === 'retry') count += 1;
+    if (type === 'busy' || type === 'retry') activeAgentIDs.add(sessionID);
   }
-  return count;
 }
 
 function getSessionID(value: unknown): string | null {
@@ -1077,7 +1075,7 @@ export class OpenCodeServer extends EventEmitter {
     }
     if (this._status.state === 'running') {
       try {
-        activeAgentCount = countActiveAgents(await this.request('GET', '/session/status'));
+        activeAgentCount = await this.readActiveAgentCount();
       } catch (err) {
         activeAgentError = err instanceof Error ? err.message : String(err);
       }
@@ -1104,6 +1102,38 @@ export class OpenCodeServer extends EventEmitter {
       health: await this.readHealthInfo(),
       workspaceCwd: this.getWorkspaceCwd(),
     };
+  }
+
+  private async readActiveAgentCount() {
+    const sessions = await this.request('GET', '/experimental/session?limit=100', undefined, {
+      unscoped: true,
+    });
+    if (!Array.isArray(sessions)) {
+      throw new Error('OpenCode returned an invalid global session list');
+    }
+
+    const directories = new Set<string>();
+    for (const value of sessions) {
+      if (!value || typeof value !== 'object') continue;
+      const directory = (value as Record<string, unknown>).directory;
+      if (typeof directory === 'string' && directory.trim()) directories.add(directory);
+    }
+    const workspaceCwd = this.getWorkspaceCwd();
+    if (workspaceCwd) directories.add(workspaceCwd);
+
+    const activeAgentIDs = new Set<string>();
+    const values = [...directories];
+    for (let index = 0; index < values.length; index += 8) {
+      const statuses = await Promise.all(
+        values
+          .slice(index, index + 8)
+          .map((directory) =>
+            this.request('GET', `/session/status?directory=${encodeURIComponent(directory)}`)
+          )
+      );
+      for (const status of statuses) addActiveAgentIDs(status, activeAgentIDs);
+    }
+    return activeAgentIDs.size;
   }
 
   private async startEventStream() {

@@ -1729,6 +1729,7 @@ describe('OpenCodeProcess config ownership', () => {
     const configPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
     ).buildServerEnv().OPENCODE_CONFIG!;
+    manager.takeOwnershipOfExistingServer = vi.fn().mockResolvedValue(false);
 
     await manager.prepareForHealthyExistingServer();
 

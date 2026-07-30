@@ -64,6 +64,8 @@ describe('RestartBlocked', () => {
     const closeButton = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Close restart status"]'
     );
+    expect(closeButton?.classList.contains('chat-image-preview-close')).toBe(true);
+    expect(closeButton?.classList.contains('server-status-close')).toBe(true);
     closeButton?.click();
     expect(state.restartBlocked).toBeNull();
   });

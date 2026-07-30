@@ -297,7 +297,7 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     `- Server health: ${serverInfo.health.healthy ? 'healthy' : 'unhealthy'}`,
     `- Server version: ${serverInfo.health.version || 'unknown'}`,
     `- Server ownership: ${ownership}`,
-    `- Active agents: ${activeAgents}`,
+    `- Active agents (server-wide): ${activeAgents}`,
     `- Auto updates: ${autoUpdate ? 'enabled' : 'disabled'}`,
     `- CLI command: ${serverInfo.command}`,
     `- Workspace: ${serverInfo.workspaceCwd || 'none'}`,

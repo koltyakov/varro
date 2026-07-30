@@ -107,7 +107,9 @@ describe('About command', () => {
     await runCommand('varro.about');
 
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining('- Active agents: 1') })
+      expect.objectContaining({
+        content: expect.stringContaining('- Active agents (server-wide): 1'),
+      })
     );
     // The About report is the paste-ready hand-off for update bug reports.
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
