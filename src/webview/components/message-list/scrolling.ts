@@ -91,10 +91,10 @@ export function resolveAutoScrollOnUserScroll(args: {
   autoScrollThresholdPx: number;
 }): AutoScrollDecision {
   const delta = args.top - args.lastObservedScrollTop;
-  const intentionalUserBreak = delta < -1 && args.userScrolledUp;
+  const intentionalUserBreak = delta < -0.5 && args.userScrolledUp;
   const nextFollowModeLocked = args.followModeLocked && !intentionalUserBreak;
   const userMovedAwayNearBottom =
-    args.autoScroll && delta < -1 && args.distanceFromBottom > 1 && args.userScrolledUp;
+    args.autoScroll && delta < -0.5 && args.distanceFromBottom > 1 && args.userScrolledUp;
   const userMovedAwayFromExpectedTarget =
     args.expectedScrollTop !== -1 &&
     args.userScrolledUp &&

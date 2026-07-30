@@ -469,6 +469,16 @@ input:focus-visible {
   flex: 0 0 auto;
 }
 
+.interactive-list-track.virtualized
+  .interactive-item-off-core
+  :is(.shimmer-progress, .thinking-in-progress, .tool-status-running, .tool-call-spinner) {
+  animation-play-state: paused;
+}
+
+.interactive-list-track.virtualized .interactive-item-off-core .chat-animated-ellipsis::after {
+  animation-play-state: paused;
+}
+
 .interactive-list-track.virtualized .virtual-spacer {
   flex: 0 0 auto;
   min-height: 0;

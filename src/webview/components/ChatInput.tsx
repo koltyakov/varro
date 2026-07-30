@@ -1939,7 +1939,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   onMount(() => {
     if (!toolbarRef) return;
-    const observer = new ResizeObserver(() => {
+    let lastObservedToolbarWidth = toolbarRef.clientWidth;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries.find((candidate) => candidate.target === toolbarRef);
+      const width = entry?.borderBoxSize?.[0]?.inlineSize ?? entry?.contentRect.width;
+      if (width !== undefined && Math.abs(width - lastObservedToolbarWidth) <= 0.5) return;
+      if (width !== undefined) lastObservedToolbarWidth = width;
       if (
         showAgentPicker() ||
         showVariantPicker() ||

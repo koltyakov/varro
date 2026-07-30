@@ -23,6 +23,25 @@ async function getVirtualScrollSample(list: Locator) {
   });
 }
 
+async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 6) {
+  return list.evaluate(async (element, frames) => {
+    const samples: Array<{ id: string; top: number }> = [];
+    for (let index = 0; index < frames; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const containerRect = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      samples.push({
+        id: row?.dataset.msgId ?? '',
+        top: row ? row.getBoundingClientRect().top - containerRect.top : Number.NaN,
+      });
+    }
+    return samples;
+  }, frameCount);
+}
+
 test.describe('auto-scroll', () => {
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
@@ -186,6 +205,57 @@ test.describe('auto-scroll', () => {
       expect(upwardScrollDelta).toBeLessThan(current.viewportHeight * 0.8);
       expect(current.firstIndex).toBeLessThanOrEqual(previous.firstIndex + 1);
       expect(previous.firstIndex - current.firstIndex).toBeLessThan(14);
+    }
+  });
+
+  test('keeps compact tool rows anchored while virtualized scrolling settles', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => list.evaluate((element) => element.querySelectorAll('[data-msg-id]').length))
+      .toBeLessThan(60);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * 0.7);
+      element.dispatchEvent(new Event('scroll'));
+    });
+
+    const beforeReflow = (await sampleVisibleAnchorAcrossFrames(list, 2)).at(-1)!;
+    await page.addStyleTag({
+      content: `
+        .tool-invocation-header,
+        .file-read-card-header,
+        .file-change-card-header,
+        .thinking-header {
+          padding-block: 9px !important;
+        }
+      `,
+    });
+    const reflowSamples = await sampleVisibleAnchorAcrossFrames(list, 8);
+    for (const sample of reflowSamples.slice(1)) {
+      expect(sample.id).toBe(beforeReflow.id);
+      expect(Math.abs(sample.top - beforeReflow.top)).toBeLessThan(1.5);
+    }
+
+    for (let step = 0; step < 20; step += 1) {
+      const target = await list.evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -180, bubbles: true }));
+        element.scrollTop = Math.max(0, element.scrollTop - 180);
+        element.dispatchEvent(new Event('scroll'));
+        return element.scrollTop;
+      });
+      const samples = await sampleVisibleAnchorAcrossFrames(list);
+      const first = samples[0]!;
+      expect(first.id).not.toBe('');
+      for (const sample of samples.slice(1)) {
+        expect(sample.id).toBe(first.id);
+        expect(Math.abs(sample.top - first.top)).toBeLessThan(1.5);
+      }
+      const settledScrollTop = await list.evaluate((element) => element.scrollTop);
+      expect(Math.abs(settledScrollTop - target)).toBeLessThan(1.5);
     }
   });
 

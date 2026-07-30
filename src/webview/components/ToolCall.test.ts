@@ -233,6 +233,7 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
     expect(container?.textContent).toContain('git status');
+    expect(container?.querySelector('.tool-call-icon-terminal')).toBeInstanceOf(SVGElement);
   });
 
   it('does not repeat long commands in the collapsed preview', () => {
@@ -357,6 +358,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
+    expect(container?.querySelector('.tool-call-icon-search')).toBeInstanceOf(SVGElement);
   });
 
   it('does not render a second line for collapsed generic tool input', () => {
@@ -406,6 +408,8 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-preview')).toBeNull();
     expect(container?.textContent).not.toContain('hidden subagent summary');
+    expect(container?.querySelector('.tool-call-icon-task circle')).toBeInstanceOf(SVGElement);
+    expect(container?.querySelector('.tool-call-icon-task rect')).toBeNull();
   });
 
   it('hides a duplicated description from expanded task details', () => {
@@ -638,10 +642,21 @@ describe('ToolCall', () => {
 
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
-    expect(container?.querySelectorAll('.tool-status-dot')).toHaveLength(1);
+    expect(container?.querySelectorAll('.tool-call-icon')).toHaveLength(1);
+    expect(container?.querySelector('.tool-call-icon-task')).toBeInstanceOf(HTMLSpanElement);
+    expect(container?.querySelector('.tool-call-icon-task')?.classList).toContain(
+      'tool-call-spinner'
+    );
+    expect(container?.querySelector('.tool-invocation-title')?.classList).not.toContain(
+      'shimmer-progress'
+    );
     const runningStatus = container?.querySelector('.tool-invocation-subagent-running');
+    const workingIcon = runningStatus?.querySelector('.tool-invocation-working-icon');
     expect(runningStatus?.getAttribute('aria-live')).toBe('polite');
     expect((runningStatus as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect(workingIcon).toBeInstanceOf(SVGElement);
+    expect(workingIcon?.getAttribute('stroke-width')).toBe('1.8');
+    expect(runningStatus?.querySelector('.tool-invocation-activity-ring')).toBeNull();
     expect(runningStatus?.textContent).toContain('Explore subagent is working');
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
   });
@@ -990,10 +1005,10 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     const header = container?.querySelector('.tool-invocation-header');
-    const dot = container?.querySelector('.tool-status-dot');
+    const icon = container?.querySelector('.tool-call-icon');
     const label = container?.querySelector('.tool-invocation-error-label');
 
-    expect(dot?.classList.contains('tool-status-aborted')).toBe(true);
+    expect(icon?.classList.contains('tool-status-aborted')).toBe(true);
     expect(label?.classList.contains('is-aborted')).toBe(true);
     expect(label?.textContent).toBe('aborted');
 
@@ -1375,8 +1390,10 @@ describe('ToolCall', () => {
 
     const target = container?.querySelector<HTMLAnchorElement>('.file-read-target');
 
+    expect(container?.querySelector('.file-read-action-label')?.textContent).toBe('Read:');
     expect(target?.textContent).toBe('main.ts');
     expect(container?.querySelector('.file-read-range')?.textContent).toBe('(L5-7)');
+    expect(container?.querySelector('.tool-call-icon-read')).toBeInstanceOf(SVGElement);
 
     target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -1407,6 +1424,10 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.file-read-running-label')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.querySelector('.file-read-action-label')?.textContent).toBe('Read');
+    expect(container?.querySelector('.file-read-action-label')?.classList).toContain(
+      'shimmer-progress'
+    );
     expect(container?.textContent).not.toContain('reading');
     expect(container?.querySelector('.file-read-card-header')).not.toBeNull();
   });
@@ -1508,7 +1529,7 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -1529,7 +1550,7 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Added');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Added:');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -1548,7 +1569,7 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Removed');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Removed:');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -1570,7 +1591,7 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Moved');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Moved:');
     expect(fileStatusSpy).not.toHaveBeenCalled();
   });
 
@@ -1771,7 +1792,7 @@ describe('FileChangeCard', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edited:');
     expect(container?.querySelector('.file-edit-path-link')?.textContent).toBe('src/app.ts');
     expect(container?.querySelector('.file-change-inline-diffs')).toBeNull();
   });
@@ -1806,10 +1827,14 @@ describe('FileChangeCard', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-change-card')).not.toBeNull();
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
     expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
-    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Running');
+    expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
+    expect(container?.querySelector('.tool-call-icon-edit')).toBeInstanceOf(SVGElement);
     expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
+    expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
+      'shimmer-progress'
+    );
     expect(container?.querySelectorAll('.file-change-inline-diffs .diff-view-file')).toHaveLength(
       2
     );
@@ -1846,10 +1871,10 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-dot')?.classList).toContain('error');
-    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Failed');
-    expect(container?.querySelector('.file-edit-dot')?.getAttribute('role')).toBe('status');
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit');
+    expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-error');
+    expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Failed');
+    expect(container?.querySelector('.file-edit-icon')?.getAttribute('role')).toBe('status');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
     const errorDetail = container?.querySelector('.file-edit-error-detail');
     expect(errorDetail?.getAttribute('role')).toBe('alert');
@@ -1886,9 +1911,9 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.file-edit-dot')?.classList).toContain('aborted');
-    expect(container?.querySelector('.file-edit-dot')?.getAttribute('aria-label')).toBe('Aborted');
-    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Add');
+    expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-aborted');
+    expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Aborted');
+    expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Add:');
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('aborted');
     expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
     expect(container?.textContent).not.toContain('Added');

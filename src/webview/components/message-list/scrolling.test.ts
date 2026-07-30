@@ -96,6 +96,32 @@ describe('resolveAutoScrollOnUserScroll', () => {
     });
   });
 
+  it('disables auto-scroll for a one-pixel upward wheel movement', () => {
+    expect(
+      resolveAutoScrollOnUserScroll({
+        top: 494,
+        distanceFromBottom: 2,
+        nearBottom: true,
+        autoScroll: true,
+        userScrolledUp: true,
+        bottomTargetStable: false,
+        followModeLocked: false,
+        expectedScrollTop: -1,
+        lastObservedScrollTop: 495,
+        ignoreScrollUntil: 0,
+        now: 500,
+        autoScrollThresholdPx: 60,
+      })
+    ).toEqual({
+      nextAutoScroll: false,
+      nextExpectedScrollTop: -1,
+      nextIgnoreScrollUntil: 0,
+      nextLastObservedScrollTop: 494,
+      nextFollowModeLocked: false,
+      shouldCancelPendingScroll: true,
+    });
+  });
+
   it('disables auto-scroll when the user pulls away from the target during a programmatic scroll window', () => {
     expect(
       resolveAutoScrollOnUserScroll({

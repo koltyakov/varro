@@ -158,6 +158,10 @@ describe('MessagePart', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one'));
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+    const icon = container?.querySelector('.thinking-topic-icon');
+    expect(icon?.getAttribute('width')).toBe('16');
+    expect(icon?.getAttribute('height')).toBe('16');
+    expect(icon?.getAttribute('stroke-width')).toBe('1.8');
   });
 
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {

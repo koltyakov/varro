@@ -11,13 +11,14 @@ function createHarness(options: {
 }) {
   const modes: ToolbarCompactMode[] = [];
   let currentMode: ToolbarCompactMode = 'full';
+  let available = options.available;
 
   const toolbar = document.createElement('div');
   const left = document.createElement('div');
   const right = document.createElement('div');
   document.body.append(toolbar, left, right);
 
-  Object.defineProperty(toolbar, 'clientWidth', { get: () => options.available });
+  Object.defineProperty(toolbar, 'clientWidth', { get: () => available });
   Object.defineProperty(left, 'scrollWidth', { get: () => options.required(currentMode) });
   right.getBoundingClientRect = () => ({ width: 0 }) as DOMRect;
 
@@ -31,7 +32,14 @@ function createHarness(options: {
     },
   });
 
-  return { fitter, modes, getMode: () => currentMode };
+  return {
+    fitter,
+    modes,
+    getMode: () => currentMode,
+    setAvailable: (nextAvailable: number) => {
+      available = nextAvailable;
+    },
+  };
 }
 
 // The fitter alternates requestAnimationFrame and queueMicrotask, so draining it means running
@@ -178,9 +186,52 @@ describe('createToolbarFitter', () => {
     runFrames();
     await settle();
 
-    // The restarted walk begins again from 'full' rather than resuming mid-ladder.
-    expect(modes[modesBeforeRestart]).toBe('full');
+    expect(modes[modesBeforeRestart]).not.toBe('full');
     expect(modes.at(-1)).toBe('tight');
+  });
+
+  it('does not replay the compact-mode ladder at an unchanged narrow width', async () => {
+    const { fitter, modes } = createHarness({ available: 10, required: () => 999 });
+
+    fitter.schedule();
+    runFrames();
+    await settle();
+    expect(modes).toEqual(TOOLBAR_COMPACT_MODES);
+
+    const appliedModeCount = modes.length;
+    for (let index = 0; index < 20; index += 1) {
+      fitter.schedule();
+      runFrames();
+      await settle();
+    }
+
+    expect(modes).toHaveLength(appliedModeCount);
+  });
+
+  it('walks incrementally from the current mode as width grows', async () => {
+    const widthByMode = new Map<ToolbarCompactMode, number>(
+      TOOLBAR_COMPACT_MODES.map((mode, index) => [mode, 220 - index * 20])
+    );
+    const { fitter, modes, getMode, setAvailable } = createHarness({
+      available: 100,
+      required: (mode) => widthByMode.get(mode) ?? 0,
+    });
+
+    fitter.schedule();
+    runFrames();
+    await settle();
+    const compactMode = getMode();
+    const initialModeCount = modes.length;
+
+    setAvailable(130);
+    fitter.schedule();
+    runFrames();
+    await settle();
+
+    expect(TOOLBAR_COMPACT_MODES.indexOf(getMode())).toBeLessThan(
+      TOOLBAR_COMPACT_MODES.indexOf(compactMode)
+    );
+    expect(modes.slice(initialModeCount)).not.toContain('full');
   });
 
   it('coalesces repeated schedules into a single frame', async () => {

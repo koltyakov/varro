@@ -184,6 +184,104 @@ describe('MessageList virtualization perf guards', () => {
     await settlePerfEffects();
 
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+    expect(container?.querySelector('.interactive-item-off-core')).toBeTruthy();
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
+  });
+
+  it('keeps the rendered row window bounded across width changes', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class ResizeObserverHarness {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverHarness,
+    });
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverHarness,
+    });
+
+    let listWidth = 500;
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
+      return this.classList.contains('interactive-list') ? listWidth : 500;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-item-container')) {
+        return new DOMRect(0, 0, listWidth, 120);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, listWidth, 24_000);
+      }
+      return new DOMRect(0, 0, listWidth, 500);
+    });
+
+    replaceMessages(
+      Array.from({ length: 200 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
+      })
+    );
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+
+    const list = container!.querySelector<HTMLElement>('.interactive-list')!;
+    const track = container!.querySelector<HTMLElement>('.interactive-list-track')!;
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+
+    let maxAddedRows = 0;
+    const mutationObserver = new MutationObserver((records) => {
+      let addedRows = 0;
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          addedRows += node.matches('[data-msg-id]') ? 1 : 0;
+          addedRows += node.querySelectorAll('[data-msg-id]').length;
+        }
+      }
+      maxAddedRows = Math.max(
+        maxAddedRows,
+        addedRows,
+        container?.querySelectorAll('[data-msg-id]').length ?? 0
+      );
+    });
+    mutationObserver.observe(container!, { childList: true, subtree: true });
+
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(list) && observer.targets.has(track)
+    );
+    expect(layoutObserver).toBeDefined();
+    listWidth = 420;
+    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    await settlePerfEffects();
+    await Promise.resolve();
+    mutationObserver.disconnect();
+
+    expect(maxAddedRows).toBeLessThan(80);
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
   });
 });

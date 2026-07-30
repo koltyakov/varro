@@ -1,6 +1,8 @@
 import {
   Show,
   For,
+  Match,
+  Switch,
   createEffect,
   createMemo,
   createSignal,
@@ -42,6 +44,17 @@ export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
 const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
+const TERMINAL_TOOL_NAMES = new Set(['bash', 'shell', 'terminal', 'exec', 'command']);
+const EDIT_TOOL_NAMES = new Set([
+  'apply_patch',
+  'edit',
+  'write',
+  'create',
+  'delete',
+  'rename',
+  'patch',
+]);
+const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
 const MAX_FILE_ERROR_DISPLAY_CHARS = 4000;
 
@@ -53,6 +66,144 @@ function normalizeToolName(toolName: string) {
   const normalized = toolName.trim().toLowerCase();
   const parts = normalized.split('.');
   return parts[parts.length - 1] || normalized;
+}
+
+type ToolCallIconKind =
+  | 'terminal'
+  | 'search'
+  | 'read'
+  | 'edit'
+  | 'task'
+  | 'todo'
+  | 'web'
+  | 'question'
+  | 'skill'
+  | 'tools';
+
+function getToolCallIconKind(toolName: string): ToolCallIconKind {
+  const normalized = normalizeToolName(toolName);
+  if (TERMINAL_TOOL_NAMES.has(normalized)) return 'terminal';
+  if (SEARCH_TOOL_NAMES.has(normalized)) return 'search';
+  if (normalized === 'read') return 'read';
+  if (EDIT_TOOL_NAMES.has(normalized)) return 'edit';
+  if (normalized === 'task') return 'task';
+  if (TODO_TOOL_NAMES.has(normalized)) return 'todo';
+  if (normalized === 'question') return 'question';
+  if (normalized === 'skill') return 'skill';
+  if (normalized === 'webfetch' || normalized.includes('browser')) return 'web';
+  return 'tools';
+}
+
+function ToolCallIcon(props: {
+  toolName?: string;
+  kind?: ToolCallIconKind;
+  statusClass?: string;
+  statusLabel?: string;
+  class?: string;
+}) {
+  const kind = () => props.kind || getToolCallIconKind(props.toolName || '');
+  const classes = () =>
+    ['tool-call-icon', `tool-call-icon-${kind()}`, props.statusClass, props.class]
+      .filter(Boolean)
+      .join(' ');
+  const isRunningTask = () => kind() === 'task' && props.statusClass === 'tool-status-running';
+
+  return (
+    <Show
+      when={isRunningTask()}
+      fallback={
+        <svg
+          class={classes()}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          role={props.statusLabel ? 'status' : undefined}
+          aria-label={props.statusLabel}
+          aria-live={props.statusLabel ? 'polite' : undefined}
+          aria-atomic={props.statusLabel ? 'true' : undefined}
+          aria-hidden={props.statusLabel ? undefined : 'true'}
+        >
+          <Show when={props.statusLabel}>{(label) => <title>{label()}</title>}</Show>
+          <Switch>
+            <Match when={kind() === 'terminal'}>
+              <path d="M13 16H18" />
+              <path d="M6 8L10 12L6 16" />
+              <path d="M2 18V6C2 4.89543 2.89543 4 4 4H20C21.1046 4 22 4.89543 22 6V18C22 19.1046 21.1046 20 20 20H4C2.89543 20 2 19.1046 2 18Z" />
+            </Match>
+            <Match when={kind() === 'search'}>
+              <path d="M17 17L21 21" />
+              <path d="M3 11C3 15.4183 6.58172 19 11 19C13.213 19 15.2161 18.1015 16.6644 16.6493C18.1077 15.2022 19 13.2053 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z" />
+            </Match>
+            <Match when={kind() === 'read'}>
+              <path d="M4 21.4V2.6C4 2.26863 4.26863 2 4.6 2H16.2515C16.4106 2 16.5632 2.06321 16.6757 2.17574L19.8243 5.32426C19.9368 5.43679 20 5.5894 20 5.74853V21.4C20 21.7314 19.7314 22 19.4 22H4.6C4.26863 22 4 21.7314 4 21.4Z" />
+              <path d="M8 10H16M8 14H16M8 18H12M16 2V5.4C16 5.73137 16.2686 6 16.6 6H20" />
+            </Match>
+            <Match when={kind() === 'edit'}>
+              <path d="M14.3632 5.65156L15.8431 4.17157C16.6242 3.39052 17.8905 3.39052 18.6716 4.17157L20.0858 5.58579C20.8668 6.36683 20.8668 7.63316 20.0858 8.41421L18.6058 9.8942M14.3632 5.65156L4.74749 15.2672C4.41542 15.5993 4.21079 16.0376 4.16947 16.5054L3.92738 19.2459C3.87261 19.8659 4.39148 20.3848 5.0115 20.33L7.75191 20.0879C8.21972 20.0466 8.65806 19.8419 8.99013 19.5099L18.6058 9.8942M14.3632 5.65156L18.6058 9.8942" />
+            </Match>
+            <Match when={kind() === 'task'}>
+              <Show
+                when={props.statusClass === 'tool-status-completed'}
+                fallback={
+                  <>
+                    <rect x="2" y="21" width="7" height="5" rx="0.6" transform="rotate(-90 2 21)" />
+                    <rect
+                      x="17"
+                      y="15.5"
+                      width="7"
+                      height="5"
+                      rx="0.6"
+                      transform="rotate(-90 17 15.5)"
+                    />
+                    <rect x="2" y="10" width="7" height="5" rx="0.6" transform="rotate(-90 2 10)" />
+                    <path
+                      d="M7 17.5H10.5C11.6046 17.5 12.5 16.6046 12.5 15.5V8.5C12.5 7.39543 11.6046 6.5 10.5 6.5H7"
+                      stroke-linecap="butt"
+                      stroke-linejoin="miter"
+                    />
+                    <path d="M12.5 12H17" stroke-linecap="butt" stroke-linejoin="miter" />
+                  </>
+                }
+              >
+                <path d="M7 12.5L10 15.5L17 8.5" />
+                <circle cx="12" cy="12" r="10" />
+              </Show>
+            </Match>
+            <Match when={kind() === 'todo'}>
+              <path d="M9 6H20M3.8 5.8L4.6 6.6L6.6 4.6M3.8 11.8L4.6 12.6L6.6 10.6M3.8 17.8L4.6 18.6L6.6 16.6M9 12H20M9 18H20" />
+            </Match>
+            <Match when={kind() === 'web'}>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12H22M12 2C14.5 4.7 16 8.1 16 12C16 15.9 14.5 19.3 12 22M12 2C9.5 4.7 8 8.1 8 12C8 15.9 9.5 19.3 12 22" />
+            </Match>
+            <Match when={kind() === 'question'}>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9 9C9 5.5 14.5 5.5 14.5 9C14.5 11.5 12 11 12 14M12 18.01L12.01 17.9989" />
+            </Match>
+            <Match when={kind() === 'skill'}>
+              <path d="M4 19V5C4 3.89543 4.89543 3 6 3H19.4C19.7314 3 20 3.26863 20 3.6V16.7143M6 17H20M6 21H20M6 21C4.89543 21 4 20.1046 4 19C4 17.8954 4.89543 17 6 17M9 7H15" />
+            </Match>
+            <Match when={kind() === 'tools'}>
+              <path d="M10.0503 10.6066L2.97923 17.6777C2.19818 18.4587 2.19818 19.7251 2.97923 20.5061C3.76027 21.2872 5.0266 21.2872 5.80765 20.5061L12.8787 13.4351M17.1927 13.7994L21.071 17.6777C21.8521 18.4587 21.8521 19.7251 21.071 20.5061C20.29 21.2872 19.0236 21.2872 18.2426 20.5061L12.0341 14.2977M6.73267 5.90381L4.61135 6.61092L2.49003 3.07539L3.90424 1.66117L7.43978 3.78249L6.73267 5.90381ZM6.73267 5.90381L9.5629 8.73404M10.0503 10.6066C9.2065 8.45359 9.37147 5.62861 11.111 3.8891C12.8505 2.14958 16.0607 1.76778 17.8285 2.82844L14.7878 5.86911L14.5052 8.98015L17.6162 8.69754L20.6569 5.65686C21.7176 7.42463 21.3358 10.6349 19.5963 12.3744C17.8567 14.1139 15.0318 14.2789 12.8788 13.435" />
+            </Match>
+          </Switch>
+        </svg>
+      }
+    >
+      <span
+        class={`${classes()} tool-call-spinner`}
+        role={props.statusLabel ? 'status' : undefined}
+        aria-label={props.statusLabel}
+        aria-live={props.statusLabel ? 'polite' : undefined}
+        aria-atomic={props.statusLabel ? 'true' : undefined}
+        aria-hidden={props.statusLabel ? undefined : 'true'}
+        title={props.statusLabel}
+      />
+    </Show>
+  );
 }
 
 function isQuestionToolName(toolName: string) {
@@ -407,18 +558,11 @@ function QuestionToolSummary(props: { title: string; items: QuestionSummaryItem[
   return (
     <div class="chat-tool-invocation-part question-summary-card">
       <div class="question-summary-header">
-        <svg
+        <ToolCallIcon
+          kind="question"
+          statusClass="tool-status-completed"
           class="question-summary-icon"
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path
-            fill-rule="evenodd"
-            clip-rule="evenodd"
-            d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-1A6 6 0 108 2a6 6 0 000 12zM7.25 4.5a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zM8 11a.75.75 0 100 1.5.75.75 0 000-1.5z"
-          />
-        </svg>
+        />
         <span class="question-summary-title">{props.title}</span>
       </div>
       <div class="question-summary-list">
@@ -521,8 +665,12 @@ function ReadToolCard(props: {
   return (
     <div class="chat-tool-invocation-part file-read-card">
       <div class="file-read-card-header">
-        <span class={`tool-status-dot ${statusClass()}`} />
-        <span class="file-read-action-label">Read</span>
+        <ToolCallIcon kind="read" statusClass={statusClass()} />
+        <span
+          class={`file-read-action-label${s().status === 'running' ? ' shimmer-progress' : ''}`}
+        >
+          {displayName() ? 'Read:' : 'Read'}
+        </span>
         <Show when={displayName()}>
           {(name) => (
             <Show
@@ -656,10 +804,10 @@ function FileChangeCard(props: {
   };
 
   const statusClass = () => {
-    if (isPending()) return 'pending';
-    if (isRunning()) return 'running';
-    if (isError()) return isAborted() ? 'aborted' : 'error';
-    return 'done';
+    if (isPending()) return 'tool-status-pending';
+    if (isRunning()) return 'tool-status-running';
+    if (isError()) return isAborted() ? 'tool-status-aborted' : 'tool-status-error';
+    return 'tool-status-completed';
   };
 
   const statusLabel = () => {
@@ -720,15 +868,15 @@ function FileChangeCard(props: {
       <Show when={showCompactCard()}>
         <div class="chat-tool-invocation-part file-change-card">
           <div class="file-change-card-header">
-            <span
-              class={`file-edit-dot ${statusClass()}`}
-              role="status"
-              aria-label={statusLabel()}
-              aria-live="polite"
-              aria-atomic="true"
-              title={statusLabel()}
+            <ToolCallIcon
+              kind="edit"
+              statusClass={statusClass()}
+              statusLabel={statusLabel()}
+              class="file-edit-icon"
             />
-            <span class="file-edit-action-label">{action()}</span>
+            <span class={`file-edit-action-label${isRunning() ? ' shimmer-progress' : ''}`}>
+              {action()}:
+            </span>
             <Show
               when={!isMultiFile() && change()}
               fallback={<span class="file-edit-summary-label">{fileCountLabel()}</span>}
@@ -1050,8 +1198,12 @@ function GenericToolCall(props: {
         aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
         aria-controls={hasExpandableContent() ? bodyId : undefined}
       >
-        <span class={`tool-status-dot ${props.statusClass}`} />
-        <span class="tool-invocation-title">{props.title}</span>
+        <ToolCallIcon toolName={props.tool.tool} statusClass={props.statusClass} />
+        <span
+          class={`tool-invocation-title${props.state.status === 'running' && !isTask() ? ' shimmer-progress' : ''}`}
+        >
+          {props.title}
+        </span>
         <Show when={taskTokenUsage()}>
           {(tokens) => (
             <span class="tool-invocation-token-stats" title="Subagent tokens">
@@ -1178,7 +1330,22 @@ function GenericToolCall(props: {
                 aria-live="polite"
                 title={taskSessionId() ? 'Open subagent session' : undefined}
               >
-                <span class="tool-invocation-activity-ring" aria-hidden="true" />
+                <svg
+                  class="tool-invocation-working-icon"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 12C15.866 12 19 8.86599 19 5H5C5 8.86599 8.13401 12 12 12ZM12 12C15.866 12 19 15.134 19 19H5C5 15.134 8.13401 12 12 12Z" />
+                  <path d="M5 2H12H19" />
+                  <path d="M5 22H12H19" />
+                </svg>
                 <span class="tool-invocation-running-copy">
                   <strong class="tool-invocation-running-label">
                     {taskRetryStatus()

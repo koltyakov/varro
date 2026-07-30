@@ -430,9 +430,7 @@ describe('ToolbarPickers', () => {
     cleanup = render(
       () => (
         <div
-          ref={(element) =>
-            element.addEventListener('click', (event) => event.stopPropagation())
-          }
+          ref={(element) => element.addEventListener('click', (event) => event.stopPropagation())}
         >
           <ProviderLimitChip
             badges={[{ label: '40%', tone: 'default' }]}

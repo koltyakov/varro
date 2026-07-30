@@ -66,6 +66,7 @@ const SCENARIO_NAMES = [
   'undo-session',
   'linked-tool-question',
   'tool-cards',
+  'tool-cards-large-transcript',
   'subagent-sessions',
   'row-archive',
   'tool-card-errors',
@@ -1920,6 +1921,136 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 300;
+    return state;
+  }
+
+  if (name === 'tool-cards-large-transcript') {
+    const session = makeSession(
+      'session-tool-cards-large-transcript',
+      'Tool card virtualization stability',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+
+    for (let index = 0; index < 70; index += 1) {
+      const createdAt = BASE_TIME - (200 - index) * 1000;
+      const user = makeUserMessage(
+        session.id,
+        `message-tool-cards-user-${index}`,
+        [`Check compact tool row ${index}.`],
+        createdAt
+      );
+      const messageId = `message-tool-cards-assistant-${index}`;
+      const assistant = makeAssistantMessage(
+        session.id,
+        messageId,
+        user.info.id,
+        '',
+        createdAt + 1
+      );
+      const toolId = `${messageId}-tool`;
+      const commonToolPart = {
+        id: toolId,
+        sessionID: session.id,
+        messageID: messageId,
+        type: 'tool' as const,
+        callID: `${toolId}-call`,
+      };
+
+      switch (index % 5) {
+        case 0:
+          assistant.parts = [
+            {
+              ...commonToolPart,
+              tool: 'read',
+              state: {
+                status: 'completed',
+                input: {
+                  file_path: `/workspace/varro/src/tool-${index}.ts`,
+                  offset: index + 1,
+                  limit: 20,
+                },
+                output: '<type>file</type>\n<content>export const stable = true;</content>',
+                title: `Read tool-${index}.ts`,
+                metadata: {},
+                time: { start: createdAt + 1, end: createdAt + 2 },
+              },
+            },
+          ];
+          break;
+        case 1:
+          assistant.parts = [
+            {
+              ...commonToolPart,
+              tool: 'edit',
+              state: {
+                status: 'completed',
+                input: {
+                  file_path: `/workspace/varro/src/tool-${index}.ts`,
+                  old_string: 'stable = false',
+                  new_string: 'stable = true',
+                },
+                output: `Updated /workspace/varro/src/tool-${index}.ts`,
+                title: `Edit tool-${index}.ts`,
+                metadata: { additions: 1, deletions: 1 },
+                time: { start: createdAt + 1, end: createdAt + 2 },
+              },
+            },
+          ];
+          break;
+        case 2:
+          assistant.parts = [
+            {
+              ...commonToolPart,
+              tool: 'bash',
+              state: {
+                status: 'completed',
+                input: { command: `npm run test -- tool-${index}` },
+                output: 'passed',
+                title: `npm run test -- tool-${index}`,
+                metadata: {},
+                time: { start: createdAt + 1, end: createdAt + 2 },
+              },
+            },
+          ];
+          break;
+        case 3:
+          assistant.parts = [
+            {
+              ...commonToolPart,
+              tool: 'grep',
+              state: {
+                status: 'completed',
+                input: { pattern: `tool-${index}`, path: 'src' },
+                output: `src/tool-${index}.ts:1:export const stable = true;`,
+                title: `Search: tool-${index}`,
+                metadata: {},
+                time: { start: createdAt + 1, end: createdAt + 2 },
+              },
+            },
+          ];
+          break;
+        default:
+          assistant.parts = [
+            makeReasoningPart(
+              session.id,
+              messageId,
+              `${messageId}-reasoning`,
+              `Checking compact tool virtualization row ${index}.`,
+              createdAt + 1,
+              createdAt + 2
+            ),
+          ];
+      }
+
+      messages.push(user, assistant);
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 305;
     return state;
   }
 

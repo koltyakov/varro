@@ -150,7 +150,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
           : ''
       }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
-      }`}
+      }${props.outerListVirtualized && props.nearViewport === false ? ' interactive-item-off-core' : ''}`}
     >
       <Show when={changeLabel()}>
         <div class="model-change-indicator">

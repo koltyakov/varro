@@ -890,11 +890,9 @@ export function MessageList() {
     for (const entry of entries) {
       const element = entry.target as HTMLDivElement;
       const messageId = element.dataset.msgId;
-      const height = element.getBoundingClientRect().height;
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? element.getBoundingClientRect().height;
       if (!messageId || !element.isConnected || height <= 0) continue;
 
-      element.style.setProperty('--cis', `${height}px`);
-      element.dataset.cis = '';
       measurements.push({ messageId, height });
     }
 
@@ -1477,6 +1475,10 @@ export function MessageList() {
     }
     if (event.deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
+      if (autoScroll() || pinnedToBottom || followModeLocked) {
+        disengageBottomFollow();
+        resumeAutoScrollAfterDiffFocus = false;
+      }
     }
   }
 
@@ -1648,31 +1650,33 @@ export function MessageList() {
     if (!trackRef) return;
     lastTrackHeight = trackRef.getBoundingClientRect().height;
     lastAutoScrolledTrackHeight = lastTrackHeight;
-    const observer = new ResizeObserver(() => {
+    const observer = new ResizeObserver((entries) => {
       if (!containerRef) return;
+      const containerChanged =
+        entries.length === 0 || entries.some((entry) => entry.target === containerRef);
+      const trackChanged = entries.length === 0 || entries.some((entry) => entry.target === trackRef);
       // Below the virtualization threshold rows have no individual ResizeObserver. Invalidate the
       // sticky DOM pass when the track changes so streamed assistant growth can reveal it again.
-      if (!shouldMeasureRows()) setMeasurementVersion((version) => version + 1);
-      const currentContainerClientWidth = containerRef.clientWidth;
-      // Chat text tracks --vscode-font-size, so a live font-size setting
-      // change re-wraps every row without changing the container width.
-      // Cached heights of unmounted virtualized rows would go stale, so it
-      // must invalidate exactly like a width change.
-      const currentContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
-      if (
-        currentContainerClientWidth !== lastContainerClientWidth ||
-        currentContainerFontSize !== lastContainerFontSize
-      ) {
-        lastContainerClientWidth = currentContainerClientWidth;
-        lastContainerFontSize = currentContainerFontSize;
-        if (shouldMeasureRows()) {
-          measuredHeights.clear();
-          setMeasurementVersion((version) => version + 1);
-        }
+      if (trackChanged && !shouldMeasureRows() && !autoScroll()) {
+        setMeasurementVersion((version) => version + 1);
       }
-      updateScrollbarInset();
-      setViewportHeight(containerRef.clientHeight);
-      scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
+      if (containerChanged) {
+        const currentContainerClientWidth = containerRef.clientWidth;
+        // Keep offscreen heights as provisional estimates while mounted row observers reconcile
+        // wrapping changes. Clearing the map here would disable virtualization and remount the full
+        // transcript on every frame of a live panel resize.
+        const currentContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
+        if (
+          currentContainerClientWidth !== lastContainerClientWidth ||
+          currentContainerFontSize !== lastContainerFontSize
+        ) {
+          lastContainerClientWidth = currentContainerClientWidth;
+          lastContainerFontSize = currentContainerFontSize;
+        }
+        updateScrollbarInset();
+        setViewportHeight(containerRef.clientHeight);
+        scheduleStickyPreviewViewportState(containerRef.scrollTop, containerRef.clientHeight);
+      }
       scheduleVisibleMeasurement({ afterResize: true });
     });
     observer.observe(containerRef);

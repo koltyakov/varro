@@ -27,6 +27,9 @@ export type ToolbarFitter = {
 export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
   let frame = 0;
   let requestId = 0;
+  let currentModeIndex = 0;
+  let hasAppliedMode = false;
+  let lastAvailableWidth: number | null = null;
 
   const getGap = () => {
     const toolbar = ports.getToolbar();
@@ -37,24 +40,70 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
     return Number.isFinite(gap) ? gap : 0;
   };
 
-  const isOverflowing = () => {
-    const toolbar = ports.getToolbar();
+  const isOverflowing = (availableWidth: number, gap: number) => {
     const left = ports.getLeftGroup();
     const right = ports.getRightGroup();
-    if (!toolbar || !left || !right) return false;
+    if (!left || !right) return false;
     const leftWidth = left.scrollWidth;
     const rightWidth = right.getBoundingClientRect().width;
-    return leftWidth + rightWidth + getGap() > toolbar.clientWidth + 1;
+    return leftWidth + rightWidth + gap > availableWidth + 1;
   };
 
-  const fit = (modeIndex: number, activeRequestId: number) => {
+  const applyMode = (modeIndex: number, activeRequestId: number, next: () => void) => {
     if (activeRequestId !== requestId) return;
-    const nextMode = TOOLBAR_COMPACT_MODES[Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1)]!;
-    ports.setMode(nextMode);
+    const boundedIndex = Math.max(0, Math.min(modeIndex, TOOLBAR_COMPACT_MODES.length - 1));
+    if (hasAppliedMode && boundedIndex === currentModeIndex) {
+      next();
+      return;
+    }
+
+    currentModeIndex = boundedIndex;
+    hasAppliedMode = true;
+    ports.setMode(TOOLBAR_COMPACT_MODES[currentModeIndex]!);
     queueMicrotask(() => {
       if (activeRequestId !== requestId) return;
-      if (!isOverflowing() || modeIndex >= TOOLBAR_COMPACT_MODES.length - 1) return;
-      fit(modeIndex + 1, activeRequestId);
+      next();
+    });
+  };
+
+  const fitTighter = (activeRequestId: number, availableWidth: number, gap: number) => {
+    if (activeRequestId !== requestId || !isOverflowing(availableWidth, gap)) return;
+    if (currentModeIndex >= TOOLBAR_COMPACT_MODES.length - 1) return;
+    applyMode(currentModeIndex + 1, activeRequestId, () =>
+      fitTighter(activeRequestId, availableWidth, gap)
+    );
+  };
+
+  const fitLooser = (activeRequestId: number, availableWidth: number, gap: number) => {
+    if (activeRequestId !== requestId || currentModeIndex <= 0) return;
+    const lastFittingModeIndex = currentModeIndex;
+    applyMode(currentModeIndex - 1, activeRequestId, () => {
+      if (isOverflowing(availableWidth, gap)) {
+        applyMode(lastFittingModeIndex, activeRequestId, () => {});
+        return;
+      }
+      fitLooser(activeRequestId, availableWidth, gap);
+    });
+  };
+
+  const fit = (activeRequestId: number) => {
+    if (activeRequestId !== requestId) return;
+    const toolbar = ports.getToolbar();
+    if (!toolbar) {
+      applyMode(currentModeIndex, activeRequestId, () => {});
+      return;
+    }
+    const availableWidth = toolbar.clientWidth;
+    const widthShrank = lastAvailableWidth !== null && availableWidth < lastAvailableWidth;
+    lastAvailableWidth = availableWidth;
+    const gap = getGap();
+
+    applyMode(currentModeIndex, activeRequestId, () => {
+      if (isOverflowing(availableWidth, gap)) {
+        fitTighter(activeRequestId, availableWidth, gap);
+        return;
+      }
+      if (!widthShrank) fitLooser(activeRequestId, availableWidth, gap);
     });
   };
 
@@ -64,7 +113,7 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
       const activeRequestId = ++requestId;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        fit(0, activeRequestId);
+        fit(activeRequestId);
       });
     },
     cancel() {

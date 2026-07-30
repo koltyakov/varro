@@ -16,6 +16,21 @@ test('renders read, edit, and bash tool cards', async ({ page }) => {
   await expect(page.locator('.terminal-command-card')).toContainText('3 passed');
 });
 
+test('keeps compact tool card headers on the same geometry contract', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+
+  const headers = page.locator(
+    '.file-read-card-header, .file-change-card-header, .tool-invocation-header'
+  );
+  await expect(headers).toHaveCount(4);
+  const heights = await headers.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height)
+  );
+
+  expect(heights).toHaveLength(4);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+});
+
 test('renders search tool details in the same framed card as other tool details', async ({
   page,
 }) => {
@@ -24,6 +39,13 @@ test('renders search tool details in the same framed card as other tool details'
   const searchTool = page
     .locator('.chat-tool-invocation-part')
     .filter({ hasText: 'Search: --color-vscode-input-border' });
+  await expect
+    .poll(() =>
+      searchTool
+        .locator('.tool-invocation-header')
+        .evaluate((header) => getComputedStyle(header).columnGap)
+    )
+    .toBe('6px');
   await searchTool.locator('.tool-invocation-header').click();
 
   const card = searchTool.locator('.structured-tool-card');

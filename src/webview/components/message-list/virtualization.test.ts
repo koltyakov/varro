@@ -23,6 +23,31 @@ describe('buildVirtualMetrics', () => {
       itemCount: 3,
     });
   });
+
+  it('rebuilds cached downstream offsets when a measured height changes', () => {
+    const itemIds = ['a', 'b', 'c'];
+    const measuredHeights = new Map([
+      ['a', 40],
+      ['b', 50],
+      ['c', 60],
+    ]);
+    const previous = buildVirtualMetrics({ itemIds, measuredHeights });
+
+    measuredHeights.set('b', 80);
+
+    expect(
+      buildVirtualMetrics({
+        itemIds,
+        measuredHeights,
+        previous: { metrics: previous, itemIds },
+        dirtyFromIndex: 1,
+      })
+    ).toEqual({
+      prefix: [0, 40, 120, 180],
+      totalHeight: 180,
+      itemCount: 3,
+    });
+  });
 });
 
 describe('calculateVirtualRange', () => {

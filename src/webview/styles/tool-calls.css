@@ -129,6 +129,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12.5px;
+  line-height: 1.2;
   color: var(--color-vscode-fg);
   opacity: 0.94;
   cursor: pointer;
@@ -159,7 +160,8 @@
 .chat-thinking-box .thinking-topic-icon {
   flex: none;
   display: block;
-  color: var(--color-vscode-fg-muted);
+  /* The sparse bulb needs slightly more contrast to match denser tool icon geometry. */
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 90%, transparent);
 }
 
 .chat-thinking-box .thinking-topic-icon.thinking-in-progress {
@@ -994,12 +996,13 @@ kbd {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: var(--space-4) var(--space-5);
   border: none;
   background: transparent;
   cursor: pointer;
   font-size: 12.5px;
+  line-height: 1.2;
   color: var(--color-vscode-fg);
   text-align: left;
   transition: opacity 0.1s;
@@ -1013,32 +1016,41 @@ kbd {
   cursor: default;
 }
 
-.chat-tool-invocation-part .tool-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.chat-tool-invocation-part .tool-call-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
-.chat-tool-invocation-part .tool-status-dot.tool-status-pending {
-  background: color-mix(in srgb, var(--color-vscode-muted) 45%, transparent);
+.chat-tool-invocation-part .tool-call-icon.tool-status-pending {
+  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
 }
 
-.chat-tool-invocation-part .tool-status-dot.tool-status-running {
-  background: var(--color-vscode-accent);
+.chat-tool-invocation-part .tool-call-icon.tool-status-running {
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
-.chat-tool-invocation-part .tool-status-dot.tool-status-completed {
-  background: var(--color-vscode-success);
+.chat-tool-invocation-part .tool-call-icon.tool-status-completed {
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
 }
 
-.chat-tool-invocation-part .tool-status-dot.tool-status-error {
-  background: var(--color-vscode-error);
+.chat-tool-invocation-part .tool-call-icon.tool-status-error {
+  color: color-mix(in srgb, var(--color-vscode-error) 82%, transparent);
 }
 
-.chat-tool-invocation-part .tool-status-dot.tool-status-aborted {
-  background: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
+.chat-tool-invocation-part .tool-call-icon.tool-status-aborted {
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
+}
+
+.chat-tool-invocation-part .tool-call-spinner.tool-status-running {
+  box-sizing: border-box;
+  border: 1.8px solid color-mix(in srgb, var(--color-vscode-fg-muted) 22%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  will-change: transform;
 }
 
 .chat-tool-invocation-part .tool-invocation-title {
@@ -1353,14 +1365,11 @@ kbd {
   outline-offset: 1px;
 }
 
-.chat-tool-invocation-part .tool-invocation-activity-ring {
-  width: 14px;
-  height: 14px;
+.chat-tool-invocation-part .tool-invocation-working-icon {
+  width: 16px;
+  height: 16px;
   flex: none;
-  border: 1.5px solid color-mix(in srgb, var(--color-vscode-accent) 22%, transparent);
-  border-top-color: var(--color-vscode-accent);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-running-copy {
@@ -1393,9 +1402,8 @@ kbd {
 
 .chat-tool-invocation-part
   .tool-invocation-subagent-running.is-retrying
-  .tool-invocation-activity-ring {
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
-  border-top-color: var(--color-vscode-warning);
+  .tool-invocation-working-icon {
+  color: var(--color-vscode-warning);
 }
 
 .file-change-card {
@@ -1445,48 +1453,24 @@ kbd {
 .file-change-card-header,
 .file-edit-line {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: 0.25em;
   width: 100%;
   min-width: 0;
   padding: var(--space-4) var(--space-5);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
-.file-edit-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.file-edit-icon {
   align-self: center;
-  flex-shrink: 0;
-}
-
-.file-edit-dot.done {
-  background: var(--color-vscode-success);
-}
-
-.file-edit-dot.pending {
-  background: var(--color-vscode-fg-muted);
-}
-
-.file-edit-dot.running {
-  background: var(--color-vscode-accent);
-  animation: pulse-soft 1.5s ease-in-out infinite;
-}
-
-.file-edit-dot.error {
-  background: var(--color-vscode-error);
-}
-
-.file-edit-dot.aborted {
-  background: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
+  margin-right: calc(8px - 0.25em);
 }
 
 .file-edit-action-label {
   display: inline-flex;
   align-items: center;
-  font-size: 12px;
+  font-size: inherit;
   color: var(--color-vscode-fg);
   flex-shrink: 0;
   line-height: 1.2;
@@ -1497,7 +1481,7 @@ kbd {
   align-items: center;
   color: var(--color-vscode-fg);
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: inherit;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1505,14 +1489,18 @@ kbd {
 .file-edit-path-link {
   display: inline-flex;
   align-items: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-family: inherit;
+  font-size: inherit;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-vscode-fg) !important;
   line-height: 1.2;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  text-decoration-thickness: 0.4px;
+  text-underline-offset: 2px;
 }
 
 .file-edit-path-link:hover {
@@ -1521,8 +1509,8 @@ kbd {
 
 .file-edit-move-paths {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
+  gap: 0.25em;
   line-height: 1.2;
   min-width: 0;
 }
@@ -1537,9 +1525,9 @@ kbd {
 
 .file-edit-multi-list {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   flex: 1 1 auto;
-  gap: 6px;
+  gap: 0.25em;
   min-width: 0;
   overflow: visible;
 }
@@ -1657,17 +1645,18 @@ kbd {
 
 .file-read-card-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 0.25em;
   width: 100%;
   min-width: 0;
   padding: var(--space-4) var(--space-5);
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
-.file-read-card-header .tool-status-dot {
+.file-read-card-header .tool-call-icon {
   align-self: center;
+  margin-right: calc(8px - 0.25em);
 }
 
 .file-read-card-header .file-read-action-label {
@@ -1686,7 +1675,7 @@ kbd {
 .file-read-target {
   display: inline-flex;
   align-items: center;
-  font-family: var(--font-mono);
+  font-family: inherit;
   font-size: inherit;
   min-width: 0;
   overflow: hidden;
@@ -1696,12 +1685,11 @@ kbd {
   line-height: 1.2;
 }
 
-.file-read-target:hover {
+.file-read-target:is(a) {
   text-decoration: underline;
-}
-
-.file-read-target-text:hover {
-  text-decoration: none;
+  text-decoration-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  text-decoration-thickness: 0.4px;
+  text-underline-offset: 2px;
 }
 
 .file-read-range,

@@ -1,9 +1,74 @@
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { getScrollMetrics, waitForAnimationFrame, waitForAnimationFrames } from './helpers';
 import {
   appendDeltaToMultiAgentLargeStreaming,
   appendDeltaToMultiAgentStreaming,
 } from './scroll-helpers';
+
+async function getVisibleAnchor(list: Locator, messageId?: string) {
+  return list.evaluate((element, targetId) => {
+    const containerRect = element.getBoundingClientRect();
+    const row = targetId
+      ? element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(targetId)}"]`)
+      : [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+        });
+    return {
+      id: row?.dataset.msgId ?? '',
+      top: row ? row.getBoundingClientRect().top - containerRect.top : Number.NaN,
+      scrollTop: element.scrollTop,
+    };
+  }, messageId);
+}
+
+async function sampleVisibleAnchorAcrossFrames(
+  list: Locator,
+  frameCount = 4,
+  messageId?: string
+) {
+  const samples: Awaited<ReturnType<typeof getVisibleAnchor>>[] = [];
+  for (let index = 0; index < frameCount; index += 1) {
+    await list.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    samples.push(await getVisibleAnchor(list, messageId));
+  }
+  return samples;
+}
+
+async function appendRunningToolPart(page: Page, index: number) {
+  await page.evaluate((toolIndex) => {
+    const part = {
+      id: `message-mla-assistant-streaming-tool-${toolIndex}`,
+      sessionID: 'session-multi-agent-large-streaming',
+      messageID: 'message-mla-assistant-streaming',
+      type: 'tool' as const,
+      callID: `message-mla-assistant-streaming-tool-${toolIndex}-call`,
+      tool: toolIndex % 2 === 0 ? 'bash' : 'grep',
+      state: {
+        status: 'running' as const,
+        input:
+          toolIndex % 2 === 0
+            ? { command: `npm run check-${toolIndex}` }
+            : { pattern: `stream-${toolIndex}`, path: 'src' },
+        title: toolIndex % 2 === 0 ? `npm run check-${toolIndex}` : `Search: stream-${toolIndex}`,
+        metadata: {},
+        time: { start: Date.now() },
+      },
+    };
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+    };
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: { type: 'message.part.updated', properties: { part } },
+      },
+      '*'
+    );
+  }, index);
+}
 
 test.describe('multi-agent scroll stability', () => {
   test('no jitter when streaming at bottom with multiple completed agent responses', async ({
@@ -183,6 +248,36 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
+  });
+
+  test('slow upward scrolling stays anchored while new content streams', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+    for (let index = 0; index < 24; index += 1) {
+      const before = await getVisibleAnchor(list);
+      expect(before.id).not.toBe('');
+      const beforeDocumentTop = before.top + before.scrollTop;
+
+      await page.mouse.wheel(0, -1);
+      await appendDeltaToMultiAgentLargeStreaming(
+        page,
+        `\n\nSlow-scroll chunk ${index}: ${'stream without moving the detached viewport '.repeat(5 + (index % 3))}`
+      );
+      await appendRunningToolPart(page, index);
+      const samples = await sampleVisibleAnchorAcrossFrames(list, 4, before.id);
+      for (const sample of samples) {
+        expect(sample.id).toBe(before.id);
+        expect(Math.abs(sample.top + sample.scrollTop - beforeDocumentTop)).toBeLessThan(1.5);
+        expect(sample.scrollTop).toBeLessThanOrEqual(before.scrollTop + 1);
+      }
+    }
   });
 
   test('detached scroll holds while streaming in large multi-agent transcript', async ({
