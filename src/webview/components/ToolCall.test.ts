@@ -233,7 +233,13 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
     expect(container?.textContent).toContain('git status');
-    expect(container?.querySelector('.tool-call-icon-terminal')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector('.tool-call-icon-terminal');
+    expect(icon).toBeInstanceOf(SVGElement);
+    expect(icon?.getAttribute('width')).toBe('12');
+    expect(icon?.getAttribute('height')).toBe('12');
+    expect(
+      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
+    ).toEqual(['M13 17H20', 'M5 7L10 12L5 17']);
   });
 
   it('does not repeat long commands in the collapsed preview', () => {
@@ -655,7 +661,9 @@ describe('ToolCall', () => {
     expect(runningStatus?.getAttribute('aria-live')).toBe('polite');
     expect((runningStatus as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(workingIcon).toBeInstanceOf(SVGElement);
-    expect(workingIcon?.getAttribute('stroke-width')).toBe('1.8');
+    expect(workingIcon?.getAttribute('width')).toBe('12');
+    expect(workingIcon?.getAttribute('height')).toBe('12');
+    expect(workingIcon?.getAttribute('stroke-width')).toBe('2');
     expect(runningStatus?.querySelector('.tool-invocation-activity-ring')).toBeNull();
     expect(runningStatus?.textContent).toContain('Explore subagent is working');
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
@@ -1393,7 +1401,14 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.file-read-action-label')?.textContent).toBe('Read:');
     expect(target?.textContent).toBe('main.ts');
     expect(container?.querySelector('.file-read-range')?.textContent).toBe('(L5-7)');
-    expect(container?.querySelector('.tool-call-icon-read')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector('.tool-call-icon-read');
+    expect(icon).toBeInstanceOf(SVGElement);
+    expect(
+      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
+    ).toEqual([
+      'M3 13C6.6 5 17.4 5 21 13',
+      'M12 17C10.3431 17 9 15.6569 9 14C9 12.3431 10.3431 11 12 11C13.6569 11 15 12.3431 15 14C15 15.6569 13.6569 17 12 17Z',
+    ]);
 
     target?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -1830,7 +1845,14 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
     expect(container?.querySelector('.file-edit-summary-label')?.textContent).toBe('2 files');
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
-    expect(container?.querySelector('.tool-call-icon-edit')).toBeInstanceOf(SVGElement);
+    const icon = container?.querySelector('.tool-call-icon-edit');
+    expect(icon).toBeInstanceOf(SVGElement);
+    expect(
+      Array.from(icon?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
+    ).toEqual([
+      'M3 21L12 21H21',
+      'M12.2218 5.82839L15.0503 2.99996L20 7.94971L17.1716 10.7781M12.2218 5.82839L6.61522 11.435C6.42769 11.6225 6.32233 11.8769 6.32233 12.1421L6.32233 16.6776L10.8579 16.6776C11.1231 16.6776 11.3774 16.5723 11.565 16.3847L17.1716 10.7781M12.2218 5.82839L17.1716 10.7781',
+    ]);
     expect(container?.querySelector('.file-edit-running-label')?.textContent).toBe('editing…');
     expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
       'shimmer-progress'

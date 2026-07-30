@@ -3,14 +3,23 @@ import type { Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
 
-function bindStickyTextOverflowFade(text: HTMLElement, trackText: () => string) {
+function bindStickyTextOverflowFade(
+  text: HTMLElement,
+  trackText: () => string,
+  onGeometryChange?: () => void
+) {
   const update = () => {
     const hasMoreBelow = text.scrollTop + text.clientHeight < text.scrollHeight - 1;
     text.parentElement?.classList.toggle('has-more-below', hasMoreBelow);
   };
+  const updateAfterResize = () => {
+    update();
+    onGeometryChange?.();
+  };
 
   text.addEventListener('scroll', update, { passive: true });
-  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+  const resizeObserver =
+    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateAfterResize);
   resizeObserver?.observe(text);
   createEffect(() => {
     trackText();
@@ -35,6 +44,7 @@ export function StickyUserMessagePreviewCard(props: {
   onClick?: (preview: StickyUserMessagePreview) => void;
   title?: string;
   loading?: boolean;
+  onGeometryChange?: () => void;
 }) {
   const isClickable = () => !!props.onClick;
 
@@ -53,7 +63,9 @@ export function StickyUserMessagePreviewCard(props: {
             <div class="latest-user-message-sticky-text-clip">
               <div
                 class="latest-user-message-sticky-text"
-                ref={(text) => bindStickyTextOverflowFade(text, () => props.preview.text)}
+                ref={(text) =>
+                  bindStickyTextOverflowFade(text, () => props.preview.text, props.onGeometryChange)
+                }
               >
                 {props.preview.text}
               </div>

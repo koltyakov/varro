@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import { postMessage } from '../lib/bridge';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { getLeafPathName } from '../lib/path-display';
+import { observeSettledResize } from '../lib/settled-resize-observer';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
 import { state } from '../lib/state';
 import type { FileDiff } from '../types';
@@ -891,10 +892,7 @@ function DiffItem(props: {
       updateScrollThumbs();
     });
 
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(updateScrollThumbs);
-    observer.observe(viewport);
-    onCleanup(() => observer.disconnect());
+    onCleanup(observeSettledResize(viewport, updateScrollThumbs));
   });
 
   createEffect(() => {

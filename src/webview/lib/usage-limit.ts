@@ -13,6 +13,49 @@ export type UsageLimitNotice = {
   modelID?: string | null;
 };
 
+export type UsageLimitPresentation = {
+  title: string;
+  summary: string;
+};
+
+export function getUsageLimitPresentation(
+  notice: Pick<UsageLimitNotice, 'message' | 'unit'>
+): UsageLimitPresentation {
+  const normalized = notice.message.toLowerCase();
+  const isServiceIssue =
+    normalized.includes('overloaded') ||
+    normalized.includes('service unavailable') ||
+    normalized.includes('server unavailable') ||
+    normalized.includes('temporarily unavailable') ||
+    normalized.includes('server is busy') ||
+    normalized.includes('servers are busy') ||
+    normalized.includes('at capacity');
+
+  if (isServiceIssue) {
+    return {
+      title: 'Service temporarily unavailable',
+      summary: 'service disruption',
+    };
+  }
+
+  const isQuotaExhausted =
+    normalized.includes('usage limit') ||
+    normalized.includes('usage exceeded') ||
+    /\b(?:messages?|tokens?|credits?|quota)\b.*\b(?:exhausted|exceeded|limit)\b/.test(normalized);
+
+  if (isQuotaExhausted) {
+    return {
+      title: 'Usage limit reached',
+      summary: `${getUsageLimitLabel(notice.unit).toLowerCase()} exhausted`,
+    };
+  }
+
+  return {
+    title: 'Request throttled',
+    summary: 'request throttled',
+  };
+}
+
 export function parseUsageLimitNotice(
   message: string | null | undefined,
   options?: { retryAt?: number | null; attempt?: number | null }
@@ -215,10 +258,13 @@ function parseJsonErrorBody(
 
   if (!isStructuredLimit) return null;
 
+  const fallbackMessage = code.includes('unavailable')
+    ? 'Service temporarily unavailable'
+    : 'Rate limited';
   const displayMessage =
     (typeof error?.message === 'string' && error.message) ||
     (typeof json.message === 'string' && json.message) ||
-    'Rate limited';
+    fallbackMessage;
 
   return {
     source: 'message',

@@ -34,6 +34,7 @@ describe('MessageListChrome', () => {
     cleanup = undefined;
     container?.remove();
     container = null;
+    vi.unstubAllGlobals();
   });
 
   it('renders the sticky user message preview shell with hidden semantics', () => {
@@ -93,6 +94,40 @@ describe('MessageListChrome', () => {
     text!.scrollTop = 128;
     text!.dispatchEvent(new Event('scroll'));
     expect(clip?.classList.contains('has-more-below')).toBe(false);
+  });
+
+  it('reports sticky text geometry changes from its resize observer', () => {
+    let resizeCallback: ResizeObserverCallback | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const onGeometryChange = vi.fn();
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'A sticky prompt that changes height when the chat width changes.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+          onGeometryChange={onGeometryChange}
+        />
+      ),
+      container!
+    );
+
+    resizeCallback?.([], {} as ResizeObserver);
+
+    expect(onGeometryChange).toHaveBeenCalledOnce();
   });
 
   it('invokes the click handler with a custom title', () => {

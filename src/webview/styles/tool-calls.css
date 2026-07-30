@@ -160,8 +160,9 @@
 .chat-thinking-box .thinking-topic-icon {
   flex: none;
   display: block;
-  /* The sparse bulb needs slightly more contrast to match denser tool icon geometry. */
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 90%, transparent);
+  width: 12px;
+  height: 12px;
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 68%, transparent);
 }
 
 .chat-thinking-box .thinking-topic-icon.thinking-in-progress {
@@ -1018,36 +1019,30 @@ kbd {
 
 .chat-tool-invocation-part .tool-call-icon {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
 }
 
-.chat-tool-invocation-part .tool-call-icon.tool-status-pending {
-  color: color-mix(in srgb, var(--color-vscode-muted) 60%, transparent);
+.chat-tool-invocation-part .tool-call-icon.tool-status-pending,
+.chat-tool-invocation-part .tool-call-icon.tool-status-completed,
+.chat-tool-invocation-part .tool-call-icon.tool-status-aborted,
+.chat-tool-invocation-part .tool-call-icon.tool-status-running {
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 68%, transparent);
 }
 
 .chat-tool-invocation-part .tool-call-icon.tool-status-running {
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
-.chat-tool-invocation-part .tool-call-icon.tool-status-completed {
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
-}
-
 .chat-tool-invocation-part .tool-call-icon.tool-status-error {
-  color: color-mix(in srgb, var(--color-vscode-error) 82%, transparent);
-}
-
-.chat-tool-invocation-part .tool-call-icon.tool-status-aborted {
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 72%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-error) 72%, transparent);
 }
 
 .chat-tool-invocation-part .tool-call-spinner.tool-status-running {
   box-sizing: border-box;
-  border: 1.8px solid color-mix(in srgb, var(--color-vscode-fg-muted) 22%, transparent);
-  border-top-color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-fg-muted) 18%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-vscode-fg-muted) 68%, transparent);
   border-radius: 50%;
   animation: spin 0.85s linear infinite;
   will-change: transform;
@@ -1366,10 +1361,10 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-working-icon {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   flex: none;
-  color: color-mix(in srgb, var(--color-vscode-fg-muted) 78%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 68%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-running-copy {
@@ -1403,7 +1398,7 @@ kbd {
 .chat-tool-invocation-part
   .tool-invocation-subagent-running.is-retrying
   .tool-invocation-working-icon {
-  color: var(--color-vscode-warning);
+  color: color-mix(in srgb, var(--color-vscode-warning) 72%, transparent);
 }
 
 .file-change-card {

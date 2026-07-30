@@ -97,7 +97,6 @@ import {
   formatVariantLabel,
   getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
-  getPrimaryProviderLimitWindow,
 } from '../lib/format';
 import { getPreferredVariant } from '../lib/model-variants';
 import { getContextWindow } from '../lib/message-metrics';
@@ -152,10 +151,7 @@ import {
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
 import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
-import {
-  createUsageLimitProviderLimit,
-  isUsageLimitNoticeVisibleForModel,
-} from '../lib/usage-limit';
+import { getUsageLimitPresentation, isUsageLimitNoticeVisibleForModel } from '../lib/usage-limit';
 import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
@@ -2197,9 +2193,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ? notice
       : null;
   });
-  const activeUsageLimitWindow = createMemo(() =>
-    getPrimaryProviderLimitWindow(createUsageLimitProviderLimit(visibleUsageLimit()))
-  );
+  const activeUsageLimitPresentation = createMemo(() => {
+    const notice = visibleUsageLimit();
+    return notice ? getUsageLimitPresentation(notice) : null;
+  });
   const activeRalphManagerSessionId = createMemo(() =>
     ralphStore.isRalphSession(composerSessionId())
       ? composerSessionId()
@@ -2397,7 +2394,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     if (deps.showBusyMenu || deps.showContextPopup || deps.showProviderLimitPopup) return;
 
-    toolbarFitter.schedule();
+    toolbarFitter.schedule({ contentChanged: true });
   });
 
   return (
@@ -2477,8 +2474,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
       <Show when={!hasExpandedDiffOverlay() && visibleUsageLimit()}>
         <UsageLimitBanner
+          title={activeUsageLimitPresentation()!.title}
           message={visibleUsageLimit()!.message}
-          meta={describeUsageLimit(activeUsageLimitWindow(), visibleUsageLimit()?.attempt ?? null)}
+          meta={describeUsageLimit(
+            activeUsageLimitPresentation()!.summary,
+            visibleUsageLimit()!.retryAt,
+            visibleUsageLimit()!.attempt
+          )}
           primaryActionLabel="Continue"
           onPrimaryAction={() => void handleUsageLimitContinue()}
           showStopRetrying={
@@ -3036,16 +3038,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 }
 
-function describeUsageLimit(
-  window: ReturnType<typeof getPrimaryProviderLimitWindow>,
-  attempt: number | null
-) {
-  const parts: string[] = [];
-  if (window?.label) {
-    parts.push(`${window.label.toLowerCase()} exhausted`);
-  }
-  if (window?.resetAt) {
-    const seconds = Math.max(1, Math.ceil((window.resetAt - Date.now()) / 1000));
+function describeUsageLimit(summary: string, retryAt: number | null, attempt: number | null) {
+  const parts = [summary];
+  if (retryAt) {
+    const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
     parts.push(`retry in ${seconds}s`);
   }
   if (attempt) {

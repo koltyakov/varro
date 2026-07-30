@@ -36,6 +36,7 @@ const SCENARIO_NAMES = [
   'startup-race',
   'plan-ready',
   'sticky-preview',
+  'sticky-preview-large-transcript',
   'todo-queue',
   'status-filters',
   'file-search',
@@ -1108,6 +1109,85 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 50;
+    return state;
+  }
+
+  if (name === 'sticky-preview-large-transcript') {
+    const session = makeSession(
+      'session-sticky-preview-large',
+      'Large sticky header overlap',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    const historyUser = makeUserMessage(
+      session.id,
+      'message-sticky-large-history-user',
+      ['Earlier request that keeps this transcript above the virtualization threshold.'],
+      BASE_TIME - 100_000
+    );
+    messages.push(historyUser);
+    for (let index = 0; index < 56; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-large-history-assistant-${index}`,
+          historyUser.info.id,
+          `Earlier implementation step ${index + 1}.`,
+          BASE_TIME - 99_000 + index
+        )
+      );
+    }
+
+    const stickyUser = makeUserMessage(
+      session.id,
+      'message-sticky-large-user-1',
+      [
+        'Do not animate text in agent calls. Remove this spinning in details. Instead, while the Explore subagent is working, show the supplied 16px hourglass icon with the requested SVG geometry and preserve the existing status treatment.',
+      ],
+      BASE_TIME - 20_000
+    );
+    messages.push(stickyUser);
+    for (let index = 0; index < 8; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-large-assistant-${index}`,
+          stickyUser.info.id,
+          index === 7
+            ? 'The implementation is in place. Verifying targeted behavior and validation now.'
+            : `Implementation detail ${index + 1}: checking the agent-call icon and status behavior.`,
+          BASE_TIME - 19_000 + index
+        )
+      );
+    }
+    const nextUser = makeUserMessage(
+      session.id,
+      'message-sticky-large-user-2',
+      [
+        'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
+      ],
+      BASE_TIME - 2_000
+    );
+    messages.push(nextUser);
+    for (let index = 0; index < 12; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-large-final-assistant-${index}`,
+          nextUser.info.id,
+          index === 0
+            ? 'Planning targeted test and lint verification.'
+            : `Follow-up implementation and verification step ${index + 1}.`,
+          BASE_TIME - 1_000 + index
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 51;
     return state;
   }
 

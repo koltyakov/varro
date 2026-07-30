@@ -13,7 +13,7 @@ export type ToolbarFitPorts = {
 
 export type ToolbarFitter = {
   /** Re-runs the fit on the next animation frame, superseding any pending run. */
-  schedule: () => void;
+  schedule: (options?: { contentChanged?: boolean }) => void;
   /** Abandons a pending or in-flight fit, e.g. on unmount. */
   cancel: () => void;
 };
@@ -30,6 +30,7 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
   let currentModeIndex = 0;
   let hasAppliedMode = false;
   let lastAvailableWidth: number | null = null;
+  const failedLooserRequiredWidths = new Map<number, number>();
 
   const getGap = () => {
     const toolbar = ports.getToolbar();
@@ -40,14 +41,17 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
     return Number.isFinite(gap) ? gap : 0;
   };
 
-  const isOverflowing = (availableWidth: number, gap: number) => {
+  const getRequiredWidth = (gap: number) => {
     const left = ports.getLeftGroup();
     const right = ports.getRightGroup();
-    if (!left || !right) return false;
+    if (!left || !right) return null;
     const leftWidth = left.scrollWidth;
     const rightWidth = right.getBoundingClientRect().width;
-    return leftWidth + rightWidth + gap > availableWidth + 1;
+    return leftWidth + rightWidth + gap;
   };
+
+  const isOverflowing = (availableWidth: number, gap: number) =>
+    (getRequiredWidth(gap) ?? 0) > availableWidth + 1;
 
   const applyMode = (modeIndex: number, activeRequestId: number, next: () => void) => {
     if (activeRequestId !== requestId) return;
@@ -77,11 +81,18 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
   const fitLooser = (activeRequestId: number, availableWidth: number, gap: number) => {
     if (activeRequestId !== requestId || currentModeIndex <= 0) return;
     const lastFittingModeIndex = currentModeIndex;
-    applyMode(currentModeIndex - 1, activeRequestId, () => {
-      if (isOverflowing(availableWidth, gap)) {
+    const looserModeIndex = currentModeIndex - 1;
+    const knownRequiredWidth = failedLooserRequiredWidths.get(looserModeIndex);
+    if (knownRequiredWidth !== undefined && knownRequiredWidth > availableWidth + 1) return;
+
+    applyMode(looserModeIndex, activeRequestId, () => {
+      const requiredWidth = getRequiredWidth(gap);
+      if (requiredWidth !== null && requiredWidth > availableWidth + 1) {
+        failedLooserRequiredWidths.set(looserModeIndex, requiredWidth);
         applyMode(lastFittingModeIndex, activeRequestId, () => {});
         return;
       }
+      failedLooserRequiredWidths.delete(looserModeIndex);
       fitLooser(activeRequestId, availableWidth, gap);
     });
   };
@@ -108,7 +119,8 @@ export function createToolbarFitter(ports: ToolbarFitPorts): ToolbarFitter {
   };
 
   return {
-    schedule() {
+    schedule(options) {
+      if (options?.contentChanged) failedLooserRequiredWidths.clear();
       if (frame) cancelAnimationFrame(frame);
       const activeRequestId = ++requestId;
       frame = requestAnimationFrame(() => {

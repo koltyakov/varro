@@ -110,6 +110,7 @@ export function TodoList() {
     if (!chatShell) return;
 
     let previousChatShellHeight = chatShell.clientHeight;
+    let previousChatViewHeight = chatView?.clientHeight ?? 0;
     const updateAvailableSpace = () => {
       const chatShellHeight = chatShell.clientHeight;
       if (chatShellHeight > 0) {
@@ -134,12 +135,24 @@ export function TodoList() {
     updateAvailableSpace();
     if (typeof ResizeObserver === 'undefined') return;
 
-    const observer = new ResizeObserver(() => {
-      const chatShellHeight = chatShell.clientHeight;
+    const observer = new ResizeObserver((entries) => {
+      const shellEntry = entries.find((entry) => entry.target === chatShell);
+      const viewEntry = chatView ? entries.find((entry) => entry.target === chatView) : undefined;
+      const chatShellHeight = shellEntry?.borderBoxSize?.[0]?.blockSize ?? chatShell.clientHeight;
+      const chatViewHeight = chatView
+        ? (viewEntry?.borderBoxSize?.[0]?.blockSize ?? chatView.clientHeight)
+        : 0;
+      if (
+        chatShellHeight === previousChatShellHeight &&
+        chatViewHeight === previousChatViewHeight
+      ) {
+        return;
+      }
       if (chatShellHeight !== previousChatShellHeight) {
         manuallyExpanded = false;
         previousChatShellHeight = chatShellHeight;
       }
+      previousChatViewHeight = chatViewHeight;
       updateAvailableSpace();
     });
     observer.observe(chatShell);

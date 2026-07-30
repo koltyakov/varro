@@ -228,6 +228,7 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [stickyPreviewGeometryVersion, setStickyPreviewGeometryVersion] = createSignal(0);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
   const [pendingStickyJump, setPendingStickyJump] = createSignal<{
@@ -725,6 +726,7 @@ export function MessageList() {
     // stale while a fully visible prompt moves or an assistant row grows; measurementVersion also
     // reruns this DOM pass for layout changes that happen without a scroll event.
     measurementVersion();
+    stickyPreviewGeometryVersion();
     const throttledViewportHeight = stickyPreviewViewportHeight();
     const currentViewportHeight =
       throttledViewportHeight > 0 ? throttledViewportHeight : viewportHeight();
@@ -1073,6 +1075,15 @@ export function MessageList() {
       top: stickyRect.top - containerRect.top,
       bottom: stickyRect.bottom - containerRect.top,
     };
+  }
+
+  function handleStickyPreviewGeometryChange() {
+    if (containerRef) {
+      previousStickyPreviewBounds =
+        getStickyUserMessagePreviewBounds(containerRef.getBoundingClientRect()) ??
+        previousStickyPreviewBounds;
+    }
+    setStickyPreviewGeometryVersion((version) => version + 1);
   }
 
   function getStickyUserMessageSourceElement(messageId: string) {
@@ -1672,6 +1683,7 @@ export function MessageList() {
         ) {
           lastContainerClientWidth = currentContainerClientWidth;
           lastContainerFontSize = currentContainerFontSize;
+          handleStickyPreviewGeometryChange();
         }
         updateScrollbarInset();
         setViewportHeight(containerRef.clientHeight);
@@ -1895,6 +1907,7 @@ export function MessageList() {
     queueMicrotask(() => {
       if (!shouldMeasureRows()) return;
       scheduleVisibleMeasurement();
+      setStickyPreviewGeometryVersion((version) => version + 1);
     });
     void start;
     void end;
@@ -2242,6 +2255,7 @@ export function MessageList() {
                 title={stickyPreviewTitle}
                 loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
+                onGeometryChange={handleStickyPreviewGeometryChange}
               />
             )}
           </Show>

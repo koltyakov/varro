@@ -29,6 +29,14 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
 
   expect(heights).toHaveLength(4);
   expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+
+  const iconSizes = await page.locator('.tool-call-icon').evaluateAll((icons) =>
+    icons.map((icon) => {
+      const bounds = icon.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    })
+  );
+  expect(iconSizes).toEqual(Array.from({ length: 4 }, () => ({ width: 12, height: 12 })));
 });
 
 test('renders search tool details in the same framed card as other tool details', async ({

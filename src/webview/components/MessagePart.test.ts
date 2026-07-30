@@ -159,9 +159,10 @@ describe('MessagePart', () => {
 
     expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
     const icon = container?.querySelector('.thinking-topic-icon');
-    expect(icon?.getAttribute('width')).toBe('16');
-    expect(icon?.getAttribute('height')).toBe('16');
-    expect(icon?.getAttribute('stroke-width')).toBe('1.8');
+    expect(icon?.getAttribute('width')).toBe('12');
+    expect(icon?.getAttribute('height')).toBe('12');
+    expect(icon?.getAttribute('viewBox')).toBe('2 2 20 20');
+    expect(icon?.getAttribute('stroke-width')).toBe('1.7');
   });
 
   it('keeps a user-expanded reasoning block open when virtualization remounts it', () => {

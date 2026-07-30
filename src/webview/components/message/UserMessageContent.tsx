@@ -8,6 +8,7 @@ import {
 import { postMessage } from '../../lib/bridge';
 import type { MessageEditContext } from '../../lib/message-edit-state';
 import { state } from '../../lib/state';
+import { observeSettledResize } from '../../lib/settled-resize-observer';
 import type { FilePart, Part, TextPart } from '../../types';
 import {
   formatContextLineRanges,
@@ -57,7 +58,6 @@ type InlineTextSegment =
   | { type: 'attachment'; attachment: InlineRenderableAttachment };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
-
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
   const update = () => {
     const hasMoreBelow = element.scrollTop + element.clientHeight < element.scrollHeight - 1;
@@ -65,15 +65,14 @@ function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => stri
   };
 
   element.addEventListener('scroll', update, { passive: true });
-  const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
-  resizeObserver?.observe(element);
+  const stopObservingResize = observeSettledResize(element, update);
   createEffect(() => {
     trackText();
     queueMicrotask(update);
   });
   onCleanup(() => {
     element.removeEventListener('scroll', update);
-    resizeObserver?.disconnect();
+    stopObservingResize();
   });
 }
 

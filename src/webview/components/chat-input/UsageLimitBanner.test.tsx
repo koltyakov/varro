@@ -26,6 +26,7 @@ describe('UsageLimitBanner', () => {
     cleanup = render(
       () =>
         UsageLimitBanner({
+          title: 'Request throttled',
           message: 'OpenAI has temporarily rate limited requests.',
           meta: '5 requests remaining',
           primaryActionLabel: 'Continue',
@@ -39,7 +40,7 @@ describe('UsageLimitBanner', () => {
 
     const status = container?.querySelector('[role="status"]');
     expect(status?.getAttribute('aria-live')).toBe('polite');
-    expect(container?.textContent).toContain('Usage limit reached');
+    expect(container?.textContent).toContain('Request throttled');
     expect(container?.textContent).toContain('5 requests remaining');
     expect(container?.textContent).toContain('OpenAI has temporarily rate limited requests.');
 
@@ -66,6 +67,7 @@ describe('UsageLimitBanner', () => {
     cleanup = render(
       () =>
         UsageLimitBanner({
+          title: 'Service temporarily unavailable',
           message: 'Claude is unavailable until the window resets.',
           meta: 'Resets in 12 minutes',
           primaryActionLabel: 'Continue',

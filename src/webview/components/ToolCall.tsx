@@ -115,9 +115,11 @@ function ToolCallIcon(props: {
         <svg
           class={classes()}
           viewBox="0 0 24 24"
+          width="12"
+          height="12"
           fill="none"
           stroke="currentColor"
-          stroke-width="1.8"
+          stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
           role={props.statusLabel ? 'status' : undefined}
@@ -129,20 +131,20 @@ function ToolCallIcon(props: {
           <Show when={props.statusLabel}>{(label) => <title>{label()}</title>}</Show>
           <Switch>
             <Match when={kind() === 'terminal'}>
-              <path d="M13 16H18" />
-              <path d="M6 8L10 12L6 16" />
-              <path d="M2 18V6C2 4.89543 2.89543 4 4 4H20C21.1046 4 22 4.89543 22 6V18C22 19.1046 21.1046 20 20 20H4C2.89543 20 2 19.1046 2 18Z" />
+              <path d="M13 17H20" />
+              <path d="M5 7L10 12L5 17" />
             </Match>
             <Match when={kind() === 'search'}>
               <path d="M17 17L21 21" />
               <path d="M3 11C3 15.4183 6.58172 19 11 19C13.213 19 15.2161 18.1015 16.6644 16.6493C18.1077 15.2022 19 13.2053 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z" />
             </Match>
             <Match when={kind() === 'read'}>
-              <path d="M4 21.4V2.6C4 2.26863 4.26863 2 4.6 2H16.2515C16.4106 2 16.5632 2.06321 16.6757 2.17574L19.8243 5.32426C19.9368 5.43679 20 5.5894 20 5.74853V21.4C20 21.7314 19.7314 22 19.4 22H4.6C4.26863 22 4 21.7314 4 21.4Z" />
-              <path d="M8 10H16M8 14H16M8 18H12M16 2V5.4C16 5.73137 16.2686 6 16.6 6H20" />
+              <path d="M3 13C6.6 5 17.4 5 21 13" />
+              <path d="M12 17C10.3431 17 9 15.6569 9 14C9 12.3431 10.3431 11 12 11C13.6569 11 15 12.3431 15 14C15 15.6569 13.6569 17 12 17Z" />
             </Match>
             <Match when={kind() === 'edit'}>
-              <path d="M14.3632 5.65156L15.8431 4.17157C16.6242 3.39052 17.8905 3.39052 18.6716 4.17157L20.0858 5.58579C20.8668 6.36683 20.8668 7.63316 20.0858 8.41421L18.6058 9.8942M14.3632 5.65156L4.74749 15.2672C4.41542 15.5993 4.21079 16.0376 4.16947 16.5054L3.92738 19.2459C3.87261 19.8659 4.39148 20.3848 5.0115 20.33L7.75191 20.0879C8.21972 20.0466 8.65806 19.8419 8.99013 19.5099L18.6058 9.8942M14.3632 5.65156L18.6058 9.8942" />
+              <path d="M3 21L12 21H21" />
+              <path d="M12.2218 5.82839L15.0503 2.99996L20 7.94971L17.1716 10.7781M12.2218 5.82839L6.61522 11.435C6.42769 11.6225 6.32233 11.8769 6.32233 12.1421L6.32233 16.6776L10.8579 16.6776C11.1231 16.6776 11.3774 16.5723 11.565 16.3847L17.1716 10.7781M12.2218 5.82839L17.1716 10.7781" />
             </Match>
             <Match when={kind() === 'task'}>
               <Show
@@ -1333,11 +1335,11 @@ function GenericToolCall(props: {
                 <svg
                   class="tool-invocation-working-icon"
                   viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
+                  width="12"
+                  height="12"
                   fill="none"
                   stroke="currentColor"
-                  stroke-width="1.8"
+                  stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   aria-hidden="true"

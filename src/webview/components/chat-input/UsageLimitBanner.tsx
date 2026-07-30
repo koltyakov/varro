@@ -1,6 +1,7 @@
 import { Show } from 'solid-js';
 
 export function UsageLimitBanner(props: {
+  title: string;
   message: string;
   meta: string;
   primaryActionLabel: string;
@@ -12,7 +13,7 @@ export function UsageLimitBanner(props: {
   return (
     <div class="chat-usage-limit-banner" role="status" aria-live="polite">
       <div class="chat-usage-limit-copy">
-        <span class="chat-usage-limit-title">Usage limit reached</span>
+        <span class="chat-usage-limit-title">{props.title}</span>
         <span class="chat-usage-limit-meta">{props.meta}</span>
         <span class="chat-usage-limit-message">{props.message}</span>
       </div>

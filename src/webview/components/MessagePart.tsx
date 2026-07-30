@@ -252,12 +252,12 @@ function BrainTopicIcon(props: { class?: string }) {
   return (
     <svg
       class={props.class ? `thinking-topic-icon ${props.class}` : 'thinking-topic-icon'}
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
+      viewBox="2 2 20 20"
+      width="12"
+      height="12"
       fill="none"
       stroke="currentColor"
-      stroke-width="1.8"
+      stroke-width="1.7"
       stroke-linecap="round"
       stroke-linejoin="round"
       aria-hidden="true"

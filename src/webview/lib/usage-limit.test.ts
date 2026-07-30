@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createUsageLimitProviderLimit,
   deriveUsageLimitNotice,
+  getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
   parseUsageLimitNotice,
 } from './usage-limit';
@@ -564,10 +565,46 @@ describe('usage limit helpers', () => {
     expect(parseUsageLimitNotice(body)?.message).toBe('Rate limited');
   });
 
+  it('identifies an unavailable structured error as a service issue', () => {
+    const notice = parseUsageLimitNotice(JSON.stringify({ code: 'service_unavailable' }));
+    expect(notice?.message).toBe('Service temporarily unavailable');
+    expect(notice && getUsageLimitPresentation(notice).title).toBe(
+      'Service temporarily unavailable'
+    );
+  });
+
   it('detects "overloaded" text pattern', () => {
     const notice = parseUsageLimitNotice('Server is overloaded, please retry');
     expect(notice).not.toBeNull();
     expect(notice?.statusCode).toBe(429);
+  });
+
+  it('presents explicit quota exhaustion as a reached usage limit', () => {
+    expect(getUsageLimitPresentation({ message: 'messages exhausted', unit: 'messages' })).toEqual({
+      title: 'Usage limit reached',
+      summary: 'messages exhausted',
+    });
+  });
+
+  it('presents rate limiting as transient request throttling', () => {
+    expect(
+      getUsageLimitPresentation({ message: '429 rate limit exceeded', unit: 'requests' })
+    ).toEqual({
+      title: 'Request throttled',
+      summary: 'request throttled',
+    });
+  });
+
+  it('presents provider overload as a temporary service issue', () => {
+    expect(
+      getUsageLimitPresentation({
+        message: 'The engine is currently overloaded, please try again later',
+        unit: 'unknown',
+      })
+    ).toEqual({
+      title: 'Service temporarily unavailable',
+      summary: 'service disruption',
+    });
   });
 
   // -- createUsageLimitProviderLimit --

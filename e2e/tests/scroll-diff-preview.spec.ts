@@ -636,7 +636,7 @@ test.describe('diff preview anchoring', () => {
     );
   });
 
-  test('loads and navigates to an unloaded sticky boundary prompt on the first click', async ({
+  test('loads and navigates to an unloaded sticky boundary prompt after a width change', async ({
     page,
   }) => {
     await page.goto(
@@ -655,6 +655,7 @@ test.describe('diff preview anchoring', () => {
     });
 
     await expect(sticky).toContainText('Review asynchronous report change 35.');
+    await page.setViewportSize({ width: 520, height: 800 });
     const sawLoading = await sticky.evaluate((card) => {
       (card as HTMLElement).click();
       const loading = card.querySelector<HTMLElement>('.latest-user-message-sticky-loading');

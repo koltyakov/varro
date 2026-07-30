@@ -234,6 +234,41 @@ describe('createToolbarFitter', () => {
     expect(modes.slice(initialModeCount)).not.toContain('full');
   });
 
+  it('does not retry a failed looser mode on every growing-width frame', async () => {
+    const widthByMode = new Map<ToolbarCompactMode, number>(
+      TOOLBAR_COMPACT_MODES.map((mode, index) => [mode, 200 - index * 20])
+    );
+    const { fitter, modes, getMode, setAvailable } = createHarness({
+      available: 100,
+      required: (mode) => widthByMode.get(mode) ?? 0,
+    });
+
+    fitter.schedule();
+    runFrames();
+    await settle();
+    expect(widthByMode.get(getMode())).toBeLessThanOrEqual(101);
+
+    setAvailable(105);
+    fitter.schedule();
+    runFrames();
+    await settle();
+    const appliedAfterFailedExpansion = modes.length;
+
+    for (let width = 106; width < 119; width += 1) {
+      setAvailable(width);
+      fitter.schedule();
+      runFrames();
+      await settle();
+    }
+
+    expect(modes).toHaveLength(appliedAfterFailedExpansion);
+    setAvailable(119);
+    fitter.schedule();
+    runFrames();
+    await settle();
+    expect(widthByMode.get(getMode())).toBe(120);
+  });
+
   it('coalesces repeated schedules into a single frame', async () => {
     const { fitter, modes } = createHarness({ available: 500, required: () => 100 });
 

@@ -42,6 +42,7 @@ afterEach(() => {
   delete window.__sendToExtension;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('DiffView', () => {
@@ -372,14 +373,19 @@ describe('DiffView', () => {
 
   it('does not leak undisposed computations while scrolling a keyed preview', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const observers: Array<() => void> = [];
+    const observers: Array<{ callback: ResizeObserverCallback; target?: Element }> = [];
     vi.stubGlobal(
       'ResizeObserver',
       class {
-        constructor(callback: () => void) {
-          observers.push(callback);
+        private readonly entry: { callback: ResizeObserverCallback; target?: Element };
+
+        constructor(callback: ResizeObserverCallback) {
+          this.entry = { callback };
+          observers.push(this.entry);
         }
-        observe() {}
+        observe(target: Element) {
+          this.entry.target = target;
+        }
         disconnect() {}
       }
     );
@@ -402,7 +408,13 @@ describe('DiffView', () => {
     for (let scrollTop = 0; scrollTop < 20; scrollTop += 1) {
       if (viewport) viewport.scrollTop = scrollTop;
       viewport?.dispatchEvent(new Event('scroll'));
-      for (const notify of observers) notify();
+      for (const observer of observers) {
+        if (!observer.target) continue;
+        observer.callback(
+          [{ target: observer.target }] as ResizeObserverEntry[],
+          {} as ResizeObserver
+        );
+      }
     }
     await Promise.resolve();
 
@@ -410,6 +422,54 @@ describe('DiffView', () => {
       ([message]) => typeof message === 'string' && message.includes('never be disposed')
     );
     expect(leaks).toEqual([]);
+  });
+
+  it('coalesces repeated preview resize measurements until resizing settles', async () => {
+    vi.useFakeTimers();
+    let notifyResize: ResizeObserverCallback | undefined;
+    let observedElement: Element | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          notifyResize = callback;
+        }
+        observe(element: Element) {
+          observedElement = element;
+        }
+        disconnect() {}
+      }
+    );
+    let clientWidthReads = 0;
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
+      if (this.classList.contains('diff-view-lines')) {
+        clientWidthReads += 1;
+        return 300;
+      }
+      return 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function () {
+      return this.classList.contains('diff-view-lines') ? 600 : 0;
+    });
+
+    cleanup = render(
+      () =>
+        DiffView({
+          showChanges: true,
+          diffs: [{ file: 'src/live.ts', patch: makeAddedPatch(4), additions: 4, deletions: 0 }],
+        }),
+      container!
+    );
+    await Promise.resolve();
+    clientWidthReads = 0;
+
+    for (let index = 0; index < 20; index += 1) {
+      notifyResize?.([{ target: observedElement! }] as ResizeObserverEntry[], {} as ResizeObserver);
+    }
+
+    expect(clientWidthReads).toBe(0);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(clientWidthReads).toBe(1);
   });
 
   it('collapses empty number gutters for unnumbered patch fragments', () => {
