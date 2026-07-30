@@ -1492,10 +1492,7 @@ kbd {
   white-space: nowrap;
   color: var(--color-vscode-fg) !important;
   line-height: 1.2;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
-  text-decoration-thickness: 0.4px;
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 .file-edit-path-link:hover {
@@ -1681,10 +1678,11 @@ kbd {
 }
 
 .file-read-target:is(a) {
+  text-decoration: none;
+}
+
+.file-read-target:is(a):hover {
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
-  text-decoration-thickness: 0.4px;
-  text-underline-offset: 2px;
 }
 
 .file-read-range,
