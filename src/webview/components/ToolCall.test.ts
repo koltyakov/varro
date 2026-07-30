@@ -68,12 +68,13 @@ afterEach(() => {
 
 function completedState(
   input: Record<string, unknown> = {},
-  title = ''
+  title = '',
+  output = ''
 ): Extract<ToolPart['state'], { status: 'completed' }> {
   return {
     status: 'completed',
     input,
-    output: '',
+    output,
     title,
     metadata: {},
     time: { start: 0, end: 1 },
@@ -350,6 +351,132 @@ describe('ToolCall', () => {
     );
   });
 
+  it('treats whitespace-only output as empty rather than rendering a blank box', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      // A command that succeeds silently returns a bare newline, which is
+      // truthy — the old check rendered it as content.
+      state: completedState({ command: 'rtk git diff --check' }, 'rtk git diff --check', '\n  \n'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
+      '(no output)'
+    );
+    expect(container?.querySelector('.tool-text-clamped')).toBeNull();
+  });
+
+  it('offers no expansion when the only output is whitespace', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'websearch',
+      state: completedState({}, 'search', '   \n'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header?.disabled).toBe(true);
+    expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
+  });
+
+  it('drops the $ row when the header already shows the whole command', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      // Header title and command are the same text, and jsdom reports no
+      // ellipsis, so the command row would be pure duplication.
+      state: completedState({ command: 'git status' }, 'git status', 'M src/app.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
+    expect(container?.querySelector('.terminal-command-row-output')).not.toBeNull();
+  });
+
+  it('copies the full command even though the $ row renders one ellipsized line', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const command = `npm run test -- ${'src/webview/components/MessageList.test.ts '.repeat(4)}`;
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command }, 'run tests', 'ok'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const copy = container?.querySelector<HTMLButtonElement>('.tool-copy-button');
+    expect(copy).not.toBeNull();
+    copy?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith(command);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the $ row when the header title is not the command', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: completedState({ command: 'git status' }, 'Check the repo', 'M src/app.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
+  });
+
+  it('keeps the $ row when there is no output, so the body is never empty', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: {
+        status: 'running',
+        input: { command: 'git status' },
+        title: 'git status',
+        metadata: {},
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
+  });
+
   it('hides completed generic tool durations under one second', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -450,7 +577,7 @@ describe('ToolCall', () => {
     expect(detailText).toContain('promptThoroughly explore the test suite for this project');
   });
 
-  it('renders prompt as a block row immediately before the task result', () => {
+  it('renders prompt immediately before the task result, on the shared label/value grid', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -480,7 +607,10 @@ describe('ToolCall', () => {
     const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
 
     expect(labels).toEqual(['subagent_type', 'task_id', 'prompt', 'task_result']);
-    expect(rows[2]?.classList.contains('structured-tool-row-block')).toBe(true);
+    // Multi-line values used to stack under their label on a one-column row,
+    // which broke alignment with the scalar rows. Every row shares one grid now.
+    expect(rows.every((row) => row.classList.contains('structured-tool-row'))).toBe(true);
+    expect(rows.some((row) => row.classList.contains('structured-tool-row-block'))).toBe(false);
   });
 
   it('shows the subagent model and reasoning in expanded task details', () => {

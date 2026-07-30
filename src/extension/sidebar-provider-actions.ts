@@ -6,6 +6,7 @@ import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
+import type { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import type { OpenCodeServer } from './server';
 import type { ExtensionMessage } from '../shared/protocol';
 
@@ -28,6 +29,7 @@ export interface SidebarProviderActionDeps {
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
   sessionDiffProvider: SessionDiffDocumentProvider;
+  toolOutputProvider: ToolOutputDocumentProvider;
   server: OpenCodeServer;
   post(message: ExtensionMessage): void;
   refreshProviders(): Promise<void>;
@@ -133,6 +135,9 @@ export function createSidebarProviderActions(
         kind: payload.kind,
         view: payload.view,
       });
+    },
+    openText: async (payload) => {
+      await deps.toolOutputProvider.open(payload);
     },
     openExternal: async (url) => {
       if (!url.startsWith('https://')) {

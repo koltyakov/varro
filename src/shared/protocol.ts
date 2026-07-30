@@ -564,6 +564,16 @@ export type WebviewMessage =
     }
   | { type: 'vscode/open-external'; payload: { url: string } }
   | {
+      /**
+       * Open arbitrary tool text (a command's full output, a long input value)
+       * in a read-only editor tab. The webview clamps long values instead of
+       * scrolling them in place, so this is the escape hatch to the full text.
+       * `title` names the tab; `language` picks syntax highlighting.
+       */
+      type: 'vscode/open-text';
+      payload: { content: string; title: string; language?: string };
+    }
+  | {
       type: 'config/update';
       payload: WebviewConfigUpdatePayload;
     }

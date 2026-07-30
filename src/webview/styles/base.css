@@ -536,15 +536,20 @@ body.vscode-light .interactive-session {
   --chat-shadow-card: inset 0 1px 0 color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
 }
 
+/* These panels are `black 14%` mixed into the list background, which is a dark
+   surface on a dark theme but a heavy grey slab on a light one. Any panel using
+   that mix in tool-calls.css must be listed here too. */
 body.vscode-light
   :is(
     .chat-tool-invocation-part .tool-invocation-output,
-    .chat-tool-invocation-part .terminal-command-card
+    .chat-tool-invocation-part .terminal-command-card,
+    .chat-tool-invocation-part .structured-tool-card
   ),
 body.vscode-high-contrast-light
   :is(
     .chat-tool-invocation-part .tool-invocation-output,
-    .chat-tool-invocation-part .terminal-command-card
+    .chat-tool-invocation-part .terminal-command-card,
+    .chat-tool-invocation-part .structured-tool-card
   ) {
   /* The editor background is the theme's "paper" color; hardcoding white
      clashes on tinted light themes (Solarized Light, Quiet Light). */

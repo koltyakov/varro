@@ -9,6 +9,7 @@ type DroppedContentFile = Extract<
 >['payload']['files'][number];
 type LogPayload = Extract<WebviewMessage, { type: 'log' }>['payload'];
 type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload'];
+type OpenTextPayload = Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'];
 type RalphMessage = Extract<
   WebviewMessage,
   {
@@ -46,6 +47,7 @@ export interface MessageRouterCallbacks {
   searchFiles(requestId: number, query: string, limit?: number): void;
   readContextFile(path: string): Promise<void>;
   openPath(payload: OpenPathPayload): Promise<void>;
+  openText(payload: OpenTextPayload): Promise<void>;
   openExternal(url: string): Promise<void>;
   updateConfig(payload: ConfigUpdatePayload): Promise<void>;
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
@@ -124,6 +126,9 @@ export class MessageRouter {
           break;
         case 'vscode/open':
           await this.handleOpenMessage(msg);
+          break;
+        case 'vscode/open-text':
+          await this.handleOpenTextMessage(msg);
           break;
         case 'vscode/open-external':
           await this.handleOpenExternalMessage(msg);
@@ -226,6 +231,10 @@ export class MessageRouter {
 
   private async handleOpenMessage(msg: Extract<WebviewMessage, { type: 'vscode/open' }>) {
     await this.callbacks.openPath(msg.payload);
+  }
+
+  private async handleOpenTextMessage(msg: Extract<WebviewMessage, { type: 'vscode/open-text' }>) {
+    await this.callbacks.openText(msg.payload);
   }
 
   private async handleOpenExternalMessage(

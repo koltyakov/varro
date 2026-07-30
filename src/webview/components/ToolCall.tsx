@@ -38,6 +38,8 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionPrompt } from './PermissionPrompt';
 import { DiffView } from './DiffView';
 import type { DiffViewFile } from './DiffView';
+import { ClampedToolText } from './ClampedToolText';
+import { CopyIconButton } from './CopyIconButton';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
@@ -267,6 +269,15 @@ function normalizedComparableText(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+/**
+ * Whitespace-only output is empty output. A command that "succeeds silently"
+ * usually returns a bare newline, which is truthy — treating it as content
+ * renders an empty box where the "(no output)" note belongs.
+ */
+function isBlank(value: string) {
+  return value.trim().length === 0;
+}
+
 export function getVisibleInputEntries(input: Record<string, unknown>) {
   return Object.entries(input).filter(([, value]) => hasVisibleInputValue(value));
 }
@@ -476,17 +487,12 @@ export function ToolCall(props: {
     isQuestionToolName(tool().tool) ? getQuestionSummaryItems(state()) : []
   );
 
-  const truncatedOutput = createMemo(() => {
+  // The full text. Detail views clamp what they render and open the rest in an
+  // editor tab, which replaced the old head/tail excerpt — that excerpt could
+  // cut a closing tag out of the middle of the output.
+  const fullOutput = createMemo(() => {
     if (state().status !== 'completed') return '';
-    const output = (state() as ToolStateCompleted).output || '';
-    if (output.length <= 2000) return output;
-    return (
-      output.slice(0, 1000) +
-      '\n\n… (' +
-      Math.round((output.length - 2000) / 1000) +
-      'k chars truncated) …\n\n' +
-      output.slice(-1000)
-    );
+    return (state() as ToolStateCompleted).output || '';
   });
 
   createEffect(() => {
@@ -539,7 +545,7 @@ export function ToolCall(props: {
         expanded={expanded() && !props.lightweight}
         toggleExpand={toggleExpand}
         inputEntries={inputEntries()}
-        truncatedOutput={truncatedOutput()}
+        fullOutput={fullOutput()}
         lightweight={props.lightweight}
       />
     );
@@ -1039,7 +1045,7 @@ function GenericToolCall(props: {
   expanded: boolean;
   toggleExpand: () => void;
   inputEntries: Array<[string, unknown]>;
-  truncatedOutput: string;
+  fullOutput: string;
   lightweight?: boolean;
 }) {
   const toolName = () => normalizeToolName(props.tool.tool);
@@ -1147,22 +1153,30 @@ function GenericToolCall(props: {
   };
   const bashOutput = () => {
     if (props.state.status !== 'completed') return '';
-    return props.truncatedOutput || '(no output)';
+    return isBlank(props.fullOutput) ? '(no output)' : props.fullOutput;
   };
-  const bashOutputIsEmpty = () => props.state.status === 'completed' && !props.truncatedOutput;
+  const bashOutputIsEmpty = () => props.state.status === 'completed' && isBlank(props.fullOutput);
+  // These read the full output rather than the head/tail excerpt: the excerpt
+  // can drop a closing </task_result> from the middle, and the clamped view
+  // needs the real text so "show all" opens the whole thing.
   const taskResult = () => {
     if (props.state.status !== 'completed') return { label: 'result', value: '' };
-    const extracted = extractTaggedOutput(props.truncatedOutput, 'task_result');
-    if (extracted !== null) return { label: 'task_result', value: extracted || '(no output)' };
-    return { label: 'result', value: props.truncatedOutput || '(no output)' };
+    const extracted = extractTaggedOutput(props.fullOutput, 'task_result');
+    if (extracted !== null) {
+      return { label: 'task_result', value: isBlank(extracted) ? '(no output)' : extracted };
+    }
+    return { label: 'result', value: isBlank(props.fullOutput) ? '(no output)' : props.fullOutput };
   };
   const structuredResult = () => {
     if (props.state.status !== 'completed') return null;
     if (isTask()) return taskResult();
     if (isSearchTool()) {
-      return { label: 'results', value: props.truncatedOutput || '(no matches)' };
+      return {
+        label: 'results',
+        value: isBlank(props.fullOutput) ? '(no matches)' : props.fullOutput,
+      };
     }
-    return { label: 'result', value: props.truncatedOutput || '(no output)' };
+    return { label: 'result', value: isBlank(props.fullOutput) ? '(no output)' : props.fullOutput };
   };
   const completedDurationMs = () => {
     if (props.state.status !== 'completed') return null;
@@ -1185,9 +1199,41 @@ function GenericToolCall(props: {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
     if (detailInputEntries().length > 0) return true;
-    return props.state.status === 'completed' && props.truncatedOutput.length > 0;
+    // Whitespace-only output is not expandable content: offering a chevron that
+    // opens onto an empty box is worse than no chevron.
+    return props.state.status === 'completed' && !isBlank(props.fullOutput);
   };
   const isExpanded = () => hasExpandableContent() && props.expanded;
+
+  // The bash card repeats the command as its `$` row, which is pure duplication
+  // when the header already shows the whole thing. The header ellipsizes at
+  // whatever width the panel happens to be, so this has to be measured rather
+  // than guessed — and it starts `true` so an unmeasured card errs toward
+  // showing the command instead of hiding it.
+  let titleRef: HTMLSpanElement | undefined;
+  const [titleClipped, setTitleClipped] = createSignal(true);
+  const measureTitle = () => {
+    if (titleRef) setTitleClipped(titleRef.scrollWidth > titleRef.clientWidth + 1);
+  };
+  createEffect(() => {
+    if (!isBash() || !isExpanded() || !titleRef) return;
+    // On a user-driven expand the header has been laid out for a while, so
+    // measure now — deferring would render the row and then yank it away. The
+    // microtask covers the other case: a card that starts expanded, where this
+    // effect runs before the header has any layout to read.
+    measureTitle();
+    queueMicrotask(measureTitle);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measureTitle);
+    observer.observe(titleRef);
+    onCleanup(() => observer.disconnect());
+  });
+  const commandMatchesTitle = () =>
+    normalizedComparableText(bashCommand()) === normalizedComparableText(props.title);
+  // Never hide the command while it is the card's only content: without a
+  // completed output row the detail body would render empty.
+  const showBashCommandRow = () =>
+    props.state.status !== 'completed' || titleClipped() || !commandMatchesTitle();
 
   const bodyId = createUniqueId();
   return (
@@ -1202,6 +1248,7 @@ function GenericToolCall(props: {
       >
         <ToolCallIcon toolName={props.tool.tool} statusClass={props.statusClass} />
         <span
+          ref={(el) => (titleRef = el)}
           class={`tool-invocation-title${props.state.status === 'running' && !isTask() ? ' shimmer-progress' : ''}`}
         >
           {props.title}
@@ -1272,7 +1319,10 @@ function GenericToolCall(props: {
                                 )}
                               </a>
                             ) : (
-                              <span class="tool-input-value">{formatValue(key, value)}</span>
+                              <>
+                                <span class="tool-input-value">{formatValue(key, value)}</span>
+                                <CopyIconButton text={formatValue(key, value)} label={key} />
+                              </>
                             )}
                           </div>
                         )}
@@ -1285,24 +1335,31 @@ function GenericToolCall(props: {
                   inputEntries={detailInputEntries()}
                   result={structuredResult()}
                   onOpenPath={openGenericToolFile}
+                  toolTitle={props.title}
                 />
               </Show>
             }
           >
             <div class="terminal-command-card">
-              <div class="terminal-command-row terminal-command-row-input">
-                <span class="terminal-command-prompt" aria-hidden="true">
-                  $
-                </span>
-                <pre class="terminal-command-text">{bashCommand()}</pre>
-              </div>
+              <Show when={showBashCommandRow()}>
+                <TerminalCommandRow command={bashCommand()} />
+              </Show>
               <Show when={props.state.status === 'completed'}>
                 <div class="terminal-command-row terminal-command-row-output">
-                  <pre
-                    class={`terminal-command-text terminal-command-output${bashOutputIsEmpty() ? ' terminal-command-output-empty' : ''}`}
+                  <Show
+                    when={!bashOutputIsEmpty()}
+                    fallback={
+                      <pre class="terminal-command-text terminal-command-output terminal-command-output-empty">
+                        {bashOutput()}
+                      </pre>
+                    }
                   >
-                    {bashOutput()}
-                  </pre>
+                    <ClampedToolText
+                      content={props.fullOutput}
+                      title={`${props.title} (output)`}
+                      class="terminal-command-text terminal-command-output"
+                    />
+                  </Show>
                 </div>
               </Show>
             </div>
@@ -1312,10 +1369,14 @@ function GenericToolCall(props: {
               !isBash() &&
               !usesStructuredCard() &&
               props.state.status === 'completed' &&
-              props.truncatedOutput
+              !isBlank(props.fullOutput)
             }
           >
-            <pre class="tool-invocation-output">{props.truncatedOutput}</pre>
+            <ClampedToolText
+              content={props.fullOutput}
+              title={`${props.title} (output)`}
+              class="tool-invocation-output"
+            />
           </Show>
           <Show when={props.state.status === 'error'}>
             <div class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}>
@@ -1369,10 +1430,29 @@ function GenericToolCall(props: {
   );
 }
 
+/**
+ * The command always occupies exactly one row — it is a label for the output
+ * below it, not something to read in full here. Copy is the escape hatch, so
+ * an ellipsized command is still recoverable in one click.
+ */
+function TerminalCommandRow(props: { command: string }) {
+  return (
+    <div class="terminal-command-row terminal-command-row-input">
+      <span class="terminal-command-prompt" aria-hidden="true">
+        $
+      </span>
+      <pre class="terminal-command-text terminal-command-single-line">{props.command}</pre>
+      <CopyIconButton text={props.command} label="command" />
+    </div>
+  );
+}
+
 function StructuredToolCard(props: {
   inputEntries: Array<[string, unknown]>;
   result: { label: string; value: string } | null;
   onOpenPath: (path: string) => void;
+  /** Prefixes editor-tab titles so an opened value says which tool it came from. */
+  toolTitle: string;
 }) {
   const promptEntry = () => props.inputEntries.find(([key]) => key === 'prompt') || null;
   const nonPromptEntries = () => props.inputEntries.filter(([key]) => key !== 'prompt');
@@ -1383,7 +1463,7 @@ function StructuredToolCard(props: {
         {([key, value]) => {
           const blockValue = shouldShowStructuredToolValueAsBlock(key, value);
           return (
-            <div class={`structured-tool-row${blockValue ? ' structured-tool-row-block' : ''}`}>
+            <div class="structured-tool-row">
               <span class="structured-tool-label">{key}</span>
               {isPathKey(key) && typeof value === 'string' ? (
                 <a
@@ -1396,8 +1476,21 @@ function StructuredToolCard(props: {
                 >
                   {formatDisplayPath(String(value), appState.editorContext.workspacePath)}
                 </a>
+              ) : blockValue ? (
+                <ClampedToolText
+                  content={formatExpandedValue(key, value)}
+                  title={`${props.toolTitle} (${key})`}
+                  class="structured-tool-value"
+                />
               ) : (
-                <pre class="structured-tool-value">{formatExpandedValue(key, value)}</pre>
+                // Scalar inputs are identifiers, not prose: one line each, with
+                // copy so an ellipsized tail is still recoverable.
+                <div class="structured-tool-value-line">
+                  <pre class="structured-tool-value structured-tool-value-single">
+                    {formatExpandedValue(key, value)}
+                  </pre>
+                  <CopyIconButton text={formatExpandedValue(key, value)} label={key} />
+                </div>
               )}
             </div>
           );
@@ -1405,17 +1498,25 @@ function StructuredToolCard(props: {
       </For>
       <Show when={promptEntry()}>
         {(entry) => (
-          <div class="structured-tool-row structured-tool-row-block">
+          <div class="structured-tool-row">
             <span class="structured-tool-label">{entry()[0]}</span>
-            <pre class="structured-tool-value">{formatExpandedValue(entry()[0], entry()[1])}</pre>
+            <ClampedToolText
+              content={formatExpandedValue(entry()[0], entry()[1])}
+              title={`${props.toolTitle} (${entry()[0]})`}
+              class="structured-tool-value"
+            />
           </div>
         )}
       </Show>
       <Show when={props.result}>
         {(result) => (
-          <div class="structured-tool-row structured-tool-row-block structured-tool-row-result">
+          <div class="structured-tool-row structured-tool-row-result">
             <span class="structured-tool-label">{result().label}</span>
-            <pre class="structured-tool-value structured-tool-value-result">{result().value}</pre>
+            <ClampedToolText
+              content={result().value}
+              title={`${props.toolTitle} (${result().label})`}
+              class="structured-tool-value structured-tool-value-result"
+            />
           </div>
         )}
       </Show>

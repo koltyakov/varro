@@ -946,6 +946,12 @@ kbd {
 }
 
 .chat-tool-invocation-part {
+  /* Left edge of the header title: header padding + icon width + gap. The
+     detail body indents to the same line so it reads as owned by the header
+     rather than as a separate block. Kept as a variable so the two stay in
+     sync if the icon or header padding changes. */
+  --tool-detail-indent: calc(var(--space-5) + 12px + 6px);
+
   margin: 0;
   border: 1px solid var(--color-vscode-border-soft);
   border-radius: var(--radius-card);
@@ -980,9 +986,25 @@ kbd {
   );
 }
 
+/* Expanding must not change the header: it keeps the same accent gradient as a
+   collapsed subagent card, so a card does not restyle itself under the cursor.
+   Only the border firms up. The detail body goes neutral separately, below. */
 .chat-tool-invocation-part.tool-invocation-task:has(.tool-invocation-chevron.expanded) {
   border-color: color-mix(in srgb, var(--color-vscode-accent) 42%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-accent) 7%, var(--color-vscode-list-bg));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-vscode-accent) 10%, transparent),
+    color-mix(in srgb, var(--color-vscode-accent) 3%, transparent) 58%,
+    transparent
+  );
+}
+
+/* The accent belongs to the card's identity, not to its content. Tinting the
+   detail washed subagent output in colour and made it read differently from
+   every other tool's. This is opaque (mixed into list-bg), so it covers the
+   header gradient behind it and matches a generic expanded card exactly. */
+.chat-tool-invocation-part.tool-invocation-task .tool-invocation-detail {
+  background: var(--color-vscode-surface-subtle-alt);
 }
 
 .chat-tool-invocation-part.tool-invocation-task .tool-invocation-title {
@@ -1015,6 +1037,13 @@ kbd {
 
 .chat-tool-invocation-part .tool-invocation-header:disabled {
   cursor: default;
+}
+
+/* Inset offset: the card clips overflow, so a ring drawn outside the button
+   edge would be cut off on the top and sides. */
+.chat-tool-invocation-part .tool-invocation-header:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
 }
 
 .chat-tool-invocation-part .tool-call-icon {
@@ -1076,7 +1105,6 @@ kbd {
   flex-shrink: 0;
   line-height: 1.2;
   white-space: nowrap;
-  transform: translateY(-1px);
 }
 
 .chat-tool-invocation-part .tool-invocation-error-label {
@@ -1113,15 +1141,40 @@ kbd {
   opacity: 0.7;
 }
 
+/* Caps rendered rows, not just logical lines: one very long line wraps into
+   many rows and would otherwise sail past the clamp. */
+.chat-tool-invocation-part .tool-text-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+}
+
+/* Clamped values fade at the bottom edge so the cut reads as "there is more"
+   rather than as content that happens to end mid-sentence.
+   Both stops are placed against the text, not the element box. Ending the
+   gradient at 100% put full transparency at the bottom of the 8px padding, so
+   the last line only ever reached ~35% alpha — on a dark panel that reads as no
+   fade at all. Ending it at the text's bottom edge instead makes the last line
+   ramp all the way to invisible. Pairs with trimming blank lines off the
+   preview, so there is always text under the gradient. */
+.chat-tool-invocation-part .tool-text-clamped.is-truncated {
+  cursor: pointer;
+  mask-image: linear-gradient(to bottom, black calc(100% - 2.6em), transparent calc(100% - 8px));
+}
+
 .chat-tool-invocation-part .tool-invocation-detail {
   border-top: 1px solid var(--color-vscode-border-soft);
-  padding: 10px 12px 12px 24px;
+  padding: var(--space-5) var(--space-6) var(--space-6) var(--tool-detail-indent);
   font-size: 11.5px;
 }
 
+/* No border: the outer card already frames this content, and the detail region
+   indents it. A second border here stacked a box inside a box — the tinted
+   background and row dividers carry the grouping on their own. */
 .chat-tool-invocation-part .terminal-command-card {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 48%, transparent);
   border-radius: var(--radius-inset);
   background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
   font-family: var(--font-mono);
@@ -1133,8 +1186,58 @@ kbd {
   align-items: start;
 }
 
+/* Third column holds the copy button, which is why the command may ellipsize
+   rather than wrap: the row is a fixed-height label for the output below. */
+.chat-tool-invocation-part .terminal-command-row-input {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
 .chat-tool-invocation-part .terminal-command-row-output {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Both classes are required: .terminal-command-text sets white-space: pre-wrap
+   further down this file, and at equal specificity the later rule would win. */
+.chat-tool-invocation-part .terminal-command-text.terminal-command-single-line {
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+
+.chat-tool-invocation-part .tool-copy-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--color-vscode-fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.1s,
+    color 0.1s;
+}
+
+/* Revealed on hover like the rest of the row affordances, but focus must also
+   reveal it or it becomes a keyboard trap the user cannot see. */
+.chat-tool-invocation-part .terminal-command-row-input:hover .tool-copy-button,
+.chat-tool-invocation-part .structured-tool-row:hover .tool-copy-button,
+.chat-tool-invocation-part .tool-input-entry:hover .tool-copy-button,
+.chat-tool-invocation-part .tool-copy-button:focus-visible {
+  opacity: 1;
+}
+
+.chat-tool-invocation-part .tool-copy-button:hover {
+  color: var(--color-vscode-fg);
+}
+
+.chat-tool-invocation-part .tool-copy-button:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
 }
 
 .chat-tool-invocation-part .terminal-command-row + .terminal-command-row {
@@ -1153,10 +1256,8 @@ kbd {
 
 .chat-tool-invocation-part .terminal-command-text {
   min-width: 0;
-  max-height: 200px;
   margin: 0;
   padding: 8px 10px 8px 6px;
-  overflow: auto;
   color: var(--color-vscode-fg);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1173,9 +1274,10 @@ kbd {
   opacity: 0.9;
 }
 
+/* Muted, not italic: these panels are monospace, and the mono fallbacks render
+   italic as a slanted synthetic face that reads as a different font. */
 .chat-tool-invocation-part .terminal-command-output-empty {
   color: var(--color-vscode-fg-muted);
-  font-style: italic;
 }
 
 .chat-tool-invocation-part .tool-invocation-input {
@@ -1187,9 +1289,16 @@ kbd {
 
 .chat-tool-invocation-part .tool-input-entry {
   display: flex;
+  align-items: center;
   gap: 6px;
   font-size: 11.5px;
   line-height: 1.5;
+}
+
+/* Only the plain value grows; path links keep their intrinsic width so the
+   hover underline tracks the text rather than the whole row. */
+.chat-tool-invocation-part .tool-input-entry > span.tool-input-value {
+  flex: 1;
 }
 
 .chat-tool-invocation-part .tool-input-key {
@@ -1215,8 +1324,6 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-output {
-  max-height: 200px;
-  overflow: auto;
   white-space: pre-wrap;
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1228,19 +1335,28 @@ kbd {
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, var(--color-vscode-list-bg));
 }
 
-/* Same frame as .terminal-command-card: both are "tool detail" panels and must
-   read as one component with different row anatomy. */
+/* Same surface as .terminal-command-card, deliberately: both are tool detail
+   panels and should read as one component with different row anatomy. Keep
+   these two in sync — if the terminal panel's background or radius changes,
+   this changes with it. The `black 14%` mix only works on a dark theme; the
+   light/high-contrast-light override lives in base.css and lists every panel
+   using this background, so add to that list before using it anywhere new. */
 .chat-tool-invocation-part .structured-tool-card {
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 48%, transparent);
   border-radius: var(--radius-inset);
   background: color-mix(in srgb, black 14%, var(--color-vscode-list-bg));
   font-family: var(--font-mono);
 }
 
+/* Every row uses this one grid, including multi-line values like prompt and
+   result — those used to stack their value under the label, which broke the
+   label/value alignment the rest of the card holds to.
+   The label/value gutter comes from column-gap; the 10px outer inset matches
+   the terminal panel's rows so both panels breathe the same. */
 .chat-tool-invocation-part .structured-tool-row {
   display: grid;
   grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  column-gap: var(--space-6);
   align-items: start;
 }
 
@@ -1265,7 +1381,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .structured-tool-label {
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-4) 0 var(--space-4) 10px;
   color: var(--color-vscode-fg-muted);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1277,16 +1393,34 @@ kbd {
 
 .chat-tool-invocation-part .structured-tool-value {
   min-width: 0;
-  max-height: 220px;
   margin: 0;
-  padding: var(--space-4) var(--space-5);
-  overflow: auto;
+  padding: var(--space-4) 10px var(--space-4) 0;
   color: var(--color-vscode-fg);
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Holds the value and its copy button in the grid's value column. */
+.chat-tool-invocation-part .structured-tool-value-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Both classes, for the same cascade reason as .terminal-command-single-line:
+   .structured-tool-value sets white-space: pre-wrap later in this file. */
+.chat-tool-invocation-part .structured-tool-value.structured-tool-value-single {
+  flex: 1;
+  /* The copy button sits to the right and carries its own 8px, so the value
+     must not add a second gutter between the text and the button. */
+  padding-right: 0;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  word-break: normal;
 }
 
 .chat-tool-invocation-part a.structured-tool-value {
@@ -1298,20 +1432,9 @@ kbd {
   text-decoration: underline;
 }
 
-.chat-tool-invocation-part .structured-tool-row-block {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.chat-tool-invocation-part .structured-tool-row-block .structured-tool-label {
-  padding-bottom: 0;
-}
-
-.chat-tool-invocation-part .structured-tool-row-block .structured-tool-value {
-  padding-top: 6px;
-}
-
+/* No padding-top override: that existed to separate a result from the label
+   stacked above it, and would now push the value out of line with its label. */
 .chat-tool-invocation-part .structured-tool-value-result {
-  padding-top: 6px;
   opacity: 0.92;
 }
 
@@ -1356,7 +1479,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-subagent-running:focus-visible {
-  outline: 1px solid var(--color-vscode-focus-border);
+  outline: 1px solid var(--color-vscode-accent);
   outline-offset: 1px;
 }
 

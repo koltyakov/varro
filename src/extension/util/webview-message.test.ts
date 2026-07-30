@@ -197,6 +197,23 @@ describe('webview message validation', () => {
       })
     ).toBeNull();
 
+    // Unknown languages would be handed straight to setTextDocumentLanguage.
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: 'x', title: 'tool', language: 'javascript' },
+      })
+    ).toBeNull();
+
+    expect(parseWebviewMessage({ type: 'vscode/open-text', payload: { content: 'x' } })).toBeNull();
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: 'x'.repeat(2_000_001), title: 'tool' },
+      })
+    ).toBeNull();
+
     expect(
       parseWebviewMessage({
         type: 'vscode/open-external',
@@ -258,6 +275,29 @@ describe('webview message validation', () => {
   it('allows only https external URLs', () => {
     expect(isAllowedExternalUrl('https://example.com')).toBe(true);
     expect(isAllowedExternalUrl('http://example.com')).toBe(false);
+  });
+
+  it('accepts tool text destined for an editor tab, including empty output', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: 'line one\nline two', title: 'rtk git status (output)' },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: 'line one\nline two', title: 'rtk git status (output)' },
+    });
+
+    // A completed tool with no output is still worth opening.
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: '', title: 'tool', language: 'shellscript' },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: '', title: 'tool', language: 'shellscript' },
+    });
   });
 
   it('normalizes accepted API request methods to uppercase', () => {

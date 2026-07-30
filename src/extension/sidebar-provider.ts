@@ -23,6 +23,7 @@ import type { OpenCodeServer } from './server';
 import { ServerEventBridge } from './server-event-bridge';
 import { SessionExportService } from './session-export-service';
 import { SessionDiffDocumentProvider } from './session-diff-document-provider';
+import { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import { SessionStateManager } from './session-state-manager';
 import { SessionTitleFallback } from './session-title-fallback';
 import { SessionTrashManager } from './session-trash-manager';
@@ -60,6 +61,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly droppedFilesService: DroppedFilesService;
   private readonly providerFileRefresh: ProviderFileRefreshController;
   private readonly sessionDiffProvider: SessionDiffDocumentProvider;
+  private readonly toolOutputProvider: ToolOutputDocumentProvider;
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -125,6 +127,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
     this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
     this.sessionDiffProvider = new SessionDiffDocumentProvider(server);
+    this.toolOutputProvider = new ToolOutputDocumentProvider();
     this.runtime = new SidebarProviderRuntime(
       server,
       this.sessionState,
@@ -231,6 +234,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
         sessionDiffProvider: this.sessionDiffProvider,
+        toolOutputProvider: this.toolOutputProvider,
         server,
         post: (message) => this.post(message),
         refreshProviders: () => this.refreshProviderState(),
@@ -362,6 +366,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerFileRefresh.dispose();
     this.fileSearch.dispose();
     this.sessionDiffProvider.dispose();
+    this.toolOutputProvider.dispose();
     await this.droppedFilesService.dispose();
   }
 

@@ -35,6 +35,7 @@ function createCallbacks(): MessageRouterCallbacks {
     searchFiles: vi.fn(),
     readContextFile: vi.fn(() => Promise.resolve()),
     openPath: vi.fn(() => Promise.resolve()),
+    openText: vi.fn(() => Promise.resolve()),
     openExternal: vi.fn(() => Promise.resolve()),
     updateConfig: vi.fn(() => Promise.resolve()),
     handleApiRequest: vi.fn(() => Promise.resolve()),

@@ -32,6 +32,11 @@ const MAX_PATH_LENGTH = 4096;
 const MAX_QUERY_LENGTH = 2048;
 const MAX_LOG_FIELD_LENGTH = 10_000;
 const MAX_SEARCH_QUERY_LENGTH = 200;
+/** Full tool output opened in an editor tab; generous but bounded so a runaway
+ *  tool cannot push an unbounded string through the bridge. */
+const MAX_OPEN_TEXT_LENGTH = 2_000_000;
+const MAX_OPEN_TEXT_TITLE_LENGTH = 200;
+const OPEN_TEXT_LANGUAGES = new Set(['plaintext', 'json', 'markdown', 'shellscript']);
 const MAX_DROPPED_PATHS = 100;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
@@ -96,6 +101,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'files/search': true,
   'file/read': true,
   'vscode/open': true,
+  'vscode/open-text': true,
   'vscode/open-external': true,
   'config/update': true,
   ready: true,
@@ -275,6 +281,16 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           ...(sessionID ? { sessionID } : {}),
         },
       };
+    }
+
+    case 'vscode/open-text': {
+      const payload = asRecord(message?.payload);
+      const content = getBoundedString(payload?.content, MAX_OPEN_TEXT_LENGTH, true);
+      const title = getBoundedString(payload?.title, MAX_OPEN_TEXT_TITLE_LENGTH);
+      const language = getOptionalBoundedString(payload?.language, 40);
+      if (content === null || !title) return null;
+      if (language !== undefined && !OPEN_TEXT_LANGUAGES.has(language)) return null;
+      return { type, payload: { content, title, ...(language ? { language } : {}) } };
     }
 
     case 'vscode/open-external': {
