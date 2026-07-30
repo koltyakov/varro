@@ -48,6 +48,21 @@ function createRalphRun() {
 }
 
 describe('webview message validation', () => {
+  it('parses restart, force restart, and restart checks', () => {
+    expect(parseWebviewMessage({ type: 'server/restart' })).toEqual({
+      type: 'server/restart',
+    });
+    expect(parseWebviewMessage({ type: 'server/restart', payload: { force: true } })).toEqual({
+      type: 'server/restart',
+      payload: { force: true },
+    });
+    expect(parseWebviewMessage({ type: 'server/restart/check', payload: { checkId: 4 } })).toEqual({
+      type: 'server/restart/check',
+      payload: { checkId: 4 },
+    });
+    expect(parseWebviewMessage({ type: 'server/restart/check' })).toBeNull();
+  });
+
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);

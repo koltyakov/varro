@@ -65,6 +65,14 @@ function createActionFixture() {
   const restProxy = {
     handleRequest: vi.fn(() => Promise.resolve()),
   };
+  const server = {
+    readRestartBlockers: vi.fn(() =>
+      Promise.resolve({
+        totalSessionCount: 2,
+        directories: [{ directory: '/repo', sessionCount: 2 }],
+      })
+    ),
+  };
 
   const deps: SidebarProviderActionDeps = {
     contextProvider: contextProvider as unknown as SidebarProviderActionDeps['contextProvider'],
@@ -75,6 +83,8 @@ function createActionFixture() {
     sessionExportService:
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
+    server: server as unknown as SidebarProviderActionDeps['server'],
+    post: vi.fn(),
     setProviderWatchActive: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
@@ -97,6 +107,7 @@ function createActionFixture() {
     deps,
     restProxy,
     sessionExportService,
+    server,
     webviewSession,
   };
 }
@@ -106,6 +117,27 @@ describe('createSidebarProviderActions', () => {
     vi.clearAllMocks();
     mocks.vscode.workspace.getConfiguration.mockReturnValue(mocks.config);
     mocks.vscode.Uri.parse.mockImplementation((value: string) => ({ value }));
+  });
+
+  it('posts blocker updates while polling and restarts once the server is idle', async () => {
+    const { actions, deps, server } = createActionFixture();
+
+    await actions.checkServerRestart(4);
+    expect(deps.post).toHaveBeenCalledWith({
+      type: 'server/restart-blocked',
+      payload: {
+        totalSessionCount: 2,
+        directories: [{ directory: '/repo', sessionCount: 2 }],
+        checkId: 4,
+      },
+    });
+
+    server.readRestartBlockers.mockResolvedValueOnce({
+      totalSessionCount: 0,
+      directories: [],
+    });
+    await actions.checkServerRestart(5);
+    expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith('varro.server.restart');
   });
 
   it('forwards host-backed actions to the injected dependencies', async () => {

@@ -48,19 +48,24 @@ describe('ServerStatus', () => {
     expect(container?.textContent).toContain('Spawning the local server');
   });
 
-  it('renders the stopped state copy', () => {
+  it('shows a pulsing Varro logo while server detection is pending', () => {
     setState('serverStatus', { state: 'stopped' });
+    setState('emptyStateLogoUri', 'https://example.test/varro.png');
 
     renderServerStatus();
 
-    expect(container?.textContent).toContain('Server not running');
-    expect(container?.textContent).toContain('Install or update OpenCode if needed');
-
-    const restartButton = Array.from(container?.querySelectorAll('button') || []).find(
-      (button) => button.textContent?.trim() === 'Restart Server'
-    );
-    restartButton?.click();
-    expect(postMessageMock).toHaveBeenCalledWith({ type: 'server/restart' });
+    const status = container?.querySelector('[role="status"]');
+    const logo = status?.querySelector<HTMLImageElement>('img');
+    expect(status?.getAttribute('aria-label')).toBe('Detecting OpenCode server');
+    expect(logo?.src).toBe('https://example.test/varro.png');
+    expect(logo?.alt).toBe('Varro');
+    expect(logo?.classList).toContain('animate-pulse-soft');
+    expect(container?.textContent).not.toContain('Server not running');
+    expect(
+      Array.from(container?.querySelectorAll('button') || []).find(
+        (button) => button.textContent?.trim() === 'Restart Server'
+      )
+    ).toBeUndefined();
   });
 
   it('renders trimmed generic errors', () => {
@@ -259,7 +264,7 @@ describe('ServerStatus', () => {
     });
   });
 
-  it('does not offer update or restart actions while another host owns the server', () => {
+  it('allows restart from a different Varro host without offering a duplicate update', () => {
     setState('serverStatus', {
       state: 'error',
       message: 'The running server is actively owned by another Varro extension host.',
@@ -273,7 +278,7 @@ describe('ServerStatus', () => {
     renderServerStatus();
 
     expect(container?.textContent).not.toContain('Open terminal and update');
-    expect(container?.textContent).not.toContain('Restart Server');
+    expect(container?.textContent).toContain('Restart Server');
     expect(container?.textContent).toContain('Show Output');
   });
 

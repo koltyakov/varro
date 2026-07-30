@@ -27,6 +27,10 @@ export function createMountBridgeOperations(deps: {
     handleExtensionMessageWithDependencies(
       {
         setServerStatus: (payload) => appStore.setState('serverStatus', payload),
+        setRestartBlocked: (payload) => {
+          if (payload?.checkId !== undefined && appStore.state.restartBlocked === null) return;
+          appStore.setState('restartBlocked', payload);
+        },
         clearError: () => uiStore.setError(null),
         ensureConnectionInitialized: deps.ensureConnectionInitialized,
         clearProvidersState: () => {
@@ -101,6 +105,9 @@ export function createMountBridgeOperations(deps: {
 export function handleExtensionMessageWithDependencies(
   deps: {
     setServerStatus(payload: Extract<ExtensionMessage, { type: 'server/status' }>['payload']): void;
+    setRestartBlocked?(
+      payload: Extract<ExtensionMessage, { type: 'server/restart-blocked' }>['payload'] | null
+    ): void;
     clearError(): void;
     ensureConnectionInitialized(): void;
     clearProvidersState(): void;
@@ -143,6 +150,9 @@ export function handleExtensionMessageWithDependencies(
   switch (msg.type) {
     case 'server/status':
       deps.setServerStatus(msg.payload);
+      if (msg.payload.state === 'starting' || msg.payload.state === 'running') {
+        deps.setRestartBlocked?.(null);
+      }
       if (msg.payload.state === 'running') {
         deps.clearError();
         deps.ensureConnectionInitialized();
@@ -150,6 +160,9 @@ export function handleExtensionMessageWithDependencies(
         deps.clearProvidersState();
         deps.clearError();
       }
+      break;
+    case 'server/restart-blocked':
+      deps.setRestartBlocked?.(msg.payload);
       break;
     case 'theme/update':
       deps.setTheme(msg.payload);

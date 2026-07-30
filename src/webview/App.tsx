@@ -6,6 +6,7 @@ import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
 import { RalphForm } from './components/ralph/RalphForm';
 import { SessionActionFeedback } from './components/chat/SessionActionFeedback';
+import { RestartBlocked } from './components/RestartBlocked';
 import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge } from './lib/bridge';
 import { observeSurfaceContrast } from './lib/theme';
@@ -55,8 +56,15 @@ export function App() {
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
       <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
-        <Show when={showChat()} fallback={<ServerStatus />}>
-          <Chat />
+        <Show
+          when={defaultAppState.state.restartBlocked}
+          fallback={
+            <Show when={showChat()} fallback={<ServerStatus />}>
+              <Chat />
+            </Show>
+          }
+        >
+          <RestartBlocked />
         </Show>
       </Show>
       <RalphForm />

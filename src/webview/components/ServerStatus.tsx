@@ -258,14 +258,15 @@ export function ServerStatus() {
       </Show>
 
       <Show when={serverStatus().state === 'stopped'}>
-        <div class="h-1.5 w-1.5 rounded-full bg-vscode-muted/30" />
-        <div>
-          <p class="text-[13px] font-medium text-vscode-fg">Server not running</p>
-          <p class="mt-1 text-[12px] text-vscode-muted">
-            Install or update OpenCode if needed, then restart the server.
-          </p>
+        <div role="status" aria-label="Detecting OpenCode server">
+          <Show when={defaultAppState.state.emptyStateLogoUri}>
+            <img
+              class="server-status-detecting-logo animate-pulse-soft"
+              src={defaultAppState.state.emptyStateLogoUri}
+              alt="Varro"
+            />
+          </Show>
         </div>
-        <SecondaryButton label="Restart Server" onClick={restartServer} />
       </Show>
 
       <Show when={serverStatus().state === 'error'}>
@@ -422,7 +423,6 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
     props.detail.kind !== 'update-blocked' ||
     props.detail.blockedBy === 'auto-update-disabled' ||
     props.detail.blockedBy === 'auto-start-disabled';
-  const blocksRestart = () => props.detail.blockedBy === 'foreign-owner';
   const title = () =>
     isWaiting()
       ? 'Waiting to update OpenCode'
@@ -458,11 +458,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
         <SecondaryButton label="Check Again" onClick={restartServer} />
       </Show>
 
-      <RecoveryActions
-        settingId={props.detail.settingId}
-        showOutput
-        allowRestart={!isWaiting() && !blocksRestart()}
-      />
+      <RecoveryActions settingId={props.detail.settingId} showOutput allowRestart={!isWaiting()} />
     </div>
   );
 }

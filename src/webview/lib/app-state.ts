@@ -32,6 +32,7 @@ import type {
   PermissionMode,
   ProviderLimitStatus,
   RecycleBinEntry,
+  RestartBlockedState,
   ServerStatus,
   WebviewThemeKind,
   WorkspaceStatusEventSummary,
@@ -84,6 +85,7 @@ import { createStreamingDeltaQueue, flushPendingStreamingDeltasFor } from './str
 
 export interface AppState {
   serverStatus: ServerStatus;
+  restartBlocked: RestartBlockedState | null;
   providersLoaded: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
@@ -254,6 +256,7 @@ export function createAppState(): AppStateInstance {
 
   const [state, setState] = createStore<AppState>({
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
+    restartBlocked: null,
     providersLoaded: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: initialWebviewState.terminalSelection ?? null,

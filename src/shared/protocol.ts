@@ -199,6 +199,17 @@ export type ServerStatus =
   | { state: 'stopped' }
   | { state: 'error'; message: string; detail?: ServerErrorDetail };
 
+export type RestartBlockedDirectory = {
+  directory: string | null;
+  sessionCount: number;
+};
+
+export type RestartBlockedState = {
+  totalSessionCount: number;
+  directories: RestartBlockedDirectory[];
+  checkId?: number;
+};
+
 export type RecycleBinSession = {
   id: string;
   projectID: string;
@@ -485,6 +496,7 @@ export type RalphStatePayload = {
 
 export type ExtensionMessage =
   | { type: 'server/status'; payload: ServerStatus }
+  | { type: 'server/restart-blocked'; payload: RestartBlockedState }
   | { type: 'server/event'; payload: ServerEvent }
   | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
   | { type: 'context/update'; payload: EditorContext }
@@ -528,7 +540,8 @@ export type WebviewMessage =
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }
-  | { type: 'server/restart' }
+  | { type: 'server/restart'; payload?: { force: true } }
+  | { type: 'server/restart/check'; payload: { checkId: number } }
   | { type: 'files/drop'; payload: { paths: string[] } }
   | {
       type: 'files/drop-content';

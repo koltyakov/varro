@@ -13,6 +13,7 @@ export type OpenCodeResponseMetadata = {
 
 export type OpenCodeRequestOptions = {
   captureNextCursor?: boolean;
+  unscoped?: boolean;
 };
 
 export type OpenCodeRescopeResult = {
@@ -80,7 +81,7 @@ export class OpenCodeTransport {
     const scoped = scopeOpenCodeRequest(
       this.options.getUrl(),
       path,
-      this.getWorkspaceDirectoryForRequest(method, path)
+      options?.unscoped ? undefined : this.getWorkspaceDirectoryForRequest(method, path)
     );
     const controller = new AbortController();
     const timeoutSignal = AbortSignal.timeout(this.getRequestTimeoutMs(method, path));
@@ -429,6 +430,10 @@ export class OpenCodeTransport {
 
   hasPendingAttentionRequests(): boolean {
     return this.pendingAttentionRequests.size > 0;
+  }
+
+  getPendingAttentionSessionIDs(): string[] {
+    return [...new Set(this.pendingAttentionRequests.values())];
   }
 
   private processSseChunk(chunk: string, controller?: AbortController, generation?: number) {

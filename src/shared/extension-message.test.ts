@@ -101,6 +101,27 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses restart blockers only when directory counts match the total', () => {
+    const message = {
+      type: 'server/restart-blocked',
+      payload: {
+        totalSessionCount: 3,
+        directories: [
+          { directory: '/repo-a', sessionCount: 2 },
+          { directory: null, sessionCount: 1 },
+        ],
+      },
+    };
+
+    expect(parseExtensionMessage(message)).toEqual(message);
+    expect(
+      parseExtensionMessage({
+        ...message,
+        payload: { ...message.payload, totalSessionCount: 4 },
+      })
+    ).toBeNull();
+  });
+
   it('parses api/response with data or error', () => {
     expect(
       parseExtensionMessage({ type: 'api/response', payload: { id: 1, data: { ok: true } } })

@@ -231,6 +231,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
         sessionDiffProvider: this.sessionDiffProvider,
+        server,
+        post: (message) => this.post(message),
         refreshProviders: () => this.refreshProviderState(),
         postContext: () => this.postContext(),
         postTerminalSelection: (selection) => this.postTerminalSelection(selection),

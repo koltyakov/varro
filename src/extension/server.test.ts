@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import type * as FsModule from 'fs';
 import type * as FsPromisesModule from 'fs/promises';
 import type * as OsModule from 'os';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';
 import type { ServerStatus } from '../shared/protocol';
 
@@ -76,8 +76,28 @@ vi.mock('fs/promises', async () => {
   };
 });
 
-import { OpenCodeServer } from './server';
+import { OpenCodeServer as RealOpenCodeServer } from './server';
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
+
+let serverOwnershipPathSequence = 0;
+class OpenCodeServer extends RealOpenCodeServer {
+  constructor(
+    port: number,
+    autoStart: boolean,
+    command?: string,
+    simulateMissingCli = false,
+    compactionSettings?: ConstructorParameters<typeof RealOpenCodeServer>[4]
+  ) {
+    super(
+      port,
+      autoStart,
+      command,
+      simulateMissingCli,
+      compactionSettings,
+      join('/tmp', `varro-server-test-${process.pid}-${++serverOwnershipPathSequence}.json`)
+    );
+  }
+}
 
 const MANIFEST_OPENCODE_VERSION = readMaximumTestedOpenCodeVersion();
 
@@ -1634,33 +1654,40 @@ describe('OpenCodeServer compatibility gate', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('does not update or replace a server actively leased by another extension host', async () => {
+  it('allows a Varro window to replace a server leased by another extension host', async () => {
     getConfigurationMock.mockImplementation(() => ({
       get: (key: string, fallback?: unknown) => (key === 'server.autoUpdate' ? true : fallback),
     }));
     const server = new OpenCodeServer(4096, true);
     const hasActiveSessions = vi.fn().mockResolvedValue(false);
     const upgradeRunningServer = vi.fn().mockResolvedValue(true);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const launchManagedServer = vi.fn().mockResolvedValue(server.url);
     const api = server as unknown as {
       readHealthInfo: () => Promise<{ healthy: boolean; version?: string }>;
       hasActiveSessions: typeof hasActiveSessions;
       upgradeRunningServer: typeof upgradeRunningServer;
+      stopServerForRestart: typeof stopServerForRestart;
+      ensureCompatibleCliForLaunch: () => Promise<void>;
+      launchManagedServer: typeof launchManagedServer;
       processManager: {
         foreignActiveOwnership: boolean;
-        refreshManagedServerOwnership: () => Promise<boolean>;
       };
     };
     api.readHealthInfo = vi.fn().mockResolvedValue({ healthy: true, version: '1.15.13' });
     api.hasActiveSessions = hasActiveSessions;
     api.upgradeRunningServer = upgradeRunningServer;
+    api.stopServerForRestart = stopServerForRestart;
+    api.ensureCompatibleCliForLaunch = vi.fn().mockResolvedValue(undefined);
+    api.launchManagedServer = launchManagedServer;
     api.processManager.foreignActiveOwnership = true;
-    api.processManager.refreshManagedServerOwnership = vi.fn().mockResolvedValue(false);
 
-    await expect(server.start()).rejects.toThrow('actively owned by another Varro extension host');
+    await expect(server.start()).resolves.toBe(server.url);
 
-    expect(hasActiveSessions).not.toHaveBeenCalled();
-    expect(upgradeRunningServer).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(hasActiveSessions).toHaveBeenCalledTimes(2);
+    expect(upgradeRunningServer).toHaveBeenCalledOnce();
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(launchManagedServer).toHaveBeenCalledOnce();
   });
 
   it('blocks an outdated running server when automatic updates are disabled', async () => {
@@ -2003,6 +2030,88 @@ describe('OpenCodeServer startup health polling', () => {
     expect(resolved).toHaveBeenCalledWith(server.url);
     expect(resolved).toHaveBeenCalledTimes(1);
     expect(rejected).not.toHaveBeenCalled();
+  });
+});
+
+describe('OpenCodeServer restart blockers', () => {
+  it('groups unique blocking sessions by normalized directory', async () => {
+    const server = new OpenCodeServer(4096, true);
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      const body =
+        pathname === '/session/status'
+          ? {
+              'session-1': { type: 'busy' },
+              'session-2': { type: 'retry' },
+              idle: { type: 'idle' },
+            }
+          : pathname === '/question'
+            ? [{ sessionID: 'session-2' }, { sessionID: 'session-3' }]
+            : [
+                { id: 'session-1', directory: 'C:\\Repo' },
+                { id: 'session-2', directory: 'c:/repo/' },
+                { id: 'session-3', directory: '/other' },
+              ];
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+
+    await expect(server.readRestartBlockers()).resolves.toEqual({
+      totalSessionCount: 3,
+      directories: [
+        { directory: '/other', sessionCount: 1 },
+        { directory: 'C:\\Repo', sessionCount: 2 },
+      ],
+    });
+  });
+
+  it('allows force restart without running the active-session preflight', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(server.url);
+    const hasActiveSessions = vi.fn().mockResolvedValue(true);
+    const api = server as unknown as {
+      hasActiveSessions: typeof hasActiveSessions;
+      start: typeof start;
+      processManager: { stopServerForRestart: typeof stopServerForRestart };
+    };
+    api.hasActiveSessions = hasActiveSessions;
+    api.start = start;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    await expect(server.restart({ force: true })).resolves.toBe(server.url);
+
+    expect(hasActiveSessions).not.toHaveBeenCalled();
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('reclaims a marked server before retrying an unmanaged-port failure', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const takeOwnershipOfExistingServer = vi.fn().mockResolvedValue(true);
+    const stopServerForRestart = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      _status: ServerStatus;
+      start: typeof start;
+      processManager: {
+        takeOwnershipOfExistingServer: typeof takeOwnershipOfExistingServer;
+        stopServerForRestart: typeof stopServerForRestart;
+      };
+    };
+    api._status = {
+      state: 'error',
+      message: 'Port 4096 is occupied by a process Varro does not own',
+    };
+    api.start = start;
+    api.processManager.takeOwnershipOfExistingServer = takeOwnershipOfExistingServer;
+    api.processManager.stopServerForRestart = stopServerForRestart;
+
+    await expect(server.restart({ force: true })).resolves.toBe(server.url);
+
+    expect(takeOwnershipOfExistingServer).toHaveBeenCalledOnce();
+    expect(stopServerForRestart).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
   });
 });
 

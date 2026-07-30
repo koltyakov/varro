@@ -515,7 +515,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     });
     const manager = new OpenCodeProcess(
       4096,
-      true,
+      false,
       '/usr/bin/opencode',
       false,
       undefined,
@@ -1191,18 +1191,23 @@ describe('OpenCodeProcess server ownership leases', () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
     const leasePath = join(directory, 'lease.json');
-    await writeFile(
-      `${leasePath}.managed`,
-      JSON.stringify({
-        pid: MOCK_LINUX_PID,
-        owner: 'recovered-owner',
-        createdAt: 1234,
-        port: 4096,
-        executable: '/usr/bin/opencode',
-        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
-      }),
-      'utf-8'
-    );
+    await Promise.all([
+      writeFile(
+        `${leasePath}.managed`,
+        JSON.stringify({
+          pid: MOCK_LINUX_PID,
+          owner: 'recovered-owner',
+          createdAt: 1234,
+          port: 4096,
+          executable: '/usr/bin/opencode',
+          birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+        }),
+        'utf-8'
+      ),
+      writeFile(`${leasePath}.claim`, '', 'utf-8'),
+    ]);
+    const staleClaimTime = new Date(Date.now() - 60_000);
+    await utimes(`${leasePath}.claim`, staleClaimTime, staleClaimTime);
     mockLinuxLeaseProcess();
     const manager = new OpenCodeProcess(
       4096,
@@ -1235,7 +1240,50 @@ describe('OpenCodeProcess server ownership leases', () => {
       owner: 'recovered-owner',
       state: 'active',
     });
+    await expect(stat(`${leasePath}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
 
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('can explicitly restart after reconstructing a missing lease', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    await writeFile(
+      `${leasePath}.managed`,
+      JSON.stringify({
+        pid: MOCK_LINUX_PID,
+        owner: 'restart-owner',
+        createdAt: 1234,
+        port: 4096,
+        executable: '/usr/bin/opencode',
+        birthIdentity: 'linux:Fri Jul 10 12:00:00 2026',
+      }),
+      'utf-8'
+    );
+    mockLinuxLeaseProcess();
+    const manager = new OpenCodeProcess(
+      4096,
+      true,
+      '/usr/bin/opencode',
+      false,
+      undefined,
+      leasePath
+    );
+
+    await expect(manager.takeOwnershipOfExistingServer()).resolves.toBe(true);
+    const ownership = manager.acquireManagedServerRestartOwnership();
+    const release = typeof ownership === 'function' ? ownership : await ownership;
+
+    expect(manager.serverOwnership).toBe('current-host');
+    expect(JSON.parse(await readFile(leasePath, 'utf-8'))).toMatchObject({
+      pid: MOCK_LINUX_PID,
+      owner: 'restart-owner',
+      state: 'active',
+    });
+
+    await release();
+    await expect(stat(`${leasePath}.claim`)).rejects.toMatchObject({ code: 'ENOENT' });
     await rm(directory, { recursive: true, force: true });
   });
 
@@ -1668,7 +1716,15 @@ describe('OpenCodeProcess config ownership', () => {
   });
 
   it('cleans prepared config when attaching to an existing server', async () => {
-    const manager = new OpenCodeProcess(4096, false, 'opencode', false, { auto: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const manager = new OpenCodeProcess(
+      4096,
+      false,
+      'opencode',
+      false,
+      { auto: true },
+      join(directory, 'lease.json')
+    );
     await manager.syncInjectedConfigFile();
     const configPath = (
       manager as unknown as { buildServerEnv(): NodeJS.ProcessEnv }
@@ -1677,6 +1733,7 @@ describe('OpenCodeProcess config ownership', () => {
     await manager.prepareForHealthyExistingServer();
 
     await expect(stat(configPath)).rejects.toThrow();
+    await rm(directory, { recursive: true, force: true });
   });
 
   it('takes ownership when attaching to a marked OpenCode server', async () => {

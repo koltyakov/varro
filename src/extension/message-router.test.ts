@@ -24,6 +24,8 @@ function createCallbacks(): MessageRouterCallbacks {
     exportSession: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
+    restartServer: vi.fn(() => Promise.resolve()),
+    checkServerRestart: vi.fn(() => Promise.resolve()),
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
     handleDroppedContent: vi.fn(() => Promise.resolve()),
     removeContextFile: vi.fn(),
@@ -67,6 +69,19 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'vscode/show-output' });
     expect(cb.showOutput).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches regular, forced, and status-check restart messages', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'server/restart' });
+    await router.handleMessage({ type: 'server/restart', payload: { force: true } });
+    await router.handleMessage({ type: 'server/restart/check', payload: { checkId: 7 } });
+
+    expect(cb.restartServer).toHaveBeenNthCalledWith(1, false);
+    expect(cb.restartServer).toHaveBeenNthCalledWith(2, true);
+    expect(cb.checkServerRestart).toHaveBeenCalledWith(7);
   });
 
   it('dispatches context/request', async () => {

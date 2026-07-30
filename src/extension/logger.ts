@@ -35,7 +35,7 @@ export const logger = {
     channel.appendLine(formatLogLine('ERROR', msg, args));
   },
   show() {
-    channel.show();
+    channel.show(false);
   },
   dispose() {
     channel.dispose();

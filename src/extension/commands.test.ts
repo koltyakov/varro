@@ -57,6 +57,7 @@ vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('./error-hub', () => ({ errorHub: errorHubMock }));
 
 import { registerCommands } from './commands';
+import { RestartBlockedError } from './server';
 
 function register(workspacePath: string | null = '/repo', server: unknown = {}) {
   registeredCommands.clear();
@@ -129,7 +130,7 @@ describe('About command', () => {
     );
   });
 
-  it('identifies a server managed by another Varro window', async () => {
+  it('does not distinguish which Varro window manages the server', async () => {
     register('/repo', {
       readServerInfo: vi.fn().mockResolvedValue({
         status: { state: 'running', url: 'http://127.0.0.1:4096' },
@@ -154,9 +155,7 @@ describe('About command', () => {
 
     expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining(
-          '- Server ownership: managed by Varro (another VS Code window)'
-        ),
+        content: expect.stringContaining('- Server ownership: managed by Varro'),
       })
     );
   });
@@ -166,10 +165,10 @@ function fileUri(fsPath: string) {
   return { fsPath };
 }
 
-async function runCommand(id: string) {
+async function runCommand(id: string, ...args: unknown[]) {
   const handler = registeredCommands.get(id);
   expect(handler).toBeTypeOf('function');
-  await handler?.();
+  await handler?.(...args);
 }
 
 describe('AGENTS.md commands', () => {
@@ -511,6 +510,37 @@ describe('varro.server.restart', () => {
     await runCommand('varro.server.restart');
 
     expect(sidebar.post).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
+  it('opens the sidebar with blocker details when active sessions prevent restart', async () => {
+    const blockers = {
+      totalSessionCount: 2,
+      directories: [{ directory: '/repo', sessionCount: 2 }],
+    };
+    const { sidebar } = register('/repo', {
+      restart: vi.fn().mockRejectedValue(new RestartBlockedError(blockers)),
+      status: { state: 'running' },
+    });
+
+    await runCommand('varro.server.restart');
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+    expect(sidebar.post).toHaveBeenCalledWith({
+      type: 'server/restart-blocked',
+      payload: blockers,
+    });
+    expect(errorHubMock.report).not.toHaveBeenCalled();
+  });
+
+  it('passes the force option to the server', async () => {
+    const restart = vi.fn().mockResolvedValue('http://127.0.0.1:4096');
+    register('/repo', { restart, status: { state: 'running' } });
+
+    await runCommand('varro.server.restart', { force: true });
+
+    expect(restart).toHaveBeenCalledWith({ force: true });
   });
 
   it('reports a restart failure through the error hub when the server is not already errored', async () => {

@@ -6,6 +6,8 @@ import type { RestProxy } from './rest-proxy';
 import type { SessionExportService } from './session-export-service';
 import type { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
+import type { OpenCodeServer } from './server';
+import type { ExtensionMessage } from '../shared/protocol';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -26,6 +28,8 @@ export interface SidebarProviderActionDeps {
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
   sessionDiffProvider: SessionDiffDocumentProvider;
+  server: OpenCodeServer;
+  post(message: ExtensionMessage): void;
   refreshProviders(): Promise<void>;
   postContext(): void;
   postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
@@ -46,6 +50,25 @@ export interface SidebarProviderActionDeps {
 export function createSidebarProviderActions(
   deps: SidebarProviderActionDeps
 ): MessageRouterCallbacks {
+  let restartCheckOperation: Promise<void> | null = null;
+  const checkServerRestart = (checkId: number) => {
+    if (restartCheckOperation) return restartCheckOperation;
+    const operation = (async () => {
+      const blockers = await deps.server.readRestartBlockers();
+      if (blockers.totalSessionCount > 0) {
+        deps.post({ type: 'server/restart-blocked', payload: { ...blockers, checkId } });
+        return;
+      }
+      await vscode.commands.executeCommand('varro.server.restart');
+    })();
+    restartCheckOperation = operation;
+    const finish = () => {
+      if (restartCheckOperation === operation) restartCheckOperation = null;
+    };
+    void operation.then(finish, finish);
+    return operation;
+  };
+
   return {
     ready: () => deps.handleReadyMessage(),
     updateCommandState: (canAbort, canSwitchSessions) => {
@@ -79,9 +102,13 @@ export function createSidebarProviderActions(
       );
     },
     showOutput: () => logger.show(),
-    restartServer: async () => {
-      await vscode.commands.executeCommand('varro.server.restart');
+    restartServer: async (force) => {
+      await vscode.commands.executeCommand(
+        'varro.server.restart',
+        force ? { force: true } : undefined
+      );
     },
+    checkServerRestart,
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
     handleDroppedContent: (files) => deps.handleDroppedContent(files),
     removeContextFile: (path) => deps.removeContextFile(path),

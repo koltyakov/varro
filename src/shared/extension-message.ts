@@ -7,6 +7,7 @@ import {
   type EditorContext,
   type ExtensionMessage,
   type RalphStatePayload,
+  type RestartBlockedState,
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
@@ -18,6 +19,7 @@ import { asRecord } from './type-utils';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/status',
+  'server/restart-blocked',
   'server/event',
   'providers/refresh',
   'context/update',
@@ -81,6 +83,11 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     case 'server/status': {
       const payload = asRecord(record.payload);
       return isServerStatus(payload) ? { type, payload } : null;
+    }
+
+    case 'server/restart-blocked': {
+      const payload = parseRestartBlockedState(record.payload);
+      return payload ? { type, payload } : null;
     }
 
     case 'server/event': {
@@ -226,6 +233,48 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     default:
       return null;
   }
+}
+
+function parseRestartBlockedState(value: unknown): RestartBlockedState | null {
+  const payload = asRecord(value);
+  if (
+    !payload ||
+    !Number.isSafeInteger(payload.totalSessionCount) ||
+    (payload.totalSessionCount as number) <= 0 ||
+    !Array.isArray(payload.directories)
+  ) {
+    return null;
+  }
+  const directories = payload.directories.map((directoryValue) => {
+    const row = asRecord(directoryValue);
+    if (
+      !row ||
+      (row.directory !== null && typeof row.directory !== 'string') ||
+      !Number.isSafeInteger(row.sessionCount) ||
+      (row.sessionCount as number) <= 0
+    ) {
+      return null;
+    }
+    return {
+      directory: row.directory as string | null,
+      sessionCount: row.sessionCount as number,
+    };
+  });
+  if (directories.some((row) => row === null)) return null;
+  const typedDirectories = directories as RestartBlockedState['directories'];
+  if (
+    typedDirectories.reduce((total, row) => total + row.sessionCount, 0) !==
+    payload.totalSessionCount
+  ) {
+    return null;
+  }
+  return {
+    totalSessionCount: payload.totalSessionCount as number,
+    directories: typedDirectories,
+    ...(Number.isSafeInteger(payload.checkId) && (payload.checkId as number) >= 0
+      ? { checkId: payload.checkId as number }
+      : {}),
+  };
 }
 
 function isServerStatus(value: Record<string, unknown> | null): value is ServerStatus {

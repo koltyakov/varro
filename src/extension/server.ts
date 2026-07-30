@@ -13,10 +13,12 @@ import {
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import {
   parseServerEvent,
+  type RestartBlockedState,
   type ServerErrorBlockedBy,
   type ServerErrorDetail,
   type ServerStatus,
 } from '../shared/protocol';
+import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import {
   OpenCodeProcess,
   type OpenCodeCompactionSettings,
@@ -83,6 +85,24 @@ function countActiveAgents(value: unknown) {
     if (type === 'busy' || type === 'retry') count += 1;
   }
   return count;
+}
+
+function getSessionID(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const info =
+    record.info && typeof record.info === 'object'
+      ? (record.info as Record<string, unknown>)
+      : null;
+  const id = record.sessionID ?? record.sessionId ?? info?.sessionID ?? info?.sessionId;
+  return typeof id === 'string' && id.trim() ? id : null;
+}
+
+export class RestartBlockedError extends Error {
+  constructor(readonly blockers: RestartBlockedState) {
+    super('OpenCode has active sessions; finish them before restarting the server');
+    this.name = 'RestartBlockedError';
+  }
 }
 
 function isSupportedOpenCodeVersion(version: string | undefined): boolean {
@@ -198,13 +218,15 @@ export class OpenCodeServer extends EventEmitter {
   private restartReadyToStart = false;
   private pendingTerminalCliUpgrades = 0;
   private lastCeilingNoticeVersion = '';
+  private lastRestartBlockers: RestartBlockedState | null = null;
 
   constructor(
     port: number,
     autoStart: boolean,
     command?: string,
     simulateMissingCli = false,
-    compactionSettings?: Partial<OpenCodeCompactionSettings>
+    compactionSettings?: Partial<OpenCodeCompactionSettings>,
+    ownershipLeasePath?: string
   ) {
     super();
     this.processManager = new OpenCodeProcess(
@@ -212,7 +234,8 @@ export class OpenCodeServer extends EventEmitter {
       autoStart,
       command,
       simulateMissingCli,
-      compactionSettings
+      compactionSettings,
+      ownershipLeasePath
     );
     this.transport = new OpenCodeTransport({
       getUrl: () => this.url,
@@ -761,17 +784,27 @@ export class OpenCodeServer extends EventEmitter {
           },
           onExit: (proc, code, exitSignal) => {
             const wasCurrentProcess = this.process === proc;
+            const ownershipTransferred =
+              this.processManager.hasTransferredManagedServerOwnership(proc);
             attemptProcessExited = true;
             const processCleanup = this.processManager.releaseExitedProcess(proc);
             attemptCleanup ||= processCleanup;
             logger.info(`Server process exited with code ${code}`);
             if (!wasCurrentProcess || (attemptProcess && attemptProcess !== proc)) return;
-            this.stopEventStream();
+            if (!ownershipTransferred) this.stopEventStream();
             if (isInvalidAttempt()) {
               rejectCancelledAttempt();
               return;
             }
             if (this._status.state === 'running') {
+              if (ownershipTransferred) {
+                void processCleanup.catch((err: unknown) => {
+                  logger.warn(
+                    `Failed to clean up transferred OpenCode process state: ${err instanceof Error ? err.message : String(err)}`
+                  );
+                });
+                return;
+              }
               this.handleRuntimeProcessExit(
                 code,
                 exitSignal,
@@ -1153,18 +1186,6 @@ export class OpenCodeServer extends EventEmitter {
       ? `the running server is ${serverVersion}`
       : 'the running server version could not be determined';
 
-    if (this.processManager.hasForeignActiveOwnership) {
-      await this.processManager.refreshManagedServerOwnership();
-      this.throwIfStartCancelled(disposeGeneration, signal);
-    }
-    if (this.processManager.hasForeignActiveOwnership) {
-      this.failForRequiredUpdate(
-        observed,
-        'The running server is actively owned by another Varro extension host and cannot be replaced safely.',
-        { blockedBy: 'foreign-owner' }
-      );
-    }
-
     if (!this.processManager.isAutoUpdateEnabled) {
       this.failForRequiredUpdate(observed, 'Automatic updates are disabled.', {
         blockedBy: 'auto-update-disabled',
@@ -1362,35 +1383,59 @@ export class OpenCodeServer extends EventEmitter {
       logger.info(
         `Restarting OpenCode server to use CLI ${installedCliVersion} instead of server ${serverVersion}`
       );
-      await this.stopServerForRestart();
+      await this.stopServerForRestart(true);
     });
   }
 
-  private async stopManagedProcessForRestart() {
-    this.clearRestartTimer();
-    this.clearRetryResetTimer();
-    this.cancelPollHealth();
-    this.stopEventStream();
-    this.transport.abortRequests();
-    await this.processManager.stopManagedProcessForRestart();
+  private async stopManagedProcessForRestart(ownershipAcquired = false) {
+    const ownership = ownershipAcquired
+      ? null
+      : this.processManager.acquireManagedServerRestartOwnership();
+    const releaseOwnership =
+      ownership === null ? null : typeof ownership === 'function' ? ownership : await ownership;
+    try {
+      this.clearRestartTimer();
+      this.clearRetryResetTimer();
+      this.cancelPollHealth();
+      this.stopEventStream();
+      this.transport.abortRequests();
+      await this.processManager.stopManagedProcessForRestart();
+    } finally {
+      await releaseOwnership?.();
+    }
   }
 
-  private async stopServerForRestart() {
-    this.clearRestartTimer();
-    this.clearRetryResetTimer();
-    this.cancelPollHealth();
-    this.stopEventStream();
-    this.transport.abortRequests();
-    await this.processManager.stopServerForRestart();
+  private async stopServerForRestart(ownershipAcquired = false) {
+    if (ownershipAcquired) {
+      this.clearRestartTimer();
+      this.clearRetryResetTimer();
+      this.cancelPollHealth();
+      this.stopEventStream();
+      this.transport.abortRequests();
+      await this.processManager.stopServerForRestart();
+      return;
+    }
+    const ownership = this.processManager.acquireManagedServerRestartOwnership();
+    const releaseOwnership = typeof ownership === 'function' ? ownership : await ownership;
+    try {
+      this.clearRestartTimer();
+      this.clearRetryResetTimer();
+      this.cancelPollHealth();
+      this.stopEventStream();
+      this.transport.abortRequests();
+      await this.processManager.stopServerForRestart();
+    } finally {
+      await releaseOwnership();
+    }
   }
 
-  private async hasActiveSessions(): Promise<boolean> {
+  async readRestartBlockers(): Promise<RestartBlockedState> {
     // Use the transport directly: restart preflight runs after the lifecycle
     // has reserved the restart operation, while public request() intentionally
     // waits behind that operation.
     const [statuses, questions] = await Promise.all([
-      this.transport.request('GET', '/session/status'),
-      this.transport.request('GET', '/question'),
+      this.transport.request('GET', '/session/status', undefined, { unscoped: true }),
+      this.transport.request('GET', '/question', undefined, { unscoped: true }),
     ]);
 
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
@@ -1399,11 +1444,67 @@ export class OpenCodeServer extends EventEmitter {
     if (!Array.isArray(questions)) {
       throw new Error('OpenCode returned an invalid pending question response');
     }
+    const blockingSessionIDs = new Set<string>();
+    for (const [sessionID, value] of Object.entries(statuses)) {
+      const status = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+      if (status?.type === 'busy' || status?.type === 'retry') blockingSessionIDs.add(sessionID);
+    }
+    for (const [index, question] of questions.entries()) {
+      blockingSessionIDs.add(getSessionID(question) ?? `unknown-question:${index}`);
+    }
+    for (const sessionID of this.transport.getPendingAttentionSessionIDs()) {
+      blockingSessionIDs.add(sessionID);
+    }
 
-    if (countActiveAgents(statuses) > 0) return true;
-    if (questions.length > 0) return true;
+    if (blockingSessionIDs.size === 0) {
+      const result = { totalSessionCount: 0, directories: [] };
+      this.lastRestartBlockers = result;
+      return result;
+    }
 
-    return this.transport.hasPendingAttentionRequests();
+    let sessions: unknown[] = [];
+    try {
+      const value = await this.transport.request('GET', '/session', undefined, { unscoped: true });
+      if (Array.isArray(value)) sessions = value;
+      else
+        logger.warn('OpenCode returned an invalid session list while describing restart blockers');
+    } catch (err) {
+      logger.warn(
+        `Could not read session directories for restart blockers: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    const directoriesBySessionID = new Map<string, string>();
+    for (const value of sessions) {
+      if (!value || typeof value !== 'object') continue;
+      const session = value as Record<string, unknown>;
+      if (typeof session.id !== 'string' || typeof session.directory !== 'string') continue;
+      directoriesBySessionID.set(session.id, session.directory);
+    }
+
+    const grouped = new Map<string, { directory: string | null; sessionCount: number }>();
+    for (const sessionID of blockingSessionIDs) {
+      const directory = directoriesBySessionID.get(sessionID) ?? null;
+      const key = normalizeWorkspaceIdentity(directory) ?? '';
+      const current = grouped.get(key);
+      if (current) current.sessionCount += 1;
+      else grouped.set(key, { directory, sessionCount: 1 });
+    }
+
+    const result = {
+      totalSessionCount: blockingSessionIDs.size,
+      directories: [...grouped.values()].toSorted((left, right) => {
+        if (left.directory === null) return 1;
+        if (right.directory === null) return -1;
+        return left.directory.localeCompare(right.directory);
+      }),
+    };
+    this.lastRestartBlockers = result;
+    return result;
+  }
+
+  private async hasActiveSessions(): Promise<boolean> {
+    return (await this.readRestartBlockers()).totalSessionCount > 0;
   }
 
   private async ensureOldServerIsIdle(
@@ -1454,7 +1555,12 @@ export class OpenCodeServer extends EventEmitter {
       );
     }
     if (activeSessions) {
-      throw new Error('OpenCode has active sessions; finish them before restarting the server');
+      throw new RestartBlockedError(
+        this.lastRestartBlockers ?? {
+          totalSessionCount: 1,
+          directories: [{ directory: null, sessionCount: 1 }],
+        }
+      );
     }
   }
 
@@ -1496,15 +1602,7 @@ export class OpenCodeServer extends EventEmitter {
    */
   async prepareForWindowsCliUpgrade() {
     if (process.platform !== 'win32') return;
-    if (this.processManager.hasForeignActiveOwnership) {
-      await this.processManager.refreshManagedServerOwnership();
-    }
-    if (this.processManager.hasForeignActiveOwnership) {
-      throw new Error(
-        'Another Varro extension host owns the OpenCode server; close it before updating OpenCode'
-      );
-    }
-    if (!this.managedProcess) {
+    if (!this.managedProcess && !this.processManager.hasForeignActiveOwnership) {
       const health = await this.readHealthInfo();
       if (this._status.state === 'running' || health.healthy) {
         throw new Error(
@@ -1559,7 +1657,7 @@ export class OpenCodeServer extends EventEmitter {
     this.processManager.updateLaunchSettings(options);
   }
 
-  restart(): Promise<string> {
+  restart(options: { force?: boolean } = {}): Promise<string> {
     // Restart is how the user says "I just installed it, look again", so the
     // memoized lookup must not survive: its key only covers the environment,
     // which does not change when a CLI appears in a directory already on PATH.
@@ -1569,17 +1667,29 @@ export class OpenCodeServer extends EventEmitter {
         new Error('OpenCode is being updated in a terminal; close it before restarting the server')
       );
     }
+    if (this._status.state === 'error' && !this.managedProcess && !this.process) {
+      return this.recoverOwnershipAndRestart(options);
+    }
+    return this.startRestart(options);
+  }
+
+  private async recoverOwnershipAndRestart(options: { force?: boolean }): Promise<string> {
+    await this.processManager.takeOwnershipOfExistingServer();
+    return this.startRestart(options);
+  }
+
+  private startRestart(options: { force?: boolean }): Promise<string> {
     return this.runRestart(
       async () => {
         await this.processManager.stopServerForRestart();
       },
-      { allowUnresponsiveManagedProcess: true }
+      { allowUnresponsiveManagedProcess: true, force: options.force }
     );
   }
 
   private runRestart(
     stop: () => Promise<void>,
-    options: { allowUnresponsiveManagedProcess?: boolean } = {}
+    options: { allowUnresponsiveManagedProcess?: boolean; force?: boolean } = {}
   ): Promise<string> {
     const existingRestart = this.lifecycle.getRestartPromise<string>();
     if (existingRestart) return existingRestart;
@@ -1588,33 +1698,41 @@ export class OpenCodeServer extends EventEmitter {
       this.throwIfOperationCancelled(signal);
       await this.transport.waitForRequestsToSettle();
       this.throwIfOperationCancelled(signal);
-      await this.ensureSafeToStopLiveServer(options.allowUnresponsiveManagedProcess);
-      this.throwIfOperationCancelled(signal);
-      this.setStatus({ state: 'starting' });
-      this.clearRestartTimer();
-      this.clearRetryResetTimer();
-      this.cancelPollHealth();
-      this.stopEventStream();
-      this.transport.clearPendingAttentionRequests();
-      this.transport.abortRequests();
-      try {
-        await stop();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.setStatus({
-          state: 'error',
-          message: `Failed to stop OpenCode server for restart: ${message}`,
-        });
-        throw err;
+      if (!options.force) {
+        await this.ensureSafeToStopLiveServer(options.allowUnresponsiveManagedProcess);
       }
       this.throwIfOperationCancelled(signal);
-      this.restartReadyToStart = true;
+      const ownership = this.processManager.acquireManagedServerRestartOwnership();
+      const releaseOwnership = typeof ownership === 'function' ? ownership : await ownership;
       try {
-        const url = await this.start();
+        this.setStatus({ state: 'starting' });
+        this.clearRestartTimer();
+        this.clearRetryResetTimer();
+        this.cancelPollHealth();
+        this.stopEventStream();
+        this.transport.clearPendingAttentionRequests();
+        this.transport.abortRequests();
+        try {
+          await stop();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.setStatus({
+            state: 'error',
+            message: `Failed to stop OpenCode server for restart: ${message}`,
+          });
+          throw err;
+        }
         this.throwIfOperationCancelled(signal);
-        return url;
+        this.restartReadyToStart = true;
+        try {
+          const url = await this.start();
+          this.throwIfOperationCancelled(signal);
+          return url;
+        } finally {
+          this.restartReadyToStart = false;
+        }
       } finally {
-        this.restartReadyToStart = false;
+        await releaseOwnership();
       }
     }, OpenCodeServer.START_DISPOSED_MESSAGE);
     // Reserve the lifecycle first so no new public request can start, then
@@ -1660,7 +1778,7 @@ export class OpenCodeServer extends EventEmitter {
   private async restartManagedServerForCompactionSettings() {
     await this.runRestart(async () => {
       logger.info('Restarting managed OpenCode server to apply updated Varro compaction settings');
-      await this.stopManagedProcessForRestart();
+      await this.stopManagedProcessForRestart(true);
     });
   }
 

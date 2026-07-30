@@ -412,6 +412,14 @@ body.vscode-light .question-custom-input {
   justify-content: safe center;
 }
 
+.server-status-detecting-logo {
+  width: clamp(64px, 12vw, 88px);
+  height: auto;
+  filter: grayscale(1);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
 .server-status-action-button {
   display: inline-flex;
   align-items: center;

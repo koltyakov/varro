@@ -35,7 +35,8 @@ export interface MessageRouterCallbacks {
   exportSession(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
-  restartServer(): Promise<void>;
+  restartServer(force: boolean): Promise<void>;
+  checkServerRestart(checkId: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
   removeContextFile(path: string): void;
@@ -95,7 +96,10 @@ export class MessageRouter {
           this.callbacks.showOutput();
           break;
         case 'server/restart':
-          await this.callbacks.restartServer();
+          await this.callbacks.restartServer(msg.payload?.force === true);
+          break;
+        case 'server/restart/check':
+          await this.callbacks.checkServerRestart(msg.payload.checkId);
           break;
         case 'files/drop':
           await this.handleFilesDropMessage(msg);

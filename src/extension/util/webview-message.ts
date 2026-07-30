@@ -107,6 +107,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'ralph/sync': true,
   log: true,
   'server/restart': true,
+  'server/restart/check': true,
 } as const satisfies Record<WebviewMessage['type'], true>;
 
 export function parseWebviewMessage(value: unknown): WebviewMessage | null {
@@ -122,8 +123,19 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'files/clear':
     case 'files/pick':
     case 'vscode/show-output':
-    case 'server/restart':
       return { type };
+
+    case 'server/restart': {
+      const payload = asRecord(message?.payload);
+      return payload?.force === true ? { type, payload: { force: true } } : { type };
+    }
+
+    case 'server/restart/check': {
+      const payload = asRecord(message?.payload);
+      return Number.isSafeInteger(payload?.checkId) && (payload?.checkId as number) >= 0
+        ? { type, payload: { checkId: payload?.checkId as number } }
+        : null;
+    }
 
     case 'session/export': {
       const payload = asRecord(message?.payload);

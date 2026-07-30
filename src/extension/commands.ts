@@ -5,7 +5,7 @@ import { describeInstallMethod, getUpgradeCommand } from '../shared/opencode-ins
 import { readMaximumTestedOpenCodeVersion } from './extension-manifest';
 import type { SidebarProvider } from './sidebar-provider';
 import type { ContextProvider } from './context-provider';
-import type { OpenCodeServer, OpenCodeServerInfo } from './server';
+import { RestartBlockedError, type OpenCodeServer, type OpenCodeServerInfo } from './server';
 import { getOpenCodeConfigDirectory } from './open-code-process';
 import { getRelativePath } from './util/path';
 import { errorHub } from './error-hub';
@@ -128,20 +128,28 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('varro.server.restart', async () => {
-      try {
-        const url = await server.restart();
-        sidebar.post({ type: 'providers/refresh' });
-        logger.info(`OpenCode server restarted at ${url}`);
-      } catch (err) {
-        const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
-        if (server.status.state !== 'error') {
-          errorHub.report({ code: 'server-start', message });
-        } else {
-          logger.error(message);
+    vscode.commands.registerCommand(
+      'varro.server.restart',
+      async (options?: { force?: boolean }) => {
+        try {
+          const url = await server.restart({ force: options?.force === true });
+          sidebar.post({ type: 'providers/refresh' });
+          logger.info(`OpenCode server restarted at ${url}`);
+        } catch (err) {
+          if (err instanceof RestartBlockedError) {
+            await vscode.commands.executeCommand('workbench.view.extension.varro');
+            sidebar.post({ type: 'server/restart-blocked', payload: err.blockers });
+            return;
+          }
+          const message = `Failed to restart server: ${err instanceof Error ? err.message : String(err)}`;
+          if (server.status.state !== 'error') {
+            errorHub.report({ code: 'server-start', message });
+          } else {
+            logger.error(message);
+          }
         }
       }
-    }),
+    ),
 
     vscode.commands.registerCommand('varro.chat.addTerminalSelectionToContext', async () => {
       try {
@@ -263,11 +271,11 @@ function renderAboutMarkdown(context: vscode.ExtensionContext, serverInfo: OpenC
     ? `error: ${serverInfo.activeAgentError}`
     : String(serverInfo.activeAgentCount ?? 'unknown');
   const ownership =
-    serverInfo.ownership === 'other-host'
-      ? 'managed by Varro (another VS Code window)'
-      : serverInfo.ownership === 'current-host' || serverInfo.managedProcess
-        ? 'managed by Varro'
-        : 'unmanaged';
+    serverInfo.ownership === 'other-host' ||
+    serverInfo.ownership === 'current-host' ||
+    serverInfo.managedProcess
+      ? 'managed by Varro'
+      : 'unmanaged';
 
   return [
     `# ${name} About`,

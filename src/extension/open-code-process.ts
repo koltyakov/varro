@@ -13,6 +13,7 @@ import {
   realpath,
   rename,
   rm,
+  stat as readStat,
   writeFile,
 } from 'fs/promises';
 import { homedir, tmpdir } from 'os';
@@ -163,6 +164,19 @@ interface InjectedConfigOwner {
   configPath?: string;
 }
 
+interface ManagedServerOwnershipClaim {
+  version: 1;
+  host: string;
+  hostPid: number;
+  hostBirthIdentity?: string;
+  createdAt: number;
+}
+
+interface ManagedServerOwnershipClaimHandle {
+  path: string;
+  handle: Awaited<ReturnType<typeof openFile>>;
+}
+
 export type OpenCodeServerOwnership = 'current-host' | 'other-host' | 'unmanaged';
 
 type CommandResult = {
@@ -181,6 +195,8 @@ const PROCESS_COMMAND_MAX_OUTPUT_CHARS = 1_000_000;
 const INJECTED_CONFIG_DIRECTORY_PREFIX = 'varro-opencode-config-';
 const INJECTED_CONFIG_OWNER_FILE = 'owner.json';
 const STALE_INJECTED_CONFIG_AGE_MS = 7 * 24 * 60 * 60_000;
+const LEGACY_OWNERSHIP_CLAIM_STALE_AGE_MS = 30_000;
+const OWNERSHIP_CLAIM_MAX_AGE_MS = 2 * 60_000;
 const SERVER_OWNER_ENV = 'VARRO_SERVER_OWNER';
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 let staleConfigSweep: Promise<void> = Promise.resolve();
@@ -233,6 +249,28 @@ function parseInjectedConfigOwner(value: unknown): InjectedConfigOwner | null {
         }
       : {}),
     ...(record.configPath ? { configPath: record.configPath as string } : {}),
+  };
+}
+
+function parseManagedServerOwnershipClaim(value: unknown): ManagedServerOwnershipClaim | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return null;
+  if (typeof record.host !== 'string' || !record.host.trim()) return null;
+  if (!Number.isSafeInteger(record.hostPid) || (record.hostPid as number) <= 0) return null;
+  if (
+    record.hostBirthIdentity !== undefined &&
+    (typeof record.hostBirthIdentity !== 'string' || !record.hostBirthIdentity.trim())
+  ) {
+    return null;
+  }
+  if (typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)) return null;
+  return {
+    version: 1,
+    host: record.host,
+    hostPid: record.hostPid as number,
+    ...(record.hostBirthIdentity ? { hostBirthIdentity: record.hostBirthIdentity as string } : {}),
+    createdAt: record.createdAt,
   };
 }
 
@@ -867,7 +905,7 @@ export class OpenCodeProcess {
       this.portInUseDetected = false;
       return;
     }
-    if (this.autoStart && (await this.takeOwnershipOfExistingServer())) {
+    if (await this.takeOwnershipOfExistingServer()) {
       this.portFallbackAttempts = 0;
       this.portInUseDetected = false;
       return;
@@ -914,8 +952,69 @@ export class OpenCodeProcess {
     return operation;
   }
 
+  acquireManagedServerRestartOwnership(): (() => Promise<void>) | Promise<() => Promise<void>> {
+    if (!this.ownershipLease && !this.foreignActiveOwnership) {
+      return () => Promise.resolve();
+    }
+    return this.runManagedServerRestartOwnershipAcquisition();
+  }
+
+  private async runManagedServerRestartOwnershipAcquisition(): Promise<() => Promise<void>> {
+    const claim = await this.acquireOwnershipClaim();
+    if (!claim) {
+      throw new Error('Another Varro window is already restarting the OpenCode server');
+    }
+
+    const release = () => this.releaseOwnershipClaim(claim);
+
+    try {
+      const lease = await this.readOwnershipLease();
+      if (!lease) {
+        if (!this.ownershipLease) {
+          await this.takeOwnershipOfMarkedListener(await this.readOwnershipHostIdentity());
+        }
+        return release;
+      }
+      if (!(await this.matchesOwnershipLease(lease))) {
+        await this.removeOwnershipLease(lease.owner, lease.host);
+        return release;
+      }
+      if (lease.configPath && !(await this.matchesInjectedConfigOwner(lease))) {
+        throw new Error('Managed OpenCode ownership no longer matches its temporary config');
+      }
+
+      const claimed: ManagedServerOwnershipLease = {
+        ...lease,
+        host: this.hostOwner,
+        state: 'active',
+      };
+      delete claimed.hostPid;
+      delete claimed.hostBirthIdentity;
+      Object.assign(claimed, await this.readOwnershipHostIdentity());
+      await this.writeOwnershipLease(claimed);
+      this.adoptManagedServerOwnership(claimed);
+      return release;
+    } catch (err) {
+      await release();
+      throw err;
+    }
+  }
+
+  hasTransferredManagedServerOwnership(proc: ChildProcess): boolean {
+    const launch = this.processLaunches.get(proc);
+    if (!launch) return false;
+    try {
+      const lease = parseManagedServerOwnershipLease(
+        JSON.parse(readFileSync(this.ownershipLeasePath, 'utf-8'))
+      );
+      return !!lease && lease.owner === launch.owner && lease.host !== this.hostOwner;
+    } catch {
+      return false;
+    }
+  }
+
   async takeOwnershipOfExistingServer(): Promise<boolean> {
-    if (!this.autoStart || this._managedProcess || this._process) {
+    if (this._managedProcess || this._process) {
       return false;
     }
     if (await this.readOwnershipLease()) {
@@ -924,57 +1023,56 @@ export class OpenCodeProcess {
       if (await this.readOwnershipLease()) return false;
     }
 
-    const claimPath = `${this.ownershipLeasePath}.claim`;
-    let claimHandle: Awaited<ReturnType<typeof openFile>>;
-    try {
-      claimHandle = await openFile(claimPath, 'wx', 0o600);
-    } catch {
-      return false;
-    }
+    const claim = await this.acquireOwnershipClaim();
+    if (!claim) return false;
 
     try {
       if (await this.readOwnershipLease()) return false;
-      const listeners = await findListeningPids(this._port, this.linuxProcRoot);
-      if (listeners.length !== 1) return false;
-      const pid = listeners[0]!;
-      const [executable, birthIdentity, ownershipHostIdentity] = await Promise.all([
-        readProcessExecutable(pid, this.linuxProcRoot),
-        readProcessBirthIdentity(pid, this.linuxProcRoot),
-        this.readOwnershipHostIdentity(),
-      ]);
-      if (!executable || !birthIdentity) return false;
-      const processOwner =
-        (await this.readMatchingOwnershipMarker(pid, executable, birthIdentity)) ??
-        (await this.findInjectedConfigOwner(pid, executable, birthIdentity));
-      if (!processOwner) return false;
-      const lease: ManagedServerOwnershipLease = {
-        version: 1,
-        pid,
-        port: this._port,
-        executable,
-        birthIdentity,
-        owner: processOwner.owner,
-        host: this.hostOwner,
-        ...ownershipHostIdentity,
-        state: 'active',
-        createdAt: processOwner.createdAt,
-        ...(processOwner.configPath ? { configPath: processOwner.configPath } : {}),
-      };
-      if (
-        !(await this.matchesOwnershipLease(lease)) ||
-        !(await this.matchesInjectedConfigOwner(lease))
-      ) {
-        return false;
-      }
-      await this.writeOwnershipMarker(lease);
-      await this.writeOwnershipLease(lease);
-      this.adoptManagedServerOwnership(lease);
-      logger.info(`Took ownership of existing OpenCode server PID ${pid}`);
-      return true;
+      return await this.takeOwnershipOfMarkedListener(await this.readOwnershipHostIdentity());
     } finally {
-      await claimHandle.close().catch(() => {});
-      await rm(claimPath, { force: true }).catch(() => {});
+      await this.releaseOwnershipClaim(claim);
     }
+  }
+
+  private async takeOwnershipOfMarkedListener(
+    ownershipHostIdentity: Pick<ManagedServerOwnershipLease, 'hostPid' | 'hostBirthIdentity'>
+  ): Promise<boolean> {
+    const listeners = await findListeningPids(this._port, this.linuxProcRoot);
+    if (listeners.length !== 1) return false;
+    const pid = listeners[0]!;
+    const [executable, birthIdentity] = await Promise.all([
+      readProcessExecutable(pid, this.linuxProcRoot),
+      readProcessBirthIdentity(pid, this.linuxProcRoot),
+    ]);
+    if (!executable || !birthIdentity) return false;
+    const processOwner =
+      (await this.readMatchingOwnershipMarker(pid, executable, birthIdentity)) ??
+      (await this.findInjectedConfigOwner(pid, executable, birthIdentity));
+    if (!processOwner) return false;
+    const lease: ManagedServerOwnershipLease = {
+      version: 1,
+      pid,
+      port: this._port,
+      executable,
+      birthIdentity,
+      owner: processOwner.owner,
+      host: this.hostOwner,
+      ...ownershipHostIdentity,
+      state: 'active',
+      createdAt: processOwner.createdAt,
+      ...(processOwner.configPath ? { configPath: processOwner.configPath } : {}),
+    };
+    if (
+      !(await this.matchesOwnershipLease(lease)) ||
+      !(await this.matchesInjectedConfigOwner(lease))
+    ) {
+      return false;
+    }
+    await this.writeOwnershipMarker(lease);
+    await this.writeOwnershipLease(lease);
+    this.adoptManagedServerOwnership(lease);
+    logger.info(`Took ownership of existing OpenCode server PID ${pid}`);
+    return true;
   }
 
   private async runManagedServerOwnershipRefresh(): Promise<boolean> {
@@ -1901,16 +1999,85 @@ export class OpenCodeProcess {
     }
   }
 
+  private async acquireOwnershipClaim(): Promise<ManagedServerOwnershipClaimHandle | null> {
+    const path = `${this.ownershipLeasePath}.claim`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let handle: Awaited<ReturnType<typeof openFile>>;
+      try {
+        handle = await openFile(path, 'wx', 0o600);
+      } catch (err) {
+        if (
+          attempt > 0 ||
+          (err as NodeJS.ErrnoException)?.code !== 'EEXIST' ||
+          !(await this.removeStaleOwnershipClaim(path))
+        ) {
+          return null;
+        }
+        continue;
+      }
+
+      try {
+        const claim: ManagedServerOwnershipClaim = {
+          version: 1,
+          host: this.hostOwner,
+          hostPid: process.pid,
+          createdAt: Date.now(),
+        };
+        await handle.writeFile(`${JSON.stringify(claim)}\n`, { encoding: 'utf-8' });
+        return { path, handle };
+      } catch (err) {
+        await handle.close().catch(() => {});
+        await rm(path, { force: true }).catch(() => {});
+        throw err;
+      }
+    }
+    return null;
+  }
+
+  private async removeStaleOwnershipClaim(path: string): Promise<boolean> {
+    let claim: ManagedServerOwnershipClaim | null = null;
+    try {
+      claim = parseManagedServerOwnershipClaim(JSON.parse(await readFile(path, 'utf-8')));
+    } catch {}
+
+    if (claim) {
+      if (claim.host === this.hostOwner) return false;
+      if (isProcessAlive(claim.hostPid)) {
+        if (claim.hostBirthIdentity) {
+          const birthIdentity = await readProcessBirthIdentity(claim.hostPid, this.linuxProcRoot);
+          if (!birthIdentity || birthIdentity === claim.hostBirthIdentity) return false;
+        } else if (Date.now() - claim.createdAt < OWNERSHIP_CLAIM_MAX_AGE_MS) {
+          return false;
+        }
+      }
+    } else {
+      try {
+        const info = await readStat(path);
+        if (Date.now() - info.mtimeMs < LEGACY_OWNERSHIP_CLAIM_STALE_AGE_MS) return false;
+      } catch {
+        return true;
+      }
+    }
+
+    try {
+      await rm(path);
+      logger.info('Removed stale OpenCode server ownership claim');
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException)?.code === 'ENOENT';
+    }
+  }
+
+  private async releaseOwnershipClaim(claim: ManagedServerOwnershipClaimHandle) {
+    await claim.handle.close().catch(() => {});
+    await rm(claim.path, { force: true }).catch(() => {});
+  }
+
   private async claimAvailableOwnershipLease(
     lease: ManagedServerOwnershipLease
   ): Promise<ManagedServerOwnershipLease | null> {
-    const claimPath = `${this.ownershipLeasePath}.claim`;
-    let claimHandle: Awaited<ReturnType<typeof openFile>>;
-    try {
-      claimHandle = await openFile(claimPath, 'wx', 0o600);
-    } catch {
-      return null;
-    }
+    const claim = await this.acquireOwnershipClaim();
+    if (!claim) return null;
 
     try {
       const current = await this.readOwnershipLease();
@@ -1944,8 +2111,7 @@ export class OpenCodeProcess {
       await this.writeOwnershipLease(claimed);
       return claimed;
     } finally {
-      await claimHandle.close().catch(() => {});
-      await rm(claimPath, { force: true }).catch(() => {});
+      await this.releaseOwnershipClaim(claim);
     }
   }
 
