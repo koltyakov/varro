@@ -24,6 +24,7 @@ import { asRecord } from '../../shared/type-utils';
 const ALLOWED_TERMINAL_COMMANDS = new Set<string>([
   'opencode auth login',
   'opencode auth',
+  'opencode providers logout',
   ...OPENCODE_TERMINAL_COMMANDS,
 ]);
 

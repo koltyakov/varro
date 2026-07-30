@@ -17,6 +17,10 @@ const clientMocks = vi.hoisted(() => ({
 }));
 
 const refreshRoutingStateMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const providerSetupMocks = vi.hoisted(() => ({
+  openProviderLogout: vi.fn(),
+  openProviderSetup: vi.fn(),
+}));
 
 vi.mock('../lib/client', () => ({
   client: {
@@ -32,7 +36,7 @@ vi.mock('../lib/client', () => ({
 }));
 
 vi.mock('../lib/provider-setup', () => ({
-  openProviderSetup: vi.fn(),
+  ...providerSetupMocks,
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({
@@ -157,6 +161,18 @@ describe('ModelsPanel', () => {
 
     expect(reloadButton).toBeInstanceOf(HTMLButtonElement);
     expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+  });
+
+  it('opens provider logout from the minus button', () => {
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const logoutButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Log out provider"]'
+    );
+    logoutButton?.click();
+
+    expect(logoutButton).toBeInstanceOf(HTMLButtonElement);
+    expect(providerSetupMocks.openProviderLogout).toHaveBeenCalledOnce();
   });
 
   it('shows a loading indicator long enough to be perceptible', async () => {

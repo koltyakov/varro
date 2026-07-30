@@ -213,6 +213,16 @@ describe('webview message validation', () => {
       type: 'terminal/run',
       payload: { command: 'opencode auth', title: 'Auth' },
     });
+
+    expect(
+      parseWebviewMessage({
+        type: 'terminal/run',
+        payload: { command: 'opencode providers logout', title: 'Provider Logout' },
+      })
+    ).toEqual({
+      type: 'terminal/run',
+      payload: { command: 'opencode providers logout', title: 'Provider Logout' },
+    });
   });
 
   // The server-status recovery buttons post these; when the allowlist did not

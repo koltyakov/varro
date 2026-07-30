@@ -16,7 +16,7 @@ import {
   modelSupportsVision,
 } from '../lib/model-capabilities';
 import { sortProviderModels } from '../lib/model-ordering';
-import { openProviderSetup } from '../lib/provider-setup';
+import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
@@ -209,6 +209,17 @@ export function ModelsPanel() {
               >
                 <path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8" />
                 <path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="chat-header-btn"
+              onClick={openProviderLogout}
+              title="Log out provider"
+              aria-label="Log out provider"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3 7.25h10a.75.75 0 010 1.5H3a.75.75 0 010-1.5z" />
               </svg>
             </button>
             <button

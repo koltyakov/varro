@@ -6,7 +6,7 @@ vi.mock('./bridge', () => ({
   postMessage: postMessageMock,
 }));
 
-import { openProviderSetup } from './provider-setup';
+import { openProviderLogout, openProviderSetup } from './provider-setup';
 
 describe('openProviderSetup', () => {
   beforeEach(() => {
@@ -19,6 +19,15 @@ describe('openProviderSetup', () => {
     expect(postMessageMock).toHaveBeenCalledWith({
       type: 'terminal/run',
       payload: { command: 'opencode auth login', title: 'OpenCode Provider Setup' },
+    });
+  });
+
+  it('opens the provider logout command in the terminal bridge', () => {
+    openProviderLogout();
+
+    expect(postMessageMock).toHaveBeenCalledWith({
+      type: 'terminal/run',
+      payload: { command: 'opencode providers logout', title: 'OpenCode Provider Logout' },
     });
   });
 });
