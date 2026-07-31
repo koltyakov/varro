@@ -66,6 +66,39 @@ test('renders search tool details in the same framed card as other tool details'
   await expect(searchTool.locator('.tool-invocation-input')).toHaveCount(0);
 });
 
+test('fills expanded details with terminal and structured cards', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+
+  const tools = [
+    page
+      .locator('.chat-tool-invocation-part')
+      .filter({ hasText: 'Search: --color-vscode-input-border' }),
+    page.locator('.chat-tool-invocation-part').last(),
+  ];
+
+  for (const tool of tools) {
+    await tool.locator('.tool-invocation-header').click();
+    const detail = tool.locator('.tool-invocation-detail');
+    const card = detail.locator('.structured-tool-card, .terminal-command-card');
+
+    await expect(detail).toHaveCSS('padding', '0px');
+    await expect(card).toHaveCSS('border-radius', '0px');
+    await expect
+      .poll(() =>
+        card.evaluate((element) => {
+          const cardBounds = element.getBoundingClientRect();
+          const detailBounds = element.parentElement!.getBoundingClientRect();
+          return {
+            left: Math.abs(cardBounds.left - detailBounds.left),
+            right: Math.abs(cardBounds.right - detailBounds.right),
+            bottom: Math.abs(cardBounds.bottom - detailBounds.bottom),
+          };
+        })
+      )
+      .toEqual({ left: 0, right: 0, bottom: 0 });
+  }
+});
+
 test('renders aborted and failed tool card states', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-card-errors');
 

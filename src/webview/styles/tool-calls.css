@@ -1011,6 +1011,11 @@ kbd {
   font-weight: 600;
 }
 
+.chat-tool-invocation-part.tool-invocation-task .tool-call-icon {
+  position: relative;
+  top: -1px;
+}
+
 .chat-tool-invocation-part:not(:last-child) {
   margin-bottom: 0;
 }
@@ -1099,6 +1104,7 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-token-stats {
   display: inline-flex;
   align-items: center;
+  transform: translateY(-1px);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
@@ -1170,9 +1176,29 @@ kbd {
   font-size: 11.5px;
 }
 
-/* No border: the outer card already frames this content, and the detail region
-   indents it. A second border here stacked a box inside a box — the tinted
-   background and row dividers carry the grouping on their own. */
+/* Terminal and structured cards are the detail surface, rather than content
+   inside one. Let them occupy the full expanded region while plain tool
+   inputs, errors, and status text retain the readable inset above. */
+.chat-tool-invocation-part
+  .tool-invocation-detail:has(> :is(.terminal-command-card, .structured-tool-card)) {
+  padding: 0;
+}
+
+.chat-tool-invocation-part
+  .tool-invocation-detail
+  > :is(.terminal-command-card, .structured-tool-card) {
+  border-radius: 0;
+}
+
+.chat-tool-invocation-part
+  .tool-invocation-detail:has(> :is(.terminal-command-card, .structured-tool-card))
+  > :is(.tool-invocation-error, .tool-invocation-running:not(.tool-invocation-subagent-running)) {
+  padding: var(--space-5) var(--space-6) var(--space-6) var(--tool-detail-indent);
+}
+
+/* No border: the outer card already frames this full-bleed content. A second
+   border here stacked a box inside a box; the tinted background and row
+   dividers carry the grouping on their own. */
 .chat-tool-invocation-part .terminal-command-card {
   overflow: hidden;
   border-radius: var(--radius-inset);
