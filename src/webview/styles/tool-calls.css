@@ -1011,11 +1011,6 @@ kbd {
   font-weight: 600;
 }
 
-.chat-tool-invocation-part.tool-invocation-task .tool-call-icon {
-  position: relative;
-  top: -1px;
-}
-
 .chat-tool-invocation-part:not(:last-child) {
   margin-bottom: 0;
 }
@@ -1486,11 +1481,11 @@ kbd {
 .chat-tool-invocation-part .tool-invocation-subagent-running {
   width: 100%;
   gap: 9px;
-  margin-top: 10px;
+  margin-top: 0;
   padding: 9px 10px;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-accent) 18%, transparent);
-  border-radius: var(--radius-inset);
-  background: color-mix(in srgb, var(--color-vscode-accent) 5%, transparent);
+  border: none;
+  border-radius: 0 0 var(--radius-inset) var(--radius-inset);
+  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
   font-family: inherit;
   text-align: left;
 }
@@ -1500,8 +1495,7 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-subagent-running:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 32%, transparent);
-  background: color-mix(in srgb, var(--color-vscode-accent) 9%, transparent);
+  background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
 }
 
 .chat-tool-invocation-part .tool-invocation-subagent-running:focus-visible {
@@ -1540,7 +1534,6 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-subagent-running.is-retrying {
-  border-color: color-mix(in srgb, var(--color-vscode-warning) 24%, transparent);
   background: color-mix(in srgb, var(--color-vscode-warning) 6%, transparent);
 }
 
