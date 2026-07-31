@@ -1,8 +1,8 @@
 {
   "name": "varro",
-  "displayName": "Varro for OpenCode",
-  "version": "0.23.0",
-  "description": "OpenCode with real project context, agent control, and sessions that stay with your code.",
+  "displayName": "Varro: The OpenCode Workbench",
+  "version": "0.23.1",
+  "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
   "categories": [
     "AI",
     "Chat"
@@ -11,6 +11,9 @@
     "agent",
     "ai",
     "chat",
+    "coding-assistant",
+    "gui",
+    "llm",
     "opencode"
   ],
   "homepage": "https://github.com/koltyakov/varro#readme",

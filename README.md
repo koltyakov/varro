@@ -1,24 +1,25 @@
-# Varro for OpenCode
+# Varro: The OpenCode Workbench
 
 [![Visual Studio Marketplace](https://vsmarketplacebadges.dev/version-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![Installs](https://vsmarketplacebadges.dev/installs-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)
 
-Varro is a focused VS Code UI for [OpenCode](https://opencode.ai), designed for daily agentic development. It keeps chat, project context, session management, permissions, model controls, provider limits, and token usage inside the editor.
+**The complete OpenCode experience inside VS Code.**
 
-Your local OpenCode configuration remains the source of truth for agents, providers, models, commands, skills, and MCP servers.
+Varro brings [OpenCode](https://opencode.ai) into a compact, project-aware workbench for daily agentic development. Run agents, manage parallel sessions, review plans and file changes, control models and permissions, and monitor context, tokens, and provider limits without leaving the editor.
 
-![Varro running OpenCode in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
+Varro builds on OpenCode instead of replacing it. Your local OpenCode configuration remains the source of truth for agents, providers, models, commands, skills, and MCP servers.
+
+![The Varro OpenCode workbench in VS Code](https://raw.githubusercontent.com/koltyakov/varro/main/assets/demo.png)
 
 ## Why Varro
 
-- **Compact, consistent UI.** Streaming output, reasoning, tool activity, permissions, questions, todos, and changed files share the same chat flow and remain readable in a sidebar.
-- **Focused scope.** Chat, context, sessions, approvals, and usage information stay central. Planning and automation are available without taking over the normal prompt-and-response workflow.
-- **Context-aware composer.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
-- **Parallel sessions with explicit state.** Workspace sessions identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar cover sessions running in the background.
-- **Visible provider limits.** When quota data is available, remaining capacity and reset windows appear next to the model controls, where they can inform provider and model selection.
-- **Detailed token accounting.** Context-window fill and session totals for input, output, reasoning, cache, and sub-agent activity can be inspected without leaving the chat.
-- **Direct OpenCode controls.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
+- **Built for the whole agent loop.** Prompts, streaming output, reasoning, tool activity, permissions, questions, todos, plans, and changed files stay in one readable flow.
+- **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
+- **Parallel work that stays understandable.** Workspace sessions clearly identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar keep background sessions visible.
+- **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
+- **Usage you can act on.** Provider limits and reset windows appear next to model controls when available, while detailed accounting covers context fill, input, output, reasoning, cache, and sub-agent tokens.
+- **Compact by design.** The complete workflow remains readable in a sidebar, with an optional session pane for larger layouts.
 
 ## Sessions
 
