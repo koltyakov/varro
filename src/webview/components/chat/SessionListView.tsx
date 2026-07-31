@@ -189,8 +189,7 @@ function isCurrentDiffSummaryRequest(request: SessionDiffSummaryRequest) {
   );
 }
 
-function enqueueDiffSummaryRequest(session: Session) {
-  const updated = getSessionTreeUpdated(session.id);
+function enqueueDiffSummaryRequest(session: Session, updated = getSessionTreeUpdated(session.id)) {
   const cache = untrack(sessionDiffSummaryCache);
   const cached = cache[session.id];
   // A matching failure is settled for this revision. Retrying from this reactive
@@ -228,7 +227,7 @@ function pumpDiffSummaryQueue() {
     activeDiffSummaryRequests += 1;
     activeDiffSummaryKeys.add(requestKey);
     void client.varro.session
-      .diffSummary(request.sessionId)
+      .diffSummary(request.sessionId, request.updated)
       .then((summary) => {
         if (!isCurrentDiffSummaryRequest(request)) return;
         setDiffSummaryCacheEntry(request.sessionId, {
@@ -905,9 +904,6 @@ export function SessionListView(props: {
       diffSummaryOwner,
       new Set(sessions.map((session) => session.id))
     );
-    for (const session of sessions) {
-      enqueueDiffSummaryRequest(session);
-    }
   });
   onCleanup(() => updateRelevantDiffSummarySessions(diffSummaryOwner, null));
 
@@ -995,6 +991,8 @@ export function SessionListView(props: {
           return (
             <SessionListItem
               session={session()}
+              summaryUpdated={getSessionTreeUpdated(sessionId)}
+              onRequestSummary={(updated) => enqueueDiffSummaryRequest(session(), updated)}
               diffSummary={sessionDiffSummaryCache()[sessionId]?.stats ?? null}
               isSummaryLoading={
                 sessionDiffSummaryCache()[sessionId]?.status === 'loading' &&
@@ -1414,6 +1412,8 @@ function RecycleBinListItem(props: { entry: RecycleBinEntry; now: () => number }
 
 function SessionListItem(props: {
   session: (typeof state.sessions)[number];
+  summaryUpdated: number;
+  onRequestSummary: (updated: number) => void;
   diffSummary: SessionDiffSummary | null;
   isSummaryLoading: boolean;
   tokens: number | null;
@@ -1438,11 +1438,13 @@ function SessionListItem(props: {
   onOpenSubagents?: (parentSessionId: string) => void;
   embedded?: boolean;
 }) {
+  let rowRef: HTMLDivElement | undefined;
   let sessionButtonRef: HTMLButtonElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
   let renameInputRef: HTMLInputElement | undefined;
   let openedPointerId: number | null = null;
   let pointerClickTimer: ReturnType<typeof setTimeout> | undefined;
+  const [shouldLoadSummary, setShouldLoadSummary] = createSignal(false);
   const isFocused = () => props.focusedIndex() === props.itemIndex();
   const isActive = () => !!props.embedded && state.activeSessionId === props.session.id;
   const showActions = () => props.actions.sessionId() === props.session.id;
@@ -1603,6 +1605,32 @@ function SessionListItem(props: {
     pointerClickTimer = undefined;
   };
 
+  onMount(() => {
+    if (!rowRef || typeof IntersectionObserver === 'undefined') {
+      setShouldLoadSummary(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setShouldLoadSummary(true);
+        observer.disconnect();
+      },
+      {
+        root: rowRef.closest('.session-list-scroll'),
+        rootMargin: '300px 0px',
+      }
+    );
+    observer.observe(rowRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  createEffect(() => {
+    if (!shouldLoadSummary()) return;
+    props.onRequestSummary(props.summaryUpdated);
+  });
+
   onCleanup(() => {
     if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
   });
@@ -1666,6 +1694,9 @@ function SessionListItem(props: {
 
   return (
     <div
+      ref={(element) => {
+        rowRef = element;
+      }}
       class={`session-item ${isActive() ? 'active' : ''} ${props.isPinned ? 'is-pinned' : ''} ${showActions() ? 'is-context-selected' : ''} ${props.actions.sessionId() && !showActions() ? 'is-context-obscured' : ''} ${isFocused() ? 'keyboard-focus' : ''} ${modelDetails() ? 'has-model-details' : ''}`}
       inert={props.actions.sessionId() ? true : undefined}
       onMouseMove={() => {

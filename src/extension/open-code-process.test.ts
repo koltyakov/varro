@@ -1160,7 +1160,7 @@ describe('OpenCodeProcess server ownership leases', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('coalesces an immediate maintenance request while a check is running', async () => {
+  it('coalesces a forced maintenance request while a check is running', async () => {
     const manager = new OpenCodeProcess(4096, false);
     let resolveInstalledVersion!: (version: string | null) => void;
     const installedVersion = new Promise<string | null>((resolve) => {
@@ -1178,13 +1178,37 @@ describe('OpenCodeProcess server ownership leases', () => {
       restartServerForCliUpdate: vi.fn().mockResolvedValue(undefined),
     });
 
-    manager.requestMaintenanceCheck(tick);
+    manager.requestMaintenanceCheck(tick, true);
     expect(tick).not.toHaveBeenCalled();
 
     resolveInstalledVersion('1.0.0');
     await operation;
 
     expect(tick).toHaveBeenCalledOnce();
+  });
+
+  it('throttles repeated opportunistic maintenance requests', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-30T12:00:00Z'));
+    const manager = new OpenCodeProcess(4096, false);
+    const tick = vi.fn();
+
+    try {
+      manager.requestMaintenanceCheck(tick);
+      manager.requestMaintenanceCheck(tick);
+      vi.advanceTimersByTime(4 * 60_000);
+      manager.requestMaintenanceCheck(tick);
+      expect(tick).toHaveBeenCalledOnce();
+
+      vi.advanceTimersByTime(60_000);
+      manager.requestMaintenanceCheck(tick);
+      expect(tick).toHaveBeenCalledTimes(2);
+
+      manager.requestMaintenanceCheck(tick, true);
+      expect(tick).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('recovers and restarts a Varro-marked server when its lease is missing', async () => {

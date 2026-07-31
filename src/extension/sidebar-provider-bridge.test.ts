@@ -2,18 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
-  readFile: vi.fn(),
   renderWebviewHtml: vi.fn(() => '<html />'),
   joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
     fsPath: [base.fsPath, ...parts].join('/'),
   })),
-}));
-
-vi.mock('fs/promises', () => ({
-  readFile: mocks.readFile,
-  default: {
-    readFile: mocks.readFile,
-  },
 }));
 
 vi.mock('vscode', () => ({
@@ -60,7 +52,6 @@ function createView(options?: { visible?: boolean; cspSource?: string }) {
 describe('SidebarProviderBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readFile.mockReset();
     mocks.renderWebviewHtml.mockReturnValue('<html />');
   });
 
@@ -104,7 +95,7 @@ describe('SidebarProviderBridge', () => {
     });
   });
 
-  it('reloads built webview assets when rendering html', async () => {
+  it('renders with cacheable webview asset URIs', async () => {
     const extensionUri = { fsPath: '/extension' };
     const bridge = new SidebarProviderBridge(extensionUri as never);
     const view = createView({ cspSource: 'csp-source' });
@@ -112,11 +103,6 @@ describe('SidebarProviderBridge', () => {
     const nextState = { ...initialState, theme: 'light' } satisfies InitialWebviewState;
 
     bridge.setView(view as never);
-    mocks.readFile
-      .mockImplementationOnce(() => Promise.resolve('console.log("first")'))
-      .mockImplementationOnce(() => Promise.resolve('body { color: red; }'))
-      .mockImplementationOnce(() => Promise.resolve('console.log("second")'))
-      .mockImplementationOnce(() => Promise.resolve('body { color: blue; }'));
     mocks.renderWebviewHtml
       .mockReturnValueOnce('<html>first</html>')
       .mockReturnValueOnce('<html>second</html>');
@@ -124,45 +110,23 @@ describe('SidebarProviderBridge', () => {
     await expect(bridge.renderHtml(initialState)).resolves.toBe('<html>first</html>');
     await expect(bridge.renderHtml(nextState)).resolves.toBe('<html>second</html>');
 
-    expect(mocks.readFile).toHaveBeenCalledTimes(4);
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(1, 'csp-source', initialState, {
-      scriptContent: 'console.log("first")',
-      cssContent: 'body { color: red; }',
+      scriptUri: 'webview:/extension/dist/webview/webview.js',
+      cssUri: 'webview:/extension/dist/webview/webview.css',
     });
     expect(mocks.renderWebviewHtml).toHaveBeenNthCalledWith(2, 'csp-source', nextState, {
-      scriptContent: 'console.log("second")',
-      cssContent: 'body { color: blue; }',
+      scriptUri: 'webview:/extension/dist/webview/webview.js',
+      cssUri: 'webview:/extension/dist/webview/webview.css',
     });
+    expect(view.webview.asWebviewUri).toHaveBeenCalledTimes(4);
+    expect(mocks.joinPath).toHaveBeenCalledWith(extensionUri, 'dist', 'webview');
   });
 
-  it.each(['webview.js', 'webview.css'])('rejects when built %s is missing', async (asset) => {
-    const extensionUri = { fsPath: '/extension' };
-    const bridge = new SidebarProviderBridge(extensionUri as never);
-    const initialState = createInitialState();
-
-    mocks.readFile.mockImplementation((path: string) => {
-      if (path.endsWith(asset)) return Promise.reject(new Error(`missing ${asset}`));
-      return Promise.resolve(
-        path.endsWith('webview.js') ? 'console.log("ready")' : 'body { color: red; }'
-      );
-    });
-
-    await expect(bridge.renderHtml(initialState)).rejects.toThrow(
-      `Failed to load built webview assets: missing ${asset}`
-    );
-    expect(mocks.renderWebviewHtml).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['webview.js', '', 'body { color: red; }'],
-    ['webview.css', 'console.log("ready")', '   '],
-  ])('rejects when %s is empty', async (asset, scriptContent, cssContent) => {
+  it('rejects rendering before a view is available', async () => {
     const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
-    mocks.readFile.mockResolvedValueOnce(scriptContent).mockResolvedValueOnce(cssContent);
 
     await expect(bridge.renderHtml(createInitialState())).rejects.toThrow(
-      `Built ${asset} is empty`
+      'Cannot render webview assets before the view is available'
     );
-    expect(mocks.renderWebviewHtml).not.toHaveBeenCalled();
   });
 });

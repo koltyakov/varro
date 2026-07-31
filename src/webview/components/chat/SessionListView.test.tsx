@@ -30,6 +30,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
 
 let container: HTMLDivElement;
 let cleanup: (() => void) | undefined;
+const originalIntersectionObserver = globalThis.IntersectionObserver;
 
 function session(id: string, updated: number, overrides: Partial<Session> = {}): Session {
   return {
@@ -92,6 +93,11 @@ afterEach(() => {
   setState('sessionsLoadError', null);
   setState('recycleBinLoadError', null);
   vi.restoreAllMocks();
+  if (originalIntersectionObserver) {
+    globalThis.IntersectionObserver = originalIntersectionObserver;
+  } else {
+    delete (globalThis as Partial<typeof globalThis>).IntersectionObserver;
+  }
   resetSessionDiffSummaryStateForTests();
   resetSessionShareOverridesForTests();
 });
@@ -263,7 +269,9 @@ describe('SessionListView diff summaries', () => {
 
     cleanup = render(() => <SessionListView />, container);
 
-    await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledWith('session-1'));
+    await vi.waitFor(() =>
+      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number))
+    );
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-meta')?.textContent).toContain('2 files');
     });
@@ -315,7 +323,9 @@ describe('SessionListView diff summaries', () => {
 
     cleanup = render(() => <SessionListView />, container);
 
-    await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledWith('session-1'));
+    await vi.waitFor(() =>
+      expect(diffSummarySpy).toHaveBeenCalledWith('session-1', expect.any(Number))
+    );
     await vi.waitFor(() => {
       const meta = container.querySelector('.session-item-meta')?.textContent;
       expect(meta).toContain('2 files');
@@ -384,6 +394,52 @@ describe('SessionListView diff summaries', () => {
       activeStartedAt: null,
     });
     await vi.waitFor(() => expect(getSessionDiffSummaryStateForTests().active).toBe(0));
+  });
+
+  it('loads summaries only when rows approach the scroll viewport', async () => {
+    const callbacks = new Map<Element, IntersectionObserverCallback>();
+    class TestIntersectionObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+
+      observe(target: Element) {
+        callbacks.set(target, this.callback);
+      }
+
+      disconnect() {}
+    }
+    globalThis.IntersectionObserver =
+      TestIntersectionObserver as unknown as typeof IntersectionObserver;
+    const diffSummarySpy = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    const now = Date.now();
+    setState(
+      'sessions',
+      Array.from({ length: 20 }, (_, index) => session(`viewport-session-${index}`, now - index))
+    );
+
+    cleanup = render(() => <SessionListView embedded />, container);
+    expect(diffSummarySpy).not.toHaveBeenCalled();
+
+    const rows = Array.from(container.querySelectorAll('.session-item')).slice(0, 3);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => callbacks.has(row))).toBe(true);
+    for (const row of rows) {
+      callbacks.get(row)?.(
+        [{ target: row, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    }
+
+    await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() =>
+      expect(getSessionDiffSummaryStateForTests()).toMatchObject({ active: 0, queued: 0 })
+    );
   });
 
   it('bounds cached summaries across changing visible session sets', async () => {
@@ -466,7 +522,7 @@ describe('SessionListView diff summaries', () => {
     ]);
 
     await vi.waitFor(() => expect(diffSummarySpy).toHaveBeenCalledTimes(2));
-    expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1');
+    expect(diffSummarySpy).toHaveBeenNthCalledWith(2, 'session-1', 100_001);
   });
 });
 

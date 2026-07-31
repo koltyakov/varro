@@ -948,17 +948,66 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
   });
 
-  it('bounds descendant history requests for diff summaries', async () => {
+  it('reuses a completed diff summary for the same session revision', async () => {
+    const serverRequest = vi.fn(async () => []);
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    const path = '/varro/session/session-1/diff-summary?revision=123';
+
+    await proxy.handleRequest(makePayload(84, 'GET', path));
+    await proxy.handleRequest(makePayload(85, 'GET', path));
+
+    expect(
+      serverRequest.mock.calls.filter(([, requestPath]) => requestPath === '/session')
+    ).toHaveLength(1);
+    expect(
+      serverRequest.mock.calls.filter(
+        ([, requestPath]) => requestPath === '/session/session-1/diff'
+      )
+    ).toHaveLength(1);
+    expect(
+      serverRequest.mock.calls.filter(
+        ([, requestPath]) => requestPath === '/session/session-1/message'
+      )
+    ).toHaveLength(1);
+  });
+
+  it('refreshes an unversioned diff summary after the previous request settles', async () => {
+    const serverRequest = vi.fn(async () => []);
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+    const path = '/varro/session/session-1/diff-summary';
+
+    await proxy.handleRequest(makePayload(84, 'GET', path));
+    await proxy.handleRequest(makePayload(85, 'GET', path));
+
+    expect(
+      serverRequest.mock.calls.filter(
+        ([, requestPath]) => requestPath === '/session/session-1/diff'
+      )
+    ).toHaveLength(2);
+    expect(
+      serverRequest.mock.calls.filter(
+        ([, requestPath]) => requestPath === '/session/session-1/message'
+      )
+    ).toHaveLength(2);
+  });
+
+  it('globally bounds descendant history requests across concurrent diff summaries', async () => {
     const gate = deferred<void>();
     let activeDescendantRequests = 0;
     let peakDescendantRequests = 0;
-    const descendants = Array.from({ length: 9 }, (_, index) => ({
-      id: `child-${index}`,
-      parentID: 'session-1',
-    }));
+    const descendants = ['session-1', 'session-2'].flatMap((parentID) =>
+      Array.from({ length: 9 }, (_, index) => ({
+        id: `${parentID}-child-${index}`,
+        parentID,
+      }))
+    );
     const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/session') return [{ id: 'session-1' }, ...descendants];
-      if (/^\/session\/child-\d+\/message$/.test(path)) {
+      if (path === '/session') return [{ id: 'session-1' }, { id: 'session-2' }, ...descendants];
+      if (/^\/session\/session-\d-child-\d+\/message$/.test(path)) {
         activeDescendantRequests += 1;
         peakDescendantRequests = Math.max(peakDescendantRequests, activeDescendantRequests);
         try {
@@ -974,20 +1023,21 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
 
-    const request = proxy.handleRequest(
-      makePayload(86, 'GET', '/varro/session/session-1/diff-summary')
-    );
+    const requests = [
+      proxy.handleRequest(makePayload(86, 'GET', '/varro/session/session-1/diff-summary')),
+      proxy.handleRequest(makePayload(87, 'GET', '/varro/session/session-2/diff-summary')),
+    ];
     await vi.waitFor(() => expect(activeDescendantRequests).toBe(4));
     expect(
-      serverRequest.mock.calls.filter(([, path]) => /\/child-\d+\/message$/.test(path))
+      serverRequest.mock.calls.filter(([, path]) => /\/session-\d-child-\d+\/message$/.test(path))
     ).toHaveLength(4);
     gate.resolve();
-    await request;
+    await Promise.all(requests);
 
     expect(peakDescendantRequests).toBe(4);
     expect(
-      serverRequest.mock.calls.filter(([, path]) => /\/child-\d+\/message$/.test(path))
-    ).toHaveLength(9);
+      serverRequest.mock.calls.filter(([, path]) => /\/session-\d-child-\d+\/message$/.test(path))
+    ).toHaveLength(18);
   });
 
   it('simulates no providers when flag is set', async () => {

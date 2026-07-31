@@ -1,9 +1,9 @@
 import { randomBytes } from 'crypto';
 import type { InitialWebviewState } from '../shared/protocol';
 
-export type WebviewAssetContent = {
-  scriptContent: string;
-  cssContent: string;
+export type WebviewAssetUris = {
+  scriptUri: string;
+  cssUri: string;
 };
 
 const LOADING_STYLES = `
@@ -75,7 +75,7 @@ export function renderWebviewLoadingHtml() {
 export function renderWebviewHtml(
   cspSource: string,
   initialState: InitialWebviewState,
-  assets: WebviewAssetContent
+  assets: WebviewAssetUris
 ) {
   const nonce = randomNonce();
   const serializedInitialState = serializeForInlineScript(initialState);
@@ -86,9 +86,10 @@ export function renderWebviewHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; font-src data:;" />
+    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
-  <style>${LOADING_STYLES}\n${assets.cssContent}</style>
+  <style>${LOADING_STYLES}</style>
+  <link rel="stylesheet" href="${escapeHtmlAttribute(assets.cssUri)}" />
 </head>
 <body>
   <div id="root">${LOADING_MARKUP}</div>
@@ -139,7 +140,7 @@ export function renderWebviewHtml(
       setState: function(state) { vscode.setState(state); },
     };
   </script>
-  <script nonce="${nonce}">${assets.scriptContent}</script>
+  <script nonce="${nonce}" src="${escapeHtmlAttribute(assets.scriptUri)}"></script>
 </body>
 </html>`;
 }
@@ -162,6 +163,21 @@ function serializeForInlineScript(value: unknown): string {
         return '\\u2028';
       case '\u2029':
         return '\\u2029';
+      default:
+        return char;
+    }
+  });
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/[&"<]/g, (char) => {
+    switch (char) {
+      case '&':
+        return '&amp;';
+      case '"':
+        return '&quot;';
+      case '<':
+        return '&lt;';
       default:
         return char;
     }

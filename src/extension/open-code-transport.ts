@@ -45,8 +45,6 @@ export class OpenCodeTransport {
   private static readonly EVENT_MAX_PAYLOAD_CHARS = 8_000_000;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
-  private static readonly RESCOPE_WAIT_TIMEOUT_MS = 3000;
-
   private readonly options: OpenCodeTransportOptions;
   private eventController: AbortController | null = null;
   private eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,14 +53,6 @@ export class OpenCodeTransport {
   private eventStreamGeneration = 0;
   private requestWorkspaceDirectory: string | undefined;
   private eventStreamDirectory: string | undefined;
-  private pendingScopeChange:
-    | {
-        directory: string | undefined;
-        promise: Promise<OpenCodeRescopeResult>;
-        resolve: (result: OpenCodeRescopeResult) => void;
-        timer: ReturnType<typeof setTimeout>;
-      }
-    | undefined;
   private readonly requestControllers = new Set<AbortController>();
   private readonly requestSettlementWaiters = new Set<() => void>();
   private readonly pendingAttentionRequests = new Map<string, string>();
@@ -196,7 +186,7 @@ export class OpenCodeTransport {
     eventStreamDirectory = this.options.getWorkspaceCwd(),
     promoteDirectoryImmediately = true
   ) {
-    this.resetEventStream(false);
+    this.resetEventStream();
     this.eventStreamDirectory = eventStreamDirectory;
     if (promoteDirectoryImmediately) {
       this.requestWorkspaceDirectory = eventStreamDirectory;
@@ -208,7 +198,7 @@ export class OpenCodeTransport {
     const eventStreamRequest = scopeOpenCodeRequest(
       this.options.getUrl(),
       EVENT_STREAM_PATH,
-      eventStreamDirectory
+      undefined
     );
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -253,13 +243,6 @@ export class OpenCodeTransport {
       clearConnectTimer();
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
-      this.requestWorkspaceDirectory = eventStreamDirectory;
-      if (this.pendingScopeChange && this.pendingScopeChange.directory === eventStreamDirectory) {
-        const pending = this.pendingScopeChange;
-        this.pendingScopeChange = undefined;
-        clearTimeout(pending.timer);
-        pending.resolve({ state: 'connected', directory: eventStreamDirectory });
-      }
       this.options.updateEventStreamState('healthy');
       stabilityTimer = setTimeout(() => {
         if (!isCurrentStream() || controller.signal.aborted) return;
@@ -341,50 +324,20 @@ export class OpenCodeTransport {
             return;
           }
           this.eventReconnectTimer = null;
-          void this.startEventStream(eventStreamDirectory, false);
+          void this.startEventStream(this.eventStreamDirectory, false);
         }, delay);
       }
     }
   }
 
   rescopeEventStream(directory: string | undefined): Promise<OpenCodeRescopeResult> {
-    if (this.pendingScopeChange && this.pendingScopeChange.directory === directory) {
-      return this.pendingScopeChange.promise;
-    }
-    if (
-      !this.pendingScopeChange &&
-      this.requestWorkspaceDirectory === directory &&
-      this.eventStreamDirectory === directory
-    ) {
+    if (this.requestWorkspaceDirectory === directory && this.eventStreamDirectory === directory) {
       return Promise.resolve({ state: 'unchanged', directory });
     }
 
-    if (this.pendingScopeChange) {
-      const superseded = this.pendingScopeChange;
-      this.pendingScopeChange = undefined;
-      clearTimeout(superseded.timer);
-      superseded.resolve({ state: 'superseded', directory: superseded.directory });
-    }
-    let resolveChange!: (result: OpenCodeRescopeResult) => void;
-    const promise = new Promise<OpenCodeRescopeResult>((resolve) => {
-      resolveChange = resolve;
-    });
-    const timer = setTimeout(() => {
-      if (this.pendingScopeChange !== pending) return;
-      this.pendingScopeChange = undefined;
-      this.requestWorkspaceDirectory = directory;
-      resolveChange({ state: 'degraded', directory });
-    }, OpenCodeTransport.RESCOPE_WAIT_TIMEOUT_MS);
-    const pending: NonNullable<OpenCodeTransport['pendingScopeChange']> = {
-      directory,
-      promise,
-      resolve: resolveChange,
-      timer,
-    };
-    this.pendingScopeChange = pending;
-    this.options.updateEventStreamState('degraded');
-    void this.startEventStream(directory, false);
-    return promise;
+    this.requestWorkspaceDirectory = directory;
+    this.eventStreamDirectory = directory;
+    return Promise.resolve({ state: 'connected', directory });
   }
 
   getWorkspaceDirectory() {
@@ -392,10 +345,10 @@ export class OpenCodeTransport {
   }
 
   stopEventStream() {
-    this.resetEventStream(true);
+    this.resetEventStream();
   }
 
-  private resetEventStream(cancelPendingScopeChange: boolean) {
+  private resetEventStream() {
     this.eventStreamGeneration += 1;
     if (this.eventReconnectTimer) {
       clearTimeout(this.eventReconnectTimer);
@@ -404,12 +357,6 @@ export class OpenCodeTransport {
     if (this.eventController) {
       this.eventController.abort();
       this.eventController = null;
-    }
-    if (cancelPendingScopeChange && this.pendingScopeChange) {
-      const pending = this.pendingScopeChange;
-      this.pendingScopeChange = undefined;
-      clearTimeout(pending.timer);
-      pending.resolve({ state: 'cancelled', directory: pending.directory });
     }
   }
 

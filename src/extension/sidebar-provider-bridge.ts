@@ -1,8 +1,6 @@
-import { readFile } from 'fs/promises';
-import { join, resolve } from 'path';
 import * as vscode from 'vscode';
 import type { ExtensionMessage, InitialWebviewState } from '../shared/protocol';
-import { renderWebviewHtml, type WebviewAssetContent } from './webview-html';
+import { renderWebviewHtml, type WebviewAssetUris } from './webview-html';
 
 export class SidebarProviderBridge {
   private view?: vscode.WebviewView;
@@ -27,7 +25,7 @@ export class SidebarProviderBridge {
   }
 
   async renderHtml(initialState: InitialWebviewState) {
-    const assets = await this.loadWebviewAssets();
+    const assets = this.getWebviewAssetUris();
     return renderWebviewHtml(this.view?.webview.cspSource || '', initialState, assets);
   }
 
@@ -44,25 +42,13 @@ export class SidebarProviderBridge {
       ?.toString();
   }
 
-  private async loadWebviewAssets(): Promise<WebviewAssetContent> {
-    const distDir = resolve(this.extensionUri.fsPath, 'dist', 'webview');
-    let scriptContent: string;
-    let cssContent: string;
-    try {
-      [scriptContent, cssContent] = await Promise.all([
-        readFile(join(distDir, 'webview.js'), 'utf-8'),
-        readFile(join(distDir, 'webview.css'), 'utf-8'),
-      ]);
-    } catch (err) {
-      throw new Error(
-        `Failed to load built webview assets: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err }
-      );
-    }
-
-    if (!scriptContent.trim()) throw new Error('Built webview.js is empty');
-    if (!cssContent.trim()) throw new Error('Built webview.css is empty');
-
-    return { scriptContent, cssContent };
+  private getWebviewAssetUris(): WebviewAssetUris {
+    const webview = this.view?.webview;
+    if (!webview) throw new Error('Cannot render webview assets before the view is available');
+    const distUri = vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview');
+    return {
+      scriptUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.js')).toString(),
+      cssUri: webview.asWebviewUri(vscode.Uri.joinPath(distUri, 'webview.css')).toString(),
+    };
   }
 }

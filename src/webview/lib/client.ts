@@ -219,8 +219,9 @@ export const client = {
       async deleteImmediately(sessionID: string): Promise<boolean> {
         return apiCall('DELETE', buildVarroSessionEndpoint(sessionID, 'delete'));
       },
-      async diffSummary(sessionID: string): Promise<SessionDiffSummary> {
-        return apiCall('GET', buildVarroSessionEndpoint(sessionID, 'diff-summary'));
+      async diffSummary(sessionID: string, revision?: number): Promise<SessionDiffSummary> {
+        const path = buildVarroSessionEndpoint(sessionID, 'diff-summary');
+        return apiCall('GET', revision === undefined ? path : `${path}?revision=${revision}`);
       },
       async setPinned(sessionID: string, pinned: boolean): Promise<string[]> {
         return apiCall('POST', buildVarroSessionEndpoint(sessionID, 'pin'), { pinned });

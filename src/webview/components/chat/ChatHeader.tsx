@@ -179,7 +179,7 @@ export function ActiveChatHeader(props: {
   };
 
   createEffect(() => {
-    const sessionId = state.activeSessionId;
+    const sessionId = getActiveSession()?.id ?? state.activeSessionId;
     if (!sessionId) {
       setWorkSummary(null);
       return;

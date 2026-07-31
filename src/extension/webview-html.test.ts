@@ -31,14 +31,14 @@ describe('renderWebviewHtml', () => {
 
   it('escapes inline state and injects the webview bootstrap assets', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
-      scriptContent: 'console.log("ready")',
-      cssContent: 'body{color:red;}',
+      scriptUri: 'webview://assets/webview.js',
+      cssUri: 'webview://assets/webview.css',
     });
 
-    expect(html).toContain('body{color:red;}');
+    expect(html).toContain('<link rel="stylesheet" href="webview://assets/webview.css" />');
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).toContain('Loading workspace...');
-    expect(html).toContain('console.log("ready")');
+    expect(html).toContain('src="webview://assets/webview.js"');
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
       'window.__sendToExtension = function(msg) { vscode.postMessage(msg); };'
@@ -52,9 +52,11 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('window.__clearVarroBootstrapFailureHandlers = clearHandlers;');
     expect(html).toContain("typeof window.__cleanupVarroBridge === 'function'");
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
-      html.indexOf('console.log("ready")')
+      html.indexOf('src="webview://assets/webview.js"')
     );
-    expect(html.indexOf('Loading workspace...')).toBeLessThan(html.indexOf('console.log("ready")'));
+    expect(html.indexOf('Loading workspace...')).toBeLessThan(
+      html.indexOf('src="webview://assets/webview.js"')
+    );
   });
 
   it('renders a standalone loading screen before the webview assets are available', () => {
@@ -68,8 +70,8 @@ describe('renderWebviewHtml', () => {
 
   it('restricts image sources to the webview and data URIs', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
-      scriptContent: '',
-      cssContent: '',
+      scriptUri: 'webview.js',
+      cssUri: 'webview.css',
     });
     const imgSrc = html.match(/img-src ([^;]+);/)?.[1];
 
@@ -78,13 +80,23 @@ describe('renderWebviewHtml', () => {
 
   it('reuses the same nonce in the CSP and both inline script tags', () => {
     const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
-      scriptContent: 'console.log("ready")',
-      cssContent: '',
+      scriptUri: 'webview.js',
+      cssUri: 'webview.css',
     });
     const nonce = html.match(/script-src 'nonce-([^']+)'/)?.[1];
 
     expect(randomBytesMock).toHaveBeenCalledWith(24);
     expect(nonce).toBe('Zml4ZWQtbm9uY2U');
     expect(html.split(`nonce="${nonce}"`).length - 1).toBe(2);
+  });
+
+  it('escapes webview asset URIs used in attributes', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptUri: 'webview.js?value="<unsafe>&',
+      cssUri: 'webview.css?value="<unsafe>&',
+    });
+
+    expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;"');
+    expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;"');
   });
 });

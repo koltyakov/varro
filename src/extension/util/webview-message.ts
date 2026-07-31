@@ -999,7 +999,10 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.openCodeConfig, methodsNoQuery('GET')),
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),
-  route(`${VARRO_API_ENDPOINTS.session}/:id/diff-summary`, methodsNoQuery('GET')),
+  route(
+    `${VARRO_API_ENDPOINTS.session}/:id/diff-summary`,
+    ({ method, url }) => method === 'GET' && onlyQuery(url, 'revision')
+  ),
   route(`${VARRO_API_ENDPOINTS.session}/:id/pin`, methodsNoQuery('POST')),
   route(`${VARRO_API_ENDPOINTS.session}/:id/rename-if-untitled`, methodsNoQuery('POST')),
   route(`${VARRO_API_ENDPOINTS.session}/:id/delete`, methodsNoQuery('DELETE')),

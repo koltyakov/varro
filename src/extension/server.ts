@@ -1180,10 +1180,10 @@ export class OpenCodeServer extends EventEmitter {
     this.processManager.stopMaintenanceLoop();
   }
 
-  private requestMaintenanceCheck() {
+  private requestMaintenanceCheck(force = false) {
     this.processManager.requestMaintenanceCheck(() => {
       void this.runMaintenanceTick();
-    });
+    }, force);
   }
 
   private async runMaintenanceTick() {
@@ -1598,7 +1598,7 @@ export class OpenCodeServer extends EventEmitter {
     return this.processManager.maybeSuggestCliUpdate(installedCliVersion, {
       readLatestCliVersion: () => this.readLatestCliVersion(),
       upgradeRunningServer: (targetVersion) => this.upgradeRunningServer(targetVersion),
-      requestMaintenanceCheck: () => this.requestMaintenanceCheck(),
+      requestMaintenanceCheck: () => this.requestMaintenanceCheck(true),
       getWorkspaceCwd: () => this.getWorkspaceCwd(),
       prepareForWindowsCliUpgrade: () => this.prepareForWindowsCliUpgrade(),
       finishWindowsCliUpgrade: () => this.finishWindowsCliUpgrade(),

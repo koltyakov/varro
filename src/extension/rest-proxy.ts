@@ -38,6 +38,8 @@ import { getRelativePath } from './util/path';
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
+const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
+const SESSION_SUMMARY_CACHE_LIMIT = 200;
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -56,6 +58,11 @@ type OpenCodeConfigRequest =
       modelID: string;
       agentName?: string;
     };
+
+type SessionSummaryCacheEntry = {
+  expiresAt: number;
+  request: Promise<SessionDiffSummary>;
+};
 
 export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/opencode-request';
 
@@ -108,7 +115,10 @@ export class RestProxy {
   private sessionDirectories = new Map<string, string>();
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
-  private sessionSummaryListRequest: Promise<unknown> | null = null;
+  private sessionSummaryListRequest: { expiresAt: number; request: Promise<unknown> } | null = null;
+  private sessionSummaryRequests = new Map<string, SessionSummaryCacheEntry>();
+  private activeSessionSummaryDescendantRequests = 0;
+  private sessionSummaryDescendantWaiters: Array<() => void> = [];
 
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
@@ -203,12 +213,15 @@ export class RestProxy {
       }
       await this.callbacks.cleanupExpiredRecycleBin();
 
-      const diffSummarySessionID = this.parseSessionDiffSummaryRequest(method, payload.path);
-      if (diffSummarySessionID) {
-        if (this.isHiddenSession(diffSummarySessionID)) {
+      const diffSummaryRequest = this.parseSessionDiffSummaryRequest(method, payload.path);
+      if (diffSummaryRequest) {
+        if (this.isHiddenSession(diffSummaryRequest.sessionID)) {
           throw new Error('404 Session not found');
         }
-        const data = await this.readSessionDiffSummary(diffSummarySessionID);
+        const data = await this.readCachedSessionDiffSummary(
+          diffSummaryRequest.sessionID,
+          diffSummaryRequest.cacheKey
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -402,11 +415,17 @@ export class RestProxy {
   private parseSessionDiffSummaryRequest(method: string, path: string) {
     if (method !== 'GET') return null;
     const url = new URL(path, 'http://localhost');
-    if (url.search) return null;
     const prefix = `${VARRO_API_ENDPOINTS.session}/`;
     if (!url.pathname.startsWith(prefix)) return null;
     const match = url.pathname.slice(prefix.length).match(/^([^/]+)\/diff-summary$/);
-    return match?.[1] ? decodeURIComponent(match[1]) : null;
+    if (!match?.[1]) return null;
+    if (Array.from(url.searchParams.keys()).some((key) => key !== 'revision')) return null;
+    const sessionID = decodeURIComponent(match[1]);
+    const revision = url.searchParams.get('revision')?.trim();
+    return {
+      sessionID,
+      cacheKey: revision ? `${sessionID}:${revision}` : null,
+    };
   }
 
   private parsePinRequest(method: string, path: string, body: unknown) {
@@ -438,6 +457,46 @@ export class RestProxy {
     };
   }
 
+  private readCachedSessionDiffSummary(
+    sessionID: string,
+    revisionCacheKey: string | null
+  ): Promise<SessionDiffSummary> {
+    const cacheKey = revisionCacheKey ?? sessionID;
+    const now = Date.now();
+    const cached = this.sessionSummaryRequests.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      this.sessionSummaryRequests.delete(cacheKey);
+      this.sessionSummaryRequests.set(cacheKey, cached);
+      return cached.request;
+    }
+    if (cached) this.sessionSummaryRequests.delete(cacheKey);
+
+    const request = this.readSessionDiffSummary(sessionID);
+    const entry = {
+      expiresAt: now + SESSION_SUMMARY_CACHE_TTL_MS,
+      request,
+    };
+    this.sessionSummaryRequests.set(cacheKey, entry);
+    while (this.sessionSummaryRequests.size > SESSION_SUMMARY_CACHE_LIMIT) {
+      const oldestSessionID = this.sessionSummaryRequests.keys().next().value;
+      if (typeof oldestSessionID !== 'string') break;
+      this.sessionSummaryRequests.delete(oldestSessionID);
+    }
+    void request.then(
+      () => {
+        if (!revisionCacheKey && this.sessionSummaryRequests.get(cacheKey) === entry) {
+          this.sessionSummaryRequests.delete(cacheKey);
+        }
+      },
+      () => {
+        if (this.sessionSummaryRequests.get(cacheKey) === entry) {
+          this.sessionSummaryRequests.delete(cacheKey);
+        }
+      }
+    );
+    return request;
+  }
+
   private async summarizeSessionTreeTokens(
     sessionID: string,
     rootMessages: unknown,
@@ -457,7 +516,10 @@ export class RestProxy {
     const messageLists = await mapWithConcurrency(
       sessionsWithoutTokenSnapshots,
       SESSION_SUMMARY_DESCENDANT_CONCURRENCY,
-      (id) => this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
+      (id) =>
+        this.withSessionSummaryDescendantSlot(() =>
+          this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
+        )
     );
     for (const messages of messageLists) {
       addSessionTokenUsage(subagents, summarizeSessionTokenUsage(messages));
@@ -470,13 +532,39 @@ export class RestProxy {
   }
 
   private readSessionListForSummary(): Promise<unknown> {
-    if (this.sessionSummaryListRequest) return this.sessionSummaryListRequest;
+    const now = Date.now();
+    const cached = this.sessionSummaryListRequest;
+    if (cached && cached.expiresAt > now) {
+      return cached.request;
+    }
     const request = this.callbacks.server.request('GET', '/session');
-    const tracked = request.finally(() => {
-      if (this.sessionSummaryListRequest === tracked) this.sessionSummaryListRequest = null;
+    const entry = {
+      expiresAt: now + SESSION_SUMMARY_CACHE_TTL_MS,
+      request,
+    };
+    this.sessionSummaryListRequest = entry;
+    void request.catch(() => {
+      if (this.sessionSummaryListRequest === entry) this.sessionSummaryListRequest = null;
     });
-    this.sessionSummaryListRequest = tracked;
-    return tracked;
+    return request;
+  }
+
+  private async withSessionSummaryDescendantSlot<T>(request: () => Promise<T>): Promise<T> {
+    if (this.activeSessionSummaryDescendantRequests < SESSION_SUMMARY_DESCENDANT_CONCURRENCY) {
+      this.activeSessionSummaryDescendantRequests += 1;
+    } else {
+      await new Promise<void>((resolve) => {
+        this.sessionSummaryDescendantWaiters.push(resolve);
+      });
+    }
+
+    try {
+      return await request();
+    } finally {
+      const next = this.sessionSummaryDescendantWaiters.shift();
+      if (next) next();
+      else this.activeSessionSummaryDescendantRequests -= 1;
+    }
   }
 
   private getHiddenSessionIdFromPath(path: string) {

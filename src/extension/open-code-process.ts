@@ -727,6 +727,7 @@ export class OpenCodeProcess {
   private maintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private maintenanceInFlight = false;
   private pendingMaintenanceCheck: (() => void) | null = null;
+  private lastMaintenanceCheckAt: number | null = null;
   private _managedProcess = false;
   private lastCliUpdateCheckAt = 0;
   private lastSuggestedCliVersion = '';
@@ -2250,16 +2251,26 @@ export class OpenCodeProcess {
     this.pendingMaintenanceCheck = null;
   }
 
-  requestMaintenanceCheck(tick: () => void) {
+  requestMaintenanceCheck(tick: () => void, force = false) {
     if (this.maintenanceInFlight) {
-      this.pendingMaintenanceCheck = tick;
+      if (force) this.pendingMaintenanceCheck = tick;
       return;
     }
+    const now = Date.now();
+    if (
+      !force &&
+      this.lastMaintenanceCheckAt !== null &&
+      now - this.lastMaintenanceCheckAt < OpenCodeProcess.VERSION_CHECK_INTERVAL_MS
+    ) {
+      return;
+    }
+    this.lastMaintenanceCheckAt = now;
     tick();
   }
 
   async runMaintenanceTick(callbacks: MaintenanceCallbacks) {
     if (this.maintenanceInFlight || callbacks.isDisposing()) return;
+    this.lastMaintenanceCheckAt = Date.now();
     this.maintenanceInFlight = true;
     try {
       if (this.foreignActiveOwnership && !(await this.refreshManagedServerOwnership())) return;
