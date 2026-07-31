@@ -4,14 +4,18 @@ type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
 type ConfigChangeListener = (event: ConfigChangeEvent) => void;
 
 const {
+  envMock,
   executeCommandMock,
+  getCommandsMock,
   getMock,
   onDidChangeConfigurationMock,
   registerWebviewViewProviderMock,
   showInformationMessageMock,
   sweepStaleInjectedConfigDirectoriesMock,
 } = vi.hoisted(() => ({
+  envMock: { appName: 'Visual Studio Code', uriScheme: 'vscode' },
   executeCommandMock: vi.fn(() => Promise.resolve()),
+  getCommandsMock: vi.fn(() => Promise.resolve([] as string[])),
   getMock: vi.fn((key: string, fallback?: unknown) => {
     switch (key) {
       case 'server.port':
@@ -88,6 +92,7 @@ const {
 }));
 
 vi.mock('vscode', () => ({
+  env: envMock,
   workspace: {
     getConfiguration: vi.fn(() => ({ get: getMock })),
     onDidChangeConfiguration: onDidChangeConfigurationMock,
@@ -98,6 +103,7 @@ vi.mock('vscode', () => ({
   },
   commands: {
     executeCommand: executeCommandMock,
+    getCommands: getCommandsMock,
   },
 }));
 
@@ -124,7 +130,7 @@ vi.mock('./open-code-process', () => ({
 }));
 vi.mock('./sidebar-provider', () => ({
   SidebarProvider: class {
-    static viewType = 'varro.sidebar';
+    static viewType = 'varro.chat';
     dispose = vi.fn(() => Promise.resolve());
     post = vi.fn();
     startProviderFileObservation = vi.fn();
@@ -163,6 +169,8 @@ describe('extension activation', () => {
     contextChangeCallback.current = null;
     latestServerInstance.current = null;
     latestSidebarProviderInstance.current = null;
+    envMock.appName = 'Visual Studio Code';
+    envMock.uriScheme = 'vscode';
     sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
   });
 
@@ -303,7 +311,7 @@ describe('extension activation', () => {
     await activate(context as never);
 
     expect(registerWebviewViewProviderMock).toHaveBeenCalledWith(
-      'varro.sidebar',
+      'varro.chat',
       expect.anything(),
       {
         webviewOptions: { retainContextWhenHidden: true },
@@ -327,6 +335,71 @@ describe('extension activation', () => {
       latestSidebarProviderInstance.current?.startProviderFileObservation
     ).toHaveBeenCalledOnce();
     expect(context.subscriptions).toHaveLength(2);
+  });
+
+  it.each([
+    ['Cursor', 'cursor'],
+    ['Windsurf', 'windsurf'],
+    ['Devin', 'devin'],
+  ])('moves the chat view to the primary sidebar once in %s', async (appName, uriScheme) => {
+    envMock.appName = appName;
+    envMock.uriScheme = uriScheme;
+    getCommandsMock.mockResolvedValueOnce(['vscode.moveViews']);
+    const globalState = {
+      get: vi.fn(() => false),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      globalState,
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(executeCommandMock).toHaveBeenCalledWith('vscode.moveViews', {
+      viewIds: ['varro.chat'],
+      destinationId: 'workbench.view.extension.varro-primary',
+    });
+    expect(globalState.update).toHaveBeenCalledWith('layout.cursorPrimarySidebar.v1', true);
+  });
+
+  it('preserves the existing fork placement after migration', async () => {
+    envMock.appName = 'Devin';
+    envMock.uriScheme = 'devin';
+    const globalState = {
+      get: vi.fn(() => true),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      globalState,
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(getCommandsMock).not.toHaveBeenCalled();
+    expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
+    expect(globalState.update).not.toHaveBeenCalled();
+  });
+
+  it('leaves the manifest placement unchanged in VS Code', async () => {
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(getCommandsMock).not.toHaveBeenCalled();
+    expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
   });
 
   it('registers the provider and commands before starting non-blocking stale cleanup', async () => {

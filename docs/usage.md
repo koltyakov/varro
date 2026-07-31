@@ -5,7 +5,10 @@ This guide covers the current Varro workflow inside VS Code.
 ## Open Varro
 
 - Click the `Varro` icon in the Activity Bar.
-- Varro defaults to the `Secondary Side Bar` so you can keep the editor visible while chatting. Move it back there if an existing VS Code layout places it elsewhere.
+- Varro defaults to the `Secondary Side Bar` so you can keep the editor visible while chatting.
+- VS Code and VSCodium are the target containers for the extension.
+
+VS Code forks have limited support. See [VS Code Fork Compatibility](vscode-forks.md) for details.
 
 ## First Run And Connection
 

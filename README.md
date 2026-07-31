@@ -1,7 +1,6 @@
 # Varro: The OpenCode Workbench
 
 [![Visual Studio Marketplace](https://vsmarketplacebadges.dev/version-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
-[![Installs](https://vsmarketplacebadges.dev/installs-short/koltyakov.varro.svg)](https://marketplace.visualstudio.com/items?itemName=koltyakov.varro)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/koltyakov/varro/blob/main/LICENSE)
 
 **The complete OpenCode experience inside VS Code.**
@@ -74,19 +73,20 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 4. Open a folder in VS Code and select `Varro` from the Activity Bar.
 5. Start a session. Varro starts or connects to OpenCode when the chat first needs it.
 
-Varro defaults to the `Secondary Side Bar` for a side-by-side editor and chat layout. You can move it back there if an existing VS Code layout places it elsewhere.
+VS Code and VSCodium are the target containers for Varro. VS Code forks have limited support; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md) for details.
 
 Varro connects to `http://127.0.0.1:4096` by default. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
 
 ## Requirements
 
-- [VS Code](https://code.visualstudio.com/) 1.120 or newer
+- [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
 - [Node.js](https://nodejs.org/) 22.12+ or 24+
 - The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`.
 
 ## Documentation
 
 - [Usage guide](https://github.com/koltyakov/varro/blob/main/docs/usage.md)
+- [VS Code forks compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md)
 - [Development guide](https://github.com/koltyakov/varro/blob/main/docs/development.md)
 - [Architecture overview](https://github.com/koltyakov/varro/blob/main/docs/architecture.md)
 - [Issues and feature requests](https://github.com/koltyakov/varro/issues)

@@ -9,6 +9,9 @@ import { sweepStaleInjectedConfigDirectories } from './open-code-process';
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
+const PRIMARY_SIDEBAR_MIGRATION_KEY = 'layout.cursorPrimarySidebar.v1';
+const PRIMARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro-primary';
+const PRIMARY_SIDEBAR_HOSTS = ['cursor', 'windsurf', 'devin'];
 
 function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
   const rawReserved = config.get<number | null>(
@@ -34,6 +37,45 @@ async function disposeSafe(fn: () => PromiseLike<void> | void, label: string) {
     await fn();
   } catch (err) {
     logger.error(`Error during ${label}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function usesPrimarySidebarForExtensions(): boolean {
+  const appName = vscode.env.appName.toLowerCase();
+  const uriScheme = vscode.env.uriScheme.toLowerCase();
+  return PRIMARY_SIDEBAR_HOSTS.some(
+    (host) =>
+      appName === host ||
+      appName.startsWith(`${host} `) ||
+      uriScheme === host ||
+      uriScheme.startsWith(`${host}-`)
+  );
+}
+
+async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Promise<void> {
+  if (
+    !usesPrimarySidebarForExtensions() ||
+    context.globalState.get<boolean>(PRIMARY_SIDEBAR_MIGRATION_KEY)
+  ) {
+    return;
+  }
+
+  try {
+    const commandIds = await vscode.commands.getCommands();
+    if (!commandIds.includes('vscode.moveViews')) {
+      logger.warn('The host does not expose the command required to move Varro to the Primary Sidebar');
+      return;
+    }
+
+    await vscode.commands.executeCommand('vscode.moveViews', {
+      viewIds: [SidebarProvider.viewType],
+      destinationId: PRIMARY_SIDEBAR_CONTAINER,
+    });
+    await context.globalState.update(PRIMARY_SIDEBAR_MIGRATION_KEY, true);
+  } catch (err) {
+    logger.warn(
+      `Failed to move Varro to the Primary Sidebar: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 
@@ -142,6 +184,8 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   registerCommands(context, sidebarProvider!, contextProvider!, server!);
+
+  await placeViewInPrimarySidebar(context);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();

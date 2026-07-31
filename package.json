@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: The OpenCode Workbench",
-  "version": "0.23.2",
+  "version": "0.23.3",
   "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
   "categories": [
     "AI",
@@ -81,6 +81,13 @@
   },
   "contributes": {
     "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "varro-primary",
+          "title": "Varro",
+          "icon": "assets/icon.png"
+        }
+      ],
       "secondarySidebar": [
         {
           "id": "varro",
@@ -344,7 +351,8 @@
   },
   "activationEvents": [
     "onCommand:varro.chat.focus",
-    "onCommand:varro.chat.statusBarClick"
+    "onCommand:varro.chat.statusBarClick",
+    "onStartupFinished"
   ],
   "extensionKind": [
     "workspace"
