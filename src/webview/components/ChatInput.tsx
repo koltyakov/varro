@@ -2084,13 +2084,19 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
 
   const contextUsage = createMemo(() => {
+    if (!composerSessionId()) return null;
+
     const best = getLatestAssistantMessageInfoWithTokens(currentSessionMessageEntries(), {
       includeSubagents: true,
     });
-    if (!best) return null;
-    const ctx = getContextWindow(best, state.providers);
-    if (!ctx) return null;
-    return ctx;
+    if (best) {
+      const ctx = getContextWindow(best, state.providers);
+      if (ctx) return ctx;
+    }
+
+    const limit = currentModel().contextLimit;
+    if (!limit) return null;
+    return { used: 0, limit, percent: 0 };
   });
 
   const localSessionTokenBreakdown = createMemo(() => {

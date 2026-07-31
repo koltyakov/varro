@@ -854,6 +854,36 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-limit-chip')?.textContent).toContain('1%');
   });
 
+  it('shows context usage before assistant tokens are available', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
+    expect(button?.getAttribute('title')).toBe('Context usage (0%)');
+
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('0/1,000tokens');
+
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+    await Promise.resolve();
+
+    expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
+    expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('500/1,000tokens');
+  });
+
+  it('hides context usage before a new session starts', () => {
+    setupModelState();
+
+    cleanup = render(() => ChatInput({ newSession: true }), container!);
+
+    expect(container?.querySelector('.chat-context-usage')).toBeNull();
+  });
+
   it('removes the context button title while the popup is open', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
@@ -926,6 +956,41 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.context-popup-overall-total')?.textContent).toContain(
       'Overall1,150'
     );
+  });
+
+  it('shows zero-valued root token details when only agents report usage', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_000, {
+        parentID: 'session-1',
+        tokens: {
+          input: 500,
+          output: 100,
+          reasoning: 0,
+          cache: { read: 50, write: 0 },
+        },
+      }),
+    ]);
+    setState('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const sections = [...(container?.querySelectorAll('.context-popup-section') || [])];
+    expect(sections.map((section) => section.textContent)).toEqual([
+      'Session Tokens',
+      'Agents (1)650',
+    ]);
+    expect(readContextRows(sections[0])).toEqual({
+      Input: '0',
+      Output: '0',
+      Total: '0',
+    });
   });
 
   it('uses the root session snapshot when older messages are not loaded', async () => {
@@ -1192,6 +1257,7 @@ describe('ChatInput', () => {
   it('right-aligns the provider limit popup when no context is shown', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
+    setState('providers', 0, 'models', 'gpt-4o', 'limit', 'context', undefined);
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit(),
     });

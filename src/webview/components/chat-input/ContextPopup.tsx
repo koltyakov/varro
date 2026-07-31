@@ -88,23 +88,21 @@ export function ContextPopup(props: {
         <span class="context-popup-unit">tokens</span>
       </div>
 
-      <Show when={props.tokens.total > 0}>
-        <div class="context-popup-section">Session Tokens</div>
-        <div class="context-popup-rows">
-          <For each={getTokenRows(props.tokens)}>
-            {(row) => (
-              <div class="context-popup-row">
-                <span class="context-popup-row-label">{row.label}</span>
-                <span class="context-popup-row-value">{formatNumber(row.value)}</span>
-              </div>
-            )}
-          </For>
-          <div class="context-popup-row context-popup-row-total">
-            <span class="context-popup-row-label">Total</span>
-            <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
-          </div>
+      <div class="context-popup-section">Session Tokens</div>
+      <div class="context-popup-rows">
+        <For each={getTokenRows(props.tokens)}>
+          {(row) => (
+            <div class="context-popup-row">
+              <span class="context-popup-row-label">{row.label}</span>
+              <span class="context-popup-row-value">{formatNumber(row.value)}</span>
+            </div>
+          )}
+        </For>
+        <div class="context-popup-row context-popup-row-total">
+          <span class="context-popup-row-label">Total</span>
+          <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
         </div>
-      </Show>
+      </div>
 
       <Show when={props.subagentTokens.total > 0}>
         <button
