@@ -81,7 +81,7 @@
   },
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "varro",
           "title": "Varro",
@@ -95,8 +95,7 @@
           "icon": "assets/icon.png",
           "type": "webview",
           "id": "varro.chat",
-          "name": "Varro",
-          "defaultViewLocation": "secondary"
+          "name": "Varro"
         }
       ]
     },
