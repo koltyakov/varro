@@ -10,6 +10,7 @@ import { routingStore } from '../../lib/stores/routing-store';
 import { sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { clearQueuedMessagesForSession } from '../../lib/state-queued-messages';
+import { clearSessionMessageWindowState } from '../../lib/message-window';
 import type { Session } from '../../types';
 
 type LifecycleState = {
@@ -192,6 +193,7 @@ export function clearDeletedSessionState(deps: LifecycleDependencies, id: string
     deps.setSessionUsageLimit(id, null);
     deps.setSessionFailed(id, false);
     deps.clearQueuedMessagesForSession(id);
+    clearSessionMessageWindowState(id);
     deps.filterQuestions((sessionId) => sessionId !== id);
     deps.filterPermissions((sessionId) => sessionId !== id);
 

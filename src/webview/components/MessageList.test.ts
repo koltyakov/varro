@@ -1232,7 +1232,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
       await Promise.resolve();
       await Promise.resolve();
     }
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
     animationFrames.restore();
   });

@@ -37,6 +37,7 @@ import { getRelativePath } from './util/path';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
+const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -107,6 +108,7 @@ export class RestProxy {
   private sessionDirectories = new Map<string, string>();
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
+  private sessionSummaryListRequest: Promise<unknown> | null = null;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
@@ -422,7 +424,7 @@ export class RestProxy {
     const [diffs, messages, sessions] = await Promise.all([
       this.callbacks.server.request('GET', `/session/${encodedSessionID}/diff`),
       this.callbacks.server.request('GET', `/session/${encodedSessionID}/message`),
-      this.callbacks.server.request('GET', '/session'),
+      this.readSessionListForSummary(),
     ]);
     const diffStats = summarizeSessionDiff(diffs);
     const tokenBreakdown = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
@@ -452,10 +454,10 @@ export class RestProxy {
       else sessionsWithoutTokenSnapshots.push(descendant.id);
     }
 
-    const messageLists = await Promise.all(
-      sessionsWithoutTokenSnapshots.map((id) =>
-        this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
-      )
+    const messageLists = await mapWithConcurrency(
+      sessionsWithoutTokenSnapshots,
+      SESSION_SUMMARY_DESCENDANT_CONCURRENCY,
+      (id) => this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
     );
     for (const messages of messageLists) {
       addSessionTokenUsage(subagents, summarizeSessionTokenUsage(messages));
@@ -465,6 +467,16 @@ export class RestProxy {
       subagents,
       subagentCount: descendants.length,
     } satisfies SessionTokenBreakdown;
+  }
+
+  private readSessionListForSummary(): Promise<unknown> {
+    if (this.sessionSummaryListRequest) return this.sessionSummaryListRequest;
+    const request = this.callbacks.server.request('GET', '/session');
+    const tracked = request.finally(() => {
+      if (this.sessionSummaryListRequest === tracked) this.sessionSummaryListRequest = null;
+    });
+    this.sessionSummaryListRequest = tracked;
+    return tracked;
   }
 
   private getHiddenSessionIdFromPath(path: string) {
@@ -1563,6 +1575,27 @@ function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeRefe
     });
   }
   return references.slice(-20);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  map: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(items.length, Math.max(1, concurrency)) },
+    async () => {
+      for (;;) {
+        const index = nextIndex++;
+        if (index >= items.length) return;
+        results[index] = await map(items[index]!);
+      }
+    }
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function isDirectoryInWorkspace(

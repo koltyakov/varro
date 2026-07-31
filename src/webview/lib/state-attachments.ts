@@ -17,7 +17,7 @@ import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readStoredBooleanRecord } from './state-stored-values';
 
 export const MAX_CLIPBOARD_IMAGES = 5;
-const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
+export const MAX_CLIPBOARD_IMAGE_SIZE = 5 * 1024 * 1024;
 
 export function getCurrentDocumentEnabled(
   sessionId: string | null | undefined = state.activeSessionId

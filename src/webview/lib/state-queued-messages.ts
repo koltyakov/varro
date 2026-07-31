@@ -15,7 +15,13 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   if (failedIds.length !== state.failedQueuedMessageIds.length) {
     setState('failedQueuedMessageIds', failedIds);
   }
-  writeStored(STORAGE_KEYS.queuedMessages, messages);
+  // Data URLs can make a single queued image message tens of megabytes. Keep those messages fully
+  // functional while the retained webview is alive, but do not synchronously serialize them into
+  // VS Code state and localStorage. Restoring a partial text-only message would change user intent.
+  writeStored(
+    STORAGE_KEYS.queuedMessages,
+    messages.filter((message) => (message.clipboardImages?.length ?? 0) === 0)
+  );
 }
 
 export function setQueuedMessageDispatchingId(id: string | null) {

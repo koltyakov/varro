@@ -173,38 +173,12 @@ describe('state helpers', () => {
       JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]').map(
         (item: { id: string }) => item.id
       )
-    ).toEqual(['q2', 'other', 'q1']);
+    ).toEqual(['q2', 'other']);
 
     vi.resetModules();
     stateModule = await loadState();
 
-    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other', 'q1']);
-    expect(stateModule.state.queuedMessages[2]).toEqual({
-      id: 'q1',
-      sessionId: 'session-1',
-      text: 'first',
-      droppedFiles: [
-        {
-          path: '/repo/src/a.ts',
-          relativePath: 'src/a.ts',
-          type: 'file',
-          attachmentSequence: 2,
-          lineRanges: [{ startLine: 2, endLine: 4 }],
-        },
-      ],
-      clipboardImages: [
-        {
-          id: 'img-1',
-          url: 'data:image/png;base64,AA==',
-          mime: 'image/png',
-          filename: 'img.png',
-          size: 1,
-          contentKey: 'image-content',
-          attachmentSequence: 3,
-        },
-      ],
-      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
-    });
+    expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other']);
 
     stateModule.removeQueuedMessage('q2');
     stateModule.clearQueuedMessagesForSession('session-1');
@@ -221,18 +195,52 @@ describe('state helpers', () => {
     ]);
   });
 
+  it('keeps queued images live without serializing them', async () => {
+    const stateModule = await loadState();
+    const imageMessage = {
+      id: 'image-message',
+      sessionId: 'session-1',
+      text: 'inspect image',
+      clipboardImages: [
+        {
+          id: 'img-1',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'img.png',
+          size: 1,
+          contentKey: 'data:image/png;base64,AA==',
+        },
+      ],
+    };
+
+    stateModule.enqueueMessage(imageMessage);
+
+    expect(stateModule.state.queuedMessages).toEqual([imageMessage]);
+    expect(window.localStorage.getItem('varro.queuedMessages')).not.toContain('base64');
+
+    expect(
+      stateModule.replaceQueuedMessage('image-message', {
+        id: 'image-message',
+        sessionId: 'session-1',
+        text: 'inspect image later',
+      })
+    ).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([
+      { id: 'image-message', sessionId: 'session-1', text: 'inspect image later' },
+    ]);
+
+    expect(stateModule.replaceQueuedMessage('image-message', imageMessage)).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([]);
+  });
+
   it('discards malformed persisted queued messages', async () => {
     window.localStorage.setItem(
       'varro.queuedMessages',
       JSON.stringify([
         {
-          id: 'valid',
+          id: 'legacy-image',
           sessionId: 'session-1',
-          text: 'keep',
-          droppedFiles: [
-            { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
-            { path: '/repo/b.ts', relativePath: 'b.ts', type: 'other' },
-          ],
+          text: 'drop atomically',
           clipboardImages: [
             {
               id: 'img-1',
@@ -241,7 +249,15 @@ describe('state helpers', () => {
               filename: 'img.png',
               size: 1,
             },
-            { id: 'broken-image' },
+          ],
+        },
+        {
+          id: 'valid',
+          sessionId: 'session-1',
+          text: 'keep',
+          droppedFiles: [
+            { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
+            { path: '/repo/b.ts', relativePath: 'b.ts', type: 'other' },
           ],
         },
         { id: 'valid', sessionId: 'session-1', text: 'duplicate' },
@@ -258,18 +274,11 @@ describe('state helpers', () => {
         sessionId: 'session-1',
         text: 'keep',
         droppedFiles: [{ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' }],
-        clipboardImages: [
-          {
-            id: 'img-1',
-            url: 'data:image/png;base64,AA==',
-            mime: 'image/png',
-            filename: 'img.png',
-            size: 1,
-          },
-        ],
+        clipboardImages: [],
         terminalSelection: null,
       },
     ]);
+    expect(window.localStorage.getItem('varro.queuedMessages')).not.toContain('base64');
   });
 
   it('persists active session state and unread markers', async () => {

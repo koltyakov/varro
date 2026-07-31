@@ -12,6 +12,20 @@ type PostMessage = (message: ExtensionMessage) => void;
 
 const UNKNOWN_EVENT_LOG_INTERVAL_MS = 60_000;
 const MAX_TRACKED_UNKNOWN_EVENT_TYPES = 100;
+const DELTA_BATCH_INTERVAL_MS = 16;
+const MAX_BATCHED_DELTA_FRAGMENTS = 256;
+const MAX_BATCHED_DELTA_CHARACTERS = 64 * 1024;
+
+type CoalescableDelta = {
+  key: string;
+  fragmentField: 'delta' | 'text';
+  fragment: string;
+};
+
+type PendingDelta = CoalescableDelta & {
+  event: ServerEvent;
+  fragmentCount: number;
+};
 
 export class ServerEventBridge {
   private readonly statusBarItem: vscode.StatusBarItem;
@@ -19,6 +33,8 @@ export class ServerEventBridge {
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private readonly unknownEventLoggedAt = new Map<string, number>();
+  private pendingDelta: PendingDelta | undefined;
+  private pendingDeltaTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly server: Pick<OpenCodeServer, 'on' | 'off'>,
@@ -54,6 +70,7 @@ export class ServerEventBridge {
 
   attach() {
     this.serverStatusHandler = (status: ServerStatus) => {
+      this.flushPendingDelta();
       const previousStatus = this.status;
       this.status = status;
       if (this.providerLimitService.shouldClearCache(previousStatus, status)) {
@@ -66,14 +83,20 @@ export class ServerEventBridge {
     this.serverEventHandler = (event: unknown) => {
       const parsed = parseServerEvent(event);
       if (!parsed) {
+        this.flushPendingDelta();
         this.logUnknownEvent(event);
         return;
       }
+      const delta = getCoalescableDelta(parsed);
+      if (!delta || this.pendingDelta?.key !== delta.key) this.flushPendingDelta();
       this.hiddenSessions.observeEvent?.(parsed);
-      if (this.shouldSuppress(parsed)) return;
-      if (this.shouldSuppressWorkspace(parsed)) return;
+      if (this.shouldSuppress(parsed) || this.shouldSuppressWorkspace(parsed)) {
+        this.flushPendingDelta();
+        return;
+      }
       this.sessionState.handleServerEvent(parsed);
-      this.post({ type: 'server/event', payload: parsed });
+      if (delta) this.enqueueDelta(parsed, delta);
+      else this.post({ type: 'server/event', payload: parsed });
     };
 
     this.server.on('status', this.serverStatusHandler);
@@ -86,10 +109,47 @@ export class ServerEventBridge {
     if (this.serverEventHandler) this.server.off('event', this.serverEventHandler);
     this.serverStatusHandler = undefined;
     this.serverEventHandler = undefined;
+    this.flushPendingDelta();
     void this.sessionState.persist();
     await this.sessionState.flush();
     this.unknownEventLoggedAt.clear();
     this.statusBarItem.dispose();
+  }
+
+  private enqueueDelta(event: ServerEvent, delta: CoalescableDelta) {
+    const pending = this.pendingDelta;
+    if (pending?.key === delta.key) {
+      if (
+        pending.fragmentCount < MAX_BATCHED_DELTA_FRAGMENTS &&
+        pending.fragment.length + delta.fragment.length <= MAX_BATCHED_DELTA_CHARACTERS
+      ) {
+        const fragment = pending.fragment + delta.fragment;
+        this.pendingDelta = {
+          ...delta,
+          event: mergeDeltaEvent(event, delta.fragmentField, fragment),
+          fragment,
+          fragmentCount: pending.fragmentCount + 1,
+        };
+        return;
+      }
+      this.flushPendingDelta();
+    }
+
+    if (delta.fragment.length > MAX_BATCHED_DELTA_CHARACTERS) {
+      this.post({ type: 'server/event', payload: event });
+      return;
+    }
+
+    this.pendingDelta = { ...delta, event, fragmentCount: 1 };
+    this.pendingDeltaTimer = setTimeout(() => this.flushPendingDelta(), DELTA_BATCH_INTERVAL_MS);
+  }
+
+  private flushPendingDelta() {
+    if (this.pendingDeltaTimer) clearTimeout(this.pendingDeltaTimer);
+    this.pendingDeltaTimer = undefined;
+    const pending = this.pendingDelta;
+    this.pendingDelta = undefined;
+    if (pending) this.post({ type: 'server/event', payload: pending.event });
   }
 
   private logUnknownEvent(event: unknown) {
@@ -131,6 +191,75 @@ export class ServerEventBridge {
       (sessionID) => this.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath) === false
     );
   }
+}
+
+function getCoalescableDelta(event: ServerEvent): CoalescableDelta | null {
+  if (event.seq !== undefined) return null;
+  const properties = asRecord(event.properties);
+  if (!properties) return null;
+
+  switch (event.type) {
+    case 'message.part.delta':
+      return createCoalescableDelta(
+        event.type,
+        properties,
+        'delta',
+        ['sessionID', 'messageID', 'partID', 'field'],
+        properties.field === 'text'
+      );
+    case 'session.next.text.delta':
+      return createCoalescableDelta(event.type, properties, 'delta', [
+        'sessionID',
+        'assistantMessageID',
+        'textID',
+      ]);
+    case 'session.next.reasoning.delta':
+      return createCoalescableDelta(event.type, properties, 'delta', [
+        'sessionID',
+        'assistantMessageID',
+        'reasoningID',
+      ]);
+    case 'session.next.tool.input.delta':
+      return createCoalescableDelta(event.type, properties, 'delta', [
+        'sessionID',
+        'assistantMessageID',
+        'callID',
+      ]);
+    case 'session.next.compaction.delta':
+      return createCoalescableDelta(event.type, properties, 'text', ['sessionID', 'messageID']);
+    default:
+      return null;
+  }
+}
+
+function createCoalescableDelta(
+  type: string,
+  properties: Record<string, unknown>,
+  fragmentField: 'delta' | 'text',
+  identityFields: string[],
+  eligible = true
+): CoalescableDelta | null {
+  if (!eligible) return null;
+  const fragment = properties[fragmentField];
+  if (typeof fragment !== 'string' || fragment.length === 0) return null;
+  const identity = identityFields.map((field) => properties[field]);
+  if (identity.some((value) => typeof value !== 'string' || value.length === 0)) return null;
+  return {
+    key: [type, ...identity].join('\u0000'),
+    fragmentField,
+    fragment,
+  };
+}
+
+function mergeDeltaEvent(
+  event: ServerEvent,
+  fragmentField: 'delta' | 'text',
+  fragment: string
+): ServerEvent {
+  return {
+    ...event,
+    properties: { ...event.properties, [fragmentField]: fragment },
+  } as ServerEvent;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

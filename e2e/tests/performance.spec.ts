@@ -39,6 +39,72 @@ test('large transcripts keep rendered rows bounded while scrolling', async ({ pa
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
+test('appending a message does not remount the full transcript', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
+
+  const stats = await page.locator('.interactive-list').evaluate(async (element) => {
+    // Playwright serializes this callback, so the helper must remain inside its browser scope.
+    // oxlint-disable-next-line consistent-function-scoping
+    const countRows = (node: Node) => {
+      if (!(node instanceof Element)) return 0;
+      return (
+        (node.matches('[data-msg-id]') ? 1 : 0) + node.querySelectorAll('[data-msg-id]').length
+      );
+    };
+    let mountedRows = element.querySelectorAll('[data-msg-id]').length;
+    let peakMountedRows = mountedRows;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) mountedRows -= countRows(node);
+        for (const node of record.addedNodes) {
+          mountedRows += countRows(node);
+          peakMountedRows = Math.max(peakMountedRows, mountedRows);
+        }
+      }
+    });
+    observer.observe(element, { childList: true, subtree: true });
+
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              id: 'message-large-assistant-appended',
+              sessionID: 'session-large-transcript',
+              role: 'assistant',
+              time: { created: Date.now() },
+              parentID: 'message-large-user-239',
+              modelID: 'model-test',
+              providerID: 'provider-test',
+              mode: 'primary',
+              path: { cwd: '/workspace', root: '/workspace' },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          },
+        },
+      },
+      '*'
+    );
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    observer.disconnect();
+    return {
+      peakMountedRows,
+      finalMountedRows: element.querySelectorAll('[data-msg-id]').length,
+    };
+  });
+
+  expect(stats.peakMountedRows).toBeLessThan(90);
+  expect(stats.finalMountedRows).toBeLessThan(90);
+});
+
 test('large transcripts keep rendered rows bounded while the chat width changes', async ({
   page,
 }) => {

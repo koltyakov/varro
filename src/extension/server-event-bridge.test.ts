@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ServerStatus } from '../shared/protocol';
+import type { ServerEvent, ServerStatus } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
   createStatusBarItem: vi.fn(() => ({
@@ -96,6 +96,14 @@ const RUNNING_STATUS: ServerStatus = { state: 'running', url: 'http://localhost:
 const STARTING_STATUS: ServerStatus = { state: 'starting' };
 const ERROR_STATUS: ServerStatus = { state: 'error', message: 'fail' };
 
+function useParsedEvents() {
+  mocks.parseServerEvent.mockImplementation((event) => event as ServerEvent);
+  mocks.getSessionIdsForEvent.mockImplementation((event: ServerEvent) => {
+    const sessionID = (event.properties as { sessionID?: unknown } | undefined)?.sessionID;
+    return typeof sessionID === 'string' ? [sessionID] : [];
+  });
+}
+
 describe('ServerEventBridge', () => {
   it('creates a status bar item on construction', () => {
     createMocks();
@@ -169,6 +177,181 @@ describe('ServerEventBridge', () => {
     handlers.event!({ type: 'session.created' });
     expect(sessionState.handleServerEvent).toHaveBeenCalledWith(parsed);
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
+  });
+
+  it.each([
+    [
+      'message.part.delta',
+      {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'a',
+      },
+      'delta',
+    ],
+    [
+      'session.next.text.delta',
+      {
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        textID: 'text-1',
+        delta: 'a',
+      },
+      'delta',
+    ],
+    [
+      'session.next.reasoning.delta',
+      {
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        reasoningID: 'reasoning-1',
+        delta: 'a',
+      },
+      'delta',
+    ],
+    [
+      'session.next.tool.input.delta',
+      {
+        sessionID: 'session-1',
+        assistantMessageID: 'message-1',
+        callID: 'call-1',
+        delta: 'a',
+      },
+      'delta',
+    ],
+    [
+      'session.next.compaction.delta',
+      { sessionID: 'session-1', messageID: 'message-1', text: 'a' },
+      'text',
+    ],
+  ] as const)('coalesces adjacent %s fragments', (type, properties, fragmentField) => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    bridge.attach();
+    const first = { type, properties } as ServerEvent;
+    const second = {
+      type,
+      properties: { ...properties, [fragmentField]: 'b' },
+    } as ServerEvent;
+
+    handlers.event!(first);
+    handlers.event!(second);
+
+    expect(sessionState.handleServerEvent).toHaveBeenNthCalledWith(1, first);
+    expect(sessionState.handleServerEvent).toHaveBeenNthCalledWith(2, second);
+    expect(post).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(16);
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        ...second,
+        properties: { ...second.properties, [fragmentField]: 'ab' },
+      },
+    });
+    vi.useRealTimers();
+  });
+
+  it('preserves order when adjacent delta streams differ', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const first = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'a',
+      },
+    } satisfies ServerEvent;
+    const second = {
+      ...first,
+      properties: { ...first.properties, partID: 'part-2', delta: 'b' },
+    } satisfies ServerEvent;
+    const third = {
+      ...first,
+      properties: { ...first.properties, delta: 'c' },
+    } satisfies ServerEvent;
+
+    handlers.event!(first);
+    handlers.event!(second);
+    handlers.event!(third);
+    vi.advanceTimersByTime(16);
+
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([first, second, third]);
+    vi.useRealTimers();
+  });
+
+  it('flushes a pending delta before a durable event or status update', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const delta = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'a',
+      },
+    } satisfies ServerEvent;
+    const durable = {
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      seq: 1,
+    } satisfies ServerEvent;
+
+    handlers.event!(delta);
+    handlers.event!(durable);
+    handlers.event!(delta);
+    handlers.status!(RUNNING_STATUS);
+
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'server/event', payload: delta },
+      { type: 'server/event', payload: durable },
+      { type: 'server/event', payload: delta },
+      { type: 'server/status', payload: RUNNING_STATUS },
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('does not batch sequenced or non-text part deltas', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const sequenced = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'a',
+      },
+      seq: 1,
+    } satisfies ServerEvent;
+    const metadata = {
+      ...sequenced,
+      seq: undefined,
+      properties: { ...sequenced.properties, field: 'metadata' },
+    } satisfies ServerEvent;
+
+    handlers.event!(sequenced);
+    handlers.event!(metadata);
+
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([sequenced, metadata]);
+    vi.useRealTimers();
   });
 
   it('event handler skips null parse results', () => {
@@ -331,6 +514,31 @@ describe('ServerEventBridge', () => {
     await bridge.dispose();
     expect(sessionState.persist).toHaveBeenCalledOnce();
     expect(sessionState.flush).toHaveBeenCalledOnce();
+  });
+
+  it('dispose flushes a pending delta exactly once', async () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    bridge.attach();
+    const delta = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'a',
+      },
+    } satisfies ServerEvent;
+    handlers.event!(delta);
+
+    await bridge.dispose();
+    vi.runAllTimers();
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: delta });
+    vi.useRealTimers();
   });
 
   it('dispose waits for the latest queued session-state write', async () => {

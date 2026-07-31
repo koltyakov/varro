@@ -12,6 +12,8 @@ const HEALTHY_LOADING_STATUS_POLL_INITIAL_MS = 4_000;
 const HEALTHY_LOADING_STATUS_POLL_MAX_MS = 16_000;
 const DEGRADED_RUNNING_SESSION_SYNC_INTERVAL_MS = 4_000;
 const HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS = 16_000;
+const DEGRADED_IDLE_STATUS_SYNC_INTERVAL_MS = 10_000;
+const HEALTHY_IDLE_STATUS_SYNC_INTERVAL_MS = 60_000;
 const MESSAGE_SYNC_FRESHNESS_MS = 4_000;
 const RUNNING_SESSION_SYNC_KEY_SEPARATOR = '\u0000';
 
@@ -255,12 +257,31 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
         const tracked = (async () => {
           const results: PromiseSettledResult<void>[] = [];
           results.push(await settleVoid(deps.hydrateSessionStatuses()));
+          const latestRunningIds = Object.entries(deps.getSessionStatuses())
+            .filter(([, status]) => status?.type === 'busy' || status?.type === 'retry')
+            .map(([sessionId]) => sessionId)
+            .toSorted();
+          if (latestRunningIds.length === 0) {
+            for (const result of results) {
+              if (result.status === 'rejected') deps.logError('runningSessionSync', result.reason);
+            }
+            return;
+          }
+
           results.push(await settleVoid(deps.loadSessions()));
           results.push(await settleVoid(deps.loadQuestions()));
           if (deps.loadPendingPermissions) {
             results.push(await settleVoid(deps.loadPendingPermissions()));
           }
-          for (const sessionId of messageSyncSessionIds) {
+          const latestActiveSessionId = deps.getActiveSessionId();
+          const latestMessageSyncSessionIds =
+            latestActiveSessionId && latestRunningIds.includes(latestActiveSessionId)
+              ? [
+                  latestActiveSessionId,
+                  ...latestRunningIds.filter((sessionId) => sessionId !== latestActiveSessionId),
+                ]
+              : latestRunningIds;
+          for (const sessionId of latestMessageSyncSessionIds) {
             results.push(await settleVoid(deps.syncSessionMessages(sessionId)));
           }
           for (const result of results) {
@@ -275,13 +296,18 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
         return tracked;
       };
 
+      const hasRunningSessions = messageSyncSessionIds.length > 0;
       const timer = window.setInterval(
         () => {
           void refresh().catch((err) => deps.logError('runningSessionSync', err));
         },
-        eventStreamState === 'healthy'
-          ? HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS
-          : DEGRADED_RUNNING_SESSION_SYNC_INTERVAL_MS
+        hasRunningSessions
+          ? eventStreamState === 'healthy'
+            ? HEALTHY_RUNNING_SESSION_SYNC_INTERVAL_MS
+            : DEGRADED_RUNNING_SESSION_SYNC_INTERVAL_MS
+          : eventStreamState === 'healthy'
+            ? HEALTHY_IDLE_STATUS_SYNC_INTERVAL_MS
+            : DEGRADED_IDLE_STATUS_SYNC_INTERVAL_MS
       );
 
       onCleanup(() => {

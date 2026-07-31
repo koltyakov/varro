@@ -273,7 +273,7 @@ describe('session effect helpers', () => {
     }
   });
 
-  it('refreshes visible session state even when no session is marked running', async () => {
+  it('uses a slower status-only safety poll when no session is marked running', async () => {
     vi.useFakeTimers();
     const loadSessions = vi.fn(async () => {});
     const hydrateSessionStatuses = vi.fn(async () => {});
@@ -297,11 +297,56 @@ describe('session effect helpers', () => {
     });
 
     try {
-      await vi.advanceTimersByTimeAsync(4000);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(hydrateSessionStatuses).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
       expect(hydrateSessionStatuses).toHaveBeenCalledTimes(1);
-      expect(loadSessions).toHaveBeenCalledTimes(1);
-      expect(loadQuestions).toHaveBeenCalledTimes(1);
+      expect(loadSessions).not.toHaveBeenCalled();
+      expect(loadQuestions).not.toHaveBeenCalled();
       expect(syncSessionMessages).not.toHaveBeenCalled();
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('fully reconciles when an idle status poll discovers a running session', async () => {
+    vi.useFakeTimers();
+    const [statuses, setStatuses] = createSignal<Record<string, { type: 'busy' }>>({});
+    const loadSessions = vi.fn(async () => {});
+    const hydrateSessionStatuses = vi.fn(async () => {
+      setStatuses({ 'session-1': { type: 'busy' } });
+    });
+    const loadQuestions = vi.fn(async () => {});
+    const loadPendingPermissions = vi.fn(async () => {});
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const dispose = createRoot((cleanup) => {
+      registerVisibleRunningSessionSyncEffect({
+        getServerState: () => 'running',
+        isDocumentVisible: () => true,
+        getEventStreamState: () => 'degraded',
+        getActiveSessionId: () => 'session-1',
+        getSessionStatuses: statuses,
+        loadSessions,
+        hydrateSessionStatuses,
+        loadQuestions,
+        loadPendingPermissions,
+        syncSessionMessages,
+        logError: vi.fn(),
+      });
+      return cleanup;
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(hydrateSessionStatuses).toHaveBeenCalledOnce();
+      expect(loadSessions).toHaveBeenCalledOnce();
+      expect(loadQuestions).toHaveBeenCalledOnce();
+      expect(loadPendingPermissions).toHaveBeenCalledOnce();
+      expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     } finally {
       dispose();
       vi.useRealTimers();

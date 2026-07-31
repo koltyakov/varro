@@ -31,6 +31,7 @@ import {
 import {
   cacheSessionHistoryPage,
   clearCachedSessionHistoryPages,
+  clearSessionMessageWindowState,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
   getSessionHistoryPrompts,
@@ -38,6 +39,7 @@ import {
   MESSAGE_HISTORY_WINDOW,
   mergeOlderHistory,
   mergeWindowedHistory,
+  resetMessageWindowState,
   setSessionHistoryPrompts,
   setSessionHistoryPromptCursor,
   setSessionHistoryCursor,
@@ -434,6 +436,7 @@ function resolvePermissionJudgeModel(sessionId: string) {
 async function deleteSessionImmediately(id: string) {
   await client.varro.session.deleteImmediately(id);
   clearQueuedMessagesForSession(id);
+  clearSessionMessageWindowState(id);
 }
 
 export function createOpenCodeRuntime(): OpenCodeRuntime {
@@ -576,6 +579,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           currentWorkspacePath = path;
         },
         reloadSessionsForWorkspaceChange: () => {
+          resetMessageWindowState();
           void loadSessions();
         },
         isInitialized: () => initialized,
@@ -638,6 +642,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         pendingAbortRetryAttempts.clear();
         statusSnapshots.clear();
         messageSyncGenerations.clear();
+        resetMessageWindowState();
         setDocumentVisible(document.visibilityState === 'visible');
       });
     });

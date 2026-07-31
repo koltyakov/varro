@@ -16,6 +16,7 @@ import {
   setState,
   setInputText,
   addContextFile,
+  MAX_CLIPBOARD_IMAGE_SIZE,
   removeContextFile,
 } from '../lib/state';
 import { client } from '../lib/client';
@@ -2611,6 +2612,30 @@ describe('ChatInput', () => {
     expect(state.droppedFiles).toEqual([]);
   });
 
+  it('rejects oversized clipboard images before reading them', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const readSpy = vi.spyOn(FileReader.prototype, 'readAsDataURL');
+    const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'large.png', {
+      type: 'image/png',
+    });
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: () => '',
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => oversized }],
+      },
+    });
+
+    editor?.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(state.clipboardImages).toEqual([]);
+  });
+
   it('keeps a mention-only paste as text when the mention does not resolve', async () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -3168,7 +3193,6 @@ describe('ChatInput', () => {
   });
 
   it('keeps the usage-limit banner visible when a retry notice predates active-session model hydration', () => {
-    setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('sessions', [session('session-1', 2_000)]);
     setState('providers', [

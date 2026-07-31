@@ -2,15 +2,22 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Message, Part } from '../types';
 import {
   cacheSessionHistoryPage,
+  clearSessionMessageWindowState,
   getPrefetchedSessionHistory,
   getSessionHistoryCursor,
+  getSessionHistoryPromptCursor,
   getSessionHistoryPrompts,
+  isSessionHistoryLoadFailed,
   isSessionHistoryTruncated,
+  markSessionHistoryLoadFailed,
   markSessionHistoryTruncated,
+  MESSAGE_HISTORY_CACHE_SESSION_LIMIT,
+  MESSAGE_HISTORY_PAGE_CACHE_LIMIT,
   mergeOlderHistory,
   mergeWindowedHistory,
   resetMessageWindowState,
   setSessionHistoryCursor,
+  setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
   takeCachedSessionHistoryPage,
 } from './message-window';
@@ -134,6 +141,50 @@ describe('history window state', () => {
       'm1',
       'm2',
     ]);
+  });
+
+  it('clears every cached value for one session', () => {
+    setSessionHistoryCursor('session-1', 'history-cursor');
+    setSessionHistoryPromptCursor('session-1', 'prompt-cursor');
+    setSessionHistoryPrompts('session-1', [entry('prompt-1')]);
+    cacheSessionHistoryPage('session-1', 'page-cursor', [entry('message-1')]);
+    markSessionHistoryLoadFailed('session-1', true);
+    setSessionHistoryCursor('session-2', 'other-cursor');
+
+    clearSessionMessageWindowState('session-1');
+
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
+    expect(getSessionHistoryPromptCursor('session-1')).toBeUndefined();
+    expect(getSessionHistoryPrompts('session-1')).toEqual([]);
+    expect(getPrefetchedSessionHistory('session-1')).toEqual([]);
+    expect(isSessionHistoryTruncated('session-1')).toBe(false);
+    expect(isSessionHistoryLoadFailed('session-1')).toBe(false);
+    expect(getSessionHistoryCursor('session-2')).toBe('other-cursor');
+  });
+
+  it('evicts the least recently used inactive session state', () => {
+    for (let index = 0; index < MESSAGE_HISTORY_CACHE_SESSION_LIMIT; index += 1) {
+      setSessionHistoryCursor(`session-${index}`, `cursor-${index}`);
+    }
+    expect(getSessionHistoryCursor('session-0')).toBe('cursor-0');
+
+    setSessionHistoryCursor('session-overflow', 'cursor-overflow');
+
+    expect(getSessionHistoryCursor('session-0')).toBe('cursor-0');
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
+    expect(getSessionHistoryCursor('session-overflow')).toBe('cursor-overflow');
+  });
+
+  it('bounds prefetched history pages across cursors', () => {
+    for (let index = 0; index <= MESSAGE_HISTORY_PAGE_CACHE_LIMIT; index += 1) {
+      cacheSessionHistoryPage('session-1', `cursor-${index}`, [entry(`message-${index}`)]);
+    }
+
+    expect(takeCachedSessionHistoryPage('session-1', 'cursor-0')).toBeUndefined();
+    expect(
+      takeCachedSessionHistoryPage('session-1', `cursor-${MESSAGE_HISTORY_PAGE_CACHE_LIMIT}`)?.[0]
+        ?.info.id
+    ).toBe(`message-${MESSAGE_HISTORY_PAGE_CACHE_LIMIT}`);
   });
 });
 

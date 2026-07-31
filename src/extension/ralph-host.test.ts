@@ -222,7 +222,7 @@ describe('HostRalphStore', () => {
     ).toEqual(phases);
   });
 
-  it('serializes delayed persistence writes and flushes the latest snapshot', async () => {
+  it('coalesces delayed persistence writes and flushes the latest snapshot', async () => {
     const writes: Array<Record<string, RalphRun>> = [];
     const releases: Array<() => void> = [];
     const persistence: Persistence = {
@@ -239,12 +239,13 @@ describe('HostRalphStore', () => {
 
     store.startRun(config);
     store.setStatus(config.managerSessionId, 'paused');
+    store.setStatus(config.managerSessionId, 'stopped');
 
     await vi.waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]?.[config.managerSessionId]?.status).toBe('running');
     releases.shift()?.();
     await vi.waitFor(() => expect(writes).toHaveLength(2));
-    expect(writes[1]?.[config.managerSessionId]?.status).toBe('paused');
+    expect(writes[1]?.[config.managerSessionId]?.status).toBe('stopped');
     releases.shift()?.();
     await store.flush();
   });

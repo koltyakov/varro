@@ -25,6 +25,7 @@ import {
   addClipboardImage,
   clearClipboardImages,
   MAX_CLIPBOARD_IMAGES,
+  MAX_CLIPBOARD_IMAGE_SIZE,
   showModelPicker,
   setShowModelPicker,
   setPersistentShowSessionPicker as setShowSessionPicker,
@@ -1761,7 +1762,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     for (const [index, item] of attachableItems.entries()) {
       const file = item.getAsFile();
-      if (!file) continue;
+      if (!file || file.size > MAX_CLIPBOARD_IMAGE_SIZE) continue;
 
       const filename = getPastedImageFilename(nextIndex + index);
       const url = await readFileAsDataUrl(file);
@@ -1771,7 +1772,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         mime: file.type || 'image/png',
         filename,
         size: file.size,
-        contentKey: url,
       });
 
       if (!didAddImage) continue;
@@ -2490,7 +2490,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           primaryActionLabel="Continue"
           onPrimaryAction={() => void handleUsageLimitContinue()}
           showStopRetrying={
-            isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
+            (isComposerBusy() ||
+              visibleUsageLimit()!.source === 'status' ||
+              (visibleUsageLimit()!.attempt !== null && visibleUsageLimit()!.retryAt !== null)) &&
+            !composerHasActiveQuestion() &&
+            !composerHasActivePermission()
           }
           onStopRetrying={() => abortSession()}
           onSwitchProvider={() => {

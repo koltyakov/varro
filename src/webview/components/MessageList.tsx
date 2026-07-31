@@ -265,6 +265,7 @@ export function MessageList() {
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [hasBootstrappedVirtualization, setHasBootstrappedVirtualization] = createSignal(false);
   const [stickyPreviewGeometryVersion, setStickyPreviewGeometryVersion] = createSignal(0);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
     createSignal<StickyUserMessagePreview | null>(null);
@@ -685,9 +686,8 @@ export function MessageList() {
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
 
-  // Principle: native scrollbar mapping must come from real layout, not guessed row heights.
-  // Large transcripts stay non-virtualized until every row has an exact measured height; only then
-  // do we switch to prefix-sum virtualization. Do not replace this with estimated heights.
+  // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
+  // rows use provisional heights until mounted instead of remounting the full transcript.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
 
   function hasMeasuredEveryMessage() {
@@ -703,7 +703,17 @@ export function MessageList() {
     return hasMeasuredEveryMessage();
   });
 
-  const shouldVirtualize = createMemo(() => shouldMeasureRows() && hasMeasuredAllRows());
+  createEffect(() => {
+    if (!shouldMeasureRows()) {
+      setHasBootstrappedVirtualization(false);
+      return;
+    }
+    if (hasMeasuredAllRows()) setHasBootstrappedVirtualization(true);
+  });
+
+  const shouldVirtualize = createMemo(
+    () => shouldMeasureRows() && (hasBootstrappedVirtualization() || hasMeasuredAllRows())
+  );
 
   createEffect(() => {
     const currentMessageIds = messageIds();
@@ -1088,24 +1098,24 @@ export function MessageList() {
   }
 
   function measureMountedRow(element: HTMLDivElement, messageId: string) {
-    // Principle: mount-time measurement is part of the exact-height bootstrap. Tests and no-layout
-    // environments may never deliver ResizeObserver entries, so virtualization must not depend on
-    // observer callbacks alone.
+    // Tests and no-layout environments may never deliver ResizeObserver entries, so virtualization
+    // must not depend on observer callbacks alone.
     const rect = element.getBoundingClientRect();
     measuredRowInlineSizes.set(element, rect.width);
     const height = alignMeasuredRowBlockSize(element, rect.height || 160);
     if (!applyRowHeightMeasurements([{ messageId, height }])) return false;
-    if (hasMeasuredEveryMessage()) scheduleMeasurementPublish('content');
+    scheduleMeasurementPublish('content');
     return true;
   }
 
   function applyRowHeightMeasurements(measurements: Array<{ messageId: string; height: number }>) {
     // ResizeObserver reports after layout. Use the old prefix metrics to offset growth above the
     // viewport before paint, including while the user is actively scrolling.
+    const metricsBefore = containerRef && shouldVirtualize() ? virtualMetrics() : null;
     const firstVisibleIndex =
-      containerRef && shouldVirtualize() && !autoScroll()
+      metricsBefore && containerRef && !autoScroll()
         ? getFirstVisibleMessageIndexFromVirtualMetrics({
-            metrics: virtualMetrics(),
+            metrics: metricsBefore,
             scrollTop: containerRef.scrollTop,
           })
         : null;
@@ -1116,10 +1126,17 @@ export function MessageList() {
       const previousHeight = measuredHeights.get(messageId);
       if ((previousHeight ?? -1) === height) continue;
 
-      if (previousHeight !== undefined && firstVisibleIndex !== null) {
+      if (firstVisibleIndex !== null) {
         const index = messageIndexById().get(messageId);
         if (index !== undefined && index < firstVisibleIndex) {
-          scrollAdjustment += height - previousHeight;
+          const previousEffectiveHeight =
+            previousHeight ??
+            (metricsBefore
+              ? metricsBefore.prefix[index + 1]! - metricsBefore.prefix[index]!
+              : undefined);
+          if (previousEffectiveHeight !== undefined) {
+            scrollAdjustment += height - previousEffectiveHeight;
+          }
         }
       }
 
@@ -1339,9 +1356,7 @@ export function MessageList() {
       pendingMeasurementAfterResize = false;
       pendingMeasurementAfterWidthResize = false;
       pendingMeasurementAfterContentResize = false;
-      if (shouldMeasureRows() && !hasMeasuredAllRows()) {
-        measureVisibleItems();
-      }
+      if (shouldMeasureRows() && !hasMeasuredAllRows()) measureVisibleItems();
       if (
         hadWidthResize &&
         !hadContentResize &&
@@ -1622,9 +1637,7 @@ export function MessageList() {
         performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS
       );
 
-      if (shouldMeasureRows() && !hasMeasuredAllRows()) {
-        measureVisibleItems();
-      }
+      if (shouldMeasureRows() && !hasMeasuredAllRows()) measureVisibleItems();
 
       const currentHeight = trackRef.getBoundingClientRect().height;
       const currentBottomScrollTop = Math.max(
@@ -2146,6 +2159,7 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     cancelScheduledStickyPreviewFrame();
     cancelWidthResize();
+    setHasBootstrappedVirtualization(false);
     measuredHeights.clear();
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = sessionId;
@@ -2400,7 +2414,7 @@ export function MessageList() {
       const messageIndex = messages().findIndex((entry) => entry.info.id === preview.id);
       if (messageIndex < 0) return null;
 
-      if (shouldMeasureRows() && !hasMeasuredEveryMessage()) {
+      if (shouldMeasureRows() && !shouldVirtualize()) {
         previousMeasurementVersion = -1;
         await waitForAnimationFrame();
         continue;
@@ -2458,6 +2472,24 @@ export function MessageList() {
   ): Promise<boolean> {
     disengageBottomFollow();
     if (!(await waitForMessageRow(preview, isCurrent))) return false;
+
+    let stableMeasurementFrames = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      if (isCurrent && !isCurrent()) return false;
+      if (!navigateToMountedMessage(preview)) {
+        stableMeasurementFrames = 0;
+        await waitForAnimationFrame();
+        continue;
+      }
+
+      const previousMeasurementVersion = measurementVersion();
+      await waitForAnimationFrame();
+      stableMeasurementFrames =
+        measurementVersion() === previousMeasurementVersion ? stableMeasurementFrames + 1 : 0;
+      if (stableMeasurementFrames >= 2) return true;
+    }
+
+    if (isCurrent && !isCurrent()) return false;
     return navigateToMountedMessage(preview);
   }
 

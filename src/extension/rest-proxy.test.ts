@@ -924,6 +924,72 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('shares the session list across concurrent diff summaries', async () => {
+    const sessionList = deferred<unknown>();
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session') return sessionList.promise;
+      return Promise.resolve([]);
+    });
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    const requests = [
+      proxy.handleRequest(makePayload(84, 'GET', '/varro/session/session-1/diff-summary')),
+      proxy.handleRequest(makePayload(85, 'GET', '/varro/session/session-2/diff-summary')),
+    ];
+    await vi.waitFor(() => {
+      expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+    });
+    sessionList.resolve([{ id: 'session-1' }, { id: 'session-2' }]);
+
+    await Promise.all(requests);
+
+    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+  });
+
+  it('bounds descendant history requests for diff summaries', async () => {
+    const gate = deferred<void>();
+    let activeDescendantRequests = 0;
+    let peakDescendantRequests = 0;
+    const descendants = Array.from({ length: 9 }, (_, index) => ({
+      id: `child-${index}`,
+      parentID: 'session-1',
+    }));
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session') return [{ id: 'session-1' }, ...descendants];
+      if (/^\/session\/child-\d+\/message$/.test(path)) {
+        activeDescendantRequests += 1;
+        peakDescendantRequests = Math.max(peakDescendantRequests, activeDescendantRequests);
+        try {
+          await gate.promise;
+          return [];
+        } finally {
+          activeDescendantRequests -= 1;
+        }
+      }
+      return [];
+    });
+    const { proxy } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    const request = proxy.handleRequest(
+      makePayload(86, 'GET', '/varro/session/session-1/diff-summary')
+    );
+    await vi.waitFor(() => expect(activeDescendantRequests).toBe(4));
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => /\/child-\d+\/message$/.test(path))
+    ).toHaveLength(4);
+    gate.resolve();
+    await request;
+
+    expect(peakDescendantRequests).toBe(4);
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => /\/child-\d+\/message$/.test(path))
+    ).toHaveLength(9);
+  });
+
   it('simulates no providers when flag is set', async () => {
     const { proxy, callbacks } = createProxy({ simulateNoProviders: true });
     await proxy.handleRequest(makePayload(9, 'GET', '/config/providers'));

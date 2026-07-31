@@ -61,6 +61,8 @@ type RalphHostMessage = Extract<
 export class HostRalphStore implements RalphRunnerStore {
   private runs: Record<string, RalphRun>;
   private persistenceQueue: Promise<void> = Promise.resolve();
+  private pendingCommitSnapshot: Record<string, RalphRun> | undefined;
+  private commitPersistenceDrain: Promise<void> | undefined;
 
   constructor(
     private readonly persistence: Persistence,
@@ -231,24 +233,51 @@ export class HostRalphStore implements RalphRunnerStore {
 
   private commit() {
     const snapshot = this.snapshot();
-    void this.enqueuePersistence(snapshot);
+    this.enqueueLatestCommitSnapshot(snapshot);
     this.onChange();
   }
 
-  private enqueuePersistence(snapshot: Record<string, RalphRun>): Promise<boolean> {
-    const result = this.persistenceQueue.then(async () => {
-      try {
-        await this.persistence.set(RALPH_RUNS_KEY, snapshot);
-        return true;
-      } catch (err) {
-        logger.warn(
-          `Failed to persist Ralph runs: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return false;
+  private enqueueLatestCommitSnapshot(snapshot: Record<string, RalphRun>) {
+    if (this.commitPersistenceDrain) {
+      this.pendingCommitSnapshot = snapshot;
+      return;
+    }
+
+    const first = snapshot;
+    const drain = this.persistenceQueue.then(async () => {
+      let next: Record<string, RalphRun> | undefined = first;
+      while (next) {
+        await this.writeSnapshot(next);
+        next = this.pendingCommitSnapshot;
+        this.pendingCommitSnapshot = undefined;
       }
     });
+    this.commitPersistenceDrain = drain;
+    this.persistenceQueue = drain.then(() => {});
+    const finish = () => {
+      if (this.commitPersistenceDrain !== drain) return;
+      this.commitPersistenceDrain = undefined;
+      if (this.pendingCommitSnapshot) this.enqueueLatestCommitSnapshot(this.pendingCommitSnapshot);
+    };
+    void drain.then(finish, finish);
+  }
+
+  private enqueuePersistence(snapshot: Record<string, RalphRun>): Promise<boolean> {
+    const result = this.persistenceQueue.then(() => this.writeSnapshot(snapshot));
     this.persistenceQueue = result.then(() => {});
     return result;
+  }
+
+  private async writeSnapshot(snapshot: Record<string, RalphRun>): Promise<boolean> {
+    try {
+      await this.persistence.set(RALPH_RUNS_KEY, snapshot);
+      return true;
+    } catch (err) {
+      logger.warn(
+        `Failed to persist Ralph runs: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return false;
+    }
   }
 }
 

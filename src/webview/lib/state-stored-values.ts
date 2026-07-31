@@ -1,5 +1,4 @@
 import type {
-  ClipboardImage,
   QueuedMessage,
   SelectedModel,
   SessionSelectedMcps,
@@ -13,7 +12,7 @@ import type {
   PermissionMode,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
-import { STORAGE_KEYS, readStored } from './state-storage';
+import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 
 function asStoredRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -125,33 +124,6 @@ function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
   return file;
 }
 
-function normalizeStoredClipboardImage(value: unknown): ClipboardImage | null {
-  const record = asStoredRecord(value);
-  const id = normalizeStoredString(record?.id);
-  const url = normalizeStoredString(record?.url);
-  const mime = normalizeStoredString(record?.mime);
-  const filename = normalizeStoredString(record?.filename);
-  const size = record?.size;
-  if (
-    !id ||
-    !url ||
-    !mime ||
-    !filename ||
-    typeof size !== 'number' ||
-    !Number.isFinite(size) ||
-    size < 0
-  ) {
-    return null;
-  }
-
-  const image: ClipboardImage = { id, url, mime, filename, size };
-  const contentKey = normalizeStoredString(record?.contentKey);
-  if (contentKey) image.contentKey = contentKey;
-  const attachmentSequence = normalizeStoredAttachmentSequence(record?.attachmentSequence);
-  if (attachmentSequence !== undefined) image.attachmentSequence = attachmentSequence;
-  return image;
-}
-
 function normalizeStoredTerminalSelection(value: unknown): QueuedMessage['terminalSelection'] {
   const record = asStoredRecord(value);
   if (typeof record?.text !== 'string' || typeof record.terminalName !== 'string') return null;
@@ -194,23 +166,20 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
   const id = normalizeStoredString(record?.id);
   const sessionId = normalizeStoredString(record?.sessionId);
   if (!id || !sessionId || typeof record?.text !== 'string') return null;
+  // Older versions persisted image data URLs. Drop the whole message rather than replaying it
+  // without its attachments, then canonicalize storage in readStoredQueuedMessages().
+  if (Array.isArray(record.clipboardImages) && record.clipboardImages.length > 0) return null;
 
   const droppedFiles = Array.isArray(record.droppedFiles)
     ? record.droppedFiles
         .map(normalizeStoredDroppedFile)
         .filter((file): file is DroppedFile => file !== null)
     : [];
-  const clipboardImages = Array.isArray(record.clipboardImages)
-    ? record.clipboardImages
-        .map(normalizeStoredClipboardImage)
-        .filter((image): image is ClipboardImage => image !== null)
-    : [];
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
   const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
   if (
     record.text.trim().length === 0 &&
     droppedFiles.length === 0 &&
-    clipboardImages.length === 0 &&
     !terminalSelection &&
     !attachedDiagnostics
   ) {
@@ -222,7 +191,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     sessionId,
     text: record.text,
     droppedFiles,
-    clipboardImages,
+    clipboardImages: [],
     terminalSelection,
     ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
   };
@@ -230,16 +199,16 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
 
 export function readStoredQueuedMessages(): QueuedMessage[] {
   const value = readStored<unknown>(STORAGE_KEYS.queuedMessages);
-  if (!Array.isArray(value)) return [];
-
   const ids = new Set<string>();
   const messages: QueuedMessage[] = [];
-  for (const item of value) {
+  for (const item of Array.isArray(value) ? value : []) {
     const message = normalizeStoredQueuedMessage(item);
     if (!message || ids.has(message.id)) continue;
     ids.add(message.id);
     messages.push(message);
   }
+  // Purge legacy image payloads and keep both browser persistence mirrors canonical.
+  writeStored(STORAGE_KEYS.queuedMessages, messages);
   return messages;
 }
 

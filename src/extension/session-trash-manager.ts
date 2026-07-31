@@ -13,6 +13,7 @@ export const SESSION_TRASH_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export class SessionTrashManager {
   private entries = new Map<string, RecycleBinEntry>();
+  private hiddenIds = new Set<string>();
   private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly persistence: Persistence) {
@@ -21,6 +22,7 @@ export class SessionTrashManager {
     for (const entry of normalizeRecycleBinEntries(stored)) {
       this.entries.set(entry.rootID, entry);
     }
+    this.hiddenIds = collectHiddenSessionIds(this.entries);
   }
 
   list() {
@@ -28,16 +30,11 @@ export class SessionTrashManager {
   }
 
   isHidden(sessionID: string | null | undefined) {
-    if (!sessionID) return false;
-    return this.hiddenSessionIds().has(sessionID);
+    return !!sessionID && this.hiddenIds.has(sessionID);
   }
 
   hiddenSessionIds() {
-    const ids = new Set<string>();
-    for (const entry of this.entries.values()) {
-      for (const session of entry.sessions) ids.add(session.id);
-    }
-    return ids;
+    return new Set(this.hiddenIds);
   }
 
   filterVisibleSessions<T extends { id: string }>(sessions: T[]) {
@@ -95,6 +92,7 @@ export class SessionTrashManager {
       next.set(entry.rootID, entry);
       await this.persist(next);
       this.entries = next;
+      this.hiddenIds = collectHiddenSessionIds(next);
       return entry;
     });
   }
@@ -107,6 +105,7 @@ export class SessionTrashManager {
       next.delete(rootID);
       await this.persist(next);
       this.entries = next;
+      this.hiddenIds = collectHiddenSessionIds(next);
       return entry;
     });
   }
@@ -123,6 +122,7 @@ export class SessionTrashManager {
       next.delete(rootID);
       await this.persist(next);
       this.entries = next;
+      this.hiddenIds = collectHiddenSessionIds(next);
       return entry;
     });
   }
@@ -148,6 +148,7 @@ export class SessionTrashManager {
       if (removed.length > 0) {
         await this.persist(next);
         this.entries = next;
+        this.hiddenIds = collectHiddenSessionIds(next);
       }
       return removed;
     });
@@ -163,6 +164,7 @@ export class SessionTrashManager {
       const next = new Map<string, RecycleBinEntry>();
       await this.persist(next);
       this.entries = next;
+      this.hiddenIds.clear();
       return removed;
     });
   }
@@ -191,18 +193,34 @@ function listEntries(entries: ReadonlyMap<string, RecycleBinEntry>) {
 
 function collectSessionTree(rootID: string, sessions: RecycleBinSession[]) {
   const tree: RecycleBinSession[] = [];
+  const visited = new Set<string>();
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const childrenByParent = new Map<string, string[]>();
+  for (const session of sessions) {
+    if (!session.parentID) continue;
+    const children = childrenByParent.get(session.parentID) ?? [];
+    children.push(session.id);
+    childrenByParent.set(session.parentID, children);
+  }
   const pending = [rootID];
   while (pending.length > 0) {
     const currentID = pending.pop();
-    if (!currentID || tree.some((session) => session.id === currentID)) continue;
-    const session = sessions.find((item) => item.id === currentID);
+    if (!currentID || visited.has(currentID)) continue;
+    visited.add(currentID);
+    const session = sessionsById.get(currentID);
     if (!session) continue;
     tree.push(session);
-    for (const child of sessions) {
-      if (child.parentID === currentID) pending.push(child.id);
-    }
+    pending.push(...(childrenByParent.get(currentID) ?? []));
   }
   return tree.toSorted((left, right) => right.time.updated - left.time.updated);
+}
+
+function collectHiddenSessionIds(entries: ReadonlyMap<string, RecycleBinEntry>) {
+  const ids = new Set<string>();
+  for (const entry of entries.values()) {
+    for (const session of entry.sessions) ids.add(session.id);
+  }
+  return ids;
 }
 
 function cloneSession(session: RecycleBinSession): RecycleBinSession {
