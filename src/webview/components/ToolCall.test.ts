@@ -494,6 +494,85 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-call-icon-search')).toBeInstanceOf(SVGElement);
   });
 
+  it('renders failed search errors as a structured table row', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'functions.grep',
+      state: {
+        status: 'error',
+        input: {
+          pattern: 'disablePageUnloadEvents',
+          path: '/repo/node_modules/@microsoft',
+          include: '*.{ts,d.ts,js,mjs}',
+        },
+        error: 'Ripgrep JSON record exceeded 65536 bytes',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detail = container?.querySelector('.tool-invocation-detail');
+    const rows = Array.from(detail?.querySelectorAll('.structured-tool-row') || []);
+    const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
+    const errorRow = rows.at(-1);
+
+    expect(labels).toEqual(['pattern', 'path', 'include', 'error']);
+    expect(errorRow?.classList.contains('structured-tool-row-error')).toBe(true);
+    expect(errorRow?.querySelector('.tool-invocation-error')?.textContent).toBe(
+      'Ripgrep JSON record exceeded 65536 bytes'
+    );
+    expect(
+      Array.from(detail?.children || []).some((child) =>
+        child.classList.contains('tool-invocation-error')
+      )
+    ).toBe(false);
+  });
+
+  it('renders web fetch details and errors in the structured table', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'webfetch',
+      state: {
+        status: 'error',
+        input: {
+          url: 'https://api.github.com/search/code?q=defaultViewLocation%20repo%3Amicrosoft%2Fvscode',
+          format: 'text',
+          timeout: 30,
+        },
+        error: 'StatusCode: non 2xx status code (401)',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    const labels = rows.map((row) => row.querySelector('.structured-tool-label')?.textContent);
+
+    expect(container?.querySelector('.tool-call-icon-web')).toBeInstanceOf(SVGElement);
+    expect(labels).toEqual(['url', 'format', 'timeout', 'error']);
+    expect(rows.at(-1)?.querySelector('.tool-invocation-error')?.textContent).toBe(
+      'StatusCode: non 2xx status code (401)'
+    );
+  });
+
   it('does not render a second line for collapsed generic tool input', () => {
     setState('editorContext', {
       workspacePath: '/repo',

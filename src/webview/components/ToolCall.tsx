@@ -45,7 +45,7 @@ export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
 const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
-const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch']);
+const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch', 'webfetch']);
 const TERMINAL_TOOL_NAMES = new Set(['bash', 'shell', 'terminal', 'exec', 'command']);
 const EDIT_TOOL_NAMES = new Set([
   'apply_patch',
@@ -1037,6 +1037,12 @@ function countContentLines(content: string | undefined) {
   return lines.length - (lines.at(-1) === '' ? 1 : 0);
 }
 
+type StructuredToolResult = {
+  label: string;
+  value: string;
+  status?: 'error' | 'aborted';
+};
+
 function GenericToolCall(props: {
   tool: ToolPart;
   state: ToolPart['state'];
@@ -1167,7 +1173,14 @@ function GenericToolCall(props: {
     }
     return { label: 'result', value: isBlank(props.fullOutput) ? '(no output)' : props.fullOutput };
   };
-  const structuredResult = () => {
+  const structuredResult = (): StructuredToolResult | null => {
+    if (props.state.status === 'error') {
+      return {
+        label: 'error',
+        value: props.state.error,
+        status: isAborted() ? 'aborted' : 'error',
+      };
+    }
     if (props.state.status !== 'completed') return null;
     if (isTask()) return taskResult();
     if (isSearchTool()) {
@@ -1378,7 +1391,7 @@ function GenericToolCall(props: {
               class="tool-invocation-output"
             />
           </Show>
-          <Show when={props.state.status === 'error'}>
+          <Show when={props.state.status === 'error' && !usesStructuredCard()}>
             <div class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}>
               {(props.state as ToolStateError).error}
             </div>
@@ -1449,7 +1462,7 @@ function TerminalCommandRow(props: { command: string }) {
 
 function StructuredToolCard(props: {
   inputEntries: Array<[string, unknown]>;
-  result: { label: string; value: string } | null;
+  result: StructuredToolResult | null;
   onOpenPath: (path: string) => void;
   /** Prefixes editor-tab titles so an opened value says which tool it came from. */
   toolTitle: string;
@@ -1510,12 +1523,18 @@ function StructuredToolCard(props: {
       </Show>
       <Show when={props.result}>
         {(result) => (
-          <div class="structured-tool-row structured-tool-row-result">
+          <div
+            class={`structured-tool-row structured-tool-row-result${result().status ? ' structured-tool-row-error' : ''}`}
+          >
             <span class="structured-tool-label">{result().label}</span>
             <ClampedToolText
               content={result().value}
               title={`${props.toolTitle} (${result().label})`}
-              class="structured-tool-value structured-tool-value-result"
+              class={`structured-tool-value structured-tool-value-result${
+                result().status
+                  ? ` tool-invocation-error${result().status === 'aborted' ? ' is-aborted' : ''}`
+                  : ''
+              }`}
             />
           </div>
         )}
