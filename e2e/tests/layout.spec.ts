@@ -1,6 +1,30 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+test('resets padding injected by legacy webview hosts', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=blank&legacy-host-padding');
+  await expect(page.locator('.interactive-session')).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const root = document.getElementById('root');
+    if (!root) throw new Error('Root is missing');
+    const bodyStyles = getComputedStyle(document.body);
+    const rootBox = root.getBoundingClientRect();
+    return {
+      bodyPaddingLeft: bodyStyles.paddingLeft,
+      bodyPaddingRight: bodyStyles.paddingRight,
+      rootLeft: rootBox.left,
+    };
+  });
+
+  expect(layout).toEqual({
+    bodyPaddingLeft: '0px',
+    bodyPaddingRight: '0px',
+    rootLeft: 0,
+  });
+});
+
 test('sticky preview hides before the next prompt can overlap it', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
 

@@ -8,6 +8,7 @@ export type WebviewAssetUris = {
 
 const LOADING_STYLES = `
 html, body, #root { width: 100%; height: 100%; margin: 0; }
+html > body { padding: 0; }
 body { background: var(--vscode-sideBar-background, #181818); }
 .varro-startup-loading {
   box-sizing: border-box;

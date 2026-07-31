@@ -65,6 +65,7 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).toContain('Loading workspace...');
     expect(html).toContain('Restoring your recent view');
+    expect(html).toContain('html > body { padding: 0; }');
     expect(html).not.toContain('<script');
   });
 

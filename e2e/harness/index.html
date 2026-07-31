@@ -182,6 +182,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (new URLSearchParams(window.location.search).has('legacy-host-padding')) {
+        const style = document.createElement('style');
+        style.textContent = 'body { padding: 0 20px; }';
+        document.head.append(style);
+      }
+    </script>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

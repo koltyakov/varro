@@ -310,13 +310,9 @@ describe('extension activation', () => {
 
     await activate(context as never);
 
-    expect(registerWebviewViewProviderMock).toHaveBeenCalledWith(
-      'varro.chat',
-      expect.anything(),
-      {
-        webviewOptions: { retainContextWhenHidden: true },
-      }
-    );
+    expect(registerWebviewViewProviderMock).toHaveBeenCalledWith('varro.chat', expect.anything(), {
+      webviewOptions: { retainContextWhenHidden: true },
+    });
     expect(registerCommandsMock).toHaveBeenCalledWith(
       context as never,
       expect.anything(),

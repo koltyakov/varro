@@ -63,7 +63,9 @@ async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Prom
   try {
     const commandIds = await vscode.commands.getCommands();
     if (!commandIds.includes('vscode.moveViews')) {
-      logger.warn('The host does not expose the command required to move Varro to the Primary Sidebar');
+      logger.warn(
+        'The host does not expose the command required to move Varro to the Primary Sidebar'
+      );
       return;
     }
 
