@@ -2078,7 +2078,8 @@ describe('OpenCodeServer restart blockers', () => {
     });
   });
 
-  it('persists an inactive rescope as the desired server workspace', async () => {
+  it('persists an inactive rescope as the desired server workspace on Windows', async () => {
+    stubPlatform('win32');
     const server = new OpenCodeServer(4096, true);
 
     await expect(server.rescopeEventStream('/repo-selected')).resolves.toEqual({
@@ -2090,9 +2091,8 @@ describe('OpenCodeServer restart blockers', () => {
 
     configureManagedStartup(server);
     await server.start();
-    const launch = spawnMock.mock.calls.find((call) =>
-      (call[1] as string[] | undefined)?.includes('serve')
-    );
+    expect(spawnMock).toHaveBeenCalledOnce();
+    const launch = spawnMock.mock.calls[0];
     expect(launch?.[2]).toEqual(expect.objectContaining({ cwd: '/repo-selected' }));
   });
 

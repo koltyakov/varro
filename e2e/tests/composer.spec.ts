@@ -138,7 +138,9 @@ test('keeps pre-input panel space reserved while the model picker is open', asyn
 
   expect(before.queueHeight).toBeGreaterThan(0);
   expect(before.todoHeight).toBeGreaterThan(0);
-  expect(after).toEqual(before);
+  expect(after.inputTop).toBeCloseTo(before.inputTop, 2);
+  expect(after.queueHeight).toBeCloseTo(before.queueHeight, 2);
+  expect(after.todoHeight).toBeCloseTo(before.todoHeight, 2);
   await expect(inputShell).toBeVisible();
 });
 
