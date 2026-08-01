@@ -1344,6 +1344,27 @@ describe('SessionListView actions', () => {
 });
 
 describe('SessionListView load errors', () => {
+  it('loads an archive session instead of showing an unknown zero count', async () => {
+    const now = Date.now();
+    const recent = session('recent', now);
+    const archived = session('archived', now - 2 * 86_400_000);
+    loadMoreSessionsMock.mockImplementationOnce(async () => {
+      setState('sessions', [recent, archived]);
+    });
+    setState('sessions', [recent]);
+    setState('sessionsHasMore', true);
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.textContent).not.toContain('0+');
+    await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      const archive = Array.from(
+        container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
+      ).find((button) => button.textContent?.includes('Archive'));
+      expect(archive?.textContent).toContain('1+');
+    });
+  });
+
   it('offers continuation when the loaded page has no visible sessions', () => {
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);

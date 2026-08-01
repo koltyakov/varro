@@ -747,10 +747,12 @@ export function SessionListSectionHeader(props: {
     <div ref={(el) => props.ref?.(el)} class="session-list-section-header">
       <button type="button" class="session-list-section-toggle" onClick={props.onToggle}>
         <span class="session-list-section-title">{props.title}</span>
-        <span class="session-list-section-count">
-          {props.count}
-          {props.incomplete ? '+' : ''}
-        </span>
+        <Show when={props.count > 0 || !props.incomplete}>
+          <span class="session-list-section-count">
+            {props.count}
+            {props.incomplete ? '+' : ''}
+          </span>
+        </Show>
       </button>
       <div class="session-list-section-actions">
         <Show when={props.onArchive !== undefined}>
@@ -1083,6 +1085,18 @@ export function SessionListView(props: {
   const isDefaultGroupedView = createMemo(
     () => !props.sessionFilter && !props.subagentParentId && !normalizedSearchQuery()
   );
+  createEffect(() => {
+    if (
+      !isDefaultGroupedView() ||
+      overflowOtherSessions().length > 0 ||
+      !state.sessionsHasMore ||
+      state.sessionsLoadingMore ||
+      state.sessionsPaginationError
+    ) {
+      return;
+    }
+    void loadMoreSessions();
+  });
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
     if (props.sessionFilter) return filteredSessions();
