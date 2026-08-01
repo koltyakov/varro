@@ -1513,6 +1513,43 @@ describe('SessionListView load errors', () => {
     expect(appState.sessions).toEqual(loadedSessions);
   });
 
+  it('resolves paginated sub-agents without adding archive sessions to loaded state', async () => {
+    const now = Date.now();
+    const loadedSessions = [
+      session('parent', now),
+      session('loaded-child', now - 1, { parentID: 'parent' }),
+    ];
+    const unrelatedArchiveSession = session('unrelated-archive', now - 30 * 86_400_000);
+    const paginatedChild = session('paginated-child', now - 2, { parentID: 'parent' });
+    vi.spyOn(client.session, 'list')
+      .mockResolvedValueOnce({
+        items: [...loadedSessions, unrelatedArchiveSession],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [...loadedSessions, unrelatedArchiveSession, paginatedChild],
+        hasMore: false,
+      });
+    setState('sessions', loadedSessions);
+    setState('sessionsHasMore', true);
+
+    cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+
+    await vi.waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll('.session-item-title-text')).map(
+          (element) => element.textContent
+        )
+      ).toEqual(['loaded-child', 'paginated-child']);
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
+    expect(loadMoreSessionsMock).not.toHaveBeenCalled();
+    expect(container.querySelector('.session-list-continuation')).toBeNull();
+    expect(container.textContent).not.toContain('unrelated-archive');
+    expect(appState.sessions).toEqual(loadedSessions);
+  });
+
   it('shows a retryable error instead of the empty state when sessions fail to load', async () => {
     setState('sessionsLoadError', 'Failed to load sessions');
     cleanup = render(() => <SessionListView />, container);
