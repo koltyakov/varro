@@ -2586,7 +2586,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 · ↓ 310 - Agents 2');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 3,100 ↓ 310 - Agents 2');
   });
 
   it('includes nested subagent session snapshots when their messages are not loaded', async () => {
@@ -2629,7 +2629,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 3,100 · ↓ 310');
+    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 3,100 ↓ 310');
   });
 
   it('keeps subagent session tokens scoped to the turn that launched them', () => {
@@ -2812,7 +2812,7 @@ describe('MessageList sticky prompt preview', () => {
     const response = container?.querySelector('[data-msg-id="assistant-1"] .chat-turn-content');
     expect(response?.className).toContain('assistant-turn-content-plain');
     expect(response?.className).not.toContain('assistant-turn-content-highlighted');
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 · ↓ 4');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 ↓ 4');
   });
 
   it('includes prefetched turn history in the Worked for summary', async () => {
@@ -2831,7 +2831,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     expect(container?.textContent).toContain('Collecting stats...');
-    expect(container?.textContent).not.toContain('Worked for 5s - Tokens ↑ 200 · ↓ 20');
+    expect(container?.textContent).not.toContain('Worked for 5s - Tokens ↑ 200 ↓ 20');
 
     cacheSessionHistoryPage('session-1', 'cursor-1', [
       {
@@ -2848,7 +2848,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 300 · ↓ 30');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 300 ↓ 30');
     expect(container?.querySelector('[data-msg-id="assistant-1"]')).toBeNull();
   });
 
@@ -2996,7 +2996,7 @@ describe('MessageList sticky prompt preview', () => {
     });
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 100 · ↓ 10');
+    expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 100 ↓ 10');
   });
 
   it('renders with virtualization enabled without hitting initialization order errors', async () => {
@@ -4354,7 +4354,7 @@ describe('MessageList loading row', () => {
     vi.advanceTimersByTime(1);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 · ↓ 7');
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
     expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 

@@ -1269,7 +1269,7 @@ function GenericToolCall(props: {
         <Show when={taskTokenUsage()}>
           {(tokens) => (
             <span class="tool-invocation-token-stats" title="Subagent tokens">
-              ↑ {formatNumber(tokens().input)} · ↓ {formatNumber(tokens().output)}
+              ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
             </span>
           )}
         </Show>

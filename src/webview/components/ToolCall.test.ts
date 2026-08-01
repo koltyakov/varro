@@ -1023,7 +1023,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     const stats = container?.querySelector('.tool-invocation-token-stats');
-    expect(stats?.textContent).toBe('↑ 1,234 · ↓ 56');
+    expect(stats?.textContent).toBe('↑ 1,234 ↓ 56');
     expect(stats?.querySelector('.diff-lines-added')).toBeNull();
     expect(stats?.querySelector('.diff-lines-removed')).toBeNull();
   });
@@ -1049,7 +1049,7 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 · ↓ 0');
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
   });
 
   it('updates the elapsed duration while a subagent task is running', () => {
@@ -1108,7 +1108,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
-      '↑ 2,468 · ↓ 135'
+      '↑ 2,468 ↓ 135'
     );
   });
 
@@ -1169,7 +1169,7 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe(
-      '↑ 321 · ↓ 45'
+      '↑ 321 ↓ 45'
     );
   });
 

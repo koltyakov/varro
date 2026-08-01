@@ -217,7 +217,7 @@ function AssistantDialogSummary(props: {
 }) {
   const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
-      ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} · ↓ ${formatNumber(props.summary.outputTokens)}`
+      ? ` - Tokens ↑ ${formatNumber(props.summary.inputTokens)} ↓ ${formatNumber(props.summary.outputTokens)}`
       : '';
   const agentSuffix = () =>
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
