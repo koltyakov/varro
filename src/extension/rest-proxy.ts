@@ -333,8 +333,9 @@ export class RestProxy {
         : undefined;
 
       const sessionPageLimit = this.parseSessionPageLimit(method, payload.path);
+      const constrainedSessionList = this.isConstrainedSessionListRequest(method, payload.path);
       if (sessionPageLimit !== null) {
-        this.hasSessionDirectorySnapshot = false;
+        if (!constrainedSessionList) this.hasSessionDirectorySnapshot = false;
         const url = new URL(forwardedPath, 'http://localhost');
         url.searchParams.set('limit', String(sessionPageLimit + 1));
         forwardedPath = `${url.pathname}${url.search}`;
@@ -380,7 +381,11 @@ export class RestProxy {
               response as OpenCodeResponseMetadata
             )
           : sessionPageLimit !== null
-            ? await this.formatPaginatedSessionsResponse(response, sessionPageLimit)
+            ? await this.formatPaginatedSessionsResponse(
+                response,
+                sessionPageLimit,
+                constrainedSessionList
+              )
             : await this.filterApiResponse(
                 method,
                 payload.path,
@@ -481,11 +486,11 @@ export class RestProxy {
       : null;
   }
 
-  private formatPaginatedSessionsResponse(response: unknown, limit: number) {
+  private formatPaginatedSessionsResponse(response: unknown, limit: number, constrained: boolean) {
     if (!Array.isArray(response)) throw new Error('Malformed session list response');
     const sessions = response.slice(0, limit);
     const hasMore = response.length > limit;
-    this.rememberSessionPage(sessions, !hasMore);
+    this.rememberSessionPage(sessions, !constrained && !hasMore, constrained);
     return { items: this.filterVisibleSessions(sessions), hasMore };
   }
 
@@ -734,8 +739,12 @@ export class RestProxy {
     this.rememberSessionPage(sessions, true);
   }
 
-  private rememberSessionPage(sessions: unknown[], complete: boolean) {
-    this.recordSessionDirectories(sessions, complete);
+  private rememberSessionPage(
+    sessions: unknown[],
+    complete: boolean,
+    preserveCompleteSnapshot = false
+  ) {
+    this.recordSessionDirectories(sessions, complete, preserveCompleteSnapshot);
     for (const session of sessions) {
       const info = asRecord(session);
       if (!info) continue;
@@ -845,7 +854,12 @@ export class RestProxy {
     return bootstrap;
   }
 
-  private recordSessionDirectories(sessions: unknown[], complete = true) {
+  private recordSessionDirectories(
+    sessions: unknown[],
+    complete = true,
+    preserveCompleteSnapshot = false
+  ) {
+    const hadCompleteSnapshot = this.hasSessionDirectorySnapshot;
     const directories = complete ? new Map<string, string>() : new Map(this.sessionDirectories);
     for (const session of sessions) {
       const info = asRecord(session);
@@ -854,11 +868,18 @@ export class RestProxy {
       directories.set(info.id, info.directory);
     }
     this.sessionDirectories = directories;
-    this.hasSessionDirectorySnapshot = complete;
+    this.hasSessionDirectorySnapshot =
+      complete || (preserveCompleteSnapshot && hadCompleteSnapshot);
   }
 
   private isSessionListRequest(method: string, path: string) {
     return method === 'GET' && new URL(path, 'http://localhost').pathname === '/session';
+  }
+
+  private isConstrainedSessionListRequest(method: string, path: string) {
+    if (!this.isSessionListRequest(method, path)) return false;
+    const params = new URL(path, 'http://localhost').searchParams;
+    return params.has('search') || params.has('roots');
   }
 
   private getCurrentWorkspacePath() {

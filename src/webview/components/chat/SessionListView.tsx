@@ -228,8 +228,9 @@ export type SessionStatusIndicatorKind =
   | 'completed';
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
-const SESSION_RESOLUTION_PAGE_SIZE = 100;
-const MAX_SESSION_RESOLUTION_LIMIT = 1_000_000;
+const SUBAGENT_SESSION_PAGE_SIZE = 100;
+const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
+const SESSION_SEARCH_LIMIT = 30;
 const SESSION_DIFF_SUMMARY_CONCURRENCY = 4;
 const SESSION_DIFF_SUMMARY_QUEUE_LIMIT = 100;
 const SESSION_DIFF_SUMMARY_CACHE_LIMIT = 200;
@@ -901,10 +902,10 @@ export function SessionListView(props: {
   const [activeGroupedSection, setActiveGroupedSection] =
     createSignal<SessionListGroupedSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
-  const [allSessionsForResolution, setAllSessionsForResolution] = createSignal<Session[] | null>(
-    null
-  );
-  const [isResolvingAllSessions, setIsResolvingAllSessions] = createSignal(false);
+  const [allSessionsForSubagent, setAllSessionsForSubagent] = createSignal<Session[] | null>(null);
+  const [isResolvingSubagents, setIsResolvingSubagents] = createSignal(false);
+  const [nativeSearchResults, setNativeSearchResults] = createSignal<Session[] | null>(null);
+  const [isSearchingAllSessions, setIsSearchingAllSessions] = createSignal(false);
   const [showAllModelDetails, setShowAllModelDetails] = createSignal(false);
   const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
   const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
@@ -969,40 +970,36 @@ export function SessionListView(props: {
     setRenamePending,
   };
 
-  const normalizedSearchQuery = createMemo(() => searchQuery().trim().toLowerCase());
+  const trimmedSearchQuery = createMemo(() => searchQuery().trim());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
 
   let resolutionRequestKey = 0;
   let resolutionRequestActive = false;
   createEffect(() => {
-    const resolutionActive =
-      Boolean(props.subagentParentId) || (shouldShowSearch() && normalizedSearchQuery().length > 0);
+    const resolutionActive = Boolean(props.subagentParentId);
     if (!resolutionActive) {
       resolutionRequestActive = false;
       resolutionRequestKey += 1;
-      setAllSessionsForResolution(null);
-      setIsResolvingAllSessions(false);
+      setAllSessionsForSubagent(null);
+      setIsResolvingSubagents(false);
       return;
     }
     if (resolutionRequestActive) return;
 
     resolutionRequestActive = true;
     const requestKey = ++resolutionRequestKey;
-    setIsResolvingAllSessions(true);
+    setIsResolvingSubagents(true);
     void (async () => {
-      let limit = SESSION_RESOLUTION_PAGE_SIZE;
+      let limit = SUBAGENT_SESSION_PAGE_SIZE;
       while (true) {
         if (requestKey !== resolutionRequestKey) return;
         const page = await client.session.list({ limit });
         if (requestKey !== resolutionRequestKey) return;
         if (Array.isArray(page)) throw new Error('Expected a paginated session list');
-        setAllSessionsForResolution(page.items);
+        setAllSessionsForSubagent(page.items);
         if (!page.hasMore) return;
 
-        const nextLimit = Math.min(
-          limit + SESSION_RESOLUTION_PAGE_SIZE,
-          MAX_SESSION_RESOLUTION_LIMIT
-        );
+        const nextLimit = Math.min(limit + SUBAGENT_SESSION_PAGE_SIZE, MAX_SUBAGENT_SESSION_LIMIT);
         if (nextLimit === limit) throw new Error('Session lookup exceeded the supported limit');
         limit = nextLimit;
       }
@@ -1012,11 +1009,52 @@ export function SessionListView(props: {
         setError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
-        if (requestKey === resolutionRequestKey) setIsResolvingAllSessions(false);
+        if (requestKey === resolutionRequestKey) setIsResolvingSubagents(false);
+      });
+  });
+
+  let searchRequestKey = 0;
+  let searchAbortController: AbortController | undefined;
+  createEffect(() => {
+    const query = trimmedSearchQuery();
+    const searchActive = shouldShowSearch() && query.length > 0;
+    searchAbortController?.abort();
+    searchAbortController = undefined;
+    searchRequestKey += 1;
+    setNativeSearchResults(null);
+    if (!searchActive) {
+      setIsSearchingAllSessions(false);
+      return;
+    }
+
+    const requestKey = searchRequestKey;
+    const controller = new AbortController();
+    searchAbortController = controller;
+    setIsSearchingAllSessions(true);
+    void client.session
+      .list({
+        limit: SESSION_SEARCH_LIMIT,
+        search: query,
+        roots: true,
+        signal: controller.signal,
+      })
+      .then((page) => {
+        if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+        if (Array.isArray(page)) throw new Error('Expected a paginated session search');
+        setNativeSearchResults(page.items);
+      })
+      .catch((error: unknown) => {
+        if (requestKey !== searchRequestKey || controller.signal.aborted) return;
+        setError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (requestKey === searchRequestKey) setIsSearchingAllSessions(false);
       });
   });
   onCleanup(() => {
     resolutionRequestKey += 1;
+    searchRequestKey += 1;
+    searchAbortController?.abort();
   });
 
   const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
@@ -1051,8 +1089,8 @@ export function SessionListView(props: {
   );
   const overflowOtherSessions = () => groupedSessions().overflowOther;
   const recentSessions = createMemo(() => getRecentSessions(groupedSessions()));
-  const resolvedVisibleSessions = createMemo(() => {
-    const resolvedSessions = allSessionsForResolution();
+  const resolvedSubagentSessions = createMemo(() => {
+    const resolvedSessions = allSessionsForSubagent();
     if (!resolvedSessions) return visibleSessionsForList();
 
     const mergedSessions = new Map(resolvedSessions.map((session) => [session.id, session]));
@@ -1060,8 +1098,16 @@ export function SessionListView(props: {
     return [...mergedSessions.values()].filter(isVisibleSession);
   });
   const subagentSessions = createMemo(() =>
-    getSubagentSessionsForParent(resolvedVisibleSessions(), props.subagentParentId ?? null)
+    getSubagentSessionsForParent(resolvedSubagentSessions(), props.subagentParentId ?? null)
   );
+  const searchResultSessions = createMemo(() => {
+    const results = nativeSearchResults();
+    if (!results) return [];
+    const loadedSessions = new Map(state.sessions.map((session) => [session.id, session]));
+    return results
+      .map((session) => loadedSessions.get(session.id) ?? session)
+      .filter(isVisibleSession);
+  });
   const filteredSessions = createMemo(() =>
     props.sessionFilter
       ? getPrimarySessionsForFilter(
@@ -1098,7 +1144,7 @@ export function SessionListView(props: {
     return sections.includes('recent') ? 'recent' : (sections[0] ?? null);
   });
   const isDefaultGroupedView = createMemo(
-    () => !props.sessionFilter && !props.subagentParentId && !normalizedSearchQuery()
+    () => !props.sessionFilter && !props.subagentParentId && !trimmedSearchQuery()
   );
   createEffect(() => {
     if (
@@ -1117,26 +1163,6 @@ export function SessionListView(props: {
     if (props.sessionFilter) return filteredSessions();
     return [];
   });
-  const searchableSessions = createMemo(() => {
-    if (props.subagentParentId) return directSessions();
-    if (props.sessionFilter) return sortSessionsForDisplay(directSessions(), ageNow());
-    const completeSessions = allSessionsForResolution();
-    if (completeSessions) {
-      const groups = groupSessions(
-        resolvedVisibleSessions(),
-        (sessionId) => sessionIndicators().runningIds.has(sessionId),
-        (sessionId) => sessionIndicators().attentionIds.has(sessionId),
-        (sessionId) => sessionIndicators().failedIds.has(sessionId),
-        (session) => sessionIndicators().planReadyIds.has(session.id),
-        (session) => sessionIndicators().newlyCompletedIds.has(session.id),
-        ageNow(),
-        (sessionId) => state.pinnedSessionIds.includes(sessionId)
-      );
-      return [...getRecentSessions(groups), ...groups.overflowOther];
-    }
-    if (defaultSurfacedSessions().length === 0) return overflowOtherSessions();
-    return [...surfacedSessions(), ...overflowOtherSessions()];
-  });
   const baseVisibleSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
 
@@ -1152,19 +1178,8 @@ export function SessionListView(props: {
     }
   });
   const visibleSessions = createMemo(() => {
-    const query = normalizedSearchQuery();
-    const sessions =
-      shouldShowSearch() && query.length > 0 ? searchableSessions() : baseVisibleSessions();
-    if (!shouldShowSearch() || query.length === 0) return sessions;
-
-    return sessions.filter((session) => {
-      const title = normalizeSessionTitle(session.title).toLowerCase();
-      return (
-        title.includes(query) ||
-        session.id.toLowerCase().includes(query) ||
-        session.directory.toLowerCase().includes(query)
-      );
-    });
+    if (shouldShowSearch() && trimmedSearchQuery()) return searchResultSessions();
+    return baseVisibleSessions();
   });
 
   createEffect(() => {
@@ -1287,7 +1302,7 @@ export function SessionListView(props: {
   const renderScrollableContent = () => (
     <div class="session-list-scroll">
       {renderSessionItems(visibleSessions)}
-      <Show when={!normalizedSearchQuery() && !props.subagentParentId}>
+      <Show when={!trimmedSearchQuery() && !props.subagentParentId}>
         <SessionListContinuation />
       </Show>
     </div>
@@ -1443,15 +1458,15 @@ export function SessionListView(props: {
   );
 
   const emptyMessage = () => {
-    if (props.subagentParentId && isResolvingAllSessions()) return 'Loading sub-agent sessions…';
+    if (props.subagentParentId && isResolvingSubagents()) return 'Loading sub-agent sessions…';
     if (props.subagentParentId) return 'No sub-agent sessions';
-    if (normalizedSearchQuery() && isResolvingAllSessions()) return 'Searching sessions…';
-    if (normalizedSearchQuery()) return 'No matching sessions';
+    if (trimmedSearchQuery() && isSearchingAllSessions()) return 'Searching sessions…';
+    if (trimmedSearchQuery()) return 'No matching sessions';
     const label = getSessionListFilterLabel(props.sessionFilter ?? null);
     return label ? `No ${label.toLowerCase()} sessions` : 'No sessions yet';
   };
   const loadErrorMessage = () =>
-    props.subagentParentId || props.sessionFilter || normalizedSearchQuery()
+    props.subagentParentId || props.sessionFilter || trimmedSearchQuery()
       ? null
       : (state.sessionsLoadError ?? state.recycleBinLoadError);
   const [isRetryingLoad, setIsRetryingLoad] = createSignal(false);
@@ -1465,7 +1480,7 @@ export function SessionListView(props: {
     }
   };
   const hasVisibleContent = createMemo(() => {
-    if (normalizedSearchQuery()) return visibleSessions().length > 0;
+    if (trimmedSearchQuery()) return visibleSessions().length > 0;
     if (props.subagentParentId) return subagentSessions().length > 0;
     if (props.sessionFilter) return filteredSessions().length > 0;
     if (state.sessionsHasMore) return true;

@@ -48,12 +48,21 @@ export const client = {
   },
 
   session: {
-    async list(options?: { limit?: number }): Promise<Session[] | SessionListPage> {
+    async list(options?: {
+      limit?: number;
+      search?: string;
+      roots?: boolean;
+      signal?: AbortSignal;
+    }): Promise<Session[] | SessionListPage> {
       const params = new URLSearchParams();
       if (options?.limit) params.set('limit', String(options.limit));
+      if (options?.search) params.set('search', options.search);
+      if (options?.roots) params.set('roots', 'true');
       const query = params.size > 0 ? `?${params.toString()}` : '';
       const path = `/session${query}`;
-      const response = await apiCall('GET', path);
+      const response = options?.signal
+        ? await apiCall('GET', path, undefined, { signal: options.signal })
+        : await apiCall('GET', path);
       if (!options?.limit) {
         return requireArray<Session>(response, path).map(applySessionShareOverride);
       }

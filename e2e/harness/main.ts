@@ -3547,14 +3547,21 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && path === '/session') {
+    const search = url.searchParams.get('search')?.toLowerCase();
+    const rootsOnly = url.searchParams.get('roots') === 'true';
     const limit = Number(url.searchParams.get('limit'));
+    const sessions = state.sessions.filter(
+      (session) =>
+        (!rootsOnly || !session.parentID) &&
+        (!search || session.title.toLowerCase().includes(search))
+    );
     if (Number.isSafeInteger(limit) && limit > 0) {
       return {
-        items: state.sessions.slice(0, limit),
-        hasMore: state.sessions.length > limit,
+        items: sessions.slice(0, limit),
+        hasMore: sessions.length > limit,
       };
     }
-    return state.sessions;
+    return sessions;
   }
 
   if (method === 'GET' && path === '/varro/session-trash') {

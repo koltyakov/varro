@@ -85,6 +85,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session?limit=100')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark+mode&roots=true')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
@@ -141,6 +142,21 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/session?limit=100&limit=200')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session?limit=100&start=0')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session?limit=1000001')).toBe(false);
+  });
+
+  it('rejects malformed native session searches', () => {
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=&roots=true')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark&roots=false')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark&roots=true&roots=true')).toBe(
+      false
+    );
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark&search=mode&roots=true')).toBe(
+      false
+    );
+    expect(isAllowedApiRequest('GET', '/session?limit=30&search=dark&roots=true&start=0')).toBe(
+      false
+    );
   });
 
   it('rejects absolute and unsupported API routes', () => {

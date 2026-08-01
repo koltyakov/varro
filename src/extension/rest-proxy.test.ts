@@ -1409,6 +1409,61 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('forwards native session search while preserving its constraints', async () => {
+    const sessions = [{ id: 'match', directory: '/repo', title: 'Dark mode' }];
+    const serverRequest = vi.fn(() => Promise.resolve(sessions));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(1511, 'GET', '/session?limit=30&search=dark%20mode&roots=true')
+    );
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=31&search=dark+mode&roots=true',
+      undefined
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 1511,
+      data: { items: sessions, hasMore: false },
+    });
+  });
+
+  it('does not treat an exhausted native search as an authoritative directory snapshot', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session?limit=31&search=match&roots=true') {
+        return Promise.resolve([{ id: 'match', directory: '/repo' }]);
+      }
+      if (path === '/session/status') {
+        return Promise.resolve({ foreign: { type: 'busy' } });
+      }
+      if (path === '/session?limit=1000000') {
+        return Promise.resolve([{ id: 'foreign', directory: '/other' }]);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(1512, 'GET', '/session?limit=30&search=match&roots=true')
+    );
+    await proxy.handleRequest(makePayload(1513, 'GET', '/session/status'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 1513,
+      data: {},
+    });
+  });
+
   it('marks an exact paginated session response as exhausted', async () => {
     const sessions = [
       { id: 'newest', directory: '/repo' },

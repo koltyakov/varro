@@ -950,6 +950,11 @@ const onlyQuery = (url: URL, ...keys: string[]) => {
 const requiredQuery = (url: URL, key: string) => Boolean(url.searchParams.get(key)?.trim());
 const MAX_SESSION_PAGE_LIMIT = 1_000_000;
 
+const singleRequiredQuery = (url: URL, key: string) => {
+  const values = url.searchParams.getAll(key);
+  return values.length === 1 && Boolean(values[0]?.trim());
+};
+
 const positiveIntegerQuery = (url: URL, key: string) => {
   const values = url.searchParams.getAll(key);
   if (values.length !== 1 || !/^\d+$/.test(values[0]!)) return false;
@@ -965,6 +970,13 @@ const optionalDirectoryQuery = (url: URL) => {
     (directories.length === 0 || requiredQuery(url, 'directory'))
   );
 };
+
+const sessionSearchQuery = (url: URL) =>
+  onlyQuery(url, 'limit', 'search', 'roots') &&
+  positiveIntegerQuery(url, 'limit') &&
+  singleRequiredQuery(url, 'search') &&
+  url.searchParams.getAll('roots').length === 1 &&
+  url.searchParams.get('roots') === 'true';
 
 const methodsNoQuery =
   (...methods: string[]) =>
@@ -1012,7 +1024,9 @@ const API_ROUTES: ApiRoute[] = [
     '/session',
     ({ method, url }) =>
       (method === 'GET' &&
-        (noQuery(url) || (onlyQuery(url, 'limit') && positiveIntegerQuery(url, 'limit')))) ||
+        (noQuery(url) ||
+          (onlyQuery(url, 'limit') && positiveIntegerQuery(url, 'limit')) ||
+          sessionSearchQuery(url))) ||
       (method === 'POST' && optionalDirectoryQuery(url))
   ),
   route('/session/status', methodsNoQuery('GET')),

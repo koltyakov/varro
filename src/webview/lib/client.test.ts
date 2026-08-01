@@ -67,6 +67,28 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session?limit=100');
   });
 
+  it('uses OpenCode native session search with encoded query parameters', async () => {
+    const { client } = await loadClient();
+    const controller = new AbortController();
+    const sessions = [{ id: 'session-1' }];
+    bridgeMocks.apiCall.mockResolvedValue({ items: sessions, hasMore: false });
+
+    await expect(
+      client.session.list({
+        limit: 30,
+        search: 'dark mode & contrast',
+        roots: true,
+        signal: controller.signal,
+      })
+    ).resolves.toEqual({ items: sessions, hasMore: false });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith(
+      'GET',
+      '/session?limit=30&search=dark+mode+%26+contrast&roots=true',
+      undefined,
+      { signal: controller.signal }
+    );
+  });
+
   it('rejects malformed session page metadata', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({ items: [], hasMore: 'yes' });

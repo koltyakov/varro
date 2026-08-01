@@ -1465,20 +1465,10 @@ describe('SessionListView load errors', () => {
     const searchOnlySession = session('deep-archive', now - 30 * 86_400_000, {
       title: 'Flick through old notes',
     });
-    vi.spyOn(client.session, 'list')
-      .mockResolvedValueOnce({ items: loadedSessions, hasMore: true })
-      .mockResolvedValueOnce({
-        items: [...loadedSessions, session('second-page', now - 10 * 86_400_000)],
-        hasMore: true,
-      })
-      .mockResolvedValueOnce({
-        items: [
-          ...loadedSessions,
-          session('second-page', now - 10 * 86_400_000),
-          searchOnlySession,
-        ],
-        hasMore: false,
-      });
+    vi.spyOn(client.session, 'list').mockResolvedValueOnce({
+      items: [searchOnlySession],
+      hasMore: false,
+    });
     setState('sessions', loadedSessions);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
@@ -1491,7 +1481,7 @@ describe('SessionListView load errors', () => {
     getArchive().click();
 
     const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
-    search.value = 'flick';
+    search.value = '  flick  ';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     await vi.waitFor(() => {
@@ -1499,9 +1489,13 @@ describe('SessionListView load errors', () => {
         'Flick through old notes'
       );
     });
-    expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
-    expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
-    expect(client.session.list).toHaveBeenNthCalledWith(3, { limit: 300 });
+    expect(client.session.list).toHaveBeenCalledOnce();
+    expect(client.session.list).toHaveBeenCalledWith({
+      limit: 30,
+      search: 'flick',
+      roots: true,
+      signal: expect.any(AbortSignal),
+    });
     expect(loadMoreSessionsMock).not.toHaveBeenCalled();
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     expect(appState.sessions).toEqual(loadedSessions);

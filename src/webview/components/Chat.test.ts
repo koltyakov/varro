@@ -2139,12 +2139,17 @@ describe('header status badges', () => {
     expect(titles).toEqual(['running-newest', 'failed-middle', 'attention-oldest']);
   });
 
-  it('filters the default sessions list from the search input', async () => {
-    setState('sessions', [
+  it('shows native session search results from the search input', async () => {
+    const sessions = [
       session('session-1', 500, { title: 'Alpha build' }),
       session('session-2', 400, { title: 'Beta follow-up' }),
       session('session-3', 300, { title: 'Gamma review', directory: '/workspace/reports' }),
-    ]);
+    ];
+    vi.spyOn(client.session, 'list').mockResolvedValue({
+      items: [sessions[2]!],
+      hasMore: false,
+    });
+    setState('sessions', sessions);
     setState('activeSessionId', 'session-1');
     setShowSessionPicker(true);
 
@@ -2153,15 +2158,15 @@ describe('header status badges', () => {
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
     expect(input).toBeInstanceOf(HTMLInputElement);
 
-    input!.value = 'reports';
+    input!.value = 'gamma';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
-    await Promise.resolve();
 
-    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
-      (item) => item.textContent?.trim()
-    );
-
-    expect(titles).toEqual(['Gamma review']);
+    await vi.waitFor(() => {
+      const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+        (item) => item.textContent?.trim()
+      );
+      expect(titles).toEqual(['Gamma review']);
+    });
   });
 
   it('resets keyboard-focused session when the search input regains focus', async () => {
@@ -2191,7 +2196,7 @@ describe('header status badges', () => {
 
   it('shows an empty state for a search with no matching sessions', async () => {
     const sessions = [session('session-1', 500, { title: 'Alpha build' })];
-    vi.spyOn(client.session, 'list').mockResolvedValue({ items: sessions, hasMore: false });
+    vi.spyOn(client.session, 'list').mockResolvedValue({ items: [], hasMore: false });
     setState('sessions', sessions);
     setShowSessionPicker(true);
 

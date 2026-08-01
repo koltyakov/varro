@@ -35,6 +35,27 @@ test('filters sessions through the session search input', async ({ page }) => {
   await search.fill('beta');
   await expect(page.locator('.session-item-title')).toContainText(['Beta rollout notes']);
   await expect(page.locator('.session-item')).toHaveCount(1);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const requests = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ method: string; path: string }> };
+          }
+        ).__varroE2E?.requests;
+        return requests?.some((request) => {
+          if (request.method !== 'GET') return false;
+          const url = new URL(request.path, 'http://varro.test');
+          return (
+            url.pathname === '/session' &&
+            url.searchParams.get('search') === 'beta' &&
+            url.searchParams.get('roots') === 'true' &&
+            url.searchParams.get('limit') === '30'
+          );
+        });
+      })
+    )
+    .toBe(true);
 
   await search.fill('zzz');
   await expect(page.getByText('No matching sessions', { exact: true })).toBeVisible();
