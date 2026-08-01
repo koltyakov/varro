@@ -2053,7 +2053,7 @@ describe('header status badges', () => {
     );
   });
 
-  it('pins archive groups outside the scrolling recent sessions list', () => {
+  it('keeps all group headers outside the expanded section scroll region', () => {
     const now = Date.now();
     setState('sessions', [
       session('recent-session', now - 1_000, { title: 'Recent session' }),
@@ -2068,26 +2068,24 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
-    const scrollRegion = container?.querySelector(
-      '.session-list-scroll-primary'
-    ) as HTMLDivElement | null;
-    const bottomGroups = container?.querySelector(
-      '.session-list-bottom-groups'
+    const sections = container?.querySelector('.session-list-sections') as HTMLDivElement | null;
+    const scrollRegion = sections?.querySelector(
+      '.session-list-section.expanded .session-list-section-scroll'
     ) as HTMLDivElement | null;
 
+    expect(sections).toBeInstanceOf(HTMLDivElement);
     expect(scrollRegion).toBeInstanceOf(HTMLDivElement);
-    expect(bottomGroups).toBeInstanceOf(HTMLDivElement);
     expect(
       Array.from(scrollRegion?.querySelectorAll('.session-item-title') ?? []).map((item) =>
         item.textContent?.trim()
       )
     ).toEqual(['Recent session']);
     expect(
-      Array.from(bottomGroups?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
+      Array.from(sections?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
         item.textContent?.trim()
       )
     ).toEqual(['Archive']);
-    expect(bottomGroups?.querySelector('.session-list-section-archive')).toBeNull();
+    expect(scrollRegion?.querySelector('.session-list-section-header')).toBeNull();
   });
 
   it('keeps showing sessions in the default list when all are older than one day', () => {
@@ -2115,10 +2113,7 @@ describe('header status badges', () => {
     expect(container?.querySelector('.session-list-bottom-groups')).toBeNull();
   });
 
-  it('scrolls the show more header into view when expanded', async () => {
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
+  it('keeps group headers visible when archive is expanded', async () => {
     const now = Date.now();
     setState('sessions', [
       session('recent-session', now - 1_000),
@@ -2142,7 +2137,6 @@ describe('header status badges', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     const sectionTitles = Array.from(
       container?.querySelectorAll('.session-list-section-title') ?? []
     ).map((item) => item.textContent?.trim());
@@ -2206,10 +2200,7 @@ describe('header status badges', () => {
     expect(expandedSessionTitles).toEqual(['Recent session']);
   });
 
-  it('scrolls the recycle bin header into view when expanded', async () => {
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
+  it('keeps group headers visible when recycle bin is expanded', async () => {
     const now = Date.now();
     setState('sessions', [session('active', now - 1_000)]);
     setState('activeSessionId', 'active');
@@ -2251,7 +2242,6 @@ describe('header status badges', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
     expect(
       Array.from(container?.querySelectorAll('.session-list-section-title') ?? []).map((item) =>
         item.textContent?.trim()

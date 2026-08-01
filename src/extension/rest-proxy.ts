@@ -40,6 +40,7 @@ type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
+const MAX_SESSION_PAGE_LIMIT = 1_000_000;
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -137,7 +138,7 @@ export class RestProxy {
       const explicitWorkspaceDirectory = requestedWorkspaceDirectory
         ? this.requireOpenWorkspaceRoot(requestedWorkspaceDirectory)
         : null;
-      const forwardedPath = explicitWorkspaceDirectory
+      let forwardedPath = explicitWorkspaceDirectory
         ? setExplicitWorkspaceDirectory(payload.path, explicitWorkspaceDirectory)
         : payload.path;
 
@@ -314,6 +315,13 @@ export class RestProxy {
         ? this.callbacks.sessionState.markSessionBusy(promptSessionID)
         : undefined;
 
+      const sessionPageLimit = this.parseSessionPageLimit(method, payload.path);
+      if (sessionPageLimit !== null) {
+        this.hasSessionDirectorySnapshot = false;
+        const url = new URL(forwardedPath, 'http://localhost');
+        url.searchParams.set('limit', String(sessionPageLimit + 1));
+        forwardedPath = `${url.pathname}${url.search}`;
+      }
       const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
       let responsePromise: Promise<unknown>;
       try {
@@ -322,7 +330,7 @@ export class RestProxy {
               captureNextCursor: true,
             })
           : this.callbacks.server.request(method, forwardedPath, payload.body);
-        if (this.isSessionListRequest(method, payload.path)) {
+        if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }
       } catch (err) {
@@ -342,7 +350,9 @@ export class RestProxy {
             payload.path,
             response as OpenCodeResponseMetadata
           )
-        : await this.filterApiResponse(method, payload.path, response);
+        : sessionPageLimit !== null
+          ? await this.formatPaginatedSessionsResponse(response, sessionPageLimit)
+          : await this.filterApiResponse(method, payload.path, response);
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
         data,
@@ -418,6 +428,24 @@ export class RestProxy {
     if (method !== 'GET') return false;
     const url = new URL(path, 'http://localhost');
     return /^\/session\/[^/]+\/message$/.test(url.pathname) && url.searchParams.has('limit');
+  }
+
+  private parseSessionPageLimit(method: string, path: string) {
+    if (method !== 'GET') return null;
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== '/session' || !url.searchParams.has('limit')) return null;
+    const limit = Number(url.searchParams.get('limit'));
+    return Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_SESSION_PAGE_LIMIT
+      ? limit
+      : null;
+  }
+
+  private formatPaginatedSessionsResponse(response: unknown, limit: number) {
+    if (!Array.isArray(response)) throw new Error('Malformed session list response');
+    const sessions = response.slice(0, limit);
+    const hasMore = response.length > limit;
+    this.rememberSessionPage(sessions, !hasMore);
+    return { items: this.filterVisibleSessions(sessions), hasMore };
   }
 
   private async formatPaginatedMessagesResponse(
@@ -606,11 +634,7 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
       this.rememberSessionList(data);
-      return this.callbacks.sessionTrash.filterVisibleSessions(
-        this.callbacks.hiddenSessions.filterVisibleSessions(
-          this.filterSessionsForCurrentWorkspace(data as Array<{ id: string; directory?: unknown }>)
-        )
-      );
+      return this.filterVisibleSessions(data);
     }
     if (
       method === 'GET' &&
@@ -649,7 +673,11 @@ export class RestProxy {
   }
 
   private rememberSessionList(sessions: unknown[]) {
-    this.recordSessionDirectories(sessions);
+    this.rememberSessionPage(sessions, true);
+  }
+
+  private rememberSessionPage(sessions: unknown[], complete: boolean) {
+    this.recordSessionDirectories(sessions, complete);
     for (const session of sessions) {
       const info = asRecord(session);
       if (!info) continue;
@@ -658,6 +686,16 @@ export class RestProxy {
         properties: { info },
       });
     }
+  }
+
+  private filterVisibleSessions(sessions: unknown[]) {
+    return this.callbacks.sessionTrash.filterVisibleSessions(
+      this.callbacks.hiddenSessions.filterVisibleSessions(
+        this.filterSessionsForCurrentWorkspace(
+          sessions as Array<{ id: string; directory?: unknown }>
+        )
+      )
+    );
   }
 
   private filterSessionsForCurrentWorkspace<T extends { directory?: unknown }>(sessions: T[]) {
@@ -749,8 +787,8 @@ export class RestProxy {
     return bootstrap;
   }
 
-  private recordSessionDirectories(sessions: unknown[]) {
-    const directories = new Map<string, string>();
+  private recordSessionDirectories(sessions: unknown[], complete = true) {
+    const directories = complete ? new Map<string, string>() : new Map(this.sessionDirectories);
     for (const session of sessions) {
       const info = asRecord(session);
       if (typeof info?.id !== 'string' || typeof info.directory !== 'string') continue;
@@ -758,7 +796,7 @@ export class RestProxy {
       directories.set(info.id, info.directory);
     }
     this.sessionDirectories = directories;
-    this.hasSessionDirectorySnapshot = true;
+    this.hasSessionDirectorySnapshot = complete;
   }
 
   private isSessionListRequest(method: string, path: string) {

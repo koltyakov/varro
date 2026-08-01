@@ -23,6 +23,8 @@ function createRuntimeMock(label: string) {
       restoreSession: vi.fn().mockResolvedValue(undefined),
       deleteSessionPermanently: vi.fn().mockResolvedValue(undefined),
       emptyRecycleBin: vi.fn().mockResolvedValue(undefined),
+      reloadSessions: vi.fn().mockResolvedValue(undefined),
+      loadMoreSessions: vi.fn().mockResolvedValue(undefined),
       sendMessage: vi.fn().mockResolvedValue(true),
       retryMessage: vi.fn().mockResolvedValue(undefined),
       editMessage: vi.fn().mockResolvedValue(undefined),
@@ -102,5 +104,14 @@ describe('useOpenCode.runtime', () => {
       'always',
       { rethrow: true }
     );
+  });
+
+  it('forwards session pagination to the installed runtime', async () => {
+    const installed = createRuntimeMock('installed');
+    const { module } = await loadModule();
+    module.installOpenCodeRuntime(installed.runtime);
+
+    await expect(module.loadMoreSessions()).resolves.toBeUndefined();
+    expect(installed.runtime.loadMoreSessions).toHaveBeenCalledOnce();
   });
 });

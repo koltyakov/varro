@@ -13,6 +13,7 @@ export {
   implementPlan,
   initSession,
   loadFullSessionHistory,
+  loadMoreSessions,
   loadOlderSessionHistoryPage,
   loadOlderSessionPrompts,
   openPlan,

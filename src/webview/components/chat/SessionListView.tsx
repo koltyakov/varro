@@ -33,6 +33,7 @@ import {
   restoreSession,
   deleteSessionPermanently,
   emptyRecycleBin,
+  loadMoreSessions,
   reloadSessions,
   renameSession,
 } from '../../hooks/useOpenCode';
@@ -626,6 +627,7 @@ export function SessionListSectionHeader(props: {
   ref?: (el: HTMLDivElement) => void;
   title: string;
   count: number;
+  incomplete?: boolean;
   expanded: boolean;
   onToggle: () => void;
   onArchive?: () => unknown;
@@ -645,7 +647,10 @@ export function SessionListSectionHeader(props: {
     <div ref={(el) => props.ref?.(el)} class="session-list-section-header">
       <button type="button" class="session-list-section-toggle" onClick={props.onToggle}>
         <span class="session-list-section-title">{props.title}</span>
-        <span class="session-list-section-count">{props.count}</span>
+        <span class="session-list-section-count">
+          {props.count}
+          {props.incomplete ? '+' : ''}
+        </span>
       </button>
       <div class="session-list-section-actions">
         <Show when={props.onArchive !== undefined}>
@@ -707,6 +712,68 @@ export function SessionListSectionHeader(props: {
   );
 }
 
+function SessionListContinuation() {
+  let sentinelRef: HTMLDivElement | undefined;
+  let observer: IntersectionObserver | undefined;
+  let requestInFlight = false;
+
+  const loadNextPage = async () => {
+    if (requestInFlight || state.sessionsLoadingMore || !state.sessionsHasMore) return;
+    requestInFlight = true;
+    try {
+      await loadMoreSessions();
+    } finally {
+      requestInFlight = false;
+      if (sentinelRef && observer && state.sessionsHasMore && !state.sessionsPaginationError) {
+        observer.unobserve(sentinelRef);
+        observer.observe(sentinelRef);
+      }
+    }
+  };
+
+  onMount(() => {
+    if (!sentinelRef || typeof IntersectionObserver === 'undefined') return;
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadNextPage();
+      },
+      {
+        root: sentinelRef.closest('.session-list-scroll'),
+        rootMargin: '120px 0px',
+      }
+    );
+    observer.observe(sentinelRef);
+    onCleanup(() => observer?.disconnect());
+  });
+
+  return (
+    <Show when={state.sessionsHasMore || state.sessionsPaginationError}>
+      <div
+        ref={(element) => {
+          sentinelRef = element;
+        }}
+        class={`session-list-continuation ${state.sessionsLoadingMore || state.sessionsPaginationError ? 'visible' : ''}`}
+      >
+        <Show when={state.sessionsLoadingMore}>
+          <span class="session-list-continuation-status" role="status">
+            Loading…
+          </span>
+        </Show>
+        <Show when={state.sessionsPaginationError}>
+          {(message) => (
+            <div class="session-list-continuation-error" role="alert">
+              <span>{message()}</span>
+              <button type="button" onClick={() => void loadNextPage()}>
+                Retry
+              </button>
+            </div>
+          )}
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
 export function SessionListView(props: {
   sessionFilter?: SessionListFilter | null;
   subagentParentId?: string | null;
@@ -744,9 +811,6 @@ export function SessionListView(props: {
   const [renamePending, setRenamePending] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
-  let recentHeaderRef: HTMLDivElement | undefined;
-  let archiveHeaderRef: HTMLDivElement | undefined;
-  let recycleBinHeaderRef: HTMLDivElement | undefined;
   let hasPointerInteraction = false;
 
   const handleAltDown = (event: KeyboardEvent) => {
@@ -875,21 +939,20 @@ export function SessionListView(props: {
   const availableGroupedSections = createMemo(() => {
     const sections: SessionListGroupedSection[] = [];
     if (defaultSurfacedSessions().length > 0) sections.push('recent');
-    if (defaultSurfacedSessions().length > 0 && overflowOtherSessions().length > 0) {
+    if (overflowOtherSessions().length > 0 || state.sessionsHasMore) {
       sections.push('archive');
     }
     if (recycleBinEntries().length > 0) sections.push('recycle-bin');
     return sections;
   });
+  const expandedGroupedSection = createMemo<SessionListGroupedSection | null>(() => {
+    const sections = availableGroupedSections();
+    const active = activeGroupedSection();
+    if (active && sections.includes(active)) return active;
+    return sections.includes('recent') ? 'recent' : (sections[0] ?? null);
+  });
   const isDefaultGroupedView = createMemo(
     () => !props.sessionFilter && !props.subagentParentId && !normalizedSearchQuery()
-  );
-  const showBottomGroups = createMemo(
-    () =>
-      isDefaultGroupedView() &&
-      !activeGroupedSection() &&
-      ((defaultSurfacedSessions().length > 0 && overflowOtherSessions().length > 0) ||
-        recycleBinEntries().length > 0)
   );
   const directSessions = createMemo(() => {
     if (props.subagentParentId) return subagentSessions();
@@ -905,7 +968,7 @@ export function SessionListView(props: {
   const baseVisibleSessions = createMemo(() => {
     if (props.subagentParentId || props.sessionFilter) return directSessions();
 
-    switch (activeGroupedSection()) {
+    switch (expandedGroupedSection()) {
       case 'recent':
         return surfacedSessions();
       case 'archive':
@@ -971,27 +1034,6 @@ export function SessionListView(props: {
       return Math.min(current, sessions.length - 1);
     });
   });
-
-  createEffect(
-    on(
-      activeGroupedSection,
-      (section, previousSection) => {
-        if (!section || section === previousSection) return;
-        queueMicrotask(() => {
-          const ref =
-            section === 'recent'
-              ? recentHeaderRef
-              : section === 'archive'
-                ? archiveHeaderRef
-                : recycleBinHeaderRef;
-          if (typeof ref?.scrollIntoView === 'function') {
-            ref.scrollIntoView({ block: 'nearest' });
-          }
-        });
-      },
-      { defer: true }
-    )
-  );
 
   const toggleGroupedSection = (section: SessionListGroupedSection) => {
     if (section === 'recent') {
@@ -1070,94 +1112,57 @@ export function SessionListView(props: {
     );
   };
 
-  const renderBottomGroups = () => (
-    <div class="session-list-bottom-groups">
-      <Show when={overflowOtherSessions().length > 0}>
-        <Show when={defaultSurfacedSessions().length > 0}>
-          <SessionListSectionHeader
-            ref={(el) => {
-              archiveHeaderRef = el;
-            }}
-            title="Archive"
-            count={overflowOtherSessions().length}
-            expanded={false}
-            onToggle={() => toggleGroupedSection('archive')}
-          />
-        </Show>
-      </Show>
-      <Show when={recycleBinEntries().length > 0}>
-        <SessionListSectionHeader
-          ref={(el) => {
-            recycleBinHeaderRef = el;
-          }}
-          title="Recycle Bin"
-          count={recycleBinEntries().length}
-          expanded={false}
-          onToggle={() => toggleGroupedSection('recycle-bin')}
-          onArchive={() => emptyRecycleBin()}
-          archiveLabel="Empty"
-        />
-      </Show>
-    </div>
-  );
-
   const renderScrollableContent = () => (
     <div class="session-list-scroll">
-      <Show when={props.subagentParentId || props.sessionFilter || normalizedSearchQuery()}>
-        {renderSessionItems(visibleSessions)}
-      </Show>
-      <Show
-        when={isDefaultGroupedView() && !activeGroupedSection() && surfacedSessions().length > 0}
-      >
-        {renderSessionItems(surfacedSessions)}
-      </Show>
-      <Show when={isDefaultGroupedView() && !!activeGroupedSection()}>
-        <For each={availableGroupedSections()}>{(section) => renderGroupedSection(section)}</For>
-      </Show>
+      {renderSessionItems(visibleSessions)}
+      <SessionListContinuation />
     </div>
   );
 
   const renderGroupedSection = (section: SessionListGroupedSection) => {
-    const expanded = () => activeGroupedSection() === section;
+    const expanded = () => expandedGroupedSection() === section;
 
     switch (section) {
       case 'recent':
         return (
-          <>
-            <SessionListSectionHeader
-              ref={(el) => {
-                recentHeaderRef = el;
-              }}
-              title="Recent"
-              count={surfacedSessions().length}
-              expanded={expanded()}
-              onToggle={() => toggleGroupedSection('recent')}
-            />
-            <Show when={expanded()}>{renderSessionItems(surfacedSessions)}</Show>
-          </>
+          <div class={`session-list-section ${expanded() ? 'expanded' : ''}`}>
+            <Show when={!expanded()}>
+              <SessionListSectionHeader
+                title="Recent"
+                count={surfacedSessions().length}
+                expanded={false}
+                onToggle={() => toggleGroupedSection('recent')}
+              />
+            </Show>
+            <Show when={expanded()}>
+              <div class="session-list-scroll session-list-section-scroll">
+                {renderSessionItems(surfacedSessions)}
+              </div>
+            </Show>
+          </div>
         );
       case 'archive':
         return (
-          <>
+          <div class={`session-list-section ${expanded() ? 'expanded' : ''}`}>
             <SessionListSectionHeader
-              ref={(el) => {
-                archiveHeaderRef = el;
-              }}
               title="Archive"
               count={overflowOtherSessions().length}
+              incomplete={state.sessionsHasMore}
               expanded={expanded()}
               onToggle={() => toggleGroupedSection('archive')}
             />
-            <Show when={expanded()}>{renderSessionItems(overflowOtherSessions)}</Show>
-          </>
+            <Show when={expanded()}>
+              <div class="session-list-scroll session-list-section-scroll">
+                {renderSessionItems(overflowOtherSessions)}
+                <SessionListContinuation />
+              </div>
+            </Show>
+          </div>
         );
       case 'recycle-bin':
         return (
-          <>
+          <div class={`session-list-section ${expanded() ? 'expanded' : ''}`}>
             <SessionListSectionHeader
-              ref={(el) => {
-                recycleBinHeaderRef = el;
-              }}
               title="Recycle Bin"
               count={recycleBinEntries().length}
               expanded={expanded()}
@@ -1166,14 +1171,22 @@ export function SessionListView(props: {
               archiveLabel="Empty"
             />
             <Show when={expanded()}>
-              <For each={recycleBinEntries()}>
-                {(entry) => <RecycleBinListItem entry={entry} now={ageNow} />}
-              </For>
+              <div class="session-list-scroll session-list-section-scroll">
+                <For each={recycleBinEntries()}>
+                  {(entry) => <RecycleBinListItem entry={entry} now={ageNow} />}
+                </For>
+              </div>
             </Show>
-          </>
+          </div>
         );
     }
   };
+
+  const renderGroupedSections = () => (
+    <div class="session-list-sections">
+      <For each={availableGroupedSections()}>{(section) => renderGroupedSection(section)}</For>
+    </div>
+  );
 
   function handleKeydown(e: KeyboardEvent) {
     const sessions = visibleSessions();
@@ -1276,6 +1289,7 @@ export function SessionListView(props: {
     }
   };
   const hasVisibleContent = createMemo(() => {
+    if (state.sessionsHasMore) return true;
     if (props.subagentParentId) return subagentSessions().length > 0;
     if (props.sessionFilter) return filteredSessions().length > 0;
     if (normalizedSearchQuery()) return visibleSessions().length > 0;
@@ -1351,13 +1365,8 @@ export function SessionListView(props: {
             </Show>
           }
         >
-          <Show when={showBottomGroups()} fallback={renderScrollableContent()}>
-            <div class="session-list-layout">
-              <div class="session-list-scroll session-list-scroll-primary">
-                {renderSessionItems(surfacedSessions)}
-              </div>
-              {renderBottomGroups()}
-            </div>
+          <Show when={isDefaultGroupedView()} fallback={renderScrollableContent()}>
+            {renderGroupedSections()}
           </Show>
         </Show>
       </div>

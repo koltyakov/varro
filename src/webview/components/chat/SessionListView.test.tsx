@@ -18,6 +18,7 @@ import {
 
 const renameSessionMock = vi.hoisted(() => vi.fn());
 const reloadSessionsMock = vi.hoisted(() => vi.fn());
+const loadMoreSessionsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
   restoreSession: vi.fn(),
   renameSession: renameSessionMock,
   reloadSessions: reloadSessionsMock,
+  loadMoreSessions: loadMoreSessionsMock,
   selectSession: vi.fn(),
 }));
 
@@ -75,11 +77,16 @@ beforeEach(() => {
   setState('activeSessionId', null);
   setState('sessionStatus', {});
   setState('sessionsLoadError', null);
+  setState('sessionsHasMore', false);
+  setState('sessionsLoadingMore', false);
+  setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
   reloadSessionsMock.mockReset();
   reloadSessionsMock.mockResolvedValue(undefined);
+  loadMoreSessionsMock.mockReset();
+  loadMoreSessionsMock.mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -94,6 +101,9 @@ afterEach(() => {
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
   setState('sessionsLoadError', null);
+  setState('sessionsHasMore', false);
+  setState('sessionsLoadingMore', false);
+  setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
   vi.restoreAllMocks();
   if (originalIntersectionObserver) {
@@ -1290,6 +1300,67 @@ describe('SessionListView actions', () => {
 });
 
 describe('SessionListView load errors', () => {
+  it('offers continuation when the loaded page has no visible sessions', () => {
+    setState('sessionsHasMore', true);
+    cleanup = render(() => <SessionListView />, container);
+
+    expect(container.textContent).not.toContain('No sessions yet');
+    expect(container.querySelector('.session-list-continuation')).not.toBeNull();
+    expect(container.textContent).not.toContain('Load more');
+  });
+
+  it('shows a lower-bound archive count and loads another session window', async () => {
+    const callbacks = new Map<Element, IntersectionObserverCallback>();
+    class TestIntersectionObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe(target: Element) {
+        callbacks.set(target, this.callback);
+      }
+      unobserve(target: Element) {
+        callbacks.delete(target);
+      }
+      disconnect() {}
+    }
+    globalThis.IntersectionObserver =
+      TestIntersectionObserver as unknown as typeof IntersectionObserver;
+    const now = Date.now();
+    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    setState('sessionsHasMore', true);
+    cleanup = render(() => <SessionListView />, container);
+
+    const archive = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
+    ).find((button) => button.textContent?.includes('Archive'));
+    expect(archive?.textContent).toContain('1+');
+
+    archive!.click();
+    const continuation = container.querySelector('.session-list-continuation')!;
+    callbacks.get(continuation)?.(
+      [{ target: continuation, isIntersecting: true } as IntersectionObserverEntry],
+      {} as IntersectionObserver
+    );
+
+    await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+  });
+
+  it('keeps pagination available while searching from the expanded archive', () => {
+    const now = Date.now();
+    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    setState('sessionsHasMore', true);
+    cleanup = render(() => <SessionListView />, container);
+
+    const archive = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
+    ).find((button) => button.textContent?.includes('Archive'))!;
+    archive.click();
+
+    const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
+    search.value = 'not loaded yet';
+    search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    expect(container.querySelector('.session-list-continuation')).not.toBeNull();
+  });
+
   it('shows a retryable error instead of the empty state when sessions fail to load', async () => {
     setState('sessionsLoadError', 'Failed to load sessions');
     cleanup = render(() => <SessionListView />, container);

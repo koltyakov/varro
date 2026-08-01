@@ -620,6 +620,96 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
   });
 
+  it('grows the session window and preserves omitted sessions until the list is exhausted', async () => {
+    const stale = session('stale');
+    const newest = session('newest');
+    const oldest = session('oldest');
+    let currentSessions = [stale];
+    const clearQueuedMessagesForSession = vi.fn();
+    const setSessionsHasMore = vi.fn();
+    const setSessionsLoadingMore = vi.fn();
+    const listSessions = vi
+      .fn<DataLoaderDependencies['listSessions']>()
+      .mockResolvedValueOnce({ items: [newest], hasMore: true })
+      .mockResolvedValueOnce({ items: [newest, oldest], hasMore: false });
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions,
+        getSessions: () => currentSessions,
+        applySessions: (sessions) => {
+          currentSessions = sessions;
+        },
+        clearQueuedMessagesForSession,
+        setSessionsHasMore,
+        setSessionsLoadingMore,
+      })
+    );
+
+    await operations.loadSessions();
+
+    expect(listSessions).toHaveBeenNthCalledWith(1, 100);
+    expect(currentSessions).toEqual([newest, stale]);
+    expect(setSessionsHasMore).toHaveBeenLastCalledWith(true);
+    expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
+
+    await operations.loadMoreSessions();
+
+    expect(listSessions).toHaveBeenNthCalledWith(2, 200);
+    expect(currentSessions).toEqual([newest, oldest]);
+    expect(setSessionsHasMore).toHaveBeenLastCalledWith(false);
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
+    expect(setSessionsLoadingMore.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('clears pagination loading state when workspace work is invalidated', async () => {
+    const response = deferred<{ items: Session[]; hasMore: boolean }>();
+    const setSessionsLoadingMore = vi.fn();
+    const setSessionsPaginationError = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: () => response.promise,
+        setSessionsLoadingMore,
+        setSessionsPaginationError,
+      })
+    );
+
+    const load = operations.loadMoreSessions();
+    operations.invalidateWorkspace();
+
+    expect(setSessionsLoadingMore.mock.calls).toEqual([[true], [false]]);
+    expect(setSessionsPaginationError).toHaveBeenLastCalledWith(null);
+
+    response.resolve({ items: [], hasMore: false });
+    await load;
+  });
+
+  it('clears a stale pagination error after a successful session refresh', async () => {
+    const setSessionsPaginationError = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => ({ items: [], hasMore: false }),
+        setSessionsPaginationError,
+      })
+    );
+
+    await operations.loadSessions();
+
+    expect(setSessionsPaginationError).toHaveBeenLastCalledWith(null);
+  });
+
+  it('retries a failed load-more request without skipping a session window', async () => {
+    const listSessions = vi
+      .fn<DataLoaderDependencies['listSessions']>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ items: [], hasMore: false });
+    const operations = createDataLoaderOperations(createLoaderDeps({ listSessions }));
+
+    await operations.loadMoreSessions();
+    await operations.loadMoreSessions();
+
+    expect(listSessions.mock.calls).toEqual([[200], [200]]);
+  });
+
   it('applies only the latest overlapping session snapshot', async () => {
     const first = deferred<Session[]>();
     const second = deferred<Session[]>();

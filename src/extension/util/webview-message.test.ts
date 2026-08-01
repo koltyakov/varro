@@ -66,6 +66,7 @@ describe('webview message validation', () => {
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/session?limit=100')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Frepo-a')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/init')).toBe(true);
     expect(isAllowedApiRequest('POST', '/session/abc/prompt_async')).toBe(true);
@@ -113,6 +114,15 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/experimental/workspace/status')).toBe(true);
     expect(isAllowedApiRequest('POST', '/experimental/workspace/warp')).toBe(true);
     expect(isAllowedApiRequest('GET', '/global/config')).toBe(true);
+  });
+
+  it('rejects invalid session page limits', () => {
+    expect(isAllowedApiRequest('GET', '/session?limit=0')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=-1')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=all')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=100&limit=200')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=100&start=0')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/session?limit=1000001')).toBe(false);
   });
 
   it('rejects absolute and unsupported API routes', () => {

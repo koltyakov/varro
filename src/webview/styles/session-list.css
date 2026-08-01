@@ -92,15 +92,27 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   -webkit-user-select: none;
 }
 
-.session-list-layout {
+.session-list-sections {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
-.session-list-scroll-primary {
-  flex: 1;
+.session-list-section {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.session-list-section.expanded {
+  flex: 1 1 0;
+}
+
+.session-list-section-scroll {
+  flex: 1 1 0;
 }
 
 @media (max-width: 959px) {
@@ -109,12 +121,8 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   }
 }
 
-.session-list-bottom-groups {
-  flex-shrink: 0;
-}
-
-.session-list-bottom-groups .session-list-section-header:first-child {
-  margin-top: 0;
+.session-list-section:first-child .session-list-section-header {
+  border-top: none;
 }
 
 .session-list-new-session {
@@ -156,6 +164,43 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-load-error-retry:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+.session-list-continuation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 1px;
+}
+
+.session-list-continuation.visible {
+  min-height: 28px;
+  padding: 4px 12px;
+}
+
+.session-list-continuation-status {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.session-list-continuation-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-vscode-error);
+  font-size: 11px;
+}
+
+.session-list-continuation-error button {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .session-list-section-toggle {
@@ -430,10 +475,9 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-error);
 }
 
-/* Toast for one-shot session actions (copy, share, unshare). Sits just clear
-   of the 36px chat header so it never straddles the title row. Fully opaque:
-   every surface mixes toward `--color-vscode-widget-bg` rather than
-   `transparent`, so nothing underneath shows through. */
+/* Toast for one-shot feedback and app errors. Sits just clear of the 36px chat
+   header so it never straddles the title row. Fully opaque: every surface
+   mixes toward `--color-vscode-widget-bg`, so nothing underneath shows through. */
 .session-action-feedback {
   position: fixed;
   z-index: calc(var(--z-menu-raised) + 1);
@@ -461,6 +505,16 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   animation: session-action-feedback-in 180ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 
+.session-action-feedback.is-error {
+  border-color: color-mix(in srgb, var(--color-vscode-error) 45%, var(--color-vscode-widget-bg));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-vscode-error) 13%, var(--color-vscode-widget-bg)),
+    color-mix(in srgb, var(--color-vscode-error) 8%, var(--color-vscode-widget-bg))
+  );
+  pointer-events: auto;
+}
+
 .session-action-feedback.is-leaving {
   animation: session-action-feedback-out 160ms ease-in both;
 }
@@ -479,6 +533,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   color: var(--color-vscode-widget-bg);
 }
 
+.session-action-feedback.is-error .session-action-feedback-icon {
+  background: var(--color-vscode-error);
+}
+
 .session-action-feedback-icon svg {
   width: 11px;
   height: 11px;
@@ -489,6 +547,47 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-action-feedback-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.session-action-feedback-actions button {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-inset);
+  background: none;
+  color: var(--color-vscode-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-action-feedback-actions button:hover,
+.session-action-feedback-actions button:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--color-vscode-error) 18%, var(--color-vscode-widget-bg));
+}
+
+.session-action-feedback-actions button:not(.session-action-feedback-dismiss) {
+  padding: 0 6px;
+}
+
+.session-action-feedback-dismiss {
+  width: 22px;
+  padding: 0;
+  color: var(--color-vscode-muted) !important;
+}
+
+.session-action-feedback-dismiss svg {
+  width: 11px;
+  height: 11px;
 }
 
 @keyframes session-action-feedback-in {

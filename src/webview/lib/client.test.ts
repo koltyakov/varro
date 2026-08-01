@@ -55,6 +55,27 @@ afterEach(() => {
 });
 
 describe('client', () => {
+  it('loads a bounded session page with continuation metadata', async () => {
+    const { client } = await loadClient();
+    const sessions = [{ id: 'session-1' }];
+    bridgeMocks.apiCall.mockResolvedValue({ items: sessions, hasMore: true });
+
+    await expect(client.session.list({ limit: 100 })).resolves.toEqual({
+      items: sessions,
+      hasMore: true,
+    });
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/session?limit=100');
+  });
+
+  it('rejects malformed session page metadata', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue({ items: [], hasMore: 'yes' });
+
+    await expect(client.session.list({ limit: 100 })).rejects.toThrow(
+      'a session page with a boolean hasMore value'
+    );
+  });
+
   it('forwards health, session, config, agent, and question requests to the api bridge', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {

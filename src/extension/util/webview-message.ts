@@ -921,6 +921,14 @@ const onlyQuery = (url: URL, ...keys: string[]) => {
 };
 
 const requiredQuery = (url: URL, key: string) => Boolean(url.searchParams.get(key)?.trim());
+const MAX_SESSION_PAGE_LIMIT = 1_000_000;
+
+const positiveIntegerQuery = (url: URL, key: string) => {
+  const values = url.searchParams.getAll(key);
+  if (values.length !== 1 || !/^\d+$/.test(values[0]!)) return false;
+  const value = Number(values[0]);
+  return Number.isSafeInteger(value) && value > 0 && value <= MAX_SESSION_PAGE_LIMIT;
+};
 
 const optionalDirectoryQuery = (url: URL) => {
   const directories = url.searchParams.getAll('directory');
@@ -976,7 +984,9 @@ const API_ROUTES: ApiRoute[] = [
   route(
     '/session',
     ({ method, url }) =>
-      (method === 'GET' && noQuery(url)) || (method === 'POST' && optionalDirectoryQuery(url))
+      (method === 'GET' &&
+        (noQuery(url) || (onlyQuery(url, 'limit') && positiveIntegerQuery(url, 'limit')))) ||
+      (method === 'POST' && optionalDirectoryQuery(url))
   ),
   route('/session/status', methodsNoQuery('GET')),
   route('/experimental/workspace/status', methodsNoQuery('GET')),

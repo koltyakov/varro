@@ -97,6 +97,9 @@ export interface AppState {
   clipboardImages: ClipboardImage[];
   sessions: Session[];
   sessionsLoadError: string | null;
+  sessionsHasMore: boolean;
+  sessionsLoadingMore: boolean;
+  sessionsPaginationError: string | null;
   recycleBinLoadError: string | null;
   messagesLoading: boolean;
   pinnedSessionIds: string[];
@@ -270,6 +273,9 @@ export function createAppState(): AppStateInstance {
     clipboardImages: [],
     sessions: [],
     sessionsLoadError: null,
+    sessionsHasMore: false,
+    sessionsLoadingMore: false,
+    sessionsPaginationError: null,
     recycleBinLoadError: null,
     messagesLoading: false,
     pinnedSessionIds: initialWebviewState.pinnedSessionIds ?? [],

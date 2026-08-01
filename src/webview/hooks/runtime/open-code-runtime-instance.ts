@@ -126,6 +126,7 @@ export interface OpenCodeRuntime {
   deleteSessionPermanently(rootID: string): Promise<void>;
   emptyRecycleBin(): Promise<void>;
   reloadSessions(): Promise<void>;
+  loadMoreSessions(): Promise<void>;
   sendMessage(
     text: string,
     options?: {
@@ -478,6 +479,9 @@ export function resetWorkspaceDerivedState() {
     sessionStore.clearMessages();
     appStore.setState('sessions', []);
     appStore.setState('sessionsLoadError', null);
+    appStore.setState('sessionsHasMore', false);
+    appStore.setState('sessionsLoadingMore', false);
+    appStore.setState('sessionsPaginationError', null);
     appStore.setState('recycleBinEntries', []);
     appStore.setState('recycleBinLoadError', null);
     appStore.setState('messagesLoading', false);
@@ -975,6 +979,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     loadCompatibilityState,
     refreshProviderLimit,
     loadSessions,
+    loadMoreSessions,
     loadRecycleBin,
     invalidateWorkspace,
   } = dataLoaders;
@@ -1693,6 +1698,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     deleteSessionPermanently,
     emptyRecycleBin,
     reloadSessions,
+    loadMoreSessions,
     sendMessage,
     retryMessage,
     editMessage,

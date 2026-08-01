@@ -91,6 +91,10 @@ export async function reloadSessions() {
   await getCurrentOpenCodeRuntime().reloadSessions();
 }
 
+export async function loadMoreSessions() {
+  await getCurrentOpenCodeRuntime().loadMoreSessions();
+}
+
 export async function sendMessage(
   text: string,
   options?: {

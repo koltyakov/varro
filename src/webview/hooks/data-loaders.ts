@@ -1,5 +1,5 @@
 import type { SelectedModel } from '../lib/app-state-types';
-import { client } from '../lib/client';
+import { client, type SessionListPage } from '../lib/client';
 import { appStore } from '../lib/stores/app-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
 import { routingStore } from '../lib/stores/routing-store';
@@ -21,6 +21,8 @@ import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state
 
 type Logger = (context: string, err: unknown) => void;
 const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
+const SESSION_PAGE_SIZE = 100;
+const MAX_SESSION_PAGE_LIMIT = 1_000_000;
 
 async function runLoad<T>(
   label: string,
@@ -80,9 +82,12 @@ export function createStateBoundDataLoaderOperations(deps: {
     setProviderAuthMethods: routingStore.setProviderAuthMethods,
     listWorkspaceStatuses: () => client.config.workspaceStatus(),
     setWorkspaceStatuses: routingStore.setWorkspaceStatuses,
-    listSessions: () => client.session.list(),
+    listSessions: (limit) => client.session.list({ limit }),
     applySessions: deps.applySessions,
     setSessionsLoadError: (message) => appStore.setState('sessionsLoadError', message),
+    setSessionsHasMore: (value) => appStore.setState('sessionsHasMore', value),
+    setSessionsLoadingMore: (value) => appStore.setState('sessionsLoadingMore', value),
+    setSessionsPaginationError: (message) => appStore.setState('sessionsPaginationError', message),
     listRecycleBin: () => client.varro.recycleBin.list(),
     setRecycleBinEntries: sessionStore.setRecycleBinEntries,
     setRecycleBinLoadError: (message) => appStore.setState('recycleBinLoadError', message),
@@ -136,9 +141,12 @@ export function createDataLoaderOperations(deps: {
   setProviderAuthMethods(methods: ProviderAuthMethodsByProvider): void;
   listWorkspaceStatuses(): Promise<WorkspaceStatusEntry[]>;
   setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
-  listSessions(): Promise<Session[]>;
+  listSessions(limit?: number): Promise<Session[] | SessionListPage>;
   applySessions(sessions: Session[]): void;
   setSessionsLoadError?(message: string | null): void;
+  setSessionsHasMore?(value: boolean): void;
+  setSessionsLoadingMore?(value: boolean): void;
+  setSessionsPaginationError?(message: string | null): void;
   listRecycleBin(): Promise<RecycleBinEntry[] | null | undefined>;
   setRecycleBinEntries(entries: RecycleBinEntry[]): void;
   setRecycleBinLoadError?(message: string | null): void;
@@ -157,6 +165,7 @@ export function createDataLoaderOperations(deps: {
   logError: Logger;
 }) {
   let emptySessionSnapshotCount = 0;
+  let requestedSessionLimit = SESSION_PAGE_SIZE;
   let workspaceGeneration = 0;
   let mcpLoadGeneration = 0;
   let questionLoadGeneration = 0;
@@ -167,6 +176,7 @@ export function createDataLoaderOperations(deps: {
   let compatibilityLoadGeneration = 0;
   let recycleBinLoadGeneration = 0;
   let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
+  let inFlightSessionPageLoad: Promise<void> | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
   const sessionSnapshots = createMutationAwareSnapshotReconciler(deps.getSessions);
@@ -327,28 +337,73 @@ export function createDataLoaderOperations(deps: {
     ]);
   };
 
-  const loadSessions = async () => {
+  const performSessionLoad = async (pagination: boolean) => {
     const workspace = workspaceGeneration;
     const generation = ++sessionLoadGeneration;
     const mutationBaseline = sessionSnapshots.captureBaseline();
     const loaded = await loadSessionsWithDependencies(
       {
-        listSessions: deps.listSessions,
-        shouldApplySessionsSnapshot,
-        applySessions: (sessions) => {
+        listSessions: () => deps.listSessions(requestedSessionLimit),
+        shouldApplySessionsSnapshot: (sessions, hasMore) =>
+          hasMore || shouldApplySessionsSnapshot(sessions),
+        applySessions: (sessions, hasMore) => {
           const reconciled = sessionSnapshots.reconcile(sessions, mutationBaseline);
-          const retainedIds = new Set(reconciled.map((session) => session.id));
+          const reconciledIds = new Set(reconciled.map((session) => session.id));
+          const merged = hasMore
+            ? [
+                ...reconciled,
+                ...deps.getSessions().filter((current) => !reconciledIds.has(current.id)),
+              ]
+            : reconciled;
+          const retainedIds = new Set(merged.map((session) => session.id));
           for (const current of deps.getSessions()) {
             if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
           }
-          deps.applySessions(reconciled);
+          deps.applySessions(merged);
+          deps.setSessionsHasMore?.(hasMore);
         },
       },
       deps.logError,
       () => workspace === workspaceGeneration && generation === sessionLoadGeneration
     );
     if (workspace !== workspaceGeneration || generation !== sessionLoadGeneration) return;
-    deps.setSessionsLoadError?.(loaded ? null : 'Failed to load sessions');
+    if (pagination) {
+      deps.setSessionsPaginationError?.(loaded ? null : 'Failed to load more sessions');
+    } else {
+      deps.setSessionsLoadError?.(loaded ? null : 'Failed to load sessions');
+      if (loaded) deps.setSessionsPaginationError?.(null);
+    }
+    return loaded;
+  };
+
+  const loadSessions = async () => {
+    await performSessionLoad(false);
+  };
+
+  const loadMoreSessions = () => {
+    if (inFlightSessionPageLoad) return inFlightSessionPageLoad;
+    const previousLimit = requestedSessionLimit;
+    const nextLimit = Math.min(previousLimit + SESSION_PAGE_SIZE, MAX_SESSION_PAGE_LIMIT);
+    if (nextLimit === previousLimit) {
+      deps.setSessionsHasMore?.(false);
+      return Promise.resolve();
+    }
+    requestedSessionLimit = nextLimit;
+    deps.setSessionsLoadingMore?.(true);
+    deps.setSessionsPaginationError?.(null);
+    const request = performSessionLoad(true)
+      .then((loaded) => {
+        if (loaded === false && requestedSessionLimit === nextLimit) {
+          requestedSessionLimit = previousLimit;
+        }
+      })
+      .finally(() => {
+        if (inFlightSessionPageLoad !== request) return;
+        inFlightSessionPageLoad = null;
+        deps.setSessionsLoadingMore?.(false);
+      });
+    inFlightSessionPageLoad = request;
+    return request;
   };
 
   const loadRecycleBin = async () => {
@@ -391,7 +446,11 @@ export function createDataLoaderOperations(deps: {
     compatibilityLoadGeneration += 1;
     recycleBinLoadGeneration += 1;
     emptySessionSnapshotCount = 0;
+    requestedSessionLimit = SESSION_PAGE_SIZE;
     inFlightMcpLoad = null;
+    inFlightSessionPageLoad = null;
+    deps.setSessionsLoadingMore?.(false);
+    deps.setSessionsPaginationError?.(null);
   };
 
   return {
@@ -404,6 +463,7 @@ export function createDataLoaderOperations(deps: {
     refreshProviderLimit,
     loadCompatibilityState,
     loadSessions,
+    loadMoreSessions,
     loadRecycleBin,
     hydrateSessionStatuses,
     invalidateWorkspace,
@@ -657,21 +717,23 @@ export async function refreshProviderLimitWithDependencies(
 
 export async function loadSessionsWithDependencies(
   deps: {
-    listSessions(): Promise<Session[]>;
-    shouldApplySessionsSnapshot?(sessions: Session[]): boolean;
-    applySessions(sessions: Session[]): void;
+    listSessions(): Promise<Session[] | SessionListPage>;
+    shouldApplySessionsSnapshot?(sessions: Session[], hasMore: boolean): boolean;
+    applySessions(sessions: Session[], hasMore: boolean): void;
   },
   logError: Logger,
   isCurrent: () => boolean = () => true
 ): Promise<boolean> {
   try {
-    const sessions = await deps.listSessions();
+    const result = await deps.listSessions();
     if (!isCurrent()) return true;
+    const sessions = Array.isArray(result) ? result : result.items;
+    const hasMore = Array.isArray(result) ? false : result.hasMore;
     // Session reads are intentionally broad. Workspace filtering belongs in
     // applySessions(), not the transport/backend layer, to avoid platform-
     // specific path formatting mismatches from hiding valid sessions.
-    if (deps.shouldApplySessionsSnapshot?.(sessions) === false) return true;
-    deps.applySessions(sessions);
+    if (deps.shouldApplySessionsSnapshot?.(sessions, hasMore) === false) return true;
+    deps.applySessions(sessions, hasMore);
     return true;
   } catch (err) {
     if (isCurrent()) logError('loadSessions', err);

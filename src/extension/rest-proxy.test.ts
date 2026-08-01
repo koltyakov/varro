@@ -1332,6 +1332,91 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('overfetches paginated session lists to report whether more sessions exist', async () => {
+    const sessions = [
+      { id: 'newest', directory: '/repo' },
+      { id: 'older', directory: '/repo' },
+      { id: 'oldest', directory: '/repo' },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(sessions));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(151, 'GET', '/session?limit=2'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=3', undefined);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 151,
+      data: {
+        items: sessions.slice(0, 2),
+        hasMore: true,
+      },
+    });
+  });
+
+  it('marks an exact paginated session response as exhausted', async () => {
+    const sessions = [
+      { id: 'newest', directory: '/repo' },
+      { id: 'oldest', directory: '/repo' },
+    ];
+    const serverRequest = vi.fn(() => Promise.resolve(sessions));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(152, 'GET', '/session?limit=2'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 152,
+      data: { items: sessions, hasMore: false },
+    });
+  });
+
+  it('does not treat a partial session page as an authoritative directory snapshot', async () => {
+    const partialPage = deferred<Array<{ id: string; directory: string }>>();
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session?limit=3') {
+        return Promise.resolve([{ id: 'initial', directory: '/repo' }]);
+      }
+      if (path === '/session?limit=2') {
+        return partialPage.promise;
+      }
+      if (path === '/session/status') {
+        return Promise.resolve({ 'foreign-old': { type: 'busy' } });
+      }
+      if (path === '/session') {
+        return Promise.resolve([{ id: 'foreign-old', directory: '/other' }]);
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        getSessionWorkspaceMatch: vi.fn(() => undefined),
+      } as never,
+    });
+
+    await proxy.handleRequest(makePayload(152, 'GET', '/session?limit=2'));
+    const partialRequest = proxy.handleRequest(makePayload(153, 'GET', '/session?limit=1'));
+    await vi.waitFor(() => {
+      expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=2', undefined);
+    });
+    await proxy.handleRequest(makePayload(154, 'GET', '/session/status'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
+    expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
+      id: 154,
+      data: {},
+    });
+    partialPage.resolve([
+      { id: 'recent', directory: '/repo' },
+      { id: 'next', directory: '/repo' },
+    ]);
+    await partialRequest;
+  });
+
   it('filters session list through sessionTrash', async () => {
     const sessions = [
       { id: 'visible', directory: '/repo' },

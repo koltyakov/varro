@@ -38,6 +38,7 @@ import type {
 } from '../../shared/opencode-types';
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
+export type SessionListPage = { items: Session[]; hasMore: boolean };
 
 export const client = {
   async health(): Promise<HealthResponse> {
@@ -47,9 +48,23 @@ export const client = {
   },
 
   session: {
-    async list(): Promise<Session[]> {
-      const sessions = requireArray<Session>(await apiCall('GET', '/session'), '/session');
-      return sessions.map(applySessionShareOverride);
+    async list(options?: { limit?: number }): Promise<Session[] | SessionListPage> {
+      const params = new URLSearchParams();
+      if (options?.limit) params.set('limit', String(options.limit));
+      const query = params.size > 0 ? `?${params.toString()}` : '';
+      const path = `/session${query}`;
+      const response = await apiCall('GET', path);
+      if (!options?.limit) {
+        return requireArray<Session>(response, path).map(applySessionShareOverride);
+      }
+      const page = requireRecord(response, path);
+      if (typeof page.hasMore !== 'boolean') {
+        throw malformedResponse(path, 'a session page with a boolean hasMore value');
+      }
+      return {
+        items: requireArray<Session>(page.items, path).map(applySessionShareOverride),
+        hasMore: page.hasMore,
+      };
     },
     async get(id: string): Promise<Session> {
       return apiCall<Session>('GET', `/session/${id}`).then(applySessionShareOverride);
