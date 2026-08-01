@@ -477,7 +477,7 @@ export type ModelCapabilities = {
   tools?: boolean;
   input?: ModelCapabilitiesModalityMap | ModelCapabilitiesModalityList;
   output?: ModelCapabilitiesModalityMap | ModelCapabilitiesModalityList;
-  interleaved?: boolean | { field: 'reasoning_content' | 'reasoning_details' };
+  interleaved?: boolean | { field: string };
 };
 
 export type ModelCost = {
