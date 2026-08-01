@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
 import {
   getRelativePath,
@@ -19,6 +20,8 @@ export type WorkspaceResolutionOptions = {
    * renderer cannot read arbitrary files through the extension host.
    */
   restrictToWorkspace?: boolean;
+  /** Bind a restricted resolution to this exact open workspace root. */
+  workspaceDirectory?: string;
 };
 
 export class ContextProvider implements vscode.Disposable {
@@ -93,6 +96,14 @@ export class ContextProvider implements vscode.Disposable {
 
   get terminalSelection() {
     return this._terminalSelection;
+  }
+
+  isOpenWorkspaceRoot(path: string): boolean {
+    return Boolean(this.getOpenWorkspaceFolder(path));
+  }
+
+  getOpenWorkspaceRoot(path: string): string | null {
+    return this.getOpenWorkspaceFolder(path)?.uri.fsPath ?? null;
   }
 
   async selectWorkspace(path: string) {
@@ -582,18 +593,29 @@ export class ContextProvider implements vscode.Disposable {
     const restrictToWorkspace = options?.restrictToWorkspace === true;
     const input = rawPath.trim();
     if (!input) return null;
+    if (restrictToWorkspace && hasRawParentTraversal(input)) return null;
+
+    const restrictedWorkspaceFolder =
+      restrictToWorkspace && options?.workspaceDirectory
+        ? this.getOpenWorkspaceFolder(options.workspaceDirectory)
+        : undefined;
+    if (restrictToWorkspace && options?.workspaceDirectory && !restrictedWorkspaceFolder) {
+      return null;
+    }
 
     if (isAbsolute(input)) {
       const uri = vscode.Uri.file(input);
       if (allowMissing) {
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        const workspaceFolder =
+          restrictedWorkspaceFolder ?? vscode.workspace.getWorkspaceFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
       }
       try {
         await vscode.workspace.fs.stat(uri);
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        const workspaceFolder =
+          restrictedWorkspaceFolder ?? vscode.workspace.getWorkspaceFolder(uri);
         if (!restrictToWorkspace) return workspaceFolder ? { uri, workspaceFolder } : { uri };
         const verifiedUri = await resolveInsideWorkspace(uri, workspaceFolder);
         return verifiedUri ? { uri, workspaceFolder, verifiedUri } : null;
@@ -602,17 +624,14 @@ export class ContextProvider implements vscode.Disposable {
       }
     }
 
-    const folders = this.getWorkspaceFoldersInResolutionOrder();
+    const folders = restrictedWorkspaceFolder
+      ? [restrictedWorkspaceFolder]
+      : this.getWorkspaceFoldersInResolutionOrder();
     const resolved = resolveWorkspaceRelativePath(input, folders);
     if (!resolved) return null;
 
     const relativePath = normalizeRelativeWorkspacePath(resolved.relativePath);
     if (!relativePath) return null;
-    // A workspace-relative path never needs to climb out of its folder. The
-    // per-candidate containment check below cannot catch this on the
-    // `allowMissing` fallback, which joins without ever stat-ing the result.
-    if (relativePath.split('/').includes('..')) return null;
-
     const resolutionOrder = resolved.workspaceFolder
       ? [
           resolved.workspaceFolder,
@@ -624,7 +643,12 @@ export class ContextProvider implements vscode.Disposable {
       const candidate = vscode.Uri.file(join(folder.uri.fsPath, relativePath));
       try {
         await vscode.workspace.fs.stat(candidate);
-        if (vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath !== folder.uri.fsPath) {
+        if (
+          !isSameWorkspacePath(
+            vscode.workspace.getWorkspaceFolder(candidate)?.uri.fsPath,
+            folder.uri.fsPath
+          )
+        ) {
           continue;
         }
         if (!restrictToWorkspace) return { uri: candidate, workspaceFolder: folder };
@@ -662,6 +686,12 @@ export class ContextProvider implements vscode.Disposable {
     const preferredFolder = folders.find((folder) => folder.uri.fsPath === preferredPath);
     if (!preferredFolder) return folders;
     return [preferredFolder, ...folders.filter((folder) => folder.uri.fsPath !== preferredPath)];
+  }
+
+  private getOpenWorkspaceFolder(path: string): vscode.WorkspaceFolder | undefined {
+    return vscode.workspace.workspaceFolders?.find((folder) =>
+      isSameWorkspacePath(folder.uri.fsPath, path)
+    );
   }
 
   private getPreferredWorkspacePath(): string | null {
@@ -729,6 +759,10 @@ export class ContextProvider implements vscode.Disposable {
       truncated,
     };
   }
+}
+
+function hasRawParentTraversal(path: string): boolean {
+  return path.replace(/\\/g, '/').split('/').includes('..');
 }
 
 type GitChange = { uri: vscode.Uri };

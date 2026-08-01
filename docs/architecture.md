@@ -5,15 +5,16 @@ This document maps the current Varro codebase to the runtime behavior of the ext
 ## High-Level Flow
 
 1. VS Code activates the extension from `src/extension/extension.ts`.
-2. Activation constructs `OpenCodeServer`, `ContextProvider`, `SidebarProvider`, registers commands, and creates the status bar integration, but it does not start OpenCode yet.
-3. `SidebarProvider` creates the webview, injects initial state, and restores pending attention or interrupted-session snapshots from extension state.
-4. When the view becomes active or the webview sends its first request, Varro either attaches to a running OpenCode server on the configured port or spawns `opencode serve`.
-5. The webview sends `ready`, initializes its bridge listeners, and starts loading sessions, agents, providers, MCP status, questions, and session statuses.
-6. The extension host proxies allowed API requests to the OpenCode server and forwards SSE events into the webview.
-7. The webview updates local state, renders the structured chat UI, and derives higher-level states such as running, attention-needed, failed, completed, and plan-ready sessions.
-8. After reloads, the webview can reconnect to interrupted sessions and continue them when they are still resumable.
+2. Activation constructs `OpenCodeServer`, `ContextProvider`, and the `SidebarProvider` composition root, then registers commands. It does not start OpenCode yet.
+3. `WebviewSession` resolves the view, shows a static loading document, restores host recovery state, and asks `SidebarProviderBridge` to render the final HTML with inline initial state and separate CSS/JS asset URIs.
+4. `src/webview/index.tsx` mounts `AppRoot`; the runtime installs bridge listeners and sends `ready` to the extension host.
+5. The host replays current context, config, status, recovery, and Ralph state, then lazily attaches to a running OpenCode server or spawns `opencode serve`.
+6. Once the server is running, the webview loads sessions, agents, providers, MCP status, questions, and session statuses through the request bridge.
+7. `RestProxy` handles allowed OpenCode and local `/varro/*` requests, while `ServerEventBridge` forwards workspace-scoped SSE events.
+8. The webview stores transport data and derives higher-level running, attention-needed, failed, completed, and plan-ready UI states.
+9. Interrupted sessions can resume after reload, while Ralph loops continue independently in the extension host.
 
-Server startup is deferred: activation only constructs the `OpenCodeServer` object, and the actual `start()` call is issued from `SidebarProvider.ensureServerStarted()` when the UI first needs it.
+Server startup is deferred: activation only constructs `OpenCodeServer`; `SidebarProviderRuntime.ensureServerStarted()` issues the actual start when the UI first needs it.
 
 ## Main Runtime Pieces
 
@@ -80,14 +81,19 @@ Clipboard-sensitive terminal capture is implemented here: Varro reads the termin
 
 This is the main extension-side coordinator.
 
-- Hosts the webview HTML
-- Receives UI messages from the webview
-- Proxies HTTP requests to `OpenCodeServer`
-- Tracks dropped files, file search cache, and provider limit cache
-- Exports sessions by invoking the OpenCode CLI and opening the JSON in VS Code
-- Sends notifications for plan completion, top-level session failures, permissions, and questions, and updates a status bar item when top-level background sessions finish or need attention
+- Composes `WebviewSession`, `SidebarProviderBridge`, `MessageRouter`, `RestProxy`, `ServerEventBridge`, and `RalphHost`
+- Connects focused services for context files, dropped files, search, provider limits, exports, diffs, pins, hidden sessions, and the recycle bin
+- Uses `SessionStateManager` to drive plan/failure/permission/question notifications and the status bar
+- Keeps routing and lifecycle ownership in the focused components rather than implementing those concerns directly
 
-It also restores pending permission or question prompts across reloads and serializes that state into the initial webview payload.
+Supporting host components define the main boundaries:
+
+- `src/extension/webview-session.ts`: webview resolution, recovery snapshots, initial state, ready/visibility handling, and queued commands
+- `src/extension/sidebar-provider-bridge.ts` and `webview-html.ts`: resource URIs, CSP, HTML, and extension/webview posting
+- `src/extension/message-router.ts` and `sidebar-provider-actions.ts`: validated webview command dispatch
+- `src/extension/rest-proxy.ts`: OpenCode REST forwarding and local `/varro/*` endpoints
+- `src/extension/server-event-bridge.ts`: server status and workspace-scoped event forwarding
+- `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
 
 It also exposes the Varro extension-host API namespace, `/varro/*`.
 
@@ -153,7 +159,7 @@ Handles attachment semantics.
 
 #### Boot
 
-`src/extension/sidebar-provider.ts` serializes an `InitialWebviewState` into the HTML payload.
+`WebviewSession` builds `InitialWebviewState`, and `SidebarProviderBridge` passes it to `webview-html.ts` for safe inline serialization. The document installs a minimal pre-bundle failure fallback before loading `dist/webview/webview.js` and `webview.css` as separate webview resources.
 
 That initial state includes:
 
@@ -166,14 +172,16 @@ That initial state includes:
 - interrupted session IDs
 - pending permission and question snapshots
 
-`src/webview/App.tsx` shows either:
+`src/webview/index.tsx` mounts `AppRoot` and preserves a generic reload fallback for bootstrap failures. `src/webview/App.tsx` then shows:
 
-- `Chat` when the server is running and at least one provider is available
+- `WorkspaceLoading` while a running connection restores its initial data
+- `RestartBlocked` when active work prevents a server restart
+- `Chat` when the server is running and providers are available
 - `ServerStatus` otherwise
 
 #### State
 
-`src/webview/lib/state.ts` is the source of truth for UI state.
+`src/webview/lib/app-state.ts` owns the central Solid state. `src/webview/lib/state.ts` is its compatibility barrel, and focused facades under `src/webview/lib/stores/` group app, session, composer, routing, permissions, UI, and Ralph operations for the runtime.
 
 It stores:
 
@@ -213,15 +221,19 @@ The runtime also handles workspace filtering for sessions, stale loading recover
 
 Key components:
 
-- `src/webview/components/Chat.tsx`: session header, session list, and top-level chat layout
+- `src/webview/App.tsx`: runtime installation and top-level loading, restart-blocked, server-status, and chat selection
+- `src/webview/components/Chat.tsx`: session filtering, navigation, responsive layout state, and transport banners
+- `src/webview/components/chat/ChatWorkspace.tsx`: session pane, active-chat shell, composer placement, and Ralph dashboard selection
+- `src/webview/components/chat/ChatHeader.tsx` and `SessionListView.tsx`: headers, status filters, search, and session trees
 - `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent/MCP pickers, queueing, send modes, and the `/ralph` launcher
 - `src/webview/components/MessageList.tsx`: chat transcript and loading state
-- `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message rendering
+- `src/webview/components/message-list/MessageRows.tsx` and `VirtualizedContent.tsx`: row rendering and virtualization
+- `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message and tool-part rendering
 - `src/webview/components/PermissionPrompt.tsx`: inline approval UI
 - `src/webview/components/QuestionPrompt.tsx`: inline question UI
 - `src/webview/components/TodoList.tsx`: task progress surface
 - `src/webview/components/DiffView.tsx`: file change summaries
-- `src/webview/components/SettingsPanel.tsx`: model visibility settings
+- `src/webview/components/ModelsPanel.tsx`: model visibility and routing settings
 - `src/webview/components/ralph/RalphForm.tsx`: Ralph loop setup form for plan path, iteration cap, model selection, and prompt-template overrides
 - `src/webview/components/ralph/RalphDashboard.tsx` and `RalphIterationCard.tsx`: manager-session dashboard, controls, stop reasons, and per-iteration summaries
 
@@ -330,7 +342,7 @@ The webview adds more derived states on top of that data.
 
 ## Notable implementation details
 
-- The webview is bundled and inlined into the HTML payload instead of loaded as separate local resources.
+- The webview JavaScript and CSS are bundled as separate local webview resources; only initial state and the small host bridge bootstrap are inline under a CSP nonce.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
 - Queued follow-up prompts are stored client-side and auto-dispatched once the active session becomes idle.

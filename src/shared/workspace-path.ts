@@ -1,8 +1,8 @@
 export function normalizeWorkspaceIdentity(path: string | null | undefined): string | null {
   if (!path) return null;
 
-  const windowsPath = /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(path);
-  let normalized = path.replace(/\\/g, '/');
+  const windowsPath = isWindowsWorkspacePath(path);
+  let normalized = windowsPath ? path.replace(/\\/g, '/') : path;
   if (normalized.startsWith('//')) {
     normalized = `//${normalized.slice(2).replace(/\/+/g, '/')}`;
   } else {
@@ -14,6 +14,10 @@ export function normalizeWorkspaceIdentity(path: string | null | undefined): str
   }
   if (!normalized) return null;
   return windowsPath ? normalized.toLowerCase() : normalized;
+}
+
+function isWindowsWorkspacePath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+(?:[\\/]|$)/.test(path);
 }
 
 export function isSameWorkspacePath(

@@ -2,6 +2,7 @@ import { For, Index, Show, createEffect, createMemo, createSignal, onCleanup } f
 import { Portal } from 'solid-js/web';
 import { postMessage } from '../lib/bridge';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { trapModalFocus } from '../lib/modal-focus';
 import { getLeafPathName } from '../lib/path-display';
 import { observeSettledResize } from '../lib/settled-resize-observer';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
@@ -1080,8 +1081,12 @@ function DiffItem(props: {
         {(mount) => (
           <Portal mount={mount()}>
             <section
+              ref={(element) =>
+                onCleanup(trapModalFocus(element, { preventScrollOnRestore: true }))
+              }
               class="diff-view-overlay animate-fade-in"
               role="dialog"
+              aria-modal="true"
               aria-label={`Expanded changes in ${displayName()}`}
               onClick={toggleExpanded}
             >

@@ -90,6 +90,7 @@ type PendingRetry = {
 const pendingRetries = new Set<PendingRetry>();
 const API_CALL_TIMEOUT_MS = 35_000;
 const API_CALL_LONG_TIMEOUT_MS = 40_000;
+const API_CALL_MCP_AUTH_TIMEOUT_MS = 315_000;
 const API_CALL_RETRY_DELAY_MS = 150;
 export const SLOW_API_REQUEST_THRESHOLD_MS = 15_000;
 
@@ -110,7 +111,7 @@ export function apiCall<T = unknown>(
   options?: ApiCallOptions
 ): Promise<T> {
   return sendApiCall(method, path, body, {
-    timeoutMs: options?.timeoutMs ?? defaultTimeoutForPath(path),
+    timeoutMs: options?.timeoutMs ?? defaultTimeoutForRequest(method, path),
     signal: options?.signal,
     retries: options?.retries ?? 1,
   });
@@ -246,10 +247,14 @@ function describeSendError(value: unknown): string {
 }
 
 function sanitizeDiagnosticPath(path: string): string {
+  return parsePathname(path);
+}
+
+function parsePathname(path: string): string {
   try {
     return new URL(path, 'http://varro.local').pathname;
   } catch {
-    return path.split('?')[0] || '/';
+    return path.split(/[?#]/)[0] || '/';
   }
 }
 
@@ -258,6 +263,12 @@ function notifySlowApiRequestsChanged() {
   for (const handler of slowApiRequestHandlers) handler(snapshot);
 }
 
-function defaultTimeoutForPath(path: string) {
-  return /\/prompt_async$|\/summarize$/.test(path) ? API_CALL_LONG_TIMEOUT_MS : API_CALL_TIMEOUT_MS;
+function defaultTimeoutForRequest(method: string, path: string) {
+  const pathname = parsePathname(path);
+  if (method.toUpperCase() === 'POST' && /^\/mcp\/[^/]+\/auth\/authenticate$/.test(pathname)) {
+    return API_CALL_MCP_AUTH_TIMEOUT_MS;
+  }
+  return /\/prompt_async$|\/summarize$/.test(pathname)
+    ? API_CALL_LONG_TIMEOUT_MS
+    : API_CALL_TIMEOUT_MS;
 }

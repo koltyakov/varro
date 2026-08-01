@@ -473,8 +473,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [caretPosition, setCaretPosition] = createSignal(0);
   // Guards async paste follow-ups against landing in a torn-down composer.
   let composerDisposed = false;
+  const pendingImagePastes = new Set<{
+    sessionId: string | null;
+    mutationVersion: number;
+    value: string;
+  }>();
   onCleanup(() => {
     composerDisposed = true;
+    pendingImagePastes.clear();
   });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
@@ -1753,42 +1759,95 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     e.preventDefault();
 
+    const owner = {
+      sessionId: composerSessionId(),
+      mutationVersion: inputTextMutationVersion(),
+      value: inputText(),
+    };
+    pendingImagePastes.add(owner);
+    const ownsActiveComposer = () =>
+      !composerDisposed &&
+      composerSessionId() === owner.sessionId &&
+      inputTextMutationVersion() === owner.mutationVersion &&
+      inputText() === owner.value;
+    const imageFiles: File[] = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file || file.size > MAX_CLIPBOARD_IMAGE_SIZE) continue;
+      imageFiles.push(file);
+      if (imageFiles.length >= MAX_CLIPBOARD_IMAGES) break;
+    }
+
+    const stagedImages = await Promise.all(
+      imageFiles.map(async (file) => {
+        try {
+          return {
+            url: await readFileAsDataUrl(file),
+            mime: file.type || 'image/png',
+            size: file.size,
+          };
+        } catch (err) {
+          logError('chat-input:readPastedImage', err);
+          return null;
+        }
+      })
+    );
+    pendingImagePastes.delete(owner);
+    if (!ownsActiveComposer()) return;
+
     const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
     if (availableSlots === 0) return;
 
-    const attachableItems = imageItems.slice(0, availableSlots);
-    const nextIndex = nextPastedImageIndex();
-    let acceptedImageCount = 0;
+    const usedFilenames = new Set(state.clipboardImages.map((image) => image.filename));
     const insertedPlaceholders: string[] = [];
+    let imageIndex = nextPastedImageIndex();
 
-    for (const [index, item] of attachableItems.entries()) {
-      const file = item.getAsFile();
-      if (!file || file.size > MAX_CLIPBOARD_IMAGE_SIZE) continue;
+    for (const image of stagedImages) {
+      if (!image) continue;
+      if (insertedPlaceholders.length >= availableSlots) break;
 
-      const filename = getPastedImageFilename(nextIndex + index);
-      const url = await readFileAsDataUrl(file);
+      let filename = getPastedImageFilename(imageIndex);
+      while (usedFilenames.has(filename)) {
+        imageIndex += 1;
+        filename = getPastedImageFilename(imageIndex);
+      }
+
       const didAddImage = addClipboardImage({
         id: createAttachmentID(),
-        url,
-        mime: file.type || 'image/png',
+        url: image.url,
+        mime: image.mime,
         filename,
-        size: file.size,
+        size: image.size,
       });
 
       if (!didAddImage) continue;
 
-      acceptedImageCount += 1;
+      usedFilenames.add(filename);
       insertedPlaceholders.push(filename);
+      imageIndex += 1;
     }
 
-    setNextPastedImageIndex(nextIndex + acceptedImageCount);
+    if (insertedPlaceholders.length > 0) setNextPastedImageIndex(imageIndex);
 
     if (insertedPlaceholders.length === 0 || inputText().trim().length === 0) return;
 
+    const previousMutationVersion = inputTextMutationVersion();
+    const previousValue = inputText();
     replaceComposerSelection(
       insertedPlaceholders.map((filename) => `[${filename}]`).join(' '),
       true
     );
+    for (const pendingPaste of pendingImagePastes) {
+      if (
+        pendingPaste.sessionId !== owner.sessionId ||
+        pendingPaste.mutationVersion !== previousMutationVersion ||
+        pendingPaste.value !== previousValue
+      ) {
+        continue;
+      }
+      pendingPaste.mutationVersion = inputTextMutationVersion();
+      pendingPaste.value = inputText();
+    }
   }
 
   function handlePasteInsertion(e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) {

@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
     questionReply: vi.fn(),
     questionReject: vi.fn(),
     serverEventsOn: vi.fn(() => () => {}),
+    invalidateClientWorkspaceCaches: vi.fn(),
   },
   bridge: {
     onMessage: vi.fn(() => () => {}),
@@ -59,6 +60,7 @@ const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 
 vi.mock('../lib/client', () => ({
+  invalidateClientWorkspaceCaches: clientMocks.invalidateClientWorkspaceCaches,
   client: {
     health: clientMocks.health,
     command: {
@@ -247,6 +249,7 @@ beforeEach(() => {
   clientMocks.questionReject.mockReset();
   clientMocks.serverEventsOn.mockReset();
   clientMocks.serverEventsOn.mockImplementation(() => () => {});
+  clientMocks.invalidateClientWorkspaceCaches.mockReset();
   bridgeMocks.onMessage.mockReset();
   bridgeMocks.onMessage.mockImplementation(() => () => {});
   bridgeMocks.postMessage.mockReset();

@@ -2059,7 +2059,7 @@ describe('OpenCodeServer restart blockers', () => {
               'session-2': { type: 'retry' },
               idle: { type: 'idle' },
             }
-          : pathname === '/question'
+          : pathname === '/question' || pathname === '/permission'
             ? [{ sessionID: 'session-2' }, { sessionID: 'session-3' }]
             : [
                 { id: 'session-1', directory: 'C:\\Repo' },
@@ -2076,6 +2076,69 @@ describe('OpenCodeServer restart blockers', () => {
         { directory: 'C:\\Repo', sessionCount: 2 },
       ],
     });
+  });
+
+  it('persists an inactive rescope as the desired server workspace', async () => {
+    const server = new OpenCodeServer(4096, true);
+
+    await expect(server.rescopeEventStream('/repo-selected')).resolves.toEqual({
+      state: 'inactive',
+      directory: '/repo-selected',
+    });
+
+    expect(server.getWorkspaceCwd()).toBe('/repo-selected');
+
+    configureManagedStartup(server);
+    await server.start();
+    const launch = spawnMock.mock.calls.find((call) =>
+      (call[1] as string[] | undefined)?.includes('serve')
+    );
+    expect(launch?.[2]).toEqual(expect.objectContaining({ cwd: '/repo-selected' }));
+  });
+
+  it('merges unscoped status, question, permission, and observed session IDs', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session/status') return { 'session-1': { type: 'busy' } };
+      if (path === '/question') return [{ sessionID: 'session-2' }];
+      if (path === '/permission') return [{ sessionID: 'session-3' }];
+      if (path === '/session') return [];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const api = server as unknown as {
+      transport: {
+        request: typeof request;
+        getPendingAttentionSessionIDs: () => string[];
+      };
+    };
+    api.transport.request = request;
+    api.transport.getPendingAttentionSessionIDs = () => ['session-1', 'session-4'];
+
+    await expect(server.readRestartBlockers()).resolves.toEqual({
+      totalSessionCount: 4,
+      directories: [{ directory: null, sessionCount: 4 }],
+    });
+    expect(request).toHaveBeenCalledWith('GET', '/session/status', undefined, { unscoped: true });
+    expect(request).toHaveBeenCalledWith('GET', '/question', undefined, { unscoped: true });
+    expect(request).toHaveBeenCalledWith('GET', '/permission', undefined, { unscoped: true });
+  });
+
+  it.each([
+    ['/session/status', { 'session-1': { state: 'busy' } }, 'session status'],
+    ['/question', [{}], 'pending question'],
+    ['/permission', [{}], 'pending permission'],
+  ])('fails closed for a malformed %s entry', async (malformedPath, malformed, message) => {
+    const server = new OpenCodeServer(4096, true);
+    const api = server as unknown as {
+      transport: { request: ReturnType<typeof vi.fn> };
+    };
+    api.transport.request = vi.fn(async (_method: string, path: string) => {
+      if (path === malformedPath) return malformed;
+      if (path === '/session/status') return {};
+      return [];
+    });
+
+    await expect(server.readRestartBlockers()).rejects.toThrow(`invalid ${message} response`);
   });
 
   it('allows force restart without running the active-session preflight', async () => {
@@ -2126,6 +2189,130 @@ describe('OpenCodeServer restart blockers', () => {
     expect(takeOwnershipOfExistingServer).toHaveBeenCalledOnce();
     expect(stopServerForRestart).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledOnce();
+  });
+});
+
+describe('OpenCodeServer adopted process recovery', () => {
+  it('coalesces degraded checks and leaves a live adopted server running', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const revalidation = deferred<boolean>();
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      updateEventStreamState: (state: 'healthy' | 'degraded') => void;
+      startOperation: typeof startOperation;
+      processManager: {
+        isAdoptedManagedServer: boolean;
+        revalidateAdoptedManagedServer: ReturnType<typeof vi.fn>;
+      };
+    };
+    Object.defineProperty(api.processManager, 'isAdoptedManagedServer', {
+      configurable: true,
+      get: () => true,
+    });
+    api.processManager.revalidateAdoptedManagedServer = vi.fn(() => revalidation.promise);
+    api.startOperation = startOperation;
+
+    api.updateEventStreamState('degraded');
+    api.updateEventStreamState('degraded');
+    expect(api.processManager.revalidateAdoptedManagedServer).toHaveBeenCalledOnce();
+
+    revalidation.resolve(true);
+    await flushMicrotasks();
+
+    expect(server.status).toEqual({
+      state: 'running',
+      url: server.url,
+      eventStream: 'degraded',
+    });
+    expect(startOperation).not.toHaveBeenCalled();
+  });
+
+  it('uses the runtime retry path when the adopted server identity disappears', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const api = server as unknown as {
+      updateEventStreamState: (state: 'healthy' | 'degraded') => void;
+      startOperation: typeof startOperation;
+      processManager: {
+        isAdoptedManagedServer: boolean;
+        revalidateAdoptedManagedServer: ReturnType<typeof vi.fn>;
+      };
+    };
+    Object.defineProperty(api.processManager, 'isAdoptedManagedServer', {
+      configurable: true,
+      get: () => true,
+    });
+    api.processManager.revalidateAdoptedManagedServer = vi.fn().mockResolvedValue(false);
+    api.startOperation = startOperation;
+
+    api.updateEventStreamState('degraded');
+    await flushMicrotasks();
+
+    expect(server.status.state).toBe('stopped');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(startOperation).toHaveBeenCalledWith(true);
+  });
+
+  it('does not run degraded recovery for an ordinary managed child', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const api = server as unknown as {
+      updateEventStreamState: (state: 'healthy' | 'degraded') => void;
+      processManager: {
+        process: MockChildProcess;
+        managedProcess: boolean;
+        revalidateAdoptedManagedServer: ReturnType<typeof vi.fn>;
+      };
+    };
+    api.processManager.process = createMockChildProcess();
+    api.processManager.managedProcess = true;
+    api.processManager.revalidateAdoptedManagedServer = vi.fn();
+
+    api.updateEventStreamState('degraded');
+    await flushMicrotasks();
+
+    expect(api.processManager.revalidateAdoptedManagedServer).not.toHaveBeenCalled();
+    expect(server.status).toEqual({
+      state: 'running',
+      url: server.url,
+      eventStream: 'degraded',
+    });
+  });
+
+  it('does not schedule adopted recovery after disposal begins', async () => {
+    const server = new OpenCodeServer(4096, true);
+    setRunning(server);
+    const revalidation = deferred<boolean>();
+    const startOperation = vi.fn().mockResolvedValue(server.url);
+    const disposeProcess = vi.fn().mockResolvedValue(undefined);
+    const api = server as unknown as {
+      updateEventStreamState: (state: 'healthy' | 'degraded') => void;
+      startOperation: typeof startOperation;
+      processManager: {
+        isAdoptedManagedServer: boolean;
+        revalidateAdoptedManagedServer: ReturnType<typeof vi.fn>;
+        disposeProcess: typeof disposeProcess;
+      };
+    };
+    Object.defineProperty(api.processManager, 'isAdoptedManagedServer', {
+      configurable: true,
+      get: () => true,
+    });
+    api.processManager.revalidateAdoptedManagedServer = vi.fn(() => revalidation.promise);
+    api.processManager.disposeProcess = disposeProcess;
+    api.startOperation = startOperation;
+
+    api.updateEventStreamState('degraded');
+    const disposal = server.dispose();
+    revalidation.resolve(true);
+    await disposal;
+    await vi.runAllTimersAsync();
+
+    expect(startOperation).not.toHaveBeenCalled();
+    expect(disposeProcess).toHaveBeenCalledWith({ stopProcess: true });
+    expect(server.status.state).toBe('stopped');
   });
 });
 
@@ -2244,13 +2431,27 @@ describe('OpenCodeServer managed process lifecycle', () => {
   it('updates status and restarts when a managed child exits after startup', async () => {
     const server = new OpenCodeServer(4096, true);
     const { children } = configureManagedStartup(server);
+    const transport = (
+      server as unknown as {
+        transport: {
+          observeServerEvent(event: unknown): void;
+          hasPendingAttentionRequests(): boolean;
+        };
+      }
+    ).transport;
 
     await expect(server.start()).resolves.toBe(server.url);
     expect(children).toHaveLength(1);
+    transport.observeServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-1', sessionID: 'session-1' },
+    });
+    expect(transport.hasPendingAttentionRequests()).toBe(true);
 
     children[0]!.emit('exit', 1, null);
 
     expect(server.status.state).toBe('stopped');
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
     await vi.advanceTimersByTimeAsync(1_000);
     await flushMicrotasks();
 

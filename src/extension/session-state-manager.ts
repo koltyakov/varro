@@ -458,6 +458,7 @@ export class SessionStateManager {
     options?: {
       previousRequests?: BlockingRequestSnapshot[];
       clearResolvedEmbedded?: boolean;
+      workspacePath?: string | null;
     }
   ) {
     const currentRequests = [...this.pendingAttention.entries()]
@@ -468,7 +469,11 @@ export class SessionStateManager {
         props: request.props,
         eventType: request.eventType,
       }))
-      .filter((item) => !hiddenSessionIds.has(item.sessionID));
+      .filter(
+        (item) =>
+          !hiddenSessionIds.has(item.sessionID) &&
+          this.isSessionInWorkspace(item.sessionID, options?.workspacePath)
+      );
     const currentRequestIds = new Set(currentRequests.map((item) => item.id));
 
     if (options?.clearResolvedEmbedded) {

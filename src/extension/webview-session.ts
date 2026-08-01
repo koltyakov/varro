@@ -48,7 +48,10 @@ export class WebviewSession {
     private readonly bridge: SidebarProviderBridge,
     private readonly sessionState: Pick<
       SessionStateManager,
-      'clearCompleted' | 'consumeRecoverySnapshot' | 'replayBlockingRequests'
+      | 'clearCompleted'
+      | 'consumeRecoverySnapshot'
+      | 'isSessionInWorkspace'
+      | 'replayBlockingRequests'
     >,
     private readonly sessionTrash: Pick<
       SessionTrashManager,
@@ -213,7 +216,11 @@ export class WebviewSession {
     this.postBootMessages(status, { clearResolvedEmbedded: true });
     this.flushPendingCommands();
     this.handleInterruptedSessionNotification();
-    void this.deps.handleReadySideEffects().catch(() => {});
+    void this.deps.handleReadySideEffects().catch((err) => {
+      logger.error(
+        `Webview ready side effects failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
     void this.deps.ensureServerStarted().catch(() => {});
   }
 
@@ -221,7 +228,11 @@ export class WebviewSession {
     const status = this.deps.renderStatus();
     this.sessionState.clearCompleted();
     this.postBootMessages(status);
-    void this.deps.handleVisibleSideEffects().catch(() => {});
+    void this.deps.handleVisibleSideEffects().catch((err) => {
+      logger.error(
+        `Webview visible side effects failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
     void this.deps.ensureServerStarted().catch(() => {});
   }
 
@@ -286,10 +297,22 @@ export class WebviewSession {
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')
         .filter((item) => !this.isHiddenSession(item.sessionID))
+        .filter((item) =>
+          this.sessionState.isSessionInWorkspace(
+            item.sessionID,
+            this.contextProvider.context.workspacePath
+          )
+        )
         .map((item) => item.props),
       pendingQuestions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'question')
         .filter((item) => !this.isHiddenSession(item.sessionID))
+        .filter((item) =>
+          this.sessionState.isSessionInWorkspace(
+            item.sessionID,
+            this.contextProvider.context.workspacePath
+          )
+        )
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
     };
@@ -318,6 +341,7 @@ export class WebviewSession {
       {
         previousRequests: this.blockingRequestsForWebview,
         clearResolvedEmbedded: options?.clearResolvedEmbedded,
+        workspacePath: this.contextProvider.context.workspacePath,
       }
     );
     this.flushPendingInputFocus();

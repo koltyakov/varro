@@ -1,4 +1,5 @@
-import { createSignal, onCleanup, onMount } from 'solid-js';
+import { batch, createSignal, onCleanup, onMount } from 'solid-js';
+import { reconcile } from 'solid-js/store';
 import type {
   AutoApproveJudgeReference,
   ExtensionMessage,
@@ -7,16 +8,17 @@ import type {
 } from '../../../shared/protocol';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
-import { client } from '../../lib/client';
+import * as clientModule from '../../lib/client';
 import type { QueuedMessage, SessionSelectionOptions } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
-import { sessionStore } from '../../lib/stores/session-store';
+import { resetSessionStatusSnapshotTracking, sessionStore } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
+import { resetMessageEditState } from '../../lib/message-edit-state';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
@@ -99,6 +101,12 @@ import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
 import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
 
+const client = clientModule.client;
+
+function invalidateClientWorkspaceState() {
+  clientModule.invalidateClientWorkspaceCaches();
+}
+
 export interface OpenCodeRuntime {
   useOpenCode(): { client: typeof client };
   recheckSessionStatus(sessionId: string): Promise<void>;
@@ -162,6 +170,7 @@ export interface OpenCodeRuntime {
 }
 
 function logError(context: string, err: unknown) {
+  if (err instanceof WorkspaceLoadInvalidatedError) return;
   postMessage({
     type: 'log',
     payload: {
@@ -171,6 +180,8 @@ function logError(context: string, err: unknown) {
     },
   });
 }
+
+class WorkspaceLoadInvalidatedError extends Error {}
 
 function isCurrentGeneration(current: number, expected: number) {
   return current === expected;
@@ -278,9 +289,10 @@ function isNotFoundError(err: unknown) {
 
 async function fetchSessionMessages(
   sessionId: string,
-  options?: { resetHistoryWindow?: boolean }
+  options?: { resetHistoryWindow?: boolean; isCurrent?: () => boolean }
 ): Promise<MessageEntry[]> {
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
+  if (options?.isCurrent?.() === false) return incoming;
   const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
   if (options?.resetHistoryWindow || current.length === 0) {
     clearCachedSessionHistoryPages(sessionId);
@@ -288,7 +300,7 @@ async function fetchSessionMessages(
     setSessionHistoryPrompts(sessionId, []);
     setSessionHistoryPromptCursor(sessionId, incoming.nextCursor);
     if (incoming.nextCursor) {
-      void loadSessionBoundaryPrompts(sessionId, incoming.nextCursor);
+      void loadSessionBoundaryPrompts(sessionId, incoming.nextCursor, options?.isCurrent);
     }
   }
   const messages = mergeWindowedHistory(current, incoming);
@@ -298,7 +310,11 @@ async function fetchSessionMessages(
 
 const promptHistoryLoads = new Map<string, Promise<boolean>>();
 
-function loadOlderSessionPrompts(sessionId: string, initialCursor?: string): Promise<boolean> {
+function loadOlderSessionPrompts(
+  sessionId: string,
+  initialCursor?: string,
+  isCurrent: () => boolean = () => true
+): Promise<boolean> {
   const existing = promptHistoryLoads.get(sessionId);
   if (existing) return existing;
 
@@ -311,6 +327,7 @@ function loadOlderSessionPrompts(sessionId: string, initialCursor?: string): Pro
         limit: MESSAGE_HISTORY_WINDOW,
         before: cursor,
       });
+      if (!isCurrent()) return false;
       cacheSessionHistoryPage(sessionId, cursor, page);
       setSessionHistoryPromptCursor(sessionId, page.nextCursor);
       const prompts = page.filter((entry) => entry.info.role === 'user');
@@ -326,40 +343,54 @@ function loadOlderSessionPrompts(sessionId: string, initialCursor?: string): Pro
     return false;
   })()
     .catch((err: unknown) => {
-      logError('loadOlderSessionPrompts', err);
+      if (isCurrent()) logError('loadOlderSessionPrompts', err);
       return false;
     })
-    .finally(() => promptHistoryLoads.delete(sessionId));
+    .finally(() => {
+      if (promptHistoryLoads.get(sessionId) === load) promptHistoryLoads.delete(sessionId);
+    });
   promptHistoryLoads.set(sessionId, load);
   return load;
 }
 
-function loadSessionBoundaryPrompts(sessionId: string, initialCursor: string): Promise<void> {
+function loadSessionBoundaryPrompts(
+  sessionId: string,
+  initialCursor: string,
+  isCurrent: () => boolean = () => true
+): Promise<void> {
   const existing = promptHistoryLoads.get(sessionId);
-  if (!existing) return loadOlderSessionPrompts(sessionId, initialCursor).then(() => {});
+  if (!existing) return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent).then(() => {});
   return existing.then(() => {
+    if (!isCurrent()) return;
     if (getSessionHistoryPromptCursor(sessionId) !== initialCursor) return;
-    return loadOlderSessionPrompts(sessionId, initialCursor).then(() => {});
+    return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent).then(() => {});
   });
 }
 
-async function loadSessionWithMessages(sessionId: string): Promise<{
+async function loadSessionWithMessages(
+  sessionId: string,
+  isCurrent: () => boolean = () => true
+): Promise<{
   session: Session;
   messages: MessageEntry[];
 }> {
-  const messagesPromise = fetchSessionMessages(sessionId, { resetHistoryWindow: true }).catch(
-    (err: unknown) => {
-      if (isNotFoundError(err)) return [];
-      throw err;
-    }
-  );
+  const messagesPromise = fetchSessionMessages(sessionId, {
+    resetHistoryWindow: true,
+    isCurrent,
+  }).catch((err: unknown) => {
+    if (isNotFoundError(err)) return [];
+    throw err;
+  });
   const [session, messages] = await Promise.all([client.session.get(sessionId), messagesPromise]);
   return { session, messages };
 }
 
-async function loadSessionMessagesAllowingEmpty(sessionId: string): Promise<MessageEntry[]> {
+async function loadSessionMessagesAllowingEmpty(
+  sessionId: string,
+  isCurrent: () => boolean = () => true
+): Promise<MessageEntry[]> {
   try {
-    return await fetchSessionMessages(sessionId);
+    return await fetchSessionMessages(sessionId, { isCurrent });
   } catch (err) {
     if (isNotFoundError(err)) return [];
     throw err;
@@ -440,11 +471,75 @@ async function deleteSessionImmediately(id: string) {
   clearSessionMessageWindowState(id);
 }
 
+export function resetWorkspaceDerivedState() {
+  batch(() => {
+    sessionStore.setActiveSessionId(null);
+    sessionStore.persistActiveSessionId(null);
+    sessionStore.clearMessages();
+    appStore.setState('sessions', []);
+    appStore.setState('sessionsLoadError', null);
+    appStore.setState('recycleBinEntries', []);
+    appStore.setState('recycleBinLoadError', null);
+    appStore.setState('messagesLoading', false);
+    appStore.setState('sessionStatus', reconcile({}));
+    appStore.setState('permissions', []);
+    appStore.setState('questions', []);
+    appStore.setState('compactingSessionIds', []);
+    appStore.setState('queuedMessageDispatchingId', null);
+    appStore.setState('failedQueuedMessageIds', []);
+    appStore.setState('queuedMessageEdit', null);
+    appStore.setState('failedSessionIds', []);
+    appStore.setState('sessionMessageCounts', reconcile({}));
+    appStore.setState('sessionUsageLimits', reconcile({}));
+    appStore.setState('interruptedSessionIds', []);
+
+    appStore.setState('providersLoaded', false);
+    appStore.setState('agents', []);
+    appStore.setState('allAgents', []);
+    appStore.setState('commands', []);
+    appStore.setState('providers', []);
+    appStore.setState('providerLimits', reconcile({}));
+    appStore.setState('mcpStatus', reconcile({}));
+    appStore.setState('providerDefaults', reconcile({}));
+    appStore.setState('providerAuthMethods', reconcile({}));
+    appStore.setState('workspaceStatuses', []);
+    appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
+    appStore.setState('draftSelectedMcps', null);
+    routingStore.setSelectedAgent(routingStore.getPersistedSelectedAgent(), {
+      persistGlobal: false,
+    });
+    routingStore.setSelectedModel(routingStore.getPersistedSelectedModel(), {
+      persistGlobal: false,
+    });
+
+    composerStore.clearContextFiles();
+    composerStore.clearClipboardImages();
+    composerStore.clearTerminalSelection();
+    composerStore.clearAttachedDiagnostics();
+    composerStore.setInputText('');
+    composerStore.resetPastedImageIndex();
+    uiStore.stopLoading();
+    uiStore.setError(null);
+    uiStore.setShowSessionPicker(false);
+    uiStore.setShowModelPicker(false);
+    uiStore.setShowSettings(false);
+  });
+
+  appStore.defaultAppState.sessionTreeIndex.invalidate();
+  appStore.defaultAppState.setSessionUsageLimitVersion((version) => version + 1);
+  resetSessionStatusSnapshotTracking();
+  resetMessageEditState();
+  resetToolCallExpansionState();
+  resetMessageWindowState();
+}
+
 export function createOpenCodeRuntime(): OpenCodeRuntime {
   let initialized = false;
-  let initializing = false;
+  let initializationAttemptGeneration = 0;
+  let activeInitializationAttempt: number | null = null;
   let eventHandlerCleanups: Array<() => void> = [];
-  let currentWorkspacePath: string | null = null;
+  let currentWorkspacePath: string | null | undefined;
+  let workspaceGeneration = 0;
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
   let approvedPermissionReferences: AutoApproveJudgeReference[] = [];
@@ -480,7 +575,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     syncSessionMessages: (sessionId) => syncSessionMessages(sessionId),
     syncBusySessionMessages: (sessionId) => syncPolledSessionMessages(sessionId),
     loadSessionStatuses: loadSessionStatusesFromSnapshot,
-    loadSessionStatusSnapshot: statusSnapshots.load,
+    loadSessionStatusSnapshot: loadCurrentSessionStatusSnapshot,
     isActiveSession: (sessionId) => appStore.state.activeSessionId === sessionId,
     getMessages: () => appStore.state.messages,
     onSessionSettled: () => {
@@ -501,7 +596,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   } = sessionStatusOperations;
 
   const sessionLifecycleOperations = new SessionLifecycleOperations({
-    getCurrentWorkspacePath: () => currentWorkspacePath,
+    getCurrentWorkspacePath: () => currentWorkspacePath ?? null,
     clearPendingAbort,
     clearPendingAbortTree,
     resetTodoSync,
@@ -532,7 +627,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       }
       await syncSession(sessionId);
     })().finally(() => {
-      sessionTitleFallbacks.delete(sessionId);
+      if (sessionTitleFallbacks.get(sessionId) === fallback) {
+        sessionTitleFallbacks.delete(sessionId);
+      }
     });
     sessionTitleFallbacks.set(sessionId, fallback);
     return fallback;
@@ -575,14 +672,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
       const mountBridgeOperations = createMountBridgeOperations({
         ensureConnectionInitialized,
+        getServerState: () => appStore.state.serverStatus.state,
+        invalidateConnection,
         getCurrentWorkspacePath: () => currentWorkspacePath,
         setCurrentWorkspacePath: (path) => {
           currentWorkspacePath = path;
         },
-        reloadSessionsForWorkspaceChange: () => {
-          resetMessageWindowState();
-          void loadSessions();
-        },
+        resetWorkspaceForChange,
+        reloadWorkspaceAfterChange,
         isInitialized: () => initialized,
         createSession: (prefill) => {
           startNewChatDraft();
@@ -631,18 +728,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         disposeFocusTracking();
         for (const cleanup of eventHandlerCleanups) cleanup();
         eventHandlerCleanups = [];
-        initialized = false;
-        uiStore.setConnectionInitialized(false);
-        initializing = false;
-        currentWorkspacePath = null;
-        connectionGeneration = 0;
-        sessionSelectionGeneration = 0;
-        permissionSyncGeneration = 0;
-        latestPermissionSyncGeneration = 0;
-        permissionSnapshotGeneration = 0;
-        pendingAbortRetryAttempts.clear();
-        statusSnapshots.clear();
-        messageSyncGenerations.clear();
+        invalidateConnection();
+        currentWorkspacePath = undefined;
         resetMessageWindowState();
         setDocumentVisible(document.visibilityState === 'visible');
       });
@@ -759,14 +846,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function loadSessionStatusesFromSnapshot(): Promise<Record<string, SessionStatus>> {
-    const snapshot = await statusSnapshots.load();
+    const snapshot = await loadCurrentSessionStatusSnapshot();
     statusSnapshotStartedAt.set(snapshot.statuses, snapshot.startedAt);
     return snapshot.statuses;
   }
 
+  async function loadCurrentSessionStatusSnapshot(): Promise<SessionStatusSnapshot> {
+    const generation = workspaceGeneration;
+    const snapshot = await statusSnapshots.load();
+    if (generation !== workspaceGeneration) throw new WorkspaceLoadInvalidatedError();
+    return snapshot;
+  }
+
   async function hydratePolledSessionStatuses(): Promise<void> {
     try {
-      const snapshot = await statusSnapshots.load();
+      const snapshot = await loadCurrentSessionStatusSnapshot();
       sessionStore.setSessionStatuses(snapshot.statuses, {
         snapshotStartedAt: snapshot.startedAt,
       });
@@ -882,11 +976,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     refreshProviderLimit,
     loadSessions,
     loadRecycleBin,
+    invalidateWorkspace,
   } = dataLoaders;
   const hydrateSessionStatuses = hydratePolledSessionStatuses;
 
   async function refreshRoutingState() {
-    await dataLoaders.refreshRoutingState();
+    await Promise.all([dataLoaders.refreshRoutingState(), loadCompatibilityState()]);
   }
 
   async function reconcileServerState() {
@@ -900,7 +995,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadMcps(),
       loadCommands(),
       refreshRoutingState(),
-      loadCompatibilityState(),
       ...(activeSessionId ? [syncSession(activeSessionId)] : []),
     ]);
     for (const result of results) {
@@ -928,6 +1022,57 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   });
 
   const { syncSessionMcps } = sessionMcpOperations;
+
+  function invalidateInitializationAttempt() {
+    initializationAttemptGeneration += 1;
+    activeInitializationAttempt = null;
+  }
+
+  function invalidateWorkspaceAsyncWork() {
+    workspaceGeneration += 1;
+    sessionSelectionGeneration += 1;
+    permissionSyncGeneration += 1;
+    latestPermissionSyncGeneration = permissionSyncGeneration;
+    permissionSnapshotGeneration += 1;
+    invalidateWorkspace();
+    statusSnapshots.clear();
+    messageSyncGenerations.clear();
+    sessionMcpOperations.invalidate();
+    pendingAbortRetryAttempts.clear();
+    stuckSessionTimers.clear();
+    sessionTitleFallbackAttempts.clear();
+    sessionTitleFallbacks.clear();
+    fullHistoryLoads.clear();
+    historyPageLoads.clear();
+    promptHistoryLoads.clear();
+    approvedPermissionReferences = [];
+  }
+
+  function invalidateConnection() {
+    invalidateClientWorkspaceState();
+    connectionGeneration += 1;
+    invalidateInitializationAttempt();
+    invalidateWorkspaceAsyncWork();
+    initialized = false;
+    uiStore.setConnectionInitialized(false);
+  }
+
+  function resetWorkspaceForChange() {
+    invalidateClientWorkspaceState();
+    connectionGeneration += 1;
+    invalidateInitializationAttempt();
+    invalidateWorkspaceAsyncWork();
+    resetWorkspaceDerivedState();
+  }
+
+  function reloadWorkspaceAfterChange(wasInitialized: boolean) {
+    if (appStore.state.serverStatus.state !== 'running') return;
+    if (wasInitialized) {
+      void reconcileServerState();
+      return;
+    }
+    ensureConnectionInitialized();
+  }
 
   async function applySessionMcps(names: string[], sessionId = appStore.state.activeSessionId) {
     await sessionMcpOperations.applySessionMcps(names, sessionId);
@@ -973,7 +1118,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       appStore.state.questions.some((item) => item.sessionID === sessionId),
     hasPendingPermission: (sessionId) =>
       appStore.state.permissions.some((item) => item.sessionID === sessionId),
-    loadSessionMessages: loadSessionMessagesAllowingEmpty,
+    loadSessionMessages: (sessionId) => {
+      const generation = workspaceGeneration;
+      return loadSessionMessagesAllowingEmpty(sessionId, () => generation === workspaceGeneration);
+    },
     logError,
     syncSessionMcps,
     resolveModel: (id) =>
@@ -1034,10 +1182,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   function ensureConnectionInitialized() {
     ensureConnectionInitializedWithDependencies({
       isInitialized: () => initialized,
-      isInitializing: () => initializing,
+      isInitializing: () => activeInitializationAttempt !== null,
       initConnection,
-      setInitializing: (value) => {
-        initializing = value;
+      beginInitializing: () => {
+        activeInitializationAttempt = ++initializationAttemptGeneration;
+        return activeInitializationAttempt;
+      },
+      finishInitializing: (attempt) => {
+        if (activeInitializationAttempt === attempt) activeInitializationAttempt = null;
       },
     });
   }
@@ -1072,7 +1224,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
       setMessagesLoading: (loading) => appStore.setState('messagesLoading', loading),
-      loadSession: loadSessionWithMessages,
+      loadSession: (sessionId) => {
+        const generation = workspaceGeneration;
+        return loadSessionWithMessages(sessionId, () => generation === workspaceGeneration);
+      },
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
       upsertSession,
@@ -1103,7 +1258,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       setError: uiStore.setError,
       getSessionStatus: (id) => appStore.state.sessionStatus[id],
       loadingStartedAt: uiStore.loadingStartedAt,
-      loadSessionMessages: loadSessionMessagesAllowingEmpty,
+      loadSessionMessages: (sessionId) => {
+        const generation = workspaceGeneration;
+        return loadSessionMessagesAllowingEmpty(
+          sessionId,
+          () => generation === workspaceGeneration
+        );
+      },
       handoffTodosToMessages,
       loadSessionMetadata: (id) => client.session.get(id),
     },
@@ -1299,9 +1460,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const existing = fullHistoryLoads.get(sessionId);
     if (existing) return existing;
 
+    const generation = workspaceGeneration;
     const load = (async () => {
       const visitedCursors = new Set<string>();
       while (appStore.state.activeSessionId === sessionId) {
+        if (generation !== workspaceGeneration) return;
         const cursor = getSessionHistoryCursor(sessionId);
         if (!cursor) return;
         if (visitedCursors.has(cursor)) {
@@ -1312,7 +1475,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (!(await loadOlderSessionHistoryPage(sessionId))) return;
       }
     })().finally(() => {
-      fullHistoryLoads.delete(sessionId);
+      if (fullHistoryLoads.get(sessionId) === load) fullHistoryLoads.delete(sessionId);
     });
     fullHistoryLoads.set(sessionId, load);
     return load;
@@ -1322,9 +1485,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const existing = historyPageLoads.get(sessionId);
     if (existing) return existing;
 
+    const generation = workspaceGeneration;
+    const isCurrent = () => generation === workspaceGeneration;
     const load = (async () => {
       const cursor = getSessionHistoryCursor(sessionId);
-      if (!cursor || appStore.state.activeSessionId !== sessionId) return false;
+      if (!cursor || !isCurrent() || appStore.state.activeSessionId !== sessionId) return false;
       try {
         let page = takeCachedSessionHistoryPage(sessionId, cursor);
         if (!page) {
@@ -1335,7 +1500,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           limit: MESSAGE_HISTORY_WINDOW,
           before: cursor,
         });
-        if (appStore.state.activeSessionId !== sessionId) return false;
+        if (!isCurrent() || appStore.state.activeSessionId !== sessionId) return false;
         const current = appStore.state.messages.filter(
           (entry) => entry.info.sessionID === sessionId
         );
@@ -1343,16 +1508,18 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         const nextCursor = page.nextCursor === cursor ? undefined : page.nextCursor;
         setSessionHistoryCursor(sessionId, nextCursor);
         markSessionHistoryLoadFailed(sessionId, false);
-        if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor);
+        if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);
         return page.length > 0;
       } catch (err) {
-        if (appStore.state.activeSessionId === sessionId) {
+        if (isCurrent() && appStore.state.activeSessionId === sessionId) {
           markSessionHistoryLoadFailed(sessionId, true);
         }
-        logError('loadOlderSessionHistoryPage', err);
+        if (isCurrent()) logError('loadOlderSessionHistoryPage', err);
         return false;
       }
-    })().finally(() => historyPageLoads.delete(sessionId));
+    })().finally(() => {
+      if (historyPageLoads.get(sessionId) === load) historyPageLoads.delete(sessionId);
+    });
     historyPageLoads.set(sessionId, load);
     return load;
   }
@@ -1385,6 +1552,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function reloadSessions() {
     await Promise.all([loadSessions(), loadRecycleBin()]);
+  }
+
+  function loadOlderSessionPromptsForCurrentWorkspace(sessionId: string) {
+    const generation = workspaceGeneration;
+    return loadOlderSessionPrompts(sessionId, undefined, () => generation === workspaceGeneration);
   }
 
   async function sendMessage(
@@ -1511,7 +1683,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     selectSession,
     loadFullSessionHistory,
     loadOlderSessionHistoryPage,
-    loadOlderSessionPrompts,
+    loadOlderSessionPrompts: loadOlderSessionPromptsForCurrentWorkspace,
     createSession,
     renameSession,
     forkSession,

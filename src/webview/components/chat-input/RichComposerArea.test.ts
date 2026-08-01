@@ -78,6 +78,14 @@ function renderComposer(props: {
 }
 
 describe('RichComposerArea', () => {
+  it('uses a stable accessible label alongside the dynamic placeholder', () => {
+    renderComposer({ value: '', cursorOffset: 0, chips: [] });
+
+    const editor = container?.querySelector('.rich-composer');
+    expect(editor?.getAttribute('aria-label')).toBe('Message composer');
+    expect(editor?.getAttribute('aria-placeholder')).toBe('Compose');
+  });
+
   it('maps chip-end offsets onto the invisible caret spacer after the chip', () => {
     const editor = document.createElement('div');
     const chip = document.createElement('span');

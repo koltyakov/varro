@@ -10,6 +10,16 @@ import {
   shouldContinueInterruptedSession,
 } from './connection-bootstrap';
 
+const HEALTHY_RESPONSE = { healthy: true, version: '1.0.0' } as const;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function userMessage(id: string): Message {
   return {
     id,
@@ -167,6 +177,7 @@ describe('connection-bootstrap helpers', () => {
       {
         health: async () => {
           callOrder.push('health');
+          return HEALTHY_RESPONSE;
         },
         loadInitialData: async () => {
           callOrder.push('loadInitialData');
@@ -206,7 +217,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -241,6 +252,7 @@ describe('connection-bootstrap helpers', () => {
       {
         health: async () => {
           callOrder.push('health');
+          return HEALTHY_RESPONSE;
         },
         loadInitialData: async () => {
           callOrder.push('loadInitialData');
@@ -283,7 +295,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -319,7 +331,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -355,7 +367,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -387,7 +399,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -419,7 +431,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -455,7 +467,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -485,7 +497,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -515,7 +527,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => null,
@@ -551,7 +563,7 @@ describe('connection-bootstrap helpers', () => {
 
     await initConnectionWithDependencies(
       {
-        health: vi.fn(async () => {}),
+        health: vi.fn(async () => HEALTHY_RESPONSE),
         loadInitialData: vi.fn(async () => {}),
         hydrateSessionStatuses: vi.fn(async () => {}),
         getActiveSessionId: () => 'session-1',
@@ -607,8 +619,77 @@ describe('connection-bootstrap helpers', () => {
     expect(setError).toHaveBeenCalledWith('Failed to connect to OpenCode server: offline');
   });
 
+  it('does not load startup data until the server reports healthy', async () => {
+    const loadInitialData = vi.fn(async () => {});
+    const setInitialized = vi.fn();
+    const setError = vi.fn();
+
+    await initConnectionWithDependencies(
+      {
+        health: async () => ({ healthy: false, version: '1.0.0' }),
+        loadInitialData,
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => null,
+        getSessionCount: () => 0,
+        getOnlyPrimarySessionId: () => null,
+        selectSession: vi.fn(async () => {}),
+        hasSession: () => false,
+        setShowSessionPicker: vi.fn(),
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized,
+        setError,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => true,
+      }
+    );
+
+    expect(loadInitialData).not.toHaveBeenCalled();
+    expect(setInitialized).toHaveBeenCalledWith(false);
+    expect(setError).toHaveBeenCalledWith(
+      'Failed to connect to OpenCode server: OpenCode server is not healthy'
+    );
+  });
+
+  it('ignores errors from a stale connection generation', async () => {
+    let current = true;
+    const setInitialized = vi.fn();
+    const setError = vi.fn();
+
+    await initConnectionWithDependencies(
+      {
+        health: async () => HEALTHY_RESPONSE,
+        loadInitialData: async () => {
+          current = false;
+          throw new Error('stale failure');
+        },
+        hydrateSessionStatuses: vi.fn(async () => {}),
+        getActiveSessionId: () => null,
+        getPersistedActiveSessionId: () => null,
+        getSessionCount: () => 0,
+        getOnlyPrimarySessionId: () => null,
+        selectSession: vi.fn(async () => {}),
+        hasSession: () => false,
+        setShowSessionPicker: vi.fn(),
+        recoverInterruptedSessions: vi.fn(async () => {}),
+        setInitialized,
+        setError,
+      },
+      {
+        next: () => 1,
+        isCurrent: () => current,
+      }
+    );
+
+    expect(setInitialized).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+  });
+
   it('starts connection initialization only once at a time', async () => {
-    let initializing = false;
+    let nextAttempt = 0;
+    let activeAttempt: number | null = null;
     let resolveInit: (() => void) | null = null;
     const initConnection = vi.fn(
       () =>
@@ -619,19 +700,27 @@ describe('connection-bootstrap helpers', () => {
 
     ensureConnectionInitializedWithDependencies({
       isInitialized: () => false,
-      isInitializing: () => initializing,
+      isInitializing: () => activeAttempt !== null,
       initConnection,
-      setInitializing: (value) => {
-        initializing = value;
+      beginInitializing: () => {
+        activeAttempt = ++nextAttempt;
+        return activeAttempt;
+      },
+      finishInitializing: (attempt) => {
+        if (activeAttempt === attempt) activeAttempt = null;
       },
     });
 
     ensureConnectionInitializedWithDependencies({
       isInitialized: () => false,
-      isInitializing: () => initializing,
+      isInitializing: () => activeAttempt !== null,
       initConnection,
-      setInitializing: (value) => {
-        initializing = value;
+      beginInitializing: () => {
+        activeAttempt = ++nextAttempt;
+        return activeAttempt;
+      },
+      finishInitializing: (attempt) => {
+        if (activeAttempt === attempt) activeAttempt = null;
       },
     });
 
@@ -639,6 +728,121 @@ describe('connection-bootstrap helpers', () => {
 
     resolveInit?.();
     await Promise.resolve();
-    expect(initializing).toBe(false);
+    expect(activeAttempt).toBeNull();
+  });
+
+  it('does not let an invalidated initialization attempt clear a replacement attempt', async () => {
+    let nextAttempt = 0;
+    let activeAttempt: number | null = null;
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const initConnection = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const ensure = () =>
+      ensureConnectionInitializedWithDependencies({
+        isInitialized: () => false,
+        isInitializing: () => activeAttempt !== null,
+        initConnection,
+        beginInitializing: () => {
+          activeAttempt = ++nextAttempt;
+          return activeAttempt;
+        },
+        finishInitializing: (attempt) => {
+          if (activeAttempt === attempt) activeAttempt = null;
+        },
+      });
+
+    ensure();
+    const firstAttempt = activeAttempt;
+    activeAttempt = null;
+    ensure();
+    const secondAttempt = activeAttempt;
+
+    first.resolve();
+    await first.promise;
+    await Promise.resolve();
+    expect(firstAttempt).not.toBe(secondAttempt);
+    expect(activeAttempt).toBe(secondAttempt);
+
+    second.resolve();
+    await second.promise;
+    await Promise.resolve();
+    expect(activeAttempt).toBeNull();
+  });
+
+  it('ignores a deferred initialization invalidated by a workspace change', async () => {
+    let generation = 0;
+    const firstHealth = deferred<typeof HEALTHY_RESPONSE>();
+    const setInitialized = vi.fn();
+    const deps = {
+      health: () => firstHealth.promise,
+      loadInitialData: vi.fn(async () => {}),
+      hydrateSessionStatuses: vi.fn(async () => {}),
+      getActiveSessionId: () => null,
+      getPersistedActiveSessionId: () => null,
+      getSessionCount: () => 0,
+      getOnlyPrimarySessionId: () => null,
+      selectSession: vi.fn(async () => {}),
+      hasSession: () => false,
+      setShowSessionPicker: vi.fn(),
+      recoverInterruptedSessions: vi.fn(async () => {}),
+      setInitialized,
+      setError: vi.fn(),
+    };
+    const generationRef = {
+      next: () => ++generation,
+      isCurrent: (candidate: number) => candidate === generation,
+    };
+
+    const staleInitialization = initConnectionWithDependencies(deps, generationRef);
+    generation += 1;
+    firstHealth.resolve(HEALTHY_RESPONSE);
+    await staleInitialization;
+
+    expect(deps.loadInitialData).not.toHaveBeenCalled();
+    expect(setInitialized).not.toHaveBeenCalled();
+  });
+
+  it('allows a fresh initialization after a deferred attempt is stopped', async () => {
+    let generation = 0;
+    const staleData = deferred<void>();
+    const setInitialized = vi.fn();
+    const loadInitialData = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(staleData.promise)
+      .mockResolvedValueOnce();
+    const deps = {
+      health: vi.fn(async () => HEALTHY_RESPONSE),
+      loadInitialData,
+      hydrateSessionStatuses: vi.fn(async () => {}),
+      getActiveSessionId: () => null,
+      getPersistedActiveSessionId: () => null,
+      getSessionCount: () => 0,
+      getOnlyPrimarySessionId: () => null,
+      selectSession: vi.fn(async () => {}),
+      hasSession: () => false,
+      setShowSessionPicker: vi.fn(),
+      recoverInterruptedSessions: vi.fn(async () => {}),
+      setInitialized,
+      setError: vi.fn(),
+    };
+    const generationRef = {
+      next: () => ++generation,
+      isCurrent: (candidate: number) => candidate === generation,
+    };
+
+    const stoppedInitialization = initConnectionWithDependencies(deps, generationRef);
+    await Promise.resolve();
+    generation += 1;
+    const restartedInitialization = initConnectionWithDependencies(deps, generationRef);
+    await restartedInitialization;
+    staleData.resolve();
+    await stoppedInitialization;
+
+    expect(loadInitialData).toHaveBeenCalledTimes(2);
+    expect(setInitialized).toHaveBeenCalledOnce();
+    expect(setInitialized).toHaveBeenCalledWith(true);
   });
 });

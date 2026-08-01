@@ -49,6 +49,9 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('"emptyStateLogoUri":"\\u003C/script\\u003E\\u0026\\u2028\\u2029"');
     expect(html).toContain("window.addEventListener('error', handleFailure);");
     expect(html).toContain("window.addEventListener('unhandledrejection', handleFailure);");
+    expect(html).toContain("if (event && 'reason' in event) failure = event.reason;");
+    expect(html).toContain("console.error('Varro webview bootstrap failed', failure);");
+    expect(html).toContain("console.error('Varro webview bridge cleanup failed', error);");
     expect(html).toContain('window.__clearVarroBootstrapFailureHandlers = clearHandlers;');
     expect(html).toContain("typeof window.__cleanupVarroBridge === 'function'");
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(

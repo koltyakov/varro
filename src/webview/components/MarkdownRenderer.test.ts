@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import {
+  __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
   MarkdownRenderer,
+  renderCodeBlockHtml,
   renderHighlightedCodeHtml,
   splitStreamingMarkdownContent,
 } from './MarkdownRenderer';
@@ -232,6 +234,35 @@ describe('MarkdownRenderer', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('makes only HTTPS external links actionable', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: '[Secure](https://example.test/docs) [Insecure](http://example.test/docs)',
+        }),
+      container!
+    );
+
+    const links = Array.from(container?.querySelectorAll<HTMLAnchorElement>('a') ?? []);
+    const secure = links.find((link) => link.textContent === 'Secure');
+    const insecure = links.find((link) => link.textContent === 'Insecure');
+    expect(secure?.getAttribute('data-external')).toBe('true');
+    expect(secure?.getAttribute('href')).toBe('https://example.test/docs');
+    expect(insecure?.hasAttribute('data-external')).toBe(false);
+    expect(insecure?.hasAttribute('href')).toBe(false);
+
+    insecure?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(send).not.toHaveBeenCalled();
+    secure?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://example.test/docs' },
+    });
+  });
+
   it('re-renders workspace-relative links when the workspace changes', async () => {
     cleanup = render(
       () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
@@ -372,6 +403,47 @@ describe('MarkdownRenderer', () => {
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(sanitizeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates finalized markdown cache entries by render options', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    const pathContent = 'See (./src/example.ts)';
+    const withoutPathLinks = __parseMarkdownForTests(pathContent, {
+      cacheByContent: true,
+      disablePathLinkify: true,
+    });
+    const withPathLinks = __parseMarkdownForTests(pathContent, {
+      cacheByContent: true,
+      disablePathLinkify: false,
+    });
+    expect(withoutPathLinks).not.toContain('file-path-link');
+    expect(withPathLinks).toContain('file-path-link');
+
+    const codeContent = '```ts\nconst value = 1;\n```';
+    const withoutHighlighting = __parseMarkdownForTests(codeContent, {
+      cacheByContent: true,
+      disableCodeHighlighting: true,
+    });
+    const withHighlighting = __parseMarkdownForTests(codeContent, {
+      cacheByContent: true,
+      disableCodeHighlighting: false,
+    });
+    expect(withoutHighlighting).not.toContain('hljs-keyword');
+    expect(withHighlighting).toContain('hljs-keyword');
+  });
+
+  it('separates code block cache entries by highlighting mode', () => {
+    const params = { text: 'const value = 1;', lang: 'ts' };
+    expect(renderCodeBlockHtml({ ...params, disableHighlighting: true })).not.toContain(
+      'hljs-keyword'
+    );
+    expect(renderCodeBlockHtml(params)).toContain('hljs-keyword');
   });
 
   it('does not cache transient sanitization across remounts', async () => {

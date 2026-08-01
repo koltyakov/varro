@@ -198,6 +198,68 @@ describe('SessionTrashManager', () => {
     expect(manager.list().map(({ rootID }) => rootID)).toEqual(['fresh']);
   });
 
+  it('scopes UI list, restore, delete, and empty operations to one workspace', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('repo-root', [session('repo-root', 1_000)], 5_000);
+    await manager.moveToTrash(
+      'other-root',
+      [session('other-root', 2_000, { directory: '/other' })],
+      6_000
+    );
+    const deleteSession = vi.fn(async () => undefined);
+
+    expect(manager.list('/repo').map(({ rootID }) => rootID)).toEqual(['repo-root']);
+    expect(manager.list('/other').map(({ rootID }) => rootID)).toEqual(['other-root']);
+    await expect(manager.restore('other-root', '/repo')).resolves.toBeNull();
+    await expect(
+      manager.deletePermanently('other-root', deleteSession, '/repo')
+    ).resolves.toBeNull();
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    await expect(manager.empty(deleteSession, '/repo')).resolves.toMatchObject([
+      { rootID: 'repo-root' },
+    ]);
+    expect(deleteSession).toHaveBeenCalledWith({ id: 'repo-root', directory: '/repo' });
+    expect(manager.list().map(({ rootID }) => rootID)).toEqual(['other-root']);
+    expect(manager.isHidden('repo-root')).toBe(false);
+    expect(manager.isHidden('other-root')).toBe(true);
+  });
+
+  it('keeps expiration cleanup global across workspace roots', async () => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('repo-root', [session('repo-root', 1_000)], 5_000);
+    await manager.moveToTrash(
+      'other-root',
+      [session('other-root', 2_000, { directory: '/other' })],
+      6_000
+    );
+    const deleteSession = vi.fn(async () => undefined);
+
+    const removed = await manager.cleanupExpired(
+      deleteSession,
+      6_000 + SESSION_TRASH_RETENTION_MS + 1
+    );
+
+    expect(removed.map(({ rootID }) => rootID).toSorted()).toEqual(['other-root', 'repo-root']);
+    expect(deleteSession.mock.calls.map(([target]) => target.directory).toSorted()).toEqual([
+      '/other',
+      '/repo',
+    ]);
+    expect(manager.list()).toEqual([]);
+  });
+
+  it.each([
+    ['Windows drive', 'C:\\Projects\\Varro', 'c:/projects/VARRO/'],
+    ['UNC share', '\\\\BuildServer\\Projects\\Varro', '//buildserver/PROJECTS/varro/'],
+  ])('scopes trash operations using normalized %s identity', async (_label, stored, selected) => {
+    const manager = new SessionTrashManager(workspaceState as never);
+    await manager.moveToTrash('root', [session('root', 1_000, { directory: stored })], 5_000);
+
+    expect(manager.list(selected).map(({ rootID }) => rootID)).toEqual(['root']);
+    await expect(manager.restore('root', selected)).resolves.toMatchObject({ rootID: 'root' });
+    expect(manager.list()).toEqual([]);
+  });
+
   it('drops corrupted persisted entries while loading valid recycle-bin state', () => {
     mementoState.stored = [
       {

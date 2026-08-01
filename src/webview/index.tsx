@@ -5,6 +5,28 @@ import { cleanupBridge } from './lib/bridge';
 import './index.css';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
+const bootstrapWindow = window as unknown as Record<string, unknown>;
+
+function logWebviewError(message: string, error: unknown) {
+  // oxlint-disable-next-line no-console
+  console.error(message, error);
+}
+
+function clearStartupHandlers() {
+  const clear = bootstrapWindow[STARTUP_HANDLERS_KEY];
+  if (typeof clear === 'function') clear();
+  if (bootstrapWindow[STARTUP_HANDLERS_KEY] === clear) {
+    delete bootstrapWindow[STARTUP_HANDLERS_KEY];
+  }
+}
+
+function cleanupBridgeSafe() {
+  try {
+    cleanupBridge();
+  } catch (error) {
+    logWebviewError('Varro webview bridge cleanup failed', error);
+  }
+}
 
 export function showBootstrapFailure(root: HTMLElement) {
   const fallback = document.createElement('div');
@@ -27,23 +49,25 @@ export function showBootstrapFailure(root: HTMLElement) {
 export function bootstrap(root: HTMLElement) {
   let dispose: (() => void) | undefined;
   let failed = false;
-  const bootstrapWindow = window as unknown as Record<string, unknown>;
-  const clearStartupHandlers = () => {
-    const clear = bootstrapWindow[STARTUP_HANDLERS_KEY];
-    if (typeof clear === 'function') clear();
-    if (bootstrapWindow[STARTUP_HANDLERS_KEY] === clear) {
-      delete bootstrapWindow[STARTUP_HANDLERS_KEY];
-    }
-  };
-  const fail = () => {
-    if (failed) return;
-    failed = true;
-    clearStartupHandlers();
+  const disposeWebview = () => {
     try {
       dispose?.();
-    } catch {}
+    } catch (error) {
+      logWebviewError('Varro webview disposal failed', error);
+    }
     dispose = undefined;
-    cleanupBridge();
+    cleanupBridgeSafe();
+  };
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    logWebviewError('Varro webview bootstrap failed', error);
+    try {
+      clearStartupHandlers();
+    } catch (cleanupError) {
+      logWebviewError('Varro webview startup handler cleanup failed', cleanupError);
+    }
+    disposeWebview();
     showBootstrapFailure(root);
   };
 
@@ -51,20 +75,31 @@ export function bootstrap(root: HTMLElement) {
     root.replaceChildren();
     dispose = render(() => <AppRoot />, root);
     clearStartupHandlers();
-  } catch {
-    fail();
+  } catch (error) {
+    fail(error);
   }
 
   return () => {
-    clearStartupHandlers();
     try {
-      dispose?.();
-    } finally {
-      dispose = undefined;
-      cleanupBridge();
+      clearStartupHandlers();
+    } catch (error) {
+      logWebviewError('Varro webview startup handler cleanup failed', error);
     }
+    disposeWebview();
   };
 }
 
-const root = document.getElementById('root');
-if (root) bootstrap(root);
+export function bootstrapWebview(root: HTMLElement | null) {
+  if (root) return bootstrap(root);
+
+  logWebviewError('Varro webview bootstrap failed', new Error('Webview root element not found'));
+  try {
+    clearStartupHandlers();
+  } catch (error) {
+    logWebviewError('Varro webview startup handler cleanup failed', error);
+  }
+  cleanupBridgeSafe();
+  return undefined;
+}
+
+bootstrapWebview(document.getElementById('root'));

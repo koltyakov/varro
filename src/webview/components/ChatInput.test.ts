@@ -16,8 +16,11 @@ import {
   setState,
   setInputText,
   addContextFile,
+  MAX_CLIPBOARD_IMAGES,
   MAX_CLIPBOARD_IMAGE_SIZE,
+  nextPastedImageIndex,
   removeContextFile,
+  resetPastedImageIndex,
 } from '../lib/state';
 import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
@@ -157,6 +160,7 @@ afterEach(() => {
   setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', {});
   setState('clipboardImages', []);
+  resetPastedImageIndex();
   setState('droppedFiles', []);
   setState('terminalSelection', null);
   setState('attachedDiagnostics', null);
@@ -300,6 +304,57 @@ function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTran
   Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
   target.dispatchEvent(event);
   return event;
+}
+
+function dispatchImagePaste(target: Element, files: File[], text = '') {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', {
+    value: {
+      getData: (type: string) => (type === 'text/plain' ? text : ''),
+      items: files.map((file) => ({
+        kind: 'file',
+        type: file.type,
+        getAsFile: () => file,
+      })),
+    },
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function installControllableFileReader() {
+  const originalFileReader = globalThis.FileReader;
+  const pendingReads = new Map<string, () => void>();
+
+  class MockFileReader {
+    result: string | ArrayBuffer | null = null;
+    error: DOMException | null = null;
+    private loadListener: (() => void) | undefined;
+
+    addEventListener(type: string, listener: () => void) {
+      if (type === 'load') this.loadListener = listener;
+    }
+
+    readAsDataURL(file: File) {
+      pendingReads.set(file.name, () => {
+        this.result = `data:${file.type};base64,${file.name}`;
+        this.loadListener?.();
+      });
+    }
+  }
+
+  globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+  return {
+    resolve(filename: string) {
+      const complete = pendingReads.get(filename);
+      if (!complete) throw new Error(`No pending FileReader for ${filename}`);
+      pendingReads.delete(filename);
+      complete();
+    },
+    restore() {
+      globalThis.FileReader = originalFileReader;
+    },
+  };
 }
 
 function emitServerEvent(type: string, properties: Record<string, unknown>) {
@@ -2757,6 +2812,133 @@ describe('ChatInput', () => {
 
     expect(readSpy).not.toHaveBeenCalled();
     expect(state.clipboardImages).toEqual([]);
+  });
+
+  it('revalidates the composer owner before committing staged pasted images', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('activeSessionId', 'session-a');
+      setInputText('draft');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+
+      dispatchImagePaste(editor, [new File(['a'], 'session.png', { type: 'image/png' })]);
+      setState('activeSessionId', 'session-b');
+      fileReader.resolve('session.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([]);
+
+      dispatchImagePaste(editor, [new File(['b'], 'mutation.png', { type: 'image/png' })]);
+      setInputText('draft');
+      fileReader.resolve('mutation.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([]);
+
+      dispatchImagePaste(editor, [new File(['c'], 'value.png', { type: 'image/png' })]);
+      setInputText('');
+      fileReader.resolve('value.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([]);
+
+      setInputText('send draft');
+      sendMessageMock.mockResolvedValueOnce(true);
+      dispatchImagePaste(editor, [new File(['d'], 'send.png', { type: 'image/png' })]);
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+      expect(inputText()).toBe('');
+      fileReader.resolve('send.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('stages overlapping image pastes and commits live capacity and unique indices', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      const firstPaste = ['first-1.png', 'first-2.png', 'first-3.png'].map(
+        (name) => new File([name], name, { type: 'image/png' })
+      );
+      const secondPaste = ['second-1.png', 'second-2.png', 'second-3.png'].map(
+        (name) => new File([name], name, { type: 'image/png' })
+      );
+
+      dispatchImagePaste(editor, firstPaste);
+      dispatchImagePaste(editor, secondPaste);
+
+      fileReader.resolve('second-1.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toEqual([]);
+
+      fileReader.resolve('second-2.png');
+      fileReader.resolve('second-3.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual([
+        'Image',
+        'Image 2',
+        'Image 3',
+      ]);
+
+      for (const file of firstPaste) fileReader.resolve(file.name);
+      await flushAsyncWork();
+
+      expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual([
+        'Image',
+        'Image 2',
+        'Image 3',
+        'Image 4',
+        'Image 5',
+      ]);
+      expect(new Set(state.clipboardImages.map((image) => image.filename)).size).toBe(
+        MAX_CLIPBOARD_IMAGES
+      );
+      expect(nextPastedImageIndex()).toBe(MAX_CLIPBOARD_IMAGES + 1);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('commits overlapping image pastes into a non-empty composer out of order', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setInputText('Review this');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, 'Review this'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+
+      dispatchImagePaste(editor, [new File(['a'], 'first.png', { type: 'image/png' })]);
+      dispatchImagePaste(editor, [new File(['b'], 'second.png', { type: 'image/png' })]);
+
+      fileReader.resolve('second.png');
+      await flushAsyncWork();
+      expect(inputText()).toBe('Review this [Image] ');
+
+      fileReader.resolve('first.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Review this [Image] [Image 2] ');
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image', 'Image 2']);
+      expect(nextPastedImageIndex()).toBe(3);
+    } finally {
+      fileReader.restore();
+    }
   });
 
   it('keeps a mention-only paste as text when the mention does not resolve', async () => {

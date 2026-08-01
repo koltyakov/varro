@@ -70,6 +70,12 @@ beforeEach(() => {
     openai: [{ type: 'api', label: 'API key' }],
   });
   clientMocks.workspaceStatus.mockResolvedValue([{ workspaceID: 'ws-1', status: 'connected' }]);
+  refreshRoutingStateMock.mockImplementation(async () => {
+    setState('providerAuthMethods', {
+      openai: [{ type: 'api', label: 'API key' }],
+    });
+    setState('workspaceStatuses', [{ workspaceID: 'ws-1', status: 'connected' }]);
+  });
   setState('providers', [
     {
       id: 'openai',
@@ -140,6 +146,8 @@ afterEach(() => {
   setState('providersLoaded', false);
   setState('agents', []);
   setState('allAgents', []);
+  setState('providerAuthMethods', {});
+  setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   if (originalResizeObserver) {
@@ -279,6 +287,9 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Workspaces: ws-1 (connected)');
+    expect(refreshRoutingStateMock).toHaveBeenCalled();
+    expect(clientMocks.providerAuth).not.toHaveBeenCalled();
+    expect(clientMocks.workspaceStatus).not.toHaveBeenCalled();
   });
 
   it('collapses providers with no enabled models', async () => {

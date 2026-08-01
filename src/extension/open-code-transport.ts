@@ -1,4 +1,5 @@
 import type { ServerStatus } from '../shared/protocol';
+import { parseHealthResponse } from '../shared/health';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
@@ -171,7 +172,7 @@ export class OpenCodeTransport {
         signal: AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS),
       });
       if (!res.ok) return { healthy: false };
-      return (await res.json()) as { healthy: boolean; version?: string };
+      return parseHealthResponse(await res.json()) ?? { healthy: false };
     } catch {
       return { healthy: false };
     }
@@ -183,7 +184,7 @@ export class OpenCodeTransport {
   }
 
   async startEventStream(
-    eventStreamDirectory = this.options.getWorkspaceCwd(),
+    eventStreamDirectory = this.requestWorkspaceDirectory,
     promoteDirectoryImmediately = true
   ) {
     this.resetEventStream();
@@ -195,6 +196,7 @@ export class OpenCodeTransport {
     this.eventController = new AbortController();
     const controller = this.eventController;
     let shouldReconnect = false;
+    let continuityEstablished = false;
     const eventStreamRequest = scopeOpenCodeRequest(
       this.options.getUrl(),
       EVENT_STREAM_PATH,
@@ -243,6 +245,7 @@ export class OpenCodeTransport {
       clearConnectTimer();
       if (!isCurrentStream()) return;
       if (!res.ok || !res.body) throw new Error(`Failed to open event stream: ${res.status}`);
+      continuityEstablished = true;
       this.options.updateEventStreamState('healthy');
       stabilityTimer = setTimeout(() => {
         if (!isCurrentStream() || controller.signal.aborted) return;
@@ -309,6 +312,7 @@ export class OpenCodeTransport {
         this.options.getStatus().state === 'running' &&
         !this.options.isDisposing()
       ) {
+        if (continuityEstablished) this.clearPendingAttentionRequests();
         this.options.updateEventStreamState('degraded');
         this.eventReconnectCount++;
         if (this.eventReconnectCount === OpenCodeTransport.EVENT_RECONNECT_WARNING_THRESHOLD) {

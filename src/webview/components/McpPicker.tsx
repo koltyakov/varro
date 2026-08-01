@@ -67,6 +67,8 @@ export function McpPicker(props: {
       return;
     }
 
+    if (e.key === ' ' && e.target === searchInputRef) return;
+
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       const item = items[focusIndex()];
@@ -155,6 +157,7 @@ export function McpPicker(props: {
                 {(item, index) => (
                   <button
                     class={`dropdown-item ${selectedNames().has(item.name) ? 'selected' : ''} ${focusIndex() === index() ? 'keyboard-focus' : ''}`}
+                    aria-pressed={selectedNames().has(item.name)}
                     onClick={() => toggle(item.name)}
                     onMouseEnter={() => setFocusIndex(index())}
                   >

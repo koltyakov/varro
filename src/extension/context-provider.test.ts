@@ -588,6 +588,130 @@ describe('ContextProvider', () => {
     }
   });
 
+  it('authorizes only exact open workspace roots', () => {
+    vscodeMock.workspace.workspaceFolders = [
+      { name: 'repo', uri: { fsPath: '/repo' } },
+      { name: 'other', uri: { fsPath: 'C:\\Projects\\Other' } },
+    ];
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      expect(provider.isOpenWorkspaceRoot('/repo/')).toBe(true);
+      expect(provider.isOpenWorkspaceRoot('c:/projects/other/')).toBe(true);
+      expect(provider.getOpenWorkspaceRoot('c:/projects/other/')).toBe('C:\\Projects\\Other');
+      expect(provider.isOpenWorkspaceRoot('/repo/nested')).toBe(false);
+      expect(provider.isOpenWorkspaceRoot('/outside')).toBe(false);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('binds restricted relative resolution to the requested open workspace root', async () => {
+    const first = { name: 'first', uri: { fsPath: '/first' } };
+    const second = { name: 'second', uri: { fsPath: '/second' } };
+    vscodeMock.workspace.workspaceFolders = [first, second];
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === '/second/RALPH.md') return { type: 0 };
+      throw new Error('File not found');
+    });
+    vscodeMock.workspace.getWorkspaceFolder.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath.startsWith('/second/') ? second : first
+    );
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => '# Plan' });
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(
+        provider.readFile('RALPH.md', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/second/',
+        })
+      ).resolves.toBe('# Plan');
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: '/second/RALPH.md',
+      });
+      expect(vscodeMock.workspace.fs.stat).not.toHaveBeenCalledWith({
+        fsPath: '/first/RALPH.md',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('fails closed when a restricted workspace binding is not open', async () => {
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(
+        provider.readFile('RALPH.md', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/other',
+        })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.fs.stat).not.toHaveBeenCalled();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('rejects an absolute plan in another open root when resolution is root-bound', async () => {
+    const first = { name: 'first', uri: { fsPath: '/first' } };
+    const second = { name: 'second', uri: { fsPath: '/second' } };
+    vscodeMock.workspace.workspaceFolders = [first, second];
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(second);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => '# Other plan' });
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(
+        provider.readFile('/second/RALPH.md', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/first',
+        })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('rejects raw parent traversal before restricted absolute resolution', async () => {
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    const provider = new ContextProvider(vi.fn());
+
+    try {
+      await expect(
+        provider.readFile('/repo/src/../secret.txt', {
+          restrictToWorkspace: true,
+          workspaceDirectory: '/repo',
+        })
+      ).resolves.toBeNull();
+      expect(vscodeMock.workspace.fs.stat).not.toHaveBeenCalled();
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('allows trusted unrestricted absolute reads with lexical parent segments', async () => {
+    const provider = new ContextProvider(vi.fn());
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 0 });
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'trusted' });
+
+    try {
+      await expect(provider.readFile('/repo/src/../trusted.txt')).resolves.toBe('trusted');
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith({
+        fsPath: '/repo/src/../trusted.txt',
+      });
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('refuses an absolute path that reaches outside via a workspace symlink', async () => {
     const provider = new ContextProvider(vi.fn());
 
@@ -760,7 +884,9 @@ describe('ContextProvider', () => {
     vscodeMock.workspace.openTextDocument.mockResolvedValue({ getText: () => 'secret' });
 
     try {
-      await expect(provider.readFile('../../etc/passwd')).resolves.toBeNull();
+      await expect(
+        provider.readFile('../../etc/passwd', { restrictToWorkspace: true })
+      ).resolves.toBeNull();
       expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
     } finally {
       provider.dispose();

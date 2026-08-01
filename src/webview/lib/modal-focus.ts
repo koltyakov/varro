@@ -36,7 +36,10 @@ const openTraps: HTMLElement[] = [];
  * installed, matching the `prepareMeasuredEntrance` convention so callers can pass it straight
  * to `onCleanup`.
  */
-export function trapModalFocus(container: HTMLElement): () => void {
+export function trapModalFocus(
+  container: HTMLElement,
+  options?: { preventScrollOnRestore?: boolean }
+): () => void {
   const previouslyFocused =
     document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
@@ -105,7 +108,9 @@ export function trapModalFocus(container: HTMLElement): () => void {
     // Only reclaim focus if the dialog still owns it. If something else took focus in the
     // meantime, moving it again would be the more surprising behavior.
     if (previouslyFocused?.isConnected && container.contains(document.activeElement)) {
-      previouslyFocused.focus();
+      previouslyFocused.focus(
+        options?.preventScrollOnRestore ? { preventScroll: true } : undefined
+      );
     }
   };
 }

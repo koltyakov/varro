@@ -28,6 +28,7 @@ import type {
   WorkspaceFilePick,
 } from '../../shared/protocol';
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
+import { parseHealthResponse, type HealthResponse } from '../../shared/health';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
 import { applySessionShareOverride } from './session-share-overrides';
 import type {
@@ -39,15 +40,16 @@ import type {
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
 
 export const client = {
-  async health(): Promise<{ healthy: boolean; version: string }> {
-    return apiCall('GET', '/global/health');
+  async health(): Promise<HealthResponse> {
+    const response = parseHealthResponse(await apiCall('GET', '/global/health'));
+    if (!response) throw malformedResponse('/global/health', 'a health response');
+    return response;
   },
 
   session: {
     async list(): Promise<Session[]> {
-      return apiCall<Session[]>('GET', '/session').then((sessions) =>
-        sessions.map(applySessionShareOverride)
-      );
+      const sessions = requireArray<Session>(await apiCall('GET', '/session'), '/session');
+      return sessions.map(applySessionShareOverride);
     },
     async get(id: string): Promise<Session> {
       return apiCall<Session>('GET', `/session/${id}`).then(applySessionShareOverride);
@@ -104,12 +106,15 @@ export const client = {
       if (options?.limit) params.set('limit', String(options.limit));
       if (options?.before) params.set('before', options.before);
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const response = await apiCall<
-        MessageEntry[] | { items: MessageEntry[]; nextCursor?: string }
-      >('GET', `/session/${id}/message${query}`);
-      if (Array.isArray(response)) return response;
-      const items = response.items as SessionMessagePage;
-      if (response.nextCursor) items.nextCursor = response.nextCursor;
+      const path = `/session/${id}/message${query}`;
+      const response = await apiCall('GET', path);
+      if (Array.isArray(response)) return response as SessionMessagePage;
+      const page = requireRecord(response, path);
+      const items = requireArray<MessageEntry>(page.items, path) as SessionMessagePage;
+      if (page.nextCursor !== undefined && typeof page.nextCursor !== 'string') {
+        throw malformedResponse(path, 'a message page with a string cursor');
+      }
+      if (page.nextCursor) items.nextCursor = page.nextCursor;
       return items;
     },
     async deleteMessage(id: string, messageID: string): Promise<boolean> {
@@ -189,7 +194,12 @@ export const client = {
       providers: Provider[];
       default: Record<string, string>;
     }> {
-      return apiCall('GET', '/config/providers');
+      const path = '/config/providers';
+      const response = requireRecord(await apiCall('GET', path), path);
+      return {
+        providers: requireArray<Provider>(response.providers, path),
+        default: requireRecord(response.default, path) as Record<string, string>,
+      };
     },
     async providerLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus> {
       const params = new URLSearchParams({ providerID });
@@ -197,7 +207,8 @@ export const client = {
       return apiCall('GET', `${VARRO_API_ENDPOINTS.providerLimit}?${params.toString()}`);
     },
     async providerAuth(): Promise<ProviderAuthMethodsByProvider> {
-      return apiCall('GET', '/provider/auth');
+      const path = '/provider/auth';
+      return requireRecord(await apiCall('GET', path), path) as ProviderAuthMethodsByProvider;
     },
     async authorizeProvider(body: {
       providerID: string;
@@ -210,7 +221,8 @@ export const client = {
       });
     },
     async workspaceStatus(): Promise<WorkspaceStatusEntry[]> {
-      return apiCall('GET', '/experimental/workspace/status');
+      const path = '/experimental/workspace/status';
+      return requireArray<WorkspaceStatusEntry>(await apiCall('GET', path), path);
     },
   },
 
@@ -286,7 +298,7 @@ export const client = {
 
   mcp: {
     async status(): Promise<Record<string, McpStatus>> {
-      return apiCall('GET', '/mcp');
+      return requireRecord(await apiCall('GET', '/mcp'), '/mcp') as Record<string, McpStatus>;
     },
     async connect(name: string): Promise<boolean> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/connect`);
@@ -307,13 +319,13 @@ export const client = {
 
   agent: {
     async list(): Promise<Agent[]> {
-      return apiCall('GET', '/agent');
+      return requireArray<Agent>(await apiCall('GET', '/agent'), '/agent');
     },
   },
 
   command: {
     async list(): Promise<Command[]> {
-      return apiCall('GET', '/command');
+      return requireArray<Command>(await apiCall('GET', '/command'), '/command');
     },
   },
 
@@ -342,6 +354,22 @@ function withDirectory(path: string, directory: string | undefined): string {
   return `${path}?${params.toString()}`;
 }
 
+function requireArray<T>(value: unknown, path: string): T[] {
+  if (!Array.isArray(value)) throw malformedResponse(path, 'an array');
+  return value as T[];
+}
+
+function requireRecord(value: unknown, path: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw malformedResponse(path, 'an object');
+  }
+  return value as Record<string, unknown>;
+}
+
+function malformedResponse(path: string, expected: string): Error {
+  return new Error(`Malformed response from ${path}: expected ${expected}`);
+}
+
 let fileStatusCache: {
   expiresAt: number;
   promise: Promise<RepoFileStatus[]>;
@@ -367,26 +395,36 @@ function sharedRequest<T>(
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
   if (fileStatusCache && fileStatusCache.expiresAt > now) return fileStatusCache.promise;
-  const promise = apiCall<RepoFileStatus[]>('GET', '/file/status').catch((err) => {
-    if (fileStatusCache?.promise === promise) fileStatusCache = null;
-    throw err;
-  });
+  const promise = apiCall('GET', '/file/status')
+    .then((response) => requireArray<RepoFileStatus>(response, '/file/status'))
+    .catch((err) => {
+      if (fileStatusCache?.promise === promise) fileStatusCache = null;
+      throw err;
+    });
   fileStatusCache = { expiresAt: now + 2_000, promise };
   return promise;
 }
 
 function getSharedSessionStatus(): Promise<Record<string, SessionStatus>> {
   return sharedRequest(sessionStatusSlot, () =>
-    apiCall<Record<string, SessionStatus>>('GET', '/session/status')
+    apiCall('GET', '/session/status').then(
+      (response) => requireRecord(response, '/session/status') as Record<string, SessionStatus>
+    )
   );
 }
 
 function getSharedQuestionList(): Promise<QuestionRequest[]> {
-  return sharedRequest(questionListSlot, () => apiCall<QuestionRequest[]>('GET', '/question'));
+  return sharedRequest(questionListSlot, () =>
+    apiCall('GET', '/question').then((response) =>
+      requireArray<QuestionRequest>(response, '/question')
+    )
+  );
 }
 
 function getSharedPermissionList(): Promise<unknown[]> {
-  return sharedRequest(permissionListSlot, () => apiCall<unknown[]>('GET', '/permission'));
+  return sharedRequest(permissionListSlot, () =>
+    apiCall('GET', '/permission').then((response) => requireArray(response, '/permission'))
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -405,6 +443,14 @@ type ServerEventsApi = {
 
 const eventListeners = new Map<string, Set<EventHandler>>();
 let workspaceStatusSummary: WorkspaceStatusEventSummary = { entries: [] };
+
+export function invalidateClientWorkspaceCaches(): void {
+  fileStatusCache = null;
+  sessionStatusSlot.current = null;
+  questionListSlot.current = null;
+  permissionListSlot.current = null;
+  workspaceStatusSummary = { entries: [] };
+}
 
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;

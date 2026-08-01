@@ -217,6 +217,7 @@ export class OpenCodeServer extends EventEmitter {
   private pendingTerminalCliUpgrades = 0;
   private lastCeilingNoticeVersion = '';
   private lastRestartBlockers: RestartBlockedState | null = null;
+  private adoptedServerRecoveryOperation: Promise<void> | null = null;
 
   constructor(
     port: number,
@@ -353,8 +354,47 @@ export class OpenCodeServer extends EventEmitter {
 
   private updateEventStreamState(eventStream: 'healthy' | 'degraded') {
     if (this._status.state !== 'running') return;
+    if (eventStream === 'degraded') this.requestAdoptedServerRecovery();
     if (this._status.eventStream === eventStream) return;
     this.setRunningStatus(this._status.url, eventStream);
+  }
+
+  private requestAdoptedServerRecovery() {
+    if (this.adoptedServerRecoveryOperation || !this.processManager.isAdoptedManagedServer) return;
+    const startAttemptId = this.startAttemptId;
+    const disposeGeneration = this.disposeGeneration;
+    const operation = this.recoverDegradedAdoptedServer(startAttemptId, disposeGeneration);
+    this.adoptedServerRecoveryOperation = operation;
+    const finish = () => {
+      if (this.adoptedServerRecoveryOperation === operation) {
+        this.adoptedServerRecoveryOperation = null;
+      }
+    };
+    void operation.then(finish, (err: unknown) => {
+      logger.warn(
+        `Failed to recover degraded adopted OpenCode server: ${err instanceof Error ? err.message : String(err)}`
+      );
+      finish();
+    });
+  }
+
+  private async recoverDegradedAdoptedServer(startAttemptId: number, disposeGeneration: number) {
+    const serverStillAlive = await this.processManager.revalidateAdoptedManagedServer();
+    if (!this.lifecycle.isCurrentStartAttempt(startAttemptId, disposeGeneration)) return;
+    if (this._status.state !== 'running') return;
+    if (serverStillAlive) return;
+
+    logger.warn('Adopted OpenCode server became unavailable; scheduling managed recovery');
+    this.stopEventStream();
+    this.handleRuntimeProcessExit(null, null, startAttemptId, disposeGeneration, Promise.resolve());
+  }
+
+  private async waitForAdoptedServerRecovery() {
+    try {
+      await this.adoptedServerRecoveryOperation;
+    } catch {
+      // Recovery reports its own failure and lifecycle operations can continue safely.
+    }
   }
 
   private setStartPromise(factory: (signal: AbortSignal) => Promise<string>): Promise<string> {
@@ -916,6 +956,7 @@ export class OpenCodeServer extends EventEmitter {
     disposeGeneration: number,
     processCleanup: Promise<void>
   ) {
+    this.transport.clearPendingAttentionRequests();
     this.clearRetryResetTimer();
     this.setStatus({ state: 'stopped' });
     if (this.retryCount >= OpenCodeServer.MAX_RETRIES) {
@@ -1058,8 +1099,8 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   async rescopeEventStream(directory?: string): Promise<OpenCodeRescopeResult> {
-    if (this._status.state !== 'running') return { state: 'inactive', directory };
-    return this.transport.rescopeEventStream(directory);
+    const result = await this.transport.rescopeEventStream(directory);
+    return this._status.state === 'running' ? result : { state: 'inactive', directory };
   }
 
   async readServerInfo(): Promise<OpenCodeServerInfo> {
@@ -1463,9 +1504,10 @@ export class OpenCodeServer extends EventEmitter {
     // Use the transport directly: restart preflight runs after the lifecycle
     // has reserved the restart operation, while public request() intentionally
     // waits behind that operation.
-    const [statuses, questions] = await Promise.all([
+    const [statuses, questions, permissions] = await Promise.all([
       this.transport.request('GET', '/session/status', undefined, { unscoped: true }),
       this.transport.request('GET', '/question', undefined, { unscoped: true }),
+      this.transport.request('GET', '/permission', undefined, { unscoped: true }),
     ]);
 
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
@@ -1474,13 +1516,33 @@ export class OpenCodeServer extends EventEmitter {
     if (!Array.isArray(questions)) {
       throw new Error('OpenCode returned an invalid pending question response');
     }
+    if (!Array.isArray(permissions)) {
+      throw new Error('OpenCode returned an invalid pending permission response');
+    }
     const blockingSessionIDs = new Set<string>();
     for (const [sessionID, value] of Object.entries(statuses)) {
-      const status = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-      if (status?.type === 'busy' || status?.type === 'retry') blockingSessionIDs.add(sessionID);
+      const status =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : null;
+      if (
+        !sessionID.trim() ||
+        !status ||
+        (status.type !== 'idle' && status.type !== 'busy' && status.type !== 'retry')
+      ) {
+        throw new Error('OpenCode returned an invalid session status response');
+      }
+      if (status.type === 'busy' || status.type === 'retry') blockingSessionIDs.add(sessionID);
     }
-    for (const [index, question] of questions.entries()) {
-      blockingSessionIDs.add(getSessionID(question) ?? `unknown-question:${index}`);
+    for (const question of questions) {
+      const sessionID = getSessionID(question);
+      if (!sessionID) throw new Error('OpenCode returned an invalid pending question response');
+      blockingSessionIDs.add(sessionID);
+    }
+    for (const permission of permissions) {
+      const sessionID = getSessionID(permission);
+      if (!sessionID) throw new Error('OpenCode returned an invalid pending permission response');
+      blockingSessionIDs.add(sessionID);
     }
     for (const sessionID of this.transport.getPendingAttentionSessionIDs()) {
       blockingSessionIDs.add(sessionID);
@@ -1726,6 +1788,10 @@ export class OpenCodeServer extends EventEmitter {
 
     const operation = this.lifecycle.setRestartPromise(async (signal) => {
       this.throwIfOperationCancelled(signal);
+      if (this.adoptedServerRecoveryOperation) {
+        await this.waitForAdoptedServerRecovery();
+        this.throwIfOperationCancelled(signal);
+      }
       await this.transport.waitForRequestsToSettle();
       this.throwIfOperationCancelled(signal);
       if (!options.force) {
@@ -1783,14 +1849,13 @@ export class OpenCodeServer extends EventEmitter {
     this.transport.clearPendingAttentionRequests();
     this.transport.abortRequests();
     await this.lifecycle.waitForOperationsSettlement();
+    if (this.adoptedServerRecoveryOperation) await this.waitForAdoptedServerRecovery();
     await this.processManager.disposeProcess(options);
     this.setStatus({ state: 'stopped' });
   }
 
   getWorkspaceCwd(): string | undefined {
-    return this._status.state === 'running'
-      ? this.transport.getWorkspaceDirectory()
-      : this.processManager.getWorkspaceCwd();
+    return this.transport.getWorkspaceDirectory();
   }
 
   resolveCommand(): string {

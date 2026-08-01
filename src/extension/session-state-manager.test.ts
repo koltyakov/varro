@@ -1410,6 +1410,109 @@ describe('SessionStateManager notifications', () => {
     expect(manager.isSessionInWorkspace('session-1', '/repo')).toBe(false);
     expect(manager.isSessionInWorkspace('session-1', null)).toBe(true);
   });
+
+  it('replays only current-workspace prompts and clears stale embedded foreign prompts', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'local-session', directory: '/repo' } },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'local-permission', sessionID: 'local-session', title: 'Local' },
+    });
+    manager.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'foreign-session', directory: '/other' } },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'foreign-permission', sessionID: 'foreign-session', title: 'Foreign' },
+    });
+    const post = vi.fn();
+
+    manager.replayBlockingRequests(post, new Set(), {
+      workspacePath: '/repo',
+      clearResolvedEmbedded: true,
+      previousRequests: [
+        {
+          id: 'local-permission',
+          sessionID: 'local-session',
+          kind: 'permission',
+          props: { id: 'local-permission', sessionID: 'local-session' },
+        },
+        {
+          id: 'foreign-permission',
+          sessionID: 'foreign-session',
+          kind: 'permission',
+          props: { id: 'foreign-permission', sessionID: 'foreign-session' },
+        },
+      ],
+    });
+
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.asked',
+        properties: expect.objectContaining({ id: 'local-permission' }),
+      },
+    });
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.replied',
+        properties: {
+          id: 'foreign-permission',
+          permissionID: 'foreign-permission',
+          requestID: 'foreign-permission',
+          sessionID: 'foreign-session',
+        },
+      },
+    });
+    expect(post).not.toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.asked',
+        properties: expect.objectContaining({ id: 'foreign-permission' }),
+      },
+    });
+  });
+
+  it('clears an embedded prompt whose session directory is still unknown', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'unknown-permission', sessionID: 'unknown-session', title: 'Unknown' },
+    });
+    const post = vi.fn();
+
+    manager.replayBlockingRequests(post, new Set(), {
+      workspacePath: '/repo',
+      clearResolvedEmbedded: true,
+      previousRequests: [
+        {
+          id: 'unknown-permission',
+          sessionID: 'unknown-session',
+          kind: 'permission',
+          props: { id: 'unknown-permission', sessionID: 'unknown-session' },
+        },
+      ],
+    });
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'permission.replied',
+        properties: {
+          id: 'unknown-permission',
+          permissionID: 'unknown-permission',
+          requestID: 'unknown-permission',
+          sessionID: 'unknown-session',
+        },
+      },
+    });
+  });
 });
 
 describe('SessionStateManager.reconcileStaleBusySessions', () => {

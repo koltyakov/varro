@@ -5,7 +5,6 @@ import {
   isModelVisible,
   setModelVisible,
   setProviderVisible,
-  setState,
   setShowSettings,
   state,
 } from '../lib/state';
@@ -35,20 +34,6 @@ const MIN_RELOAD_INDICATOR_MS = 500;
 
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
-}
-
-async function loadCompatibilityState() {
-  try {
-    setState('providerAuthMethods', await client.config.providerAuth());
-  } catch {
-    setState('providerAuthMethods', {});
-  }
-
-  try {
-    setState('workspaceStatuses', await client.config.workspaceStatus());
-  } catch {
-    setState('workspaceStatuses', []);
-  }
 }
 
 export function ModelsPanel() {
@@ -153,7 +138,6 @@ export function ModelsPanel() {
   onMount(() => {
     updateScrollbarInset();
     void loadRouting();
-    void loadCompatibilityState();
     if (!bodyRef) return;
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(bodyRef);

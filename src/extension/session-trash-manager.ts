@@ -25,8 +25,14 @@ export class SessionTrashManager {
     this.hiddenIds = collectHiddenSessionIds(this.entries);
   }
 
-  list() {
-    return [...this.entries.values()].toSorted((left, right) => right.deletedAt - left.deletedAt);
+  list(workspaceDirectory?: string) {
+    return [...this.entries.values()]
+      .filter(
+        (entry) =>
+          workspaceDirectory === undefined ||
+          isSameWorkspacePath(entry.root.directory, workspaceDirectory)
+      )
+      .toSorted((left, right) => right.deletedAt - left.deletedAt);
   }
 
   isHidden(sessionID: string | null | undefined) {
@@ -97,10 +103,16 @@ export class SessionTrashManager {
     });
   }
 
-  async restore(rootID: string) {
+  async restore(rootID: string, workspaceDirectory?: string) {
     return this.mutate(async () => {
       const entry = this.entries.get(rootID) || null;
-      if (!entry) return null;
+      if (
+        !entry ||
+        (workspaceDirectory !== undefined &&
+          !isSameWorkspacePath(entry.root.directory, workspaceDirectory))
+      ) {
+        return null;
+      }
       const next = new Map(this.entries);
       next.delete(rootID);
       await this.persist(next);
@@ -112,11 +124,18 @@ export class SessionTrashManager {
 
   async deletePermanently(
     rootID: string,
-    deleteSession: (target: SessionDeleteTarget) => Promise<unknown>
+    deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
+    workspaceDirectory?: string
   ) {
     return this.mutate(async () => {
       const entry = this.entries.get(rootID) || null;
-      if (!entry) return null;
+      if (
+        !entry ||
+        (workspaceDirectory !== undefined &&
+          !isSameWorkspacePath(entry.root.directory, workspaceDirectory))
+      ) {
+        return null;
+      }
       await deleteEntrySessions(entry, deleteSession);
       const next = new Map(this.entries);
       next.delete(rootID);
@@ -154,17 +173,21 @@ export class SessionTrashManager {
     });
   }
 
-  async empty(deleteSession: (target: SessionDeleteTarget) => Promise<unknown>) {
+  async empty(
+    deleteSession: (target: SessionDeleteTarget) => Promise<unknown>,
+    workspaceDirectory?: string
+  ) {
     return this.mutate(async () => {
       const removed: RecycleBinEntry[] = [];
-      for (const entry of this.list()) {
+      const next = new Map(this.entries);
+      for (const entry of this.list(workspaceDirectory)) {
         await deleteEntrySessions(entry, deleteSession);
+        next.delete(entry.rootID);
         removed.push(entry);
       }
-      const next = new Map<string, RecycleBinEntry>();
       await this.persist(next);
       this.entries = next;
-      this.hiddenIds.clear();
+      this.hiddenIds = collectHiddenSessionIds(next);
       return removed;
     });
   }

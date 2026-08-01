@@ -26,6 +26,18 @@ async function loadClient() {
   return import('./client');
 }
 
+type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function emitMessage(message: ExtensionMessage) {
   for (const handler of bridgeMocks.messageHandlers) handler(message);
 }
@@ -45,7 +57,13 @@ afterEach(() => {
 describe('client', () => {
   it('forwards health, session, config, agent, and question requests to the api bridge', async () => {
     const { client } = await loadClient();
-    bridgeMocks.apiCall.mockResolvedValue([]);
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/global/health') return Promise.resolve({ healthy: true, version: '1.0.0' });
+      if (path === '/session/status') return Promise.resolve({});
+      if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      if (path === '/provider/auth') return Promise.resolve({});
+      return Promise.resolve([]);
+    });
 
     await client.health();
     await client.command.list();
@@ -187,6 +205,65 @@ describe('client', () => {
     ]);
   });
 
+  it.each([null, {}, { healthy: 'true', version: '1.0.0' }, { healthy: true, version: 1 }])(
+    'rejects malformed health payload %#',
+    async (response) => {
+      const { client } = await loadClient();
+      bridgeMocks.apiCall.mockResolvedValue(response);
+
+      await expect(client.health()).rejects.toThrow('/global/health');
+    }
+  );
+
+  it('rejects malformed collection payloads with the endpoint in the error', async () => {
+    const { client } = await loadClient();
+    const requests: Array<{ path: string; load: () => Promise<unknown> }> = [
+      { path: '/session', load: () => client.session.list() },
+      { path: '/session/status', load: () => client.session.status() },
+      { path: '/session/session-1/message', load: () => client.session.messages('session-1') },
+      { path: '/config/providers', load: () => client.config.providers() },
+      { path: '/agent', load: () => client.agent.list() },
+      { path: '/command', load: () => client.command.list() },
+      { path: '/mcp', load: () => client.mcp.status() },
+      { path: '/question', load: () => client.question.list() },
+      { path: '/permission', load: () => client.permission.list() },
+      { path: '/file/status', load: () => client.file.status() },
+    ];
+
+    for (const request of requests) {
+      bridgeMocks.apiCall.mockResolvedValueOnce(null);
+      await expect(request.load()).rejects.toThrow(request.path);
+    }
+  });
+
+  it.each([
+    { providers: {}, default: {} },
+    { providers: [], default: [] },
+  ])('rejects malformed provider containers %#', async (response) => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(response);
+
+    await expect(client.config.providers()).rejects.toThrow('/config/providers');
+  });
+
+  it.each([
+    {
+      path: '/provider/auth',
+      response: [],
+      load: (client: ClientApi) => client.config.providerAuth(),
+    },
+    {
+      path: '/experimental/workspace/status',
+      response: {},
+      load: (client: ClientApi) => client.config.workspaceStatus(),
+    },
+  ])('rejects a malformed $path response', async ({ path, response, load }) => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(response);
+
+    await expect(load(client)).rejects.toThrow(path);
+  });
+
   it('unwraps cursor-paginated message responses', async () => {
     const { client } = await loadClient();
     const items = [{ info: { id: 'message-1' }, parts: [] }];
@@ -204,6 +281,28 @@ describe('client', () => {
     expect(result).toBe(items);
     expect(result.nextCursor).toBe('cursor with spaces');
   });
+
+  it('preserves direct message page responses', async () => {
+    const { client } = await loadClient();
+    const items = [{ info: { id: 'message-1' }, parts: [] }];
+    bridgeMocks.apiCall.mockResolvedValue(items);
+
+    const result = await client.session.messages('session-1');
+
+    expect(result).toBe(items);
+  });
+
+  it.each([{ items: {} }, { items: [], nextCursor: 42 }])(
+    'rejects malformed wrapped message page %#',
+    async (response) => {
+      const { client } = await loadClient();
+      bridgeMocks.apiCall.mockResolvedValue(response);
+
+      await expect(client.session.messages('session-1')).rejects.toThrow(
+        '/session/session-1/message'
+      );
+    }
+  );
 
   it('suppresses OpenCode share URLs after a confirmed local unshare', async () => {
     const { client } = await loadClient();
@@ -354,6 +453,90 @@ describe('client', () => {
     expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/question');
   });
 
+  it.each([
+    {
+      name: 'session status',
+      path: '/session/status',
+      load: (client: ClientApi) => client.session.status(),
+      oldValue: { old: { type: 'idle' } },
+      newValue: { current: { type: 'busy' } },
+    },
+    {
+      name: 'questions',
+      path: '/question',
+      load: (client: ClientApi) => client.question.list(),
+      oldValue: [{ id: 'old-question' }],
+      newValue: [{ id: 'current-question' }],
+    },
+    {
+      name: 'permissions',
+      path: '/permission',
+      load: (client: ClientApi) => client.permission.list(),
+      oldValue: [{ id: 'old-permission' }],
+      newValue: [{ id: 'current-permission' }],
+    },
+  ])(
+    'detaches an in-flight $name request when workspace caches are invalidated',
+    async ({ path, load, oldValue, newValue }) => {
+      const { client, invalidateClientWorkspaceCaches } = await loadClient();
+      const oldDeferred = createDeferred<unknown>();
+      const currentDeferred = createDeferred<unknown>();
+      bridgeMocks.apiCall
+        .mockReturnValueOnce(oldDeferred.promise)
+        .mockReturnValueOnce(currentDeferred.promise);
+
+      const oldRequest = load(client);
+      invalidateClientWorkspaceCaches();
+      const currentRequest = load(client);
+
+      expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+      expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(1, 'GET', path);
+      expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(2, 'GET', path);
+
+      oldDeferred.resolve(oldValue);
+      await expect(oldRequest).resolves.toBe(oldValue);
+
+      const nextConsumer = load(client);
+      expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+
+      currentDeferred.resolve(newValue);
+      await expect(Promise.all([currentRequest, nextConsumer])).resolves.toEqual([
+        newValue,
+        newValue,
+      ]);
+    }
+  );
+
+  it('keeps a new file-status request cached when the detached request fails', async () => {
+    const { client, invalidateClientWorkspaceCaches } = await loadClient();
+    const oldDeferred = createDeferred<unknown>();
+    const currentDeferred = createDeferred<unknown>();
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    bridgeMocks.apiCall
+      .mockReturnValueOnce(oldDeferred.promise)
+      .mockReturnValueOnce(currentDeferred.promise);
+
+    const oldRequest = client.file.status();
+    const oldRejection = expect(oldRequest).rejects.toThrow('old workspace failed');
+    invalidateClientWorkspaceCaches();
+    const currentRequest = client.file.status();
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+
+    oldDeferred.reject(new Error('old workspace failed'));
+    await oldRejection;
+
+    const nextConsumer = client.file.status();
+    expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+
+    const currentValue = [{ path: 'src/current.ts' }];
+    currentDeferred.resolve(currentValue);
+    await expect(Promise.all([currentRequest, nextConsumer])).resolves.toEqual([
+      currentValue,
+      currentValue,
+    ]);
+  });
+
   it('caches file status requests for two seconds', async () => {
     const { client } = await loadClient();
     const nowSpy = vi.spyOn(Date, 'now');
@@ -384,6 +567,26 @@ describe('client', () => {
     await expect(client.file.status()).resolves.toEqual([]);
 
     expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets the workspace status event summary when workspace caches are invalidated', async () => {
+    const { getWorkspaceStatusEventSummary, invalidateClientWorkspaceCaches } = await loadClient();
+
+    emitMessage({
+      type: 'server/event',
+      payload: {
+        type: 'workspace.status',
+        properties: { workspaceID: 'old-workspace', status: 'connected' },
+      },
+    });
+    emitMessage({
+      type: 'server/event',
+      payload: { type: 'workspace.ready', properties: { name: 'Old workspace' } },
+    });
+
+    invalidateClientWorkspaceCaches();
+
+    expect(getWorkspaceStatusEventSummary()).toEqual({ entries: [] });
   });
 
   it('delivers server events to specific and wildcard listeners', async () => {

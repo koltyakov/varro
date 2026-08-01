@@ -1,19 +1,21 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist/webview",
+    "noEmit": true,
+    "rootDir": ".",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vscode", "vitest/globals"],
     "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "types": []
+    "jsxImportSource": "solid-js"
   },
-  "include": ["src/webview/**/*", "src/shared/**/*"],
-  "exclude": [
+  "include": [
+    "vitest.setup.ts",
+    "src/test/**/*.ts",
+    "src/webview/global.d.ts",
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
     "src/**/*.test-support.ts",
     "src/**/*.test-support.tsx",
-    "src/test/**/*",
     "src/webview/perf/harness.ts"
   ]
 }

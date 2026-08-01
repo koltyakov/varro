@@ -68,7 +68,10 @@ export { scopeOpenCodeRequest, getOpenCodeDirectoryHeaders } from './util/openco
 
 export interface RestProxyCallbacks {
   server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
-  contextProvider: Pick<ContextProvider, 'context' | 'readFile' | 'resolvePath'>;
+  contextProvider: Pick<
+    ContextProvider,
+    'context' | 'getOpenWorkspaceRoot' | 'readFile' | 'resolvePath'
+  >;
   providerLimitService: Pick<ProviderLimitService, 'get'>;
   sessionState: Pick<
     SessionStateManager,
@@ -130,9 +133,29 @@ export class RestProxy {
         throw new Error('Unsupported API request');
       }
 
+      const requestedWorkspaceDirectory = getExplicitWorkspaceDirectory(payload.path);
+      const explicitWorkspaceDirectory = requestedWorkspaceDirectory
+        ? this.requireOpenWorkspaceRoot(requestedWorkspaceDirectory)
+        : null;
+      const forwardedPath = explicitWorkspaceDirectory
+        ? setExplicitWorkspaceDirectory(payload.path, explicitWorkspaceDirectory)
+        : payload.path;
+
       const directSessionID = parseDirectSessionID(payload.path);
       if (directSessionID) {
-        await this.assertSessionInCurrentWorkspace(directSessionID);
+        const currentWorkspaceDirectory = this.getCurrentWorkspaceResolutionRoot();
+        if (
+          explicitWorkspaceDirectory &&
+          currentWorkspaceDirectory &&
+          !isSameWorkspacePath(explicitWorkspaceDirectory, currentWorkspaceDirectory)
+        ) {
+          throw new Error('404 Session not found');
+        }
+        await this.assertSessionInWorkspace(
+          directSessionID,
+          currentWorkspaceDirectory ?? this.getCurrentWorkspacePath(),
+          currentWorkspaceDirectory ?? explicitWorkspaceDirectory ?? undefined
+        );
       }
 
       const recycleBinRequest = this.parseRecycleBinRequest(method, payload.path);
@@ -187,6 +210,7 @@ export class RestProxy {
       if (workspaceFileRequest) {
         const data = await this.callbacks.contextProvider.readFile(workspaceFileRequest.path, {
           restrictToWorkspace: true,
+          workspaceDirectory: this.getCurrentWorkspaceResolutionRoot(),
         });
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -196,7 +220,10 @@ export class RestProxy {
       if (workspaceResolveRequest) {
         const data = await this.callbacks.contextProvider.resolvePath(
           workspaceResolveRequest.path,
-          { restrictToWorkspace: true }
+          {
+            restrictToWorkspace: true,
+            workspaceDirectory: this.getCurrentWorkspaceResolutionRoot(),
+          }
         );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
@@ -291,10 +318,10 @@ export class RestProxy {
       let responsePromise: Promise<unknown>;
       try {
         responsePromise = paginatedMessages
-          ? this.callbacks.server.request(method, payload.path, payload.body, {
+          ? this.callbacks.server.request(method, forwardedPath, payload.body, {
               captureNextCursor: true,
             })
-          : this.callbacks.server.request(method, payload.path, payload.body);
+          : this.callbacks.server.request(method, forwardedPath, payload.body);
         if (this.isSessionListRequest(method, payload.path)) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }
@@ -745,18 +772,47 @@ export class RestProxy {
     );
   }
 
-  private async assertSessionInCurrentWorkspace(sessionID: string) {
+  private getCurrentWorkspaceResolutionRoot(): string | undefined {
     const workspacePath = this.getCurrentWorkspacePath();
+    if (!workspacePath) return undefined;
+    return this.callbacks.contextProvider.getOpenWorkspaceRoot(workspacePath) ?? workspacePath;
+  }
+
+  private getRequiredCurrentWorkspacePath(): string {
+    const workspacePath = this.getCurrentWorkspacePath();
+    const matchedWorkspacePath = workspacePath
+      ? this.callbacks.contextProvider.getOpenWorkspaceRoot(workspacePath)
+      : null;
+    if (!matchedWorkspacePath) {
+      throw new Error('Open a workspace folder before using the recycle bin');
+    }
+    return matchedWorkspacePath;
+  }
+
+  private async assertSessionInWorkspace(
+    sessionID: string,
+    workspacePath: string | null | undefined,
+    lookupDirectory?: string
+  ) {
     if (!normalizeWorkspaceIdentity(workspacePath)) return;
     if (this.callbacks.sessionState.isSessionInWorkspace(sessionID, workspacePath)) return;
 
     if (this.callbacks.getStatus().state !== 'running') {
       await this.callbacks.ensureServerStarted();
     }
-    const directory = await this.lookupSessionDirectory(sessionID);
+    const directory = await this.lookupSessionDirectory(sessionID, lookupDirectory);
     if (!isSameWorkspacePath(directory, workspacePath)) {
       throw new Error('404 Session not found');
     }
+  }
+
+  private requireOpenWorkspaceRoot(workspaceDirectory: string): string {
+    const matchedWorkspacePath =
+      this.callbacks.contextProvider.getOpenWorkspaceRoot(workspaceDirectory);
+    if (!matchedWorkspacePath) {
+      throw new Error('Workspace directory is not an open workspace folder');
+    }
+    return matchedWorkspacePath;
   }
 
   private isHiddenSession(sessionID: string | null | undefined) {
@@ -826,17 +882,22 @@ export class RestProxy {
   }
 
   private async handleRecycleBinRequest(request: RecycleBinRequest) {
+    const workspaceDirectory = this.getRequiredCurrentWorkspacePath();
     switch (request.kind) {
       case 'list':
-        return this.callbacks.sessionTrash.list();
+        return this.callbacks.sessionTrash.list(workspaceDirectory);
       case 'restore': {
-        const restored = await this.callbacks.sessionTrash.restore(request.rootID);
+        const restored = await this.callbacks.sessionTrash.restore(
+          request.rootID,
+          workspaceDirectory
+        );
         return Boolean(restored);
       }
       case 'delete': {
         const removed = await this.callbacks.sessionTrash.deletePermanently(
           request.rootID,
-          (session) => this.deleteSessionForDirectory(session)
+          (session) => this.deleteSessionForDirectory(session),
+          workspaceDirectory
         );
         if (removed) {
           this.callbacks.sessionState.removeSessions(removed.sessions.map((session) => session.id));
@@ -844,8 +905,9 @@ export class RestProxy {
         return Boolean(removed);
       }
       case 'empty': {
-        const removed = await this.callbacks.sessionTrash.empty((session) =>
-          this.deleteSessionForDirectory(session)
+        const removed = await this.callbacks.sessionTrash.empty(
+          (session) => this.deleteSessionForDirectory(session),
+          workspaceDirectory
         );
         if (removed.length > 0) {
           this.callbacks.sessionState.removeSessions(
@@ -900,8 +962,11 @@ export class RestProxy {
     }
   }
 
-  private async lookupSessionDirectory(sessionID: string) {
-    const sessions = await this.callbacks.server.request('GET', '/session');
+  private async lookupSessionDirectory(sessionID: string, workspaceDirectory?: string) {
+    const path = workspaceDirectory
+      ? `/session?directory=${encodeURIComponent(workspaceDirectory)}`
+      : '/session';
+    const sessions = await this.callbacks.server.request('GET', path);
     if (!Array.isArray(sessions)) return undefined;
     this.rememberSessionList(sessions);
     const match = sessions.find((session) => asRecord(session)?.id === sessionID);
@@ -972,9 +1037,15 @@ export class RestProxy {
     if (!selected) return null;
 
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(selected);
+    const workspaceDirectory = workspaceFolder
+      ? this.callbacks.contextProvider.getOpenWorkspaceRoot(workspaceFolder.uri.fsPath)
+      : null;
+    if (!workspaceFolder || !workspaceDirectory) {
+      throw new Error('Selected file is outside the open workspace folders');
+    }
     return {
-      path: workspaceFolder ? getRelativePath(selected, workspaceFolder) : selected.fsPath,
-      workspaceDirectory: workspaceFolder?.uri.fsPath ?? null,
+      path: getRelativePath(selected, workspaceFolder),
+      workspaceDirectory,
     };
   }
 
@@ -1634,6 +1705,18 @@ function parseDirectSessionID(path: string): string | null {
   if (pathname === '/session/status') return null;
   const match = pathname.match(/^\/(?:varro\/)?session\/([^/]+)(?:\/|$)/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function getExplicitWorkspaceDirectory(path: string): string | null {
+  const url = new URL(path, 'http://localhost');
+  if (!url.searchParams.has('directory')) return null;
+  return url.searchParams.get('directory')?.trim() || null;
+}
+
+function setExplicitWorkspaceDirectory(path: string, workspaceDirectory: string): string {
+  const url = new URL(path, 'http://localhost');
+  url.searchParams.set('directory', workspaceDirectory);
+  return `${url.pathname}${url.search}`;
 }
 
 function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeReference[] {

@@ -7,5 +7,12 @@
     "types": ["node"]
   },
   "include": ["e2e/**/*", "playwright.config.ts", "src/webview/**/*", "src/shared/**/*"],
-  "exclude": ["**/*.test.ts"]
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.test-support.ts",
+    "src/**/*.test-support.tsx",
+    "src/test/**/*",
+    "src/webview/perf/harness.ts"
+  ]
 }

@@ -99,13 +99,19 @@ export function renderWebviewHtml(
       var active = true;
       var handleFailure = function(event) {
         if (!active) return;
+        var failure = event;
+        if (event && 'reason' in event) failure = event.reason;
+        else if (event && 'error' in event && event.error !== undefined) failure = event.error;
+        console.error('Varro webview bootstrap failed', failure);
         event.preventDefault();
         clearHandlers();
         try {
           if (typeof window.__cleanupVarroBridge === 'function') {
             window.__cleanupVarroBridge();
           }
-        } catch {}
+        } catch (error) {
+          console.error('Varro webview bridge cleanup failed', error);
+        }
         var root = document.getElementById('root');
         if (!root) return;
         root.replaceChildren();

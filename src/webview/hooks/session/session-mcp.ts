@@ -20,6 +20,10 @@ export class SessionMcpOperations {
 
   constructor(private readonly deps: SessionMcpDependencies) {}
 
+  readonly invalidate = () => {
+    this.reconciliationGeneration += 1;
+  };
+
   private reconcileSessionMcps = (
     sessionId: string | null,
     preserveBackgroundMcps: boolean
@@ -118,6 +122,7 @@ export async function syncSessionMcpsWithDependencies(
     ...authenticate.map((name) => deps.authenticateMcp(name)),
     ...disconnect.map((name) => deps.disconnectMcp(name)),
   ]);
+  if (!isCurrent()) return;
   for (const result of results) {
     if (result.status === 'rejected') deps.logError('syncSessionMcps', result.reason);
   }

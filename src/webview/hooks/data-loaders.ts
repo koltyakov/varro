@@ -26,12 +26,16 @@ async function runLoad<T>(
   label: string,
   load: () => Promise<T>,
   apply: (value: T) => void,
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ): Promise<boolean> {
   try {
-    apply(await load());
+    const value = await load();
+    if (!isCurrent()) return true;
+    apply(value);
     return true;
   } catch (err) {
+    if (!isCurrent()) return true;
     logError(label, err);
     return false;
   }
@@ -153,9 +157,15 @@ export function createDataLoaderOperations(deps: {
   logError: Logger;
 }) {
   let emptySessionSnapshotCount = 0;
+  let workspaceGeneration = 0;
   let mcpLoadGeneration = 0;
   let questionLoadGeneration = 0;
   let sessionLoadGeneration = 0;
+  let agentLoadGeneration = 0;
+  let commandLoadGeneration = 0;
+  let providerLoadGeneration = 0;
+  let compatibilityLoadGeneration = 0;
+  let recycleBinLoadGeneration = 0;
   let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
@@ -179,6 +189,7 @@ export function createDataLoaderOperations(deps: {
   const loadMcps = () => {
     const sessionId = deps.getActiveSessionId();
     if (inFlightMcpLoad?.sessionId === sessionId) return inFlightMcpLoad.promise;
+    const workspace = workspaceGeneration;
     const generation = ++mcpLoadGeneration;
     const request = loadMcpsWithDependencies(
       {
@@ -189,7 +200,7 @@ export function createDataLoaderOperations(deps: {
         setSelectedMcpsForSession: deps.setSelectedMcpsForSession,
       },
       deps.logError,
-      () => generation === mcpLoadGeneration
+      () => workspace === workspaceGeneration && generation === mcpLoadGeneration
     );
     const tracked = request.finally(() => {
       if (inFlightMcpLoad?.promise === tracked) inFlightMcpLoad = null;
@@ -199,6 +210,7 @@ export function createDataLoaderOperations(deps: {
   };
 
   const loadQuestions = async () => {
+    const workspace = workspaceGeneration;
     const generation = ++questionLoadGeneration;
     const mutationBaseline = questionSnapshots.captureBaseline();
     await loadQuestionsWithDependencies(
@@ -209,11 +221,13 @@ export function createDataLoaderOperations(deps: {
         },
       },
       deps.logError,
-      () => generation === questionLoadGeneration
+      () => workspace === workspaceGeneration && generation === questionLoadGeneration
     );
   };
 
   const loadAgents = async () => {
+    const workspace = workspaceGeneration;
+    const generation = ++agentLoadGeneration;
     await loadAgentsWithDependencies(
       {
         listAgents: deps.listAgents,
@@ -225,21 +239,27 @@ export function createDataLoaderOperations(deps: {
         setPrimaryAgents: deps.setPrimaryAgents,
         setSelectedAgent: deps.setSelectedAgent,
       },
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration && generation === agentLoadGeneration
     );
   };
 
   const loadCommands = async () => {
+    const workspace = workspaceGeneration;
+    const generation = ++commandLoadGeneration;
     await loadCommandsWithDependencies(
       {
         listCommands: deps.listCommands,
         setCommands: deps.setCommands,
       },
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration && generation === commandLoadGeneration
     );
   };
 
   const loadProviders = async () => {
+    const workspace = workspaceGeneration;
+    const generation = ++providerLoadGeneration;
     await loadProvidersWithDependencies(
       {
         listProviders: deps.listProviders,
@@ -259,7 +279,8 @@ export function createDataLoaderOperations(deps: {
         getSelectedModel: deps.getSelectedModel,
         setSelectedModel: deps.setSelectedModel,
       },
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration && generation === providerLoadGeneration
     );
   };
 
@@ -268,6 +289,7 @@ export function createDataLoaderOperations(deps: {
   };
 
   const refreshProviderLimit = async (providerID: string, modelID?: string | null) => {
+    const workspace = workspaceGeneration;
     await refreshProviderLimitWithDependencies(
       {
         loadProviderLimit: deps.loadProviderLimit,
@@ -275,30 +297,38 @@ export function createDataLoaderOperations(deps: {
       },
       providerID,
       modelID,
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration
     );
   };
 
   const loadCompatibilityState = async () => {
+    const workspace = workspaceGeneration;
+    const generation = ++compatibilityLoadGeneration;
+    const isCurrent = () =>
+      workspace === workspaceGeneration && generation === compatibilityLoadGeneration;
     await Promise.all([
       loadProviderAuthMethodsWithDependencies(
         {
           listProviderAuthMethods: deps.listProviderAuthMethods,
           setProviderAuthMethods: deps.setProviderAuthMethods,
         },
-        deps.logError
+        deps.logError,
+        isCurrent
       ),
       loadWorkspaceStatusesWithDependencies(
         {
           listWorkspaceStatuses: deps.listWorkspaceStatuses,
           setWorkspaceStatuses: deps.setWorkspaceStatuses,
         },
-        deps.logError
+        deps.logError,
+        isCurrent
       ),
     ]);
   };
 
   const loadSessions = async () => {
+    const workspace = workspaceGeneration;
     const generation = ++sessionLoadGeneration;
     const mutationBaseline = sessionSnapshots.captureBaseline();
     const loaded = await loadSessionsWithDependencies(
@@ -315,24 +345,29 @@ export function createDataLoaderOperations(deps: {
         },
       },
       deps.logError,
-      () => generation === sessionLoadGeneration
+      () => workspace === workspaceGeneration && generation === sessionLoadGeneration
     );
-    if (generation !== sessionLoadGeneration) return;
+    if (workspace !== workspaceGeneration || generation !== sessionLoadGeneration) return;
     deps.setSessionsLoadError?.(loaded ? null : 'Failed to load sessions');
   };
 
   const loadRecycleBin = async () => {
+    const workspace = workspaceGeneration;
+    const generation = ++recycleBinLoadGeneration;
     const loaded = await loadRecycleBinWithDependencies(
       {
         listRecycleBin: deps.listRecycleBin,
         setRecycleBinEntries: deps.setRecycleBinEntries,
       },
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration && generation === recycleBinLoadGeneration
     );
+    if (workspace !== workspaceGeneration || generation !== recycleBinLoadGeneration) return;
     deps.setRecycleBinLoadError?.(loaded ? null : 'Failed to load the recycle bin');
   };
 
   const hydrateSessionStatuses = async () => {
+    const workspace = workspaceGeneration;
     await hydrateSessionStatusesWithDependencies(
       {
         loadSessionStatuses: deps.loadSessionStatuses,
@@ -340,8 +375,23 @@ export function createDataLoaderOperations(deps: {
         getSessions: deps.getSessions,
         updateUsageLimitState: deps.updateUsageLimitState,
       },
-      deps.logError
+      deps.logError,
+      () => workspace === workspaceGeneration
     );
+  };
+
+  const invalidateWorkspace = () => {
+    workspaceGeneration += 1;
+    mcpLoadGeneration += 1;
+    questionLoadGeneration += 1;
+    sessionLoadGeneration += 1;
+    agentLoadGeneration += 1;
+    commandLoadGeneration += 1;
+    providerLoadGeneration += 1;
+    compatibilityLoadGeneration += 1;
+    recycleBinLoadGeneration += 1;
+    emptySessionSnapshotCount = 0;
+    inFlightMcpLoad = null;
   };
 
   return {
@@ -356,6 +406,7 @@ export function createDataLoaderOperations(deps: {
     loadSessions,
     loadRecycleBin,
     hydrateSessionStatuses,
+    invalidateWorkspace,
   };
 }
 
@@ -388,13 +439,15 @@ export async function loadProviderAuthMethodsWithDependencies(
     listProviderAuthMethods(): Promise<ProviderAuthMethodsByProvider>;
     setProviderAuthMethods(methods: ProviderAuthMethodsByProvider): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   await runLoad(
     'loadProviderAuthMethods',
     deps.listProviderAuthMethods,
     (methods) => deps.setProviderAuthMethods(methods || {}),
-    logError
+    logError,
+    isCurrent
   );
 }
 
@@ -403,13 +456,15 @@ export async function loadWorkspaceStatusesWithDependencies(
     listWorkspaceStatuses(): Promise<WorkspaceStatusEntry[]>;
     setWorkspaceStatuses(entries: WorkspaceStatusEntry[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   await runLoad(
     'loadWorkspaceStatuses',
     deps.listWorkspaceStatuses,
     (entries) => deps.setWorkspaceStatuses(entries || []),
-    logError
+    logError,
+    isCurrent
   );
 }
 
@@ -477,10 +532,12 @@ export async function loadAgentsWithDependencies(
       options: { sessionId?: string | null; persistGlobal: boolean }
     ): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   try {
     const loadedAgents = await deps.listAgents();
+    if (!isCurrent()) return;
     const activeSessionId = deps.getActiveSessionId();
     const routingState = reconcileLoadedAgents({
       loadedAgents,
@@ -501,7 +558,7 @@ export async function loadAgentsWithDependencies(
       );
     }
   } catch (err) {
-    logError('loadAgents', err);
+    if (isCurrent()) logError('loadAgents', err);
   }
 }
 
@@ -510,13 +567,15 @@ export async function loadCommandsWithDependencies(
     listCommands(): Promise<Command[] | null | undefined>;
     setCommands(commands: Command[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   await runLoad(
     'loadCommands',
     deps.listCommands,
     (commands) => deps.setCommands(commands || []),
-    logError
+    logError,
+    isCurrent
   );
 }
 
@@ -530,11 +589,13 @@ export async function loadProvidersWithDependencies(
     getActiveSessionId?(): string | null;
     setSelectedModel(model: SelectedModel | null): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   deps.setProvidersLoaded(false);
   try {
     const res = await deps.listProviders();
+    if (!isCurrent()) return;
     const providers = res.providers.map((provider) =>
       provider.id === 'openai'
         ? {
@@ -568,7 +629,7 @@ export async function loadProvidersWithDependencies(
       deps.setSelectedModel(routingState.nextSelectedModel);
     }
   } catch (err) {
-    logError('loadProviders', err);
+    if (isCurrent()) logError('loadProviders', err);
   }
 }
 
@@ -583,13 +644,14 @@ export async function refreshProviderLimitWithDependencies(
   },
   providerID: string,
   modelID: string | null | undefined,
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   try {
     const limit = await deps.loadProviderLimit(providerID, modelID);
-    deps.setProviderLimit(providerID, modelID, limit);
+    if (isCurrent()) deps.setProviderLimit(providerID, modelID, limit);
   } catch (err) {
-    logError('loadProviderLimit', err);
+    if (isCurrent()) logError('loadProviderLimit', err);
   }
 }
 
@@ -612,7 +674,7 @@ export async function loadSessionsWithDependencies(
     deps.applySessions(sessions);
     return true;
   } catch (err) {
-    logError('loadSessions', err);
+    if (isCurrent()) logError('loadSessions', err);
     return false;
   }
 }
@@ -622,13 +684,15 @@ export async function loadRecycleBinWithDependencies(
     listRecycleBin(): Promise<RecycleBinEntry[] | null | undefined>;
     setRecycleBinEntries(entries: RecycleBinEntry[]): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ): Promise<boolean> {
   return await runLoad(
     'loadRecycleBin',
     deps.listRecycleBin,
     (entries) => deps.setRecycleBinEntries(entries || []),
-    logError
+    logError,
+    isCurrent
   );
 }
 
@@ -646,16 +710,18 @@ export async function hydrateSessionStatusesWithDependencies(
       messages?: Array<unknown>
     ): void;
   },
-  logError: Logger
+  logError: Logger,
+  isCurrent: () => boolean = () => true
 ) {
   try {
     const snapshotStartedAt = Date.now();
     const statuses = await deps.loadSessionStatuses();
+    if (!isCurrent()) return;
     deps.setSessionStatuses(statuses, { snapshotStartedAt });
     for (const session of deps.getSessions()) {
       deps.updateUsageLimitState(session.id, statuses[session.id], []);
     }
   } catch (err) {
-    logError('session.status', err);
+    if (isCurrent()) logError('session.status', err);
   }
 }

@@ -233,7 +233,6 @@ describe('DiffView', () => {
 
     const viewport = container?.querySelector<HTMLElement>('.diff-view-lines');
     const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
-    const header = container?.querySelector<HTMLElement>('.diff-view-item-expandable');
 
     expect(viewport?.scrollTop).toBe(0);
     expect(container?.querySelectorAll('.diff-view-line')).toHaveLength(5);
@@ -286,7 +285,8 @@ describe('DiffView', () => {
     expect(document.activeElement).toBe(viewport);
     viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
 
-    header?.click();
+    toggle?.focus();
+    toggle?.click();
     await Promise.resolve();
 
     const overlay = document.querySelector<HTMLElement>('.diff-view-overlay');
@@ -295,6 +295,7 @@ describe('DiffView', () => {
     expect(toggle?.getAttribute('aria-label')).toBe('Collapse changes in example.ts');
     expect(toggle?.title).toBe('Collapse diff preview');
     expect(overlay).toBeInstanceOf(HTMLElement);
+    expect(overlay?.getAttribute('aria-modal')).toBe('true');
     expect(overlay?.closest('.interactive-list-shell')).toBe(messageListShell);
     expect(hasExpandedDiffOverlay()).toBe(true);
     expect(overlayViewport?.scrollTop).toBe(57);
@@ -306,16 +307,42 @@ describe('DiffView', () => {
       '10'
     );
 
-    toggle?.focus();
-    expect(document.activeElement).toBe(toggle);
+    const closeButton = overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close');
+    expect(document.activeElement).toBe(closeButton);
 
-    overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close')?.click();
+    overlayViewport?.focus();
+    const tabEvent = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    });
+    overlayViewport?.dispatchEvent(tabEvent);
+    expect(tabEvent.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton?.click();
     await Promise.resolve();
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(viewport?.scrollTop).toBe(0);
     expect(document.querySelector('.diff-view-overlay')).toBeNull();
     expect(hasExpandedDiffOverlay()).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+
+    toggle?.click();
+    await Promise.resolve();
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+
+    toggle?.click();
+    await Promise.resolve();
+    document.querySelector<HTMLElement>('.diff-view-overlay')?.click();
+    await Promise.resolve();
+    expect(document.querySelector('.diff-view-overlay')).toBeNull();
     expect(document.activeElement).toBe(toggle);
   });
 

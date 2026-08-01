@@ -19,4 +19,14 @@ describe('workspace path identity', () => {
   it('keeps POSIX path identity case-sensitive', () => {
     expect(isSameWorkspacePath('/Users/Andrew/Varro', '/Users/andrew/Varro')).toBe(false);
   });
+
+  it('keeps backslashes literal in POSIX paths', () => {
+    expect(normalizeWorkspaceIdentity('/srv/Repo\\Feature/')).toBe('/srv/Repo\\Feature');
+    expect(isSameWorkspacePath('/srv/repo\\feature', '/srv/repo/feature')).toBe(false);
+    expect(isSameWorkspacePath('/srv/Repo\\Feature', '/srv/repo\\feature')).toBe(false);
+  });
+
+  it('does not case-fold an incomplete UNC-like POSIX path', () => {
+    expect(isSameWorkspacePath('//BuildServer', '//buildserver')).toBe(false);
+  });
 });

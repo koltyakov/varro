@@ -1,6 +1,6 @@
-import { defineConfig } from 'vitest/config';
+import { resolve } from 'node:path';
 import solid from 'vite-plugin-solid';
-import { resolve } from 'path';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   // hot: false keeps vite-plugin-solid from injecting the /@solid-refresh virtual
@@ -18,6 +18,14 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       reportsDirectory: './tmp/coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.test-support.{ts,tsx}',
+        'src/test/**',
+        'src/webview/perf/harness.ts',
+      ],
       thresholds: {
         statements: 80,
         branches: 71,

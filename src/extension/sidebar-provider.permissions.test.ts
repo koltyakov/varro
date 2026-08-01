@@ -42,6 +42,10 @@ describe('SidebarProvider permission replay', () => {
     ];
 
     providerState.sessionState.handleServerEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'session-1', directory: '/repo' } },
+    });
+    providerState.sessionState.handleServerEvent({
       type: 'permission.asked',
       properties: {
         id: 'perm-1',

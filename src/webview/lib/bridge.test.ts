@@ -179,33 +179,45 @@ describe('bridge', () => {
     await rejection;
   });
 
-  it('times out API requests that never receive a response', async () => {
+  it.each([
+    { method: 'POST', path: '/slow?next=/prompt_async', timeoutMs: 35_000 },
+    {
+      method: 'POST',
+      path: '/session/1/prompt_async?directory=%2Frepo',
+      timeoutMs: 40_000,
+    },
+    { method: 'POST', path: '/session/1/summarize?directory=%2Frepo', timeoutMs: 40_000 },
+    {
+      method: 'POST',
+      path: '/mcp/browser%20server/auth/authenticate?directory=%2Frepo',
+      timeoutMs: 315_000,
+    },
+    {
+      method: 'GET',
+      path: '/mcp/browser%20server/auth/authenticate?directory=%2Frepo',
+      timeoutMs: 35_000,
+    },
+  ])('uses the endpoint timeout for $method $path', async ({ method, path, timeoutMs }) => {
     vi.useFakeTimers();
     const bridge = await loadBridge();
     window.__sendToExtension = vi.fn();
 
-    const request = bridge.apiCall('GET', '/slow');
-    const rejection = expect(request).rejects.toThrow('API call timed out: GET /slow');
-    await vi.advanceTimersByTimeAsync(35_000);
-
-    await rejection;
-  });
-
-  it('uses the long timeout for async prompt requests', async () => {
-    vi.useFakeTimers();
-    const bridge = await loadBridge();
-    window.__sendToExtension = vi.fn();
-
-    const request = bridge.apiCall('POST', '/session/1/prompt_async', { parts: [] });
-    const rejection = expect(request).rejects.toThrow(
-      'API call timed out: POST /session/1/prompt_async'
+    const request = bridge.apiCall(method, path);
+    const rejection = expect(request).rejects.toThrow(`API call timed out: ${method} ${path}`);
+    let settled = false;
+    void request.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
     );
 
-    await vi.advanceTimersByTimeAsync(35_000);
-    await Promise.resolve();
-    expect(window.__sendToExtension).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+    expect(settled).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(1);
     await rejection;
   });
 

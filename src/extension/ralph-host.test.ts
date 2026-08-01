@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
-import { resolve as resolvePath } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RalphConfig, RalphRun } from '../shared/ralph';
 import type { RalphStatePayload } from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
+import { isSameWorkspacePath } from '../shared/workspace-path';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -150,7 +150,8 @@ class FakeServer extends EventEmitter {
 
 function createHost(options?: {
   persistence?: Persistence;
-  readFile?: (path: string) => Promise<string | null>;
+  readFile?: (path: string, options?: unknown) => Promise<string | null>;
+  getOpenWorkspaceRoot?: (path: string) => string | null;
   ensureServerStarted?: () => Promise<unknown>;
 }) {
   const server = new FakeServer();
@@ -163,6 +164,7 @@ function createHost(options?: {
     server,
     contextProvider: {
       readFile: options?.readFile ?? (async () => '# Plan\n- [x] all done'),
+      getOpenWorkspaceRoot: options?.getOpenWorkspaceRoot ?? ((path) => path),
     },
     persistence,
     ensureServerStarted,
@@ -573,6 +575,88 @@ describe('RalphHost', () => {
     expect(ensureServerStarted).not.toHaveBeenCalled();
   });
 
+  it('does not start OpenCode or create a Ralph run for an unavailable workspace root', async () => {
+    const { host, server, ensureServerStarted } = createHost({
+      getOpenWorkspaceRoot: () => null,
+    });
+    const config = createConfig({ workspaceDirectory: '/closed' });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await Promise.resolve();
+
+    expect(host.getStatePayload().runs[config.managerSessionId]).toBeUndefined();
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('workspace folder is not open')
+    );
+  });
+
+  it('fails resume before startup when the run workspace root is unavailable', async () => {
+    let workspaceOpen = true;
+    const { host, ensureServerStarted } = createHost({
+      getOpenWorkspaceRoot: (path) => (workspaceOpen ? path : null),
+    });
+    const config = createConfig();
+    host.handleMessage({
+      type: 'ralph/sync',
+      payload: {
+        legacyRuns: {
+          [config.managerSessionId]: {
+            config,
+            status: 'paused',
+            currentIteration: 0,
+            iterations: [],
+            updatedAt: 1,
+          },
+        },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]).toBeDefined()
+    );
+    ensureServerStarted.mockClear();
+    workspaceOpen = false;
+
+    host.handleMessage({
+      type: 'ralph/resume',
+      payload: { managerSessionId: config.managerSessionId },
+    });
+
+    expect(host.getStatePayload().runs[config.managerSessionId]).toMatchObject({
+      status: 'failed',
+      stopReason: 'iteration_error',
+      note: expect.stringContaining('not open'),
+    });
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
+  it('fails a persisted running run without starting OpenCode when its root is unavailable', async () => {
+    const { persistence } = createMemoryPersistence();
+    const config = createConfig({ workspaceDirectory: '/closed' });
+    await persistence.set(RALPH_RUNS_KEY, {
+      [config.managerSessionId]: {
+        config,
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    });
+
+    const { host, ensureServerStarted } = createHost({
+      persistence,
+      getOpenWorkspaceRoot: () => null,
+    });
+
+    expect(host.getStatePayload().runs[config.managerSessionId]).toMatchObject({
+      status: 'failed',
+      stopReason: 'iteration_error',
+      note: expect.stringContaining('not open'),
+    });
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+  });
+
   it('does not start a run after a stop overtakes pending server startup', async () => {
     const serverStart = deferred<void>();
     const { host, server, broadcasts, ensureServerStarted } = createHost({
@@ -792,13 +876,112 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().runs[config.managerSessionId]?.config.workspaceDirectory).toBe(
       '/workspace-a'
     );
-    expect(readFile).toHaveBeenCalledWith(resolvePath('/workspace-a', 'RALPH.md'));
+    expect(readFile).toHaveBeenCalledWith('RALPH.md', {
+      restrictToWorkspace: true,
+      workspaceDirectory: '/workspace-a',
+    });
     expect(server.request.mock.calls.length).toBeGreaterThan(0);
     expect(
       server.request.mock.calls.every(
         ([, path]) => requestDirectory(path as string) === '/workspace-a'
       )
     ).toBe(true);
+  });
+
+  it('runs from an open secondary root and scopes all work to its canonical path', async () => {
+    const canonicalWorkspace = 'C:\\Projects\\Secondary';
+    const readFile = vi.fn(async () => '# Plan\n- [x] all done');
+    const { host, server } = createHost({
+      readFile,
+      getOpenWorkspaceRoot: (path) =>
+        isSameWorkspacePath(path, canonicalWorkspace) ? canonicalWorkspace : null,
+    });
+    const config = createConfig({ workspaceDirectory: 'c:/projects/SECONDARY/' });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.config.workspaceDirectory).toBe(
+      canonicalWorkspace
+    );
+    expect(readFile).toHaveBeenCalledWith('RALPH.md', {
+      restrictToWorkspace: true,
+      workspaceDirectory: canonicalWorkspace,
+    });
+    expect(
+      server.request.mock.calls.every(
+        ([, path]) => requestDirectory(path as string) === canonicalWorkspace
+      )
+    ).toBe(true);
+  });
+
+  it.each([
+    ['relative traversal', '../workspace-b/RALPH.md'],
+    ['absolute cross-root path', '/workspace-b/RALPH.md'],
+  ])(
+    'keeps a %s plan read root-bound without sending cross-root contents to OpenCode',
+    async (_label, planDocPath) => {
+      const crossRootSecret = 'CROSS_ROOT_PLAN_SECRET';
+      const readFile = vi.fn(async (_path: string, options?: unknown) => {
+        const workspaceDirectory = (options as { workspaceDirectory?: string } | undefined)
+          ?.workspaceDirectory;
+        return workspaceDirectory === '/workspace' ? null : crossRootSecret;
+      });
+      const { host, server } = createHost({ readFile });
+      const config = createConfig({ planDocPath });
+
+      host.handleMessage({ type: 'ralph/start', payload: { config } });
+      await vi.waitFor(() =>
+        expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+      );
+
+      expect(readFile).toHaveBeenCalledWith(planDocPath, {
+        restrictToWorkspace: true,
+        workspaceDirectory: '/workspace',
+      });
+      const promptBodies = server.request.mock.calls
+        .filter(
+          ([method, path]) =>
+            method === 'POST' && requestPath(path as string).endsWith('/prompt_async')
+        )
+        .map(([, , body]) => body);
+      expect(promptBodies.length).toBeGreaterThan(0);
+      expect(JSON.stringify(promptBodies)).not.toContain(crossRootSecret);
+    }
+  );
+
+  it('fails an active iteration when its workspace root is removed', async () => {
+    let workspaceOpen = true;
+    const readFile = vi.fn(async () => '# Plan\n- [ ] work');
+    const { host, server } = createHost({
+      readFile,
+      getOpenWorkspaceRoot: (path) => (workspaceOpen ? path : null),
+    });
+    const config = createConfig();
+    server.request.mockImplementation(async (method: string, path: string) => {
+      if (method === 'POST' && requestPath(path) === '/session') {
+        workspaceOpen = false;
+        return { id: 'child-root-removed' };
+      }
+      throw new Error(`Unexpected request after workspace removal: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('failed')
+    );
+
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(readFile).toHaveBeenCalledWith('RALPH.md', {
+      restrictToWorkspace: true,
+      workspaceDirectory: '/workspace',
+    });
+    expect(server.request).toHaveBeenCalledTimes(1);
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
+      'workspace folder that is not open'
+    );
   });
 
   it('unwraps global events and ignores envelopes from another workspace', async () => {

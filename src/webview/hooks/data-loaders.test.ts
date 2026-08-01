@@ -62,6 +62,10 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
       note: 'Unsupported',
     }),
     setProviderLimit: vi.fn(),
+    listProviderAuthMethods: async () => ({}),
+    setProviderAuthMethods: vi.fn(),
+    listWorkspaceStatuses: async () => [],
+    setWorkspaceStatuses: vi.fn(),
     listSessions: async () => [],
     applySessions: vi.fn(),
     listRecycleBin: async () => [],
@@ -642,6 +646,159 @@ describe('data loaders', () => {
     expect(applySessions).toHaveBeenCalledTimes(1);
   });
 
+  it('applies only the latest overlapping routing, compatibility, and recycle loads', async () => {
+    const firstAgents = deferred<Agent[]>();
+    const latestAgents = deferred<Agent[]>();
+    const firstCommands = deferred<Array<{ name: string; template: string }>>();
+    const latestCommands = deferred<Array<{ name: string; template: string }>>();
+    const firstProviders = deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const latestProviders =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listProviders']>>>();
+    const firstAuth =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listProviderAuthMethods']>>>();
+    const latestAuth =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listProviderAuthMethods']>>>();
+    const firstWorkspaces =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listWorkspaceStatuses']>>>();
+    const latestWorkspaces =
+      deferred<Awaited<ReturnType<DataLoaderDependencies['listWorkspaceStatuses']>>>();
+    const firstRecycleBin = deferred<RecycleBinEntry[]>();
+    const latestRecycleBin = deferred<RecycleBinEntry[]>();
+    const setAllAgents = vi.fn();
+    const setCommands = vi.fn();
+    const setProviders = vi.fn();
+    const setProviderAuthMethods = vi.fn();
+    const setWorkspaceStatuses = vi.fn();
+    const setRecycleBinEntries = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents: vi
+          .fn<DataLoaderDependencies['listAgents']>()
+          .mockReturnValueOnce(firstAgents.promise)
+          .mockReturnValueOnce(latestAgents.promise),
+        setAllAgents,
+        listCommands: vi
+          .fn<DataLoaderDependencies['listCommands']>()
+          .mockReturnValueOnce(firstCommands.promise)
+          .mockReturnValueOnce(latestCommands.promise),
+        setCommands,
+        listProviders: vi
+          .fn<DataLoaderDependencies['listProviders']>()
+          .mockReturnValueOnce(firstProviders.promise)
+          .mockReturnValueOnce(latestProviders.promise),
+        setProviders,
+        listProviderAuthMethods: vi
+          .fn<DataLoaderDependencies['listProviderAuthMethods']>()
+          .mockReturnValueOnce(firstAuth.promise)
+          .mockReturnValueOnce(latestAuth.promise),
+        setProviderAuthMethods,
+        listWorkspaceStatuses: vi
+          .fn<DataLoaderDependencies['listWorkspaceStatuses']>()
+          .mockReturnValueOnce(firstWorkspaces.promise)
+          .mockReturnValueOnce(latestWorkspaces.promise),
+        setWorkspaceStatuses,
+        listRecycleBin: vi
+          .fn<DataLoaderDependencies['listRecycleBin']>()
+          .mockReturnValueOnce(firstRecycleBin.promise)
+          .mockReturnValueOnce(latestRecycleBin.promise),
+        setRecycleBinEntries,
+      })
+    );
+
+    const staleLoads = [
+      operations.loadAgents(),
+      operations.loadCommands(),
+      operations.loadProviders(),
+      operations.loadCompatibilityState(),
+      operations.loadRecycleBin(),
+    ];
+    const latestLoads = [
+      operations.loadAgents(),
+      operations.loadCommands(),
+      operations.loadProviders(),
+      operations.loadCompatibilityState(),
+      operations.loadRecycleBin(),
+    ];
+    latestAgents.resolve([buildAgent('latest')]);
+    latestCommands.resolve([{ name: 'latest', template: '/latest' }]);
+    latestProviders.resolve({ providers: [provider('latest', {})], default: {} });
+    latestAuth.resolve({ latest: [{ type: 'api', label: 'Latest' }] });
+    latestWorkspaces.resolve([{ workspaceID: 'latest', status: 'connected' }]);
+    latestRecycleBin.resolve([]);
+    await Promise.all(latestLoads);
+
+    firstAgents.resolve([buildAgent('stale')]);
+    firstCommands.resolve([{ name: 'stale', template: '/stale' }]);
+    firstProviders.resolve({ providers: [provider('stale', {})], default: {} });
+    firstAuth.resolve({ stale: [{ type: 'api', label: 'Stale' }] });
+    firstWorkspaces.resolve([{ workspaceID: 'stale', status: 'connected' }]);
+    firstRecycleBin.resolve([]);
+    await Promise.all(staleLoads);
+
+    expect(setAllAgents).toHaveBeenCalledOnce();
+    expect(setAllAgents).toHaveBeenCalledWith([buildAgent('latest')]);
+    expect(setCommands).toHaveBeenCalledOnce();
+    expect(setCommands).toHaveBeenCalledWith([{ name: 'latest', template: '/latest' }]);
+    expect(setProviders).toHaveBeenCalledOnce();
+    expect(setProviders).toHaveBeenCalledWith([provider('latest', {})], {}, []);
+    expect(setProviderAuthMethods).toHaveBeenCalledOnce();
+    expect(setProviderAuthMethods).toHaveBeenCalledWith({
+      latest: [{ type: 'api', label: 'Latest' }],
+    });
+    expect(setWorkspaceStatuses).toHaveBeenCalledOnce();
+    expect(setWorkspaceStatuses).toHaveBeenCalledWith([
+      { workspaceID: 'latest', status: 'connected' },
+    ]);
+    expect(setRecycleBinEntries).toHaveBeenCalledOnce();
+  });
+
+  it('does not apply workspace-sensitive loads invalidated by a workspace change', async () => {
+    const agents = deferred<Agent[]>();
+    const recycleBin = deferred<RecycleBinEntry[]>();
+    const statuses = deferred<Record<string, SessionStatus>>();
+    const sessions = deferred<Session[]>();
+    const setAllAgents = vi.fn();
+    const setRecycleBinEntries = vi.fn();
+    const setSessionStatuses = vi.fn();
+    const applySessions = vi.fn();
+    const setSessionsLoadError = vi.fn();
+    const setRecycleBinLoadError = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listAgents: () => agents.promise,
+        setAllAgents,
+        listRecycleBin: () => recycleBin.promise,
+        setRecycleBinEntries,
+        loadSessionStatuses: () => statuses.promise,
+        setSessionStatuses,
+        listSessions: () => sessions.promise,
+        applySessions,
+        setSessionsLoadError,
+        setRecycleBinLoadError,
+      })
+    );
+
+    const staleLoads = Promise.all([
+      operations.loadAgents(),
+      operations.loadRecycleBin(),
+      operations.hydrateSessionStatuses(),
+      operations.loadSessions(),
+    ]);
+    operations.invalidateWorkspace();
+    agents.resolve([buildAgent('build')]);
+    recycleBin.resolve([]);
+    statuses.resolve({ 'session-old': { type: 'busy' } });
+    sessions.resolve([session('session-old')]);
+    await staleLoads;
+
+    expect(setAllAgents).not.toHaveBeenCalled();
+    expect(setRecycleBinEntries).not.toHaveBeenCalled();
+    expect(setSessionStatuses).not.toHaveBeenCalled();
+    expect(applySessions).not.toHaveBeenCalled();
+    expect(setSessionsLoadError).not.toHaveBeenCalled();
+    expect(setRecycleBinLoadError).not.toHaveBeenCalled();
+  });
+
   it('does not resurrect a question answered while its snapshot is in flight', async () => {
     const response = deferred<QuestionRequest[]>();
     const answered: QuestionRequest = {
@@ -724,6 +881,28 @@ describe('data loaders', () => {
     await operations.loadSessions();
     expect(applySessions).toHaveBeenCalledWith([]);
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('resets empty-snapshot confirmation when workspace loads are invalidated', async () => {
+    let currentSessions = [session('session-1')];
+    const applySessions = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listSessions: async () => [],
+        getSessions: () => currentSessions,
+        applySessions,
+      })
+    );
+
+    await operations.loadSessions();
+    operations.invalidateWorkspace();
+    await operations.loadSessions();
+    expect(applySessions).not.toHaveBeenCalled();
+
+    currentSessions = [];
+    await operations.loadSessions();
+    expect(applySessions).toHaveBeenCalledOnce();
+    expect(applySessions).toHaveBeenCalledWith([]);
   });
 
   it('resets empty session snapshot confirmation after a non-empty snapshot', async () => {

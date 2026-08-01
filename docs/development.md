@@ -34,12 +34,16 @@ npm run typecheck
 npm run test
 ```
 
+`npm run typecheck` covers the extension, webview, E2E harness, and shared contract tests. `npm run typecheck:unit` is an opt-in debt report for all Vitest sources; it currently reports legacy fixture and mock typing errors and is not part of standard or CI validation.
+
 While iterating, run the narrowest relevant command for the area you changed. Useful targeted commands include:
 
 - `npm run test -- src/webview/components/ChatInput.test.ts`
-- `npm run test -- src/webview/components/ralph/ralph-runner.test.ts`
+- `npm run test -- src/shared/ralph-runner-core.test.ts`
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
+
+The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
 For message-list scrolling, pagination, sticky prompts, row measurement, attachments, or inline
 editing, read [Message List Virtualization](message-list-virtualization.md) before making changes.
@@ -141,7 +145,7 @@ At activation time, `src/extension/extension.ts`:
 - Creates and registers `SidebarProvider`
 - Registers commands
 
-The OpenCode server itself is not started at activation. `SidebarProvider.ensureServerStarted()` is called lazily when the view becomes active or the webview issues a request, which either attaches to an already running server or spawns `opencode serve`.
+The OpenCode server itself is not started at activation. `WebviewSession` and request handlers call `SidebarProviderRuntime.ensureServerStarted()` only when the UI needs it, which either attaches to an already running server or spawns `opencode serve`.
 
 See [architecture.md](architecture.md) for a deeper component-by-component breakdown.
 
@@ -183,12 +187,12 @@ It debounces editor and diagnostics updates before posting them to the webview.
 
 `src/extension/sidebar-provider.ts` owns the webview lifecycle and message bridge.
 
-- Injects the built webview HTML, CSS, and JS into the sidebar
-- Sends initial state to the webview inline
-- Proxies webview API calls to the OpenCode server
-- Handles file search, file picking, dropped files, and VS Code open actions
-- Tracks session attention state for notifications and a status bar item
-- Resolves provider limit metadata through OpenCode or supported provider APIs
+- Composes the webview session, bridge, message router, REST proxy, server-event bridge, Ralph host, and focused file/session/provider services
+- Delegates loading and lifecycle recovery to `WebviewSession`
+- Routes validated webview messages through `MessageRouter` and `sidebar-provider-actions.ts`
+- Proxies OpenCode and local `/varro/*` calls through `RestProxy`
+- Forwards workspace-scoped server events through `ServerEventBridge`
+- Tracks session attention through `SessionStateManager` for notifications and the status bar
 
 It also exposes the Varro extension-host API namespace, `/varro/*`:
 
@@ -242,7 +246,7 @@ Drag and drop also has a fallback path for environments that do not expose local
 - Current-document context toggles and skipped plan-session markers
 - Pending attention session IDs and interrupted session IDs from the extension host
 
-`src/webview/hooks/useOpenCode.ts` is the main integration hook.
+`src/webview/hooks/useOpenCode.ts` is the stable public API. Runtime composition lives in `src/webview/hooks/runtime/open-code-runtime-instance.ts`, with focused operations and effects under `src/webview/hooks/session/`.
 
 - Initializes the UI once the server reports `running`
 - Loads sessions, agents, providers, MCP status, and questions
@@ -330,7 +334,7 @@ The chat UI runs inside a VS Code webview.
 2. Run **Developer: Open Webview Developer Tools**.
 3. Use DevTools to inspect the UI, view console logs, and debug the webview code.
 
-The webview build outputs source maps in `dist/webview/webview.js.map`.
+The browser preview serves source through Vite, but the built webview has `sourcemap: false` and does not emit `dist/webview/webview.js.map`. Extension-host watch builds emit a source map; non-watch extension builds do not.
 
 ## Connect To An Existing OpenCode Server
 
@@ -388,11 +392,12 @@ docs/
 | `npm run watch:extension` | Watch and rebuild the extension host |
 | `npm run watch:webview` | Watch and rebuild the webview |
 | `npm run dev` | Run both watch tasks and open `preview.html` |
-| `npm run lint` | Run oxlint with `--fix` on `src/` |
-| `npm run lint:check` | Run oxlint without fixing |
+| `npm run lint` | Run oxlint with `--fix` across the repository |
+| `npm run lint:check` | Run oxlint without fixing across the repository |
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:coverage` | Run tests with coverage output |
-| `npm run typecheck` | Run TypeScript checks for extension, webview, and e2e code |
+| `npm run typecheck` | Check extension, webview, shared contract-test, and e2e code |
+| `npm run typecheck:unit` | Diagnostic all-unit-test typecheck; currently expected to report legacy test debt |
 | `npm run package` | Build and create a VSIX package |
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |

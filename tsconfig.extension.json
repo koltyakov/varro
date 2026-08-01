@@ -6,5 +6,12 @@
     "lib": ["ES2023"]
   },
   "include": ["src/extension/**/*", "src/shared/**/*"],
-  "exclude": ["**/*.test.ts"]
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.test-support.ts",
+    "src/**/*.test-support.tsx",
+    "src/test/**/*",
+    "src/webview/perf/harness.ts"
+  ]
 }

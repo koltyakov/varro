@@ -160,6 +160,7 @@ export function createContextProvider() {
       diagnostics: [],
     },
     terminalSelection: null,
+    getOpenWorkspaceRoot: vi.fn((path: string) => path),
     clearTerminalSelection: vi.fn(),
     readFile: vi.fn(() => Promise.resolve()),
     openPath: vi.fn(() => Promise.resolve()),

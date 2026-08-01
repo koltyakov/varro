@@ -307,6 +307,7 @@ export function RichComposerArea(props: {
         class="rich-composer"
         contentEditable={true}
         role="textbox"
+        aria-label="Message composer"
         aria-multiline="true"
         aria-placeholder={props.placeholder}
         data-placeholder={props.placeholder}

@@ -1,3 +1,4 @@
+import type { HealthResponse } from '../../shared/health';
 import { normalizeModelVariant } from '../../shared/model-variant';
 import type { MessageEntry, SessionStatus } from '../types';
 
@@ -110,6 +111,7 @@ export async function recoverInterruptedSessionsWithDependencies(
       if (!shouldContinueInterruptedSession(messages)) continue;
       await deps.continueInterruptedSession(sessionId);
     } catch (err) {
+      if (!deps.isCurrentGeneration(generation)) return;
       deps.logError('recoverInterruptedSession', err);
     }
   }
@@ -117,7 +119,7 @@ export async function recoverInterruptedSessionsWithDependencies(
 
 export async function initConnectionWithDependencies(
   deps: {
-    health(): Promise<unknown>;
+    health(): Promise<HealthResponse>;
     loadInitialData(): Promise<void>;
     hydrateSessionStatuses(): Promise<void>;
     getActiveSessionId(): string | null;
@@ -137,8 +139,9 @@ export async function initConnectionWithDependencies(
 ) {
   const generation = generationRef.next();
   try {
-    await deps.health();
+    const health = await deps.health();
     if (!generationRef.isCurrent(generation)) return;
+    if (!health.healthy) throw new Error('OpenCode server is not healthy');
 
     await deps.loadInitialData();
     if (!generationRef.isCurrent(generation)) return;
@@ -156,6 +159,7 @@ export async function initConnectionWithDependencies(
 
     deps.setInitialized(true);
   } catch (err) {
+    if (!generationRef.isCurrent(generation)) return;
     deps.setInitialized(false);
     deps.setError(
       `Failed to connect to OpenCode server: ${err instanceof Error ? err.message : String(err)}`
@@ -227,17 +231,18 @@ export function ensureConnectionInitializedWithDependencies(deps: {
   isInitialized(): boolean;
   isInitializing(): boolean;
   initConnection(): Promise<unknown>;
-  setInitializing(value: boolean): void;
+  beginInitializing(): number;
+  finishInitializing(attempt: number): void;
 }) {
   if (deps.isInitialized() || deps.isInitializing()) return;
-  deps.setInitializing(true);
+  const attempt = deps.beginInitializing();
   void deps.initConnection().finally(() => {
-    deps.setInitializing(false);
+    deps.finishInitializing(attempt);
   });
 }
 
 export function createConnectionBootstrapOperations(deps: {
-  health(): Promise<unknown>;
+  health(): Promise<HealthResponse>;
   loadInitialData(): Promise<void>;
   hydrateSessionStatuses(): Promise<void>;
   getActiveSessionId(): string | null;
@@ -325,13 +330,14 @@ export function createConnectionBootstrapOperations(deps: {
 
   const ensureConnectionInitialized = (
     state: { initialized: boolean; initializing: boolean },
-    setInitializing: (value: boolean) => void
+    attempts: { begin(): number; finish(attempt: number): void }
   ) => {
     ensureConnectionInitializedWithDependencies({
       isInitialized: () => state.initialized,
       isInitializing: () => state.initializing,
       initConnection,
-      setInitializing,
+      beginInitializing: attempts.begin,
+      finishInitializing: attempts.finish,
     });
   };
 

@@ -107,6 +107,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
         blockingRequests: [],
       } satisfies RecoverySnapshot)
     ),
+    isSessionInWorkspace: vi.fn(() => true),
     replayBlockingRequests: vi.fn(),
   };
 
@@ -375,6 +376,42 @@ describe('WebviewSession', () => {
     );
   });
 
+  it('omits recovered prompts from other workspace roots in the initial state', async () => {
+    const { session, bridge, sessionState } = createSession();
+    const view = createWebviewView(true);
+    sessionState.isSessionInWorkspace.mockImplementation(
+      (sessionID: string) => sessionID !== 'foreign-session'
+    );
+    sessionState.consumeRecoverySnapshot.mockResolvedValue({
+      interruptedSessions: [],
+      blockingRequests: [
+        {
+          id: 'local-permission',
+          sessionID: 'local-session',
+          kind: 'permission',
+          props: { id: 'local-permission', sessionID: 'local-session' },
+        },
+        {
+          id: 'foreign-question',
+          sessionID: 'foreign-session',
+          kind: 'question',
+          props: { id: 'foreign-question', sessionID: 'foreign-session' },
+        },
+      ] satisfies BlockingRequestSnapshot[],
+    });
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingPermissions: [{ id: 'local-permission', sessionID: 'local-session' }],
+        pendingQuestions: [],
+      })
+    );
+    expect(sessionState.isSessionInWorkspace).toHaveBeenCalledWith('foreign-session', '/repo');
+  });
+
   it('forwards valid webview messages and logs invalid ones', async () => {
     const { session, deps } = createSession();
     const view = createWebviewView(true);
@@ -451,6 +488,7 @@ describe('WebviewSession', () => {
       {
         previousRequests: session.blockingRequestsForWebview,
         clearResolvedEmbedded: true,
+        workspacePath: '/repo',
       }
     );
 
@@ -506,6 +544,23 @@ describe('WebviewSession', () => {
 
     expect(bridge.getView()).toBeUndefined();
     expect(deps.updateStatusBarItem).toHaveBeenCalledOnce();
+  });
+
+  it('logs ready and visible side-effect failures without duplicating server-start reporting', async () => {
+    const { session, deps } = createSession();
+    deps.handleReadySideEffects.mockRejectedValueOnce(new Error('ready cleanup failed'));
+    deps.handleVisibleSideEffects.mockRejectedValueOnce('visible cleanup failed');
+    deps.ensureServerStarted.mockRejectedValue(new Error('startup already reported'));
+
+    await session.handleReady();
+    session.handleVisible();
+    await flushMicrotasks();
+
+    expect(loggerMock.error.mock.calls).toEqual([
+      ['Webview ready side effects failed: ready cleanup failed'],
+      ['Webview visible side effects failed: visible cleanup failed'],
+    ]);
+    expect(deps.ensureServerStarted).toHaveBeenCalledTimes(2);
   });
 
   it('posts theme updates from VS Code theme changes', async () => {

@@ -1,3 +1,4 @@
+import { reconcile } from 'solid-js/store';
 import type { ExtensionMessage, WebviewThemeKind } from '../../shared/protocol';
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
@@ -12,9 +13,12 @@ import { normalizeProjectPath } from './session/session-lifecycle';
 
 export function createMountBridgeOperations(deps: {
   ensureConnectionInitialized(): void;
-  getCurrentWorkspacePath(): string | null;
+  getServerState(): Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'];
+  invalidateConnection(): void;
+  getCurrentWorkspacePath(): string | null | undefined;
   setCurrentWorkspacePath(path: string | null): void;
-  reloadSessionsForWorkspaceChange(): void;
+  resetWorkspaceForChange(): void;
+  reloadWorkspaceAfterChange(wasInitialized: boolean): void;
   isInitialized(): boolean;
   createSession(prefill?: string): void;
   abortSession(): void;
@@ -33,9 +37,11 @@ export function createMountBridgeOperations(deps: {
         },
         clearError: () => uiStore.setError(null),
         ensureConnectionInitialized: deps.ensureConnectionInitialized,
+        getServerState: deps.getServerState,
+        invalidateConnection: deps.invalidateConnection,
         clearProvidersState: () => {
           appStore.setState('providersLoaded', false);
-          appStore.setState('providerLimits', {});
+          appStore.setState('providerLimits', reconcile({}));
         },
         setTheme: (payload) => {
           uiStore.setTheme(payload.theme);
@@ -77,7 +83,8 @@ export function createMountBridgeOperations(deps: {
           composerStore.syncCurrentDocumentForWorkspace(path);
           syncSessionMarkersForWorkspace(path);
         },
-        reloadSessionsForWorkspaceChange: deps.reloadSessionsForWorkspaceChange,
+        resetWorkspaceForChange: deps.resetWorkspaceForChange,
+        reloadWorkspaceAfterChange: deps.reloadWorkspaceAfterChange,
         isInitialized: deps.isInitialized,
         setTerminalSelection: composerStore.setTerminalSelection,
         addContextFiles: composerStore.addContextFiles,
@@ -110,18 +117,21 @@ export function handleExtensionMessageWithDependencies(
     ): void;
     clearError(): void;
     ensureConnectionInitialized(): void;
+    getServerState(): Extract<ExtensionMessage, { type: 'server/status' }>['payload']['state'];
+    invalidateConnection(): void;
     clearProvidersState(): void;
     setTheme(payload: Extract<ExtensionMessage, { type: 'theme/update' }>['payload']): void;
     setConfig(payload: Extract<ExtensionMessage, { type: 'config/update' }>['payload']): void;
     getPreviousActiveFilePath(): string | null;
-    getCurrentWorkspacePath(): string | null;
+    getCurrentWorkspacePath(): string | null | undefined;
     setCurrentWorkspacePath(path: string | null): void;
     setEditorContext(
       payload: Extract<ExtensionMessage, { type: 'context/update' }>['payload']
     ): void;
     rememberCurrentDocumentNavigation(previousPath: string | null, nextPath: string | null): void;
     syncWorkspaceState(path: string | null): void;
-    reloadSessionsForWorkspaceChange(): void;
+    resetWorkspaceForChange(): void;
+    reloadWorkspaceAfterChange(wasInitialized: boolean): void;
     isInitialized(): boolean;
     setTerminalSelection(
       payload: Extract<ExtensionMessage, { type: 'terminal-selection/update' }>['payload']
@@ -148,7 +158,8 @@ export function handleExtensionMessageWithDependencies(
   msg: ExtensionMessage
 ) {
   switch (msg.type) {
-    case 'server/status':
+    case 'server/status': {
+      const previousServerState = deps.getServerState();
       deps.setServerStatus(msg.payload);
       if (msg.payload.state === 'starting' || msg.payload.state === 'running') {
         deps.setRestartBlocked?.(null);
@@ -157,10 +168,12 @@ export function handleExtensionMessageWithDependencies(
         deps.clearError();
         deps.ensureConnectionInitialized();
       } else {
+        if (previousServerState === 'running') deps.invalidateConnection();
         deps.clearProvidersState();
         deps.clearError();
       }
       break;
+    }
     case 'server/restart-blocked':
       deps.setRestartBlocked?.(msg.payload);
       break;
@@ -173,18 +186,23 @@ export function handleExtensionMessageWithDependencies(
     case 'context/update': {
       const previousActiveFilePath = deps.getPreviousActiveFilePath();
       const nextWorkspacePath = normalizeProjectPath(msg.payload.workspacePath);
-      const workspaceChanged = nextWorkspacePath !== deps.getCurrentWorkspacePath();
+      const previousWorkspacePath = deps.getCurrentWorkspacePath();
+      const initialWorkspaceContext = previousWorkspacePath === undefined;
+      const workspaceChanged =
+        !initialWorkspaceContext && nextWorkspacePath !== previousWorkspacePath;
       deps.setCurrentWorkspacePath(nextWorkspacePath);
       deps.setEditorContext(msg.payload);
-      if (workspaceChanged) {
+      if (initialWorkspaceContext || workspaceChanged) {
         deps.syncWorkspaceState(nextWorkspacePath);
       }
       deps.rememberCurrentDocumentNavigation(
         previousActiveFilePath,
         msg.payload.activeFile?.path ?? null
       );
-      if (workspaceChanged && deps.isInitialized()) {
-        deps.reloadSessionsForWorkspaceChange();
+      if (workspaceChanged) {
+        const wasInitialized = deps.isInitialized();
+        deps.resetWorkspaceForChange();
+        deps.reloadWorkspaceAfterChange(wasInitialized);
       }
       break;
     }

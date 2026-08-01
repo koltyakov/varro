@@ -1,4 +1,3 @@
-import { isAbsolute, resolve as resolvePath } from 'path';
 import type { RalphConfig, RalphIteration, RalphRun, RalphStopReason } from '../shared/ralph';
 import {
   MAX_RALPH_ITERATIONS,
@@ -38,6 +37,8 @@ const MAX_RALPH_FILES_CHANGED = 500;
 const MAX_RALPH_VERIFICATIONS = 100;
 const MAX_RALPH_REPAIR_SESSIONS = 100;
 const MAX_RALPH_NOTE_LENGTH = 10_000;
+const RALPH_WORKSPACE_UNAVAILABLE_NOTE =
+  'This Ralph run is bound to a workspace folder that is not open, so it cannot run safely. Reopen that workspace folder and resume the run.';
 
 type RalphHostMessage = Extract<
   WebviewMessage,
@@ -298,7 +299,7 @@ export class RalphHost {
   constructor(
     private readonly deps: {
       server: Pick<OpenCodeServer, 'request' | 'on' | 'off'>;
-      contextProvider: Pick<ContextProvider, 'readFile'>;
+      contextProvider: Pick<ContextProvider, 'getOpenWorkspaceRoot' | 'readFile'>;
       persistence: Persistence;
       ensureServerStarted(): Promise<unknown>;
       broadcastState(payload: RalphStatePayload): void;
@@ -402,8 +403,9 @@ export class RalphHost {
         return parseRalphSessionStatus(status, sessionId);
       },
       onSessionStatus: (listener, workspaceDirectory) => {
+        const authorizedWorkspaceDirectory = this.requireWorkspaceDirectory(workspaceDirectory);
         const handler = (rawEvent: unknown) => {
-          if (!isRalphEventInWorkspace(rawEvent, workspaceDirectory)) return;
+          if (!isRalphEventInWorkspace(rawEvent, authorizedWorkspaceDirectory)) return;
           const event = parseServerEvent(rawEvent);
           if (!event) return;
           const signal = getRalphSessionSignal(event);
@@ -414,11 +416,21 @@ export class RalphHost {
           this.deps.server.off('event', handler);
         };
       },
-      readWorkspaceFile: (path, signal, workspaceDirectory) =>
-        raceAgainstAbort(
-          this.deps.contextProvider.readFile(resolveRalphPlanPath(path, workspaceDirectory)),
+      readWorkspaceFile: (path, signal, workspaceDirectory) => {
+        let authorizedWorkspaceDirectory: string;
+        try {
+          authorizedWorkspaceDirectory = this.requireWorkspaceDirectory(workspaceDirectory);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+        return raceAgainstAbort(
+          this.deps.contextProvider.readFile(path, {
+            restrictToWorkspace: true,
+            workspaceDirectory: authorizedWorkspaceDirectory,
+          }),
           signal
-        ),
+        );
+      },
       normalizeVariant: (modelID, variant) => normalizeModelVariant(modelID, variant),
       logError: (context, err) => {
         logger.error(`ralph-host:${context}: ${err instanceof Error ? err.message : String(err)}`);
@@ -428,11 +440,11 @@ export class RalphHost {
     // Resume loops that were running when the previous window closed. This
     // intentionally starts the OpenCode server: an in-flight autonomous run
     // is exactly the case where eager startup is justified.
-    if (this.store.getAllRuns().some((run) => run.status === 'running')) {
+    if (this.failUnavailableRunningRuns()) {
       void this.deps
         .ensureServerStarted()
         .then(() => {
-          if (!this.disposed) return this.runner.reattachAll();
+          if (!this.disposed && this.failUnavailableRunningRuns()) return this.runner.reattachAll();
         })
         .catch((err) => {
           if (this.disposed) return;
@@ -450,9 +462,32 @@ export class RalphHost {
     switch (msg.type) {
       case 'ralph/start': {
         const managerSessionId = msg.payload.config.managerSessionId;
+        const workspaceDirectory = this.getWorkspaceDirectory(
+          msg.payload.config.workspaceDirectory
+        );
+        if (!workspaceDirectory) {
+          logger.warn(
+            `Refusing to start Ralph run ${managerSessionId}: workspace folder is not open`
+          );
+          break;
+        }
         const generation = this.advanceCommandGeneration(managerSessionId);
         void this.withServer(
-          () => this.runner.start(msg.payload.config),
+          () => {
+            const currentWorkspaceDirectory = this.getWorkspaceDirectory(
+              msg.payload.config.workspaceDirectory
+            );
+            if (!currentWorkspaceDirectory) {
+              logger.warn(
+                `Refusing to start Ralph run ${managerSessionId}: workspace folder is not open`
+              );
+              return Promise.resolve();
+            }
+            return this.runner.start({
+              ...msg.payload.config,
+              workspaceDirectory: currentWorkspaceDirectory,
+            });
+          },
           'start',
           () => this.commandGenerations.get(managerSessionId) === generation
         );
@@ -478,9 +513,32 @@ export class RalphHost {
           );
           break;
         }
+        if (run && !this.isWorkspaceAvailable(run.config.workspaceDirectory)) {
+          this.store.setStatus(
+            managerSessionId,
+            'failed',
+            'iteration_error',
+            RALPH_WORKSPACE_UNAVAILABLE_NOTE
+          );
+          break;
+        }
         const generation = this.advanceCommandGeneration(managerSessionId);
         void this.withServer(
-          () => this.runner.resume(managerSessionId),
+          () => {
+            const currentRun = this.store.getRun(managerSessionId);
+            if (!currentRun || !this.isWorkspaceAvailable(currentRun.config.workspaceDirectory)) {
+              if (currentRun) {
+                this.store.setStatus(
+                  managerSessionId,
+                  'failed',
+                  'iteration_error',
+                  RALPH_WORKSPACE_UNAVAILABLE_NOTE
+                );
+              }
+              return Promise.resolve();
+            }
+            return this.runner.resume(managerSessionId);
+          },
           'resume',
           () => this.commandGenerations.get(managerSessionId) === generation
         );
@@ -548,7 +606,13 @@ export class RalphHost {
     this.trackSync(adoption.then(() => {}));
     const acknowledgedIds = await adoption;
     if (this.disposed) return;
-    await this.withServer(async () => this.runner.reattachAll(), 'reattach');
+    const hadRunningRuns = this.store.getAllRuns().some((run) => run.status === 'running');
+    const hasAvailableRunningRuns = this.failUnavailableRunningRuns();
+    if (hasAvailableRunningRuns || !hadRunningRuns) {
+      await this.withServer(async () => {
+        if (this.failUnavailableRunningRuns()) this.runner.reattachAll();
+      }, 'reattach');
+    }
     if (!this.disposed) this.broadcast(acknowledgedIds);
   }
 
@@ -565,12 +629,51 @@ export class RalphHost {
     workspaceDirectory: string,
     signal?: AbortSignal
   ) {
+    let authorizedWorkspaceDirectory: string;
+    try {
+      authorizedWorkspaceDirectory = this.requireWorkspaceDirectory(workspaceDirectory);
+    } catch (err) {
+      return Promise.reject(err);
+    }
     const request = this.deps.server.request(
       method,
-      scopeRalphRequestPath(path, workspaceDirectory),
+      scopeRalphRequestPath(path, authorizedWorkspaceDirectory),
       body
     );
     return signal ? raceAgainstAbort(request, signal) : request;
+  }
+
+  private isWorkspaceAvailable(workspaceDirectory: string | null): boolean {
+    return Boolean(this.getWorkspaceDirectory(workspaceDirectory));
+  }
+
+  private getWorkspaceDirectory(workspaceDirectory: string | null): string | null {
+    const normalized = normalizeRalphWorkspaceDirectory(workspaceDirectory);
+    return normalized ? this.deps.contextProvider.getOpenWorkspaceRoot(normalized) : null;
+  }
+
+  private requireWorkspaceDirectory(workspaceDirectory: string): string {
+    const matchedWorkspaceDirectory = this.getWorkspaceDirectory(workspaceDirectory);
+    if (!matchedWorkspaceDirectory) throw new Error(RALPH_WORKSPACE_UNAVAILABLE_NOTE);
+    return matchedWorkspaceDirectory;
+  }
+
+  private failUnavailableRunningRuns(): boolean {
+    let hasAvailableRun = false;
+    for (const run of this.store.getAllRuns()) {
+      if (run.status !== 'running') continue;
+      if (this.isWorkspaceAvailable(run.config.workspaceDirectory)) {
+        hasAvailableRun = true;
+        continue;
+      }
+      this.store.setStatus(
+        run.config.managerSessionId,
+        'failed',
+        'iteration_error',
+        RALPH_WORKSPACE_UNAVAILABLE_NOTE
+      );
+    }
+    return hasAvailableRun;
   }
 
   private broadcast(legacyMigrationAcknowledgedIds: string[] = []) {
@@ -587,10 +690,6 @@ function scopeRalphRequestPath(path: string, workspaceDirectory: string): string
   const url = new URL(path, 'http://ralph.local');
   url.searchParams.set('directory', workspaceDirectory);
   return `${url.pathname}${url.search}`;
-}
-
-function resolveRalphPlanPath(planDocPath: string, workspaceDirectory: string): string {
-  return isAbsolute(planDocPath) ? planDocPath : resolvePath(workspaceDirectory, planDocPath);
 }
 
 function isRalphEventInWorkspace(rawEvent: unknown, workspaceDirectory: string): boolean {

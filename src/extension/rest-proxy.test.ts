@@ -52,7 +52,14 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       request: vi.fn(() => Promise.resolve(undefined)),
     },
     contextProvider: {
-      context: { workspacePath: '/repo', activeFile: null, selection: null, diagnostics: [] },
+      context: {
+        workspacePath: '/repo',
+        workspaceFolders: [{ name: 'repo', path: '/repo' }],
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      },
+      getOpenWorkspaceRoot: vi.fn((path: string) => path),
       readFile: vi.fn(() => Promise.resolve(null as string | null)),
       resolvePath: vi.fn(() => Promise.resolve(null)),
     },
@@ -345,7 +352,7 @@ describe('RestProxy handleRequest', () => {
 
   it('rejects direct session requests owned by another workspace', async () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
-      if (method === 'GET' && path === '/session') {
+      if (method === 'GET' && path === '/session?directory=%2Frepo') {
         return [{ id: 'foreign', directory: '/other' }];
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -394,7 +401,10 @@ describe('RestProxy handleRequest', () => {
 
   it('allows normalized Windows workspace matches from an authoritative lookup', async () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
-      if (method === 'GET' && path === '/session') {
+      if (
+        method === 'GET' &&
+        path === '/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
+      ) {
         return [{ id: 'session one', directory: 'c:/users/andrew/projects/VARRO/' }];
       }
       if (method === 'GET' && path === '/session/session%20one/message') return [];
@@ -420,11 +430,111 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(93, 'GET', '/session/session%20one/message'));
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session'],
+      ['GET', '/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'],
       ['GET', '/session/session%20one/message', undefined],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 93, data: [] });
   });
+
+  it('rejects an explicit directory outside open roots before server startup', async () => {
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        getOpenWorkspaceRoot: vi.fn(() => null),
+      } as never,
+      getStatus: vi.fn(() => ({ state: 'stopped' as const })),
+    });
+
+    await proxy.handleRequest(makePayload(94, 'POST', '/session?directory=%2Foutside', {}));
+
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 94,
+      error: 'Workspace directory is not an open workspace folder',
+    });
+  });
+
+  it('forwards the canonical matched root instead of explicit renderer spelling', async () => {
+    const serverRequest = vi.fn(() => Promise.resolve({ id: 'created' }));
+    const { proxy, callbacks } = createProxy({
+      contextProvider: {
+        ...createCallbacks().contextProvider,
+        getOpenWorkspaceRoot: vi.fn(() => 'C:\\Projects\\Varro'),
+      } as never,
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(941, 'POST', '/session?directory=c%3A%2Fprojects%2FVARRO%2F', {})
+    );
+
+    expect(serverRequest).toHaveBeenCalledWith(
+      'POST',
+      '/session?directory=C%3A%5CProjects%5CVarro',
+      {}
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 941,
+      data: { id: 'created' },
+    });
+  });
+
+  it('accepts a direct session when its explicit directory matches the selected root', async () => {
+    const serverRequest = vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session?directory=%2Frepo') {
+        return [{ id: 'session-a', directory: '/repo' }];
+      }
+      if (method === 'POST' && path === '/session/session-a/prompt_async?directory=%2Frepo') {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: {
+        ...createCallbacks().sessionState,
+        isSessionInWorkspace: vi.fn(() => false),
+      } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(95, 'POST', '/session/session-a/prompt_async?directory=%2Frepo', { parts: [] })
+    );
+
+    expect(serverRequest.mock.calls).toEqual([
+      ['GET', '/session?directory=%2Frepo'],
+      ['POST', '/session/session-a/prompt_async?directory=%2Frepo', { parts: [] }],
+    ]);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 95,
+      data: { ok: true },
+    });
+  });
+
+  it.each(['prompt_async', 'share'])(
+    'rejects a direct %s request whose explicit directory differs from the selected root',
+    async (route) => {
+      const serverRequest = vi.fn();
+      const { proxy, callbacks } = createProxy({
+        server: { ...createCallbacks().server, request: serverRequest } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          isSessionInWorkspace: vi.fn(() => false),
+        } as never,
+      });
+
+      await proxy.handleRequest(
+        makePayload(96, 'POST', `/session/session-a/${route}?directory=%2Frepo-b`)
+      );
+
+      expect(serverRequest).not.toHaveBeenCalled();
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+        id: 96,
+        error: '404 Session not found',
+      });
+    }
+  );
 
   it('routes recycle bin list request', async () => {
     const trashList = [{ rootID: 'abc' }];
@@ -435,6 +545,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(2, 'GET', '/varro/session-trash'));
+    expect(callbacks.sessionTrash.list).toHaveBeenCalledWith('/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 2, data: trashList });
   });
 
@@ -458,7 +569,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(3, 'DELETE', '/varro/session-trash'));
-    expect(callbacks.sessionTrash.empty).toHaveBeenCalled();
+    expect(callbacks.sessionTrash.empty).toHaveBeenCalledWith(expect.any(Function), '/repo');
     expect(serverRequest.mock.calls).toEqual([
       ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
       ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
@@ -475,7 +586,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(4, 'POST', '/varro/session-trash/abc/restore'));
-    expect(callbacks.sessionTrash.restore).toHaveBeenCalledWith('abc');
+    expect(callbacks.sessionTrash.restore).toHaveBeenCalledWith('abc', '/repo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 4, data: true });
   });
 
@@ -503,6 +614,11 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(5, 'DELETE', '/varro/session-trash/abc/delete'));
+    expect(callbacks.sessionTrash.deletePermanently).toHaveBeenCalledWith(
+      'abc',
+      expect.any(Function),
+      '/repo'
+    );
     expect(serverRequest.mock.calls).toEqual([
       ['DELETE', '/session/s1?directory=%2Frepo%2Fa'],
       ['DELETE', '/session/s2?directory=%2Frepo%2Fb'],
@@ -585,6 +701,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(6, 'GET', '/varro/workspace-file?path=src/foo.ts'));
     expect(callbacks.contextProvider.readFile).toHaveBeenCalledWith('src/foo.ts', {
       restrictToWorkspace: true,
+      workspaceDirectory: '/repo',
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 6, data: fileContent });
   });
@@ -608,6 +725,7 @@ describe('RestProxy handleRequest', () => {
 
     expect(callbacks.contextProvider.resolvePath).toHaveBeenCalledWith('src/foo.ts', {
       restrictToWorkspace: true,
+      workspaceDirectory: '/repo',
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 61, data: resolved });
   });
@@ -625,6 +743,20 @@ describe('RestProxy handleRequest', () => {
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 62,
       data: { path: 'docs/RALPH.md', workspaceDirectory: '/repo-b' },
+    });
+  });
+
+  it('rejects a selected plan outside all open workspace roots', async () => {
+    const selected = { fsPath: '/outside/RALPH.md' };
+    mocks.vscode.window.showOpenDialog.mockResolvedValueOnce([selected] as never);
+    mocks.vscode.workspace.getWorkspaceFolder.mockReturnValueOnce(undefined);
+    const { proxy, callbacks } = createProxy();
+
+    await proxy.handleRequest(makePayload(63, 'GET', '/varro/workspace-file/pick'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 63,
+      error: 'Selected file is outside the open workspace folders',
     });
   });
 

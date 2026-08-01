@@ -852,6 +852,15 @@ export class OpenCodeProcess {
     return this._process?.pid ?? this.ownershipLease?.pid ?? null;
   }
 
+  get isAdoptedManagedServer(): boolean {
+    return (
+      this._managedProcess &&
+      !this._process &&
+      this.ownershipLease?.host === this.hostOwner &&
+      this.ownershipLease.state === 'active'
+    );
+  }
+
   get serverOwnership(): OpenCodeServerOwnership {
     if (this._managedProcess) return 'current-host';
     if (this.foreignActiveOwnership && this.ownershipLease) return 'other-host';
@@ -915,6 +924,19 @@ export class OpenCodeProcess {
     this.portFallbackAttempts = 0;
     this.portInUseDetected = false;
     await this.cleanupInjectedConfigFile();
+  }
+
+  async revalidateAdoptedManagedServer(): Promise<boolean> {
+    const lease = this.isAdoptedManagedServer ? this.ownershipLease : null;
+    if (!lease) return false;
+    if (await this.matchesOwnershipLease(lease)) return true;
+    if (!this.isAdoptedManagedServer || this.ownershipLease !== lease) return false;
+
+    await Promise.all([
+      this.clearManagedServerOwnership(lease.owner, lease.host),
+      this.cleanupInjectedConfigFile(lease.configPath ?? this.injectedConfigPath),
+    ]);
+    return false;
   }
 
   async recoverManagedServerOwnership(): Promise<boolean> {

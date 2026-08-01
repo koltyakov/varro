@@ -341,8 +341,13 @@ function hashContent(value: string) {
   return `${value.length}:${(hash >>> 0).toString(36)}`;
 }
 
-function getRenderedMarkdownCacheKey(content: string) {
-  return `${hashContent(state.editorContext.workspacePath || '')}\u0000${hashContent(content)}`;
+function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOptions) {
+  return [
+    hashContent(state.editorContext.workspacePath || ''),
+    options.disablePathLinkify ? 'no-paths' : 'paths',
+    options.disableCodeHighlighting ? 'plain-code' : 'highlight-code',
+    hashContent(content),
+  ].join('\u0000');
 }
 
 function resolveCodeLanguage(lang?: string) {
@@ -392,6 +397,7 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
       className || '',
       lang || '',
       showCopyButton ? 'copy' : 'nocopy',
+      disableHighlighting ? 'plain' : 'highlight',
       params.text,
       copyText,
     ].join('\u0000');
@@ -583,7 +589,7 @@ function isSafeExternalHref(href: string | null): boolean {
   if (!href) return false;
   try {
     const parsed = new URL(href);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return parsed.protocol === 'https:';
   } catch {
     return false;
   }
@@ -854,7 +860,7 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
     });
   }
 
-  const cacheKey = getRenderedMarkdownCacheKey(content);
+  const cacheKey = getRenderedMarkdownCacheKey(content, options);
   const cached = getCachedValue(renderedMarkdownCache, cacheKey);
   if (cached !== undefined) return cached;
 

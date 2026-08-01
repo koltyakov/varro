@@ -62,6 +62,35 @@ function createPendingEventResponse(signal: AbortSignal) {
   } as unknown as Response;
 }
 
+function createEventResponse(signal: AbortSignal, payload: unknown) {
+  let delivered = false;
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        return {
+          read: () => {
+            if (!delivered) {
+              delivered = true;
+              return Promise.resolve({
+                value: new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`),
+                done: false,
+              });
+            }
+            return new Promise<never>((_, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => reject(signal.reason instanceof Error ? signal.reason : new Error('aborted')),
+                { once: true }
+              );
+            });
+          },
+        };
+      },
+    },
+  } as unknown as Response;
+}
+
 function createClosedEventResponse() {
   return {
     ok: true,
@@ -341,6 +370,66 @@ describe('OpenCodeTransport event stream path', () => {
     expect(transport.hasPendingAttentionRequests()).toBe(false);
   });
 
+  it('clears attention observations only after an established stream loses continuity', async () => {
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      observeServerEvent(event: unknown): void;
+      hasPendingAttentionRequests(): boolean;
+    };
+    transport.observeServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-1', sessionID: 'session-1' },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('not connected')));
+
+    await transport.startEventStream();
+    expect(transport.hasPendingAttentionRequests()).toBe(true);
+
+    vi.mocked(fetch).mockResolvedValueOnce(createClosedEventResponse());
+    await transport.startEventStream();
+
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
+    transport.stopEventStream();
+  });
+
+  it('keeps attention observed after reconnect tracked', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const reconnectedQuestion = {
+      type: 'question.asked',
+      properties: { id: 'question-new', sessionID: 'session-new' },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(createClosedEventResponse())
+      .mockImplementationOnce(async (_input, init) =>
+        createEventResponse(init!.signal as AbortSignal, reconnectedQuestion)
+      );
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+    const transport = createTransport() as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      observeServerEvent(event: unknown): void;
+      hasPendingAttentionRequests(): boolean;
+      getPendingAttentionSessionIDs(): string[];
+    };
+    transport.observeServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-old', sessionID: 'session-old' },
+    });
+
+    await transport.startEventStream();
+    expect(transport.hasPendingAttentionRequests()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(transport.getPendingAttentionSessionIDs()).toEqual(['session-new']);
+    transport.stopEventStream();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
   it('updates REST scope without replacing the global event stream', async () => {
     let eventSignal: AbortSignal | undefined;
     let eventRequests = 0;
@@ -459,6 +548,63 @@ describe('OpenCodeTransport event stream path', () => {
     expect(eventRequests).toBe(1);
     transport.stopEventStream();
   });
+
+  it('uses a stored rescope as the first stream directory', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => createPendingEventResponse(init!.signal as AbortSignal))
+    );
+    const transport = new OpenCodeTransport({
+      getUrl: () => 'http://localhost:4096',
+      getWorkspaceCwd: () => '/repo-a',
+      getStatus: () => ({ state: 'running', url: 'http://localhost:4096', eventStream: 'healthy' }),
+      isDisposing: () => false,
+      updateEventStreamState: updateEventStreamStateMock,
+      emitEvent: emitEventMock,
+    }) as unknown as {
+      startEventStream(): Promise<void>;
+      stopEventStream(): void;
+      rescopeEventStream(directory: string): Promise<unknown>;
+      eventStreamDirectory: string;
+    };
+
+    await transport.rescopeEventStream('/repo-b');
+    const stream = transport.startEventStream();
+    await Promise.resolve();
+
+    expect(transport.eventStreamDirectory).toBe('/repo-b');
+    transport.stopEventStream();
+    await stream;
+  });
+});
+
+describe('OpenCodeTransport health', () => {
+  it.each([
+    [
+      { healthy: true, version: '1.2.3' },
+      { healthy: true, version: '1.2.3' },
+    ],
+    [{ healthy: false }, { healthy: false }],
+  ])('preserves valid health response %#', async (value, expected) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => value })) as unknown as typeof fetch
+    );
+
+    await expect(createTransport().readHealthInfo()).resolves.toEqual(expected);
+  });
+
+  it.each([null, {}, { healthy: 'true', version: '1.2.3' }, { healthy: true, version: 123 }])(
+    'treats malformed successful response %# as unhealthy',
+    async (value) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => value })) as unknown as typeof fetch
+      );
+
+      await expect(createTransport().readHealthInfo()).resolves.toEqual({ healthy: false });
+    }
+  );
 });
 
 describe('OpenCodeTransport requests', () => {

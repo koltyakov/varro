@@ -124,6 +124,13 @@ describe('McpPicker', () => {
     const menu = container?.querySelector('.dropdown-menu');
     expect(menu).toBeInstanceOf(HTMLDivElement);
     expect(document.activeElement).toBe(menu);
+    const items = Array.from(container!.querySelectorAll<HTMLButtonElement>('.dropdown-item'));
+    expect(
+      items.find((item) => item.textContent?.includes('alpha'))?.getAttribute('aria-pressed')
+    ).toBe('false');
+    expect(
+      items.find((item) => item.textContent?.includes('zeta'))?.getAttribute('aria-pressed')
+    ).toBe('true');
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
@@ -144,6 +151,66 @@ describe('McpPicker', () => {
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     );
 
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves Space to search input while retaining navigation and actions', async () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    setMcpStatuses(
+      Object.fromEntries(
+        ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota'].map(
+          (name) => [name, { status: 'connected' as const }]
+        )
+      )
+    );
+
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange,
+          onClose,
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    const searchInput = container?.querySelector<HTMLInputElement>('[aria-label="Search MCPs"]');
+    const spaceEvent = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput?.dispatchEvent(spaceEvent);
+    expect(spaceEvent.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+
+    const arrowEvent = new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput?.dispatchEvent(arrowEvent);
+    await flushMicrotasks();
+    expect(arrowEvent.defaultPrevented).toBe(true);
+
+    const enterEvent = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput?.dispatchEvent(enterEvent);
+    expect(enterEvent.defaultPrevented).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    const escapeEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput?.dispatchEvent(escapeEvent);
+    expect(escapeEvent.defaultPrevented).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

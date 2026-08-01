@@ -113,6 +113,32 @@ function mockLinuxLeaseProcess(options?: {
   });
 }
 
+async function setAdoptedOwnership(
+  manager: OpenCodeProcess,
+  leasePath: string,
+  birthIdentity = 'linux:Fri Jul 10 12:00:00 2026'
+) {
+  const api = manager as unknown as {
+    hostOwner: string;
+    ownershipLease: Record<string, unknown> | null;
+  };
+  const lease = {
+    version: 1,
+    pid: MOCK_LINUX_PID,
+    port: 4096,
+    executable: '/usr/bin/opencode',
+    birthIdentity,
+    owner: 'adopted-owner',
+    host: api.hostOwner,
+    state: 'active',
+    createdAt: Date.now(),
+  };
+  await writeFile(leasePath, JSON.stringify(lease), 'utf-8');
+  api.ownershipLease = lease;
+  manager.managedProcess = true;
+  return lease;
+}
+
 describe('normalizeCompactionSettings', () => {
   it('returns defaults for undefined input', () => {
     expect(normalizeCompactionSettings(undefined)).toEqual({ auto: null, reserved: null });
@@ -458,6 +484,72 @@ describe('OpenCodeProcess startup termination', () => {
 });
 
 describe('OpenCodeProcess server ownership leases', () => {
+  it('keeps adopted ownership when its listener identity is still alive', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    await setAdoptedOwnership(manager, leasePath);
+    mockLinuxLeaseProcess();
+    const kill = vi.spyOn(process, 'kill');
+
+    expect(manager.isAdoptedManagedServer).toBe(true);
+    await expect(manager.revalidateAdoptedManagedServer()).resolves.toBe(true);
+
+    expect(manager.isAdoptedManagedServer).toBe(true);
+    expect(manager.managedProcess).toBe(true);
+    expect(kill).not.toHaveBeenCalled();
+    await expect(stat(leasePath)).resolves.toBeDefined();
+    kill.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('cleans adopted ownership when its listener disappears without signalling a PID', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    await setAdoptedOwnership(manager, leasePath);
+    spawnMock.mockImplementation(() => {
+      const result = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => result.emit('close', 0));
+      return result;
+    });
+    const kill = vi.spyOn(process, 'kill');
+
+    await expect(manager.revalidateAdoptedManagedServer()).resolves.toBe(false);
+
+    expect(manager.isAdoptedManagedServer).toBe(false);
+    expect(manager.managedProcess).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+    await expect(stat(leasePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    kill.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('cleans a reused adopted PID without signalling the replacement process', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
+    const leasePath = join(directory, 'lease.json');
+    const manager = new OpenCodeProcess(4096, true, 'opencode', false, undefined, leasePath);
+    await setAdoptedOwnership(manager, leasePath, 'linux:old-process');
+    mockLinuxLeaseProcess({ birthIdentity: () => 'replacement-process' });
+    const kill = vi.spyOn(process, 'kill');
+
+    await expect(manager.revalidateAdoptedManagedServer()).resolves.toBe(false);
+
+    expect(manager.isAdoptedManagedServer).toBe(false);
+    expect(manager.managedProcess).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+    await expect(stat(leasePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    kill.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('confirms a spawned Linux descendant through procfs when inspection tools are unavailable', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     const directory = await mkdtemp(join(tmpdir(), 'varro-server-lease-test-'));
