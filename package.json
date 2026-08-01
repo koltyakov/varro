@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: The OpenCode Workbench",
-  "version": "0.23.6",
+  "version": "0.23.7",
   "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
   "categories": [
     "AI",

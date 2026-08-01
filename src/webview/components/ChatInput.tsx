@@ -3119,7 +3119,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
-          showMcpControl={showMcpControl()}
+          showMcpControl={!composerEditingMessage() && showMcpControl()}
           connectedMcpCount={connectedMcpCount()}
           mcpButtonRef={(el) => {
             mcpPickerRef = el;

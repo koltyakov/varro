@@ -747,6 +747,21 @@ describe('ChatInput', () => {
     expect(disconnectedCount?.textContent).toContain('0');
   });
 
+  it('hides the MCP control while editing a message', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('mcpStatus', {
+      alpha: { status: 'disabled' },
+    });
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-mcp-count')).not.toBeNull();
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt');
+    await Promise.resolve();
+
+    expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
+  });
+
   it('hides provider-limit UI when polling is disabled', () => {
     setProviderLimitPollIntervalSeconds(-1);
     setState('providers', [
