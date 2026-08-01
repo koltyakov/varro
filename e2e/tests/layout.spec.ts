@@ -135,6 +135,60 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   await expect(nextPrompt).toBeVisible();
 });
 
+test('model picker paints above the sticky prompt', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  await list.evaluate((element) => {
+    const nextPrompt = element.querySelector(
+      '[data-msg-id="message-sticky-user-2"] .user-message-card'
+    );
+    if (!nextPrompt) throw new Error('Next prompt is not mounted');
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop +=
+      nextPrompt.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight -
+      20;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(sticky).toBeVisible();
+
+  await page.locator('.model-picker-btn').click();
+  const menu = page.locator('.dropdown-menu');
+  await expect(menu).toBeVisible();
+
+  const paintOrder = await page.evaluate(() => {
+    const menuElement = document.querySelector<HTMLElement>('.dropdown-menu');
+    const stickyElement = document.querySelector<HTMLElement>('.latest-user-message-sticky');
+    if (!menuElement || !stickyElement) throw new Error('Layered surfaces are missing');
+
+    const menuBox = menuElement.getBoundingClientRect();
+    const stickyBox = stickyElement.getBoundingClientRect();
+    const overlapLeft = Math.max(menuBox.left, stickyBox.left);
+    const overlapRight = Math.min(menuBox.right, stickyBox.right);
+    const overlapTop = Math.max(menuBox.top, stickyBox.top);
+    const overlapBottom = Math.min(menuBox.bottom, stickyBox.bottom);
+    const overlapWidth = overlapRight - overlapLeft;
+    const overlapHeight = overlapBottom - overlapTop;
+    const topElement = document.elementFromPoint(
+      overlapLeft + overlapWidth / 2,
+      overlapTop + overlapHeight / 2
+    );
+
+    return {
+      overlapWidth,
+      overlapHeight,
+      dropdownIsTopmost: !!topElement?.closest('.dropdown-menu'),
+    };
+  });
+
+  expect(paintOrder.overlapWidth).toBeGreaterThan(0);
+  expect(paintOrder.overlapHeight).toBeGreaterThan(0);
+  expect(paintOrder.dropdownIsTopmost).toBe(true);
+});
+
 test('sticky preview follows live prompt geometry when the assistant row grows', async ({
   page,
 }) => {

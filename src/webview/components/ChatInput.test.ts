@@ -1516,7 +1516,7 @@ describe('ChatInput', () => {
     expect(popup?.style.left).toBe('24px');
   });
 
-  it('raises the input shell above sticky overlays while the model picker is open', () => {
+  it('marks the input shell as hosting a floating popover while the model picker is open', () => {
     setupModelState();
     setShowModelPicker(true);
 

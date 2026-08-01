@@ -1113,6 +1113,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
     state.persistedActiveSessionId = session.id;
+    addDenseSearchModels(state);
     state.nextSequence = 50;
     return state;
   }

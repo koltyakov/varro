@@ -1286,7 +1286,7 @@ body.vscode-light
 }
 
 .interactive-session .chat-input-shell.showing-floating-popover {
-  z-index: var(--z-chrome-cover);
+  z-index: var(--z-popover);
 }
 
 .interactive-session .chat-input-container {
