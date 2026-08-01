@@ -620,7 +620,7 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
   });
 
-  it('grows the session window and preserves omitted sessions until the list is exhausted', async () => {
+  it('removes sessions omitted from a partial refresh while growing the session window', async () => {
     const stale = session('stale');
     const newest = session('newest');
     const oldest = session('oldest');
@@ -648,16 +648,15 @@ describe('data loaders', () => {
     await operations.loadSessions();
 
     expect(listSessions).toHaveBeenNthCalledWith(1, 100);
-    expect(currentSessions).toEqual([newest, stale]);
+    expect(currentSessions).toEqual([newest]);
     expect(setSessionsHasMore).toHaveBeenLastCalledWith(true);
-    expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
 
     await operations.loadMoreSessions();
 
     expect(listSessions).toHaveBeenNthCalledWith(2, 200);
     expect(currentSessions).toEqual([newest, oldest]);
     expect(setSessionsHasMore).toHaveBeenLastCalledWith(false);
-    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
     expect(setSessionsLoadingMore.mock.calls).toEqual([[true], [false]]);
   });
 

@@ -348,18 +348,11 @@ export function createDataLoaderOperations(deps: {
           hasMore || shouldApplySessionsSnapshot(sessions),
         applySessions: (sessions, hasMore) => {
           const reconciled = sessionSnapshots.reconcile(sessions, mutationBaseline);
-          const reconciledIds = new Set(reconciled.map((session) => session.id));
-          const merged = hasMore
-            ? [
-                ...reconciled,
-                ...deps.getSessions().filter((current) => !reconciledIds.has(current.id)),
-              ]
-            : reconciled;
-          const retainedIds = new Set(merged.map((session) => session.id));
+          const retainedIds = new Set(reconciled.map((session) => session.id));
           for (const current of deps.getSessions()) {
             if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
           }
-          deps.applySessions(merged);
+          deps.applySessions(reconciled);
           deps.setSessionsHasMore?.(hasMore);
         },
       },

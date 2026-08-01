@@ -68,34 +68,11 @@ export function App() {
         </Show>
       </Show>
       <RalphForm />
-      <SessionActionFeedback />
-      <Show when={defaultAppState.error()}>
-        <div class="flex items-start justify-between gap-2 border-t border-vscode-error/30 bg-vscode-error/6 px-4 py-2 text-[11px] text-vscode-error">
-          <span class="break-words leading-relaxed">{defaultAppState.error()}</span>
-          <span class="flex shrink-0 items-center gap-1">
-            <Show when={defaultAppState.errorRetry()}>
-              {(retry) => (
-                <button
-                  class="rounded px-1 py-px text-vscode-error/80 transition-colors hover:bg-vscode-error/10 hover:text-vscode-error"
-                  onClick={() => retry()()}
-                  title="Retry"
-                >
-                  Retry
-                </button>
-              )}
-            </Show>
-            <button
-              class="px-1 text-vscode-error/60 transition-colors hover:text-vscode-error"
-              onClick={() => defaultAppState.setError(null)}
-              title="Dismiss"
-            >
-              <svg class="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-              </svg>
-            </button>
-          </span>
-        </div>
-      </Show>
+      <SessionActionFeedback
+        error={defaultAppState.error}
+        errorRetry={defaultAppState.errorRetry}
+        onDismissError={() => defaultAppState.setError(null)}
+      />
     </div>
   );
 }

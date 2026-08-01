@@ -43,7 +43,6 @@ function ComposerHost() {
 }
 
 export function ChatWorkspace(props: {
-  isEnteringChatView: boolean;
   shouldRenderWorkspace: boolean;
   isDesktopSessionPaneRight: boolean;
   showSessionPicker: boolean;
@@ -206,9 +205,7 @@ export function ChatWorkspace(props: {
   );
 
   return (
-    <div
-      class={`interactive-session ${props.isEnteringChatView ? 'chat-view-entering' : ''}`.trim()}
-    >
+    <div class="interactive-session">
       <div
         class={`chat-header ${props.shouldRenderWorkspace ? 'chat-header-centered chat-header-chat-layout' : ''}`}
       >

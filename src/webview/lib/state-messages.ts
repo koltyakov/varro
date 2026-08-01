@@ -3,7 +3,6 @@ import { produce } from 'solid-js/store';
 import type { AssistantMessage, Message, MessageEntry, Part } from '../types';
 import {
   defaultAppState,
-  isLoading,
   messageIndex,
   messageStructureVersion,
   setState,
@@ -420,7 +419,7 @@ export function replaceMessages(incoming: MessageEntry[]) {
     if (state.streamingText !== '') setState('streamingText', '');
   });
   messageIndex.invalidate();
-  settleRunningSessionStatusesFromMessages(nextMessages);
+  recordSettledAssistantMarkers(nextMessages);
 }
 
 export function pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null {
@@ -510,7 +509,7 @@ export function setMessagesIncremental(
       })
     );
   });
-  settleRunningSessionStatusesFromMessages(incoming);
+  recordSettledAssistantMarkers(incoming);
 }
 
 export function hasSettledLatestAssistantMessage(
@@ -525,17 +524,12 @@ export function hasSettledLatestAssistantMessage(
   );
 }
 
-function settleRunningSessionStatusesFromMessages(messages: MessageEntry[]) {
+function recordSettledAssistantMarkers(messages: MessageEntry[]) {
   const settledMessages = getSettledLatestAssistantMessages(messages);
   if (settledMessages.size === 0) return;
 
   batch(() => {
     for (const [sessionId, message] of settledMessages) {
-      const status = state.sessionStatus[sessionId];
-      if (status?.type === 'busy' || status?.type === 'retry') {
-        if (state.activeSessionId === sessionId && isLoading()) continue;
-        setState('sessionStatus', sessionId, { type: 'idle' });
-      }
       if (message.error) continue;
       if (state.activeSessionId === sessionId && !showSessionPicker()) {
         markSessionSeen(sessionId, message.time.completed);

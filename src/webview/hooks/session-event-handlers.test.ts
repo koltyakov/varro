@@ -1161,7 +1161,7 @@ describe('registerSessionEventHandlers', () => {
     expect(handoffTodosToMessages).toHaveBeenCalledTimes(1);
   });
 
-  it('marks completed inactive assistant messages idle without stopping active loading', () => {
+  it('keeps completed inactive assistant messages running until session idle', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
@@ -1186,13 +1186,13 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
     expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
     expect(handoffTodosToMessages).not.toHaveBeenCalled();
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('marks partial inactive assistant completion updates idle without stopping active loading', () => {
+  it('keeps partial inactive assistant completion updates running until session idle', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
 
@@ -1219,7 +1219,7 @@ describe('registerSessionEventHandlers', () => {
       },
     });
 
-    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'busy' });
     expect(markSessionResponseCompleted).toHaveBeenCalledWith('session-1', 2);
     expect(stopLoading).not.toHaveBeenCalled();
   });
@@ -1287,7 +1287,7 @@ describe('registerSessionEventHandlers', () => {
       version: '1',
       time: { created: 1, updated: 3 },
     });
-    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', { type: 'busy' });
     expect(stopLoading).not.toHaveBeenCalled();
   });
 

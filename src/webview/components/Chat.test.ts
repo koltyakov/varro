@@ -982,6 +982,63 @@ describe('SessionListSectionHeader', () => {
 });
 
 describe('header status badges', () => {
+  it('derives quick statuses from Recent sessions and excludes recycled sessions', () => {
+    const now = Date.now();
+    const oldUpdatedAt = now - 3 * 24 * 60 * 60 * 1_000;
+    setState('sessions', [
+      session('active', now),
+      session('old-running', oldUpdatedAt),
+      session('old-attention', oldUpdatedAt),
+      session('old-failed', oldUpdatedAt),
+      session('old-plan', oldUpdatedAt),
+      session('old-completed', oldUpdatedAt),
+      session('archived', oldUpdatedAt),
+      session('deleted-running', now - 1_000),
+    ]);
+    setState('activeSessionId', 'active');
+    setState('sessionStatus', {
+      'old-running': { type: 'busy' },
+      'deleted-running': { type: 'busy' },
+    });
+    setState('questions', [{ id: 'question-1', sessionID: 'old-attention', questions: [] }]);
+    setState('failedSessionIds', ['old-failed']);
+    setState('sessionSelectedAgents', { 'old-plan': 'plan' });
+    setState('completedSessionResponses', { 'old-completed': oldUpdatedAt });
+    setState('recycleBinEntries', [
+      {
+        rootID: 'deleted-running',
+        deletedAt: now - 500,
+        expiresAt: now + 1_000,
+        root: session('deleted-running', now - 1_000),
+        sessions: [session('deleted-running', now - 1_000)],
+      },
+    ]);
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
+    expect(container?.querySelector('.chat-header-attention-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(container?.querySelector('.chat-header-failed-badge')).toBeInstanceOf(HTMLButtonElement);
+    expect(container?.querySelector('.chat-header-plan-badge')).toBeInstanceOf(HTMLButtonElement);
+    expect(container?.querySelector('.chat-header-completed-badge')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+
+    const recentTitles = Array.from(
+      container?.querySelectorAll('.session-list-section.expanded .session-item-title') ?? []
+    ).map((item) => item.textContent?.trim());
+    expect(recentTitles).toContain('old-running');
+    expect(recentTitles).toContain('old-attention');
+    expect(recentTitles).toContain('old-failed');
+    expect(recentTitles).toContain('old-plan');
+    expect(recentTitles).toContain('old-completed');
+    expect(recentTitles).not.toContain('archived');
+    expect(recentTitles).not.toContain('deleted-running');
+  });
+
   it('opens the session list and focuses search when requested by the host', async () => {
     cleanup = render(() => Chat(), container!);
 
@@ -1613,31 +1670,6 @@ describe('header status badges', () => {
 
     expect(deleteImmediatelySpy).toHaveBeenCalledWith('draft-session');
     expect(container?.querySelector('.session-list-view')).toBeInstanceOf(HTMLDivElement);
-  });
-
-  it('adds a brief chat view transition class after the new chat opens', async () => {
-    setState('sessions', [session('active', 500)]);
-    setState('activeSessionId', 'active');
-    setShowSessionPicker(true);
-
-    cleanup = render(() => Chat(), container!);
-
-    const newChatButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="New chat"]'
-    ) as HTMLButtonElement | null;
-    newChatButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
-
-    expect(
-      container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
-    ).toBe(true);
-
-    vi.advanceTimersByTime(180);
-    await Promise.resolve();
-
-    expect(
-      container?.querySelector('.interactive-session')?.classList.contains('chat-view-entering')
-    ).toBe(false);
   });
 
   it('filters completed sessions from the header badge', async () => {
@@ -2726,24 +2758,41 @@ describe('usage-limit session status precedence', () => {
     expect(isRunningSession('session-1')).toBe(true);
   });
 
-  it('shows completed indicators after synced active messages have completed', () => {
-    setState('sessions', [session('session-1', 500)]);
-    setState('activeSessionId', 'session-1');
-    setState('sessionStatus', {
-      'session-1': { type: 'busy' },
-    });
-    setShowSessionPicker(true);
+  it('shows completed indicators only after synced active sessions remain idle', async () => {
+    try {
+      setState('sessions', [session('session-1', 500)]);
+      setState('activeSessionId', 'session-1');
+      setState('sessionStatus', {
+        'session-1': { type: 'busy' },
+      });
+      setShowSessionPicker(true);
 
-    setMessagesIncremental([assistantMessageEntry('assistant-1')]);
+      setMessagesIncremental([assistantMessageEntry('assistant-1')]);
 
-    cleanup = render(() => Chat(), container!);
+      cleanup = render(() => Chat(), container!);
 
-    const row = container?.querySelector('.session-item');
-    const indicator = row?.querySelector('.session-item-indicator');
+      const row = container?.querySelector('.session-item');
+      expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+      expect(isRunningSession('session-1')).toBe(true);
+      expect(row?.querySelector('.session-item-indicator')?.classList.contains('is-running')).toBe(
+        true
+      );
 
-    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
-    expect(isRunningSession('session-1')).toBe(false);
-    expect(indicator?.classList.contains('is-completed')).toBe(true);
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+
+      expect(isRunningSession('session-1')).toBe(false);
+      expect(row?.querySelector('.session-item-indicator')?.classList.contains('is-running')).toBe(
+        true
+      );
+
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(
+        row?.querySelector('.session-item-indicator')?.classList.contains('is-completed')
+      ).toBe(true);
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+    }
   });
 
   it('does not render the active session status next to the chat header title', () => {

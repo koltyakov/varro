@@ -958,9 +958,10 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
-    const sessions = (await this.callbacks.server.request('GET', '/session')) as Array<
-      Record<string, unknown>
-    >;
+    const sessions = (await this.callbacks.server.request(
+      'GET',
+      `/session?limit=${MAX_SESSION_PAGE_LIMIT}`
+    )) as Array<Record<string, unknown>>;
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
     if (!entry) {
       throw new Error('404 Session not found');
@@ -991,24 +992,18 @@ export class RestProxy {
 
   private async sessionExistsOnServer(sessionID: string) {
     try {
-      const sessions = await this.callbacks.server.request('GET', '/session');
-      return (
-        Array.isArray(sessions) && sessions.some((session) => asRecord(session)?.id === sessionID)
-      );
-    } catch {
+      await this.callbacks.server.request('GET', `/session/${encodeURIComponent(sessionID)}`);
       return true;
+    } catch (err) {
+      return !isNotFoundError(err);
     }
   }
 
   private async lookupSessionDirectory(sessionID: string, workspaceDirectory?: string) {
-    const path = workspaceDirectory
-      ? `/session?directory=${encodeURIComponent(workspaceDirectory)}`
-      : '/session';
-    const sessions = await this.callbacks.server.request('GET', path);
-    if (!Array.isArray(sessions)) return undefined;
-    this.rememberSessionList(sessions);
-    const match = sessions.find((session) => asRecord(session)?.id === sessionID);
-    const record = asRecord(match);
+    const path = this.buildScopedSessionPath(sessionID, workspaceDirectory);
+    const session = await this.callbacks.server.request('GET', path);
+    const record = asRecord(session);
+    if (record) this.rememberSessionPage([record], false);
     return typeof record?.directory === 'string' ? record.directory : undefined;
   }
 
@@ -1743,6 +1738,10 @@ function parseDirectSessionID(path: string): string | null {
   if (pathname === '/session/status') return null;
   const match = pathname.match(/^\/(?:varro\/)?session\/([^/]+)(?:\/|$)/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function isNotFoundError(error: unknown) {
+  return error instanceof Error && /^404\b/.test(error.message);
 }
 
 function getExplicitWorkspaceDirectory(path: string): string | null {

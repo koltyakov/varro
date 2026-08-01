@@ -62,7 +62,7 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                 }
               >
                 <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.5 3h1v5h-1V4zm.5 8a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                  <path d="M7.25 3h1.5v6.25h-1.5V3zm0 8h1.5v1.5h-1.5V11z" />
                 </svg>
               </Show>
             </span>
@@ -85,8 +85,15 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
                   aria-label="Dismiss error"
                   title="Dismiss"
                 >
-                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m4.5 4.5 7 7m0-7-7 7" />
                   </svg>
                 </button>
               </span>

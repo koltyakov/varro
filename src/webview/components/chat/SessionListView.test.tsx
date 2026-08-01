@@ -76,6 +76,7 @@ beforeEach(() => {
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
   setState('sessionStatus', {});
+  setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
   setState('sessionsLoadingMore', false);
@@ -100,6 +101,7 @@ afterEach(() => {
   setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
+  setState('completedSessionResponses', reconcile({}));
   setState('sessionsLoadError', null);
   setState('sessionsHasMore', false);
   setState('sessionsLoadingMore', false);
@@ -874,6 +876,48 @@ describe('SessionListView selection', () => {
 });
 
 describe('SessionListView ordering', () => {
+  it('keeps the spinner when a completion dot briefly returns to running', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    setState('sessions', [session('session-1', 500)]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    setState('completedSessionResponses', { 'session-1': 10_000 });
+
+    try {
+      cleanup = render(() => <SessionListView />, container);
+      expect(
+        container.querySelector('.session-item-indicator')?.classList.contains('is-running')
+      ).toBe(true);
+
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(600);
+      expect(
+        container.querySelector('.session-item-indicator')?.classList.contains('is-running')
+      ).toBe(true);
+
+      setState('sessionStatus', 'session-1', { type: 'busy' });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(
+        container.querySelector('.session-item-indicator')?.classList.contains('is-running')
+      ).toBe(true);
+
+      setState('sessionStatus', 'session-1', { type: 'idle' });
+      await vi.advanceTimersByTimeAsync(1199);
+      expect(
+        container.querySelector('.session-item-indicator')?.classList.contains('is-running')
+      ).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(
+        container.querySelector('.session-item-indicator')?.classList.contains('is-completed')
+      ).toBe(true);
+    } finally {
+      cleanup?.();
+      cleanup = undefined;
+      vi.useRealTimers();
+    }
+  });
+
   it('preserves a running indicator across same-session updates', () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
@@ -1343,22 +1387,58 @@ describe('SessionListView load errors', () => {
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
   });
 
-  it('keeps pagination available while searching from the expanded archive', () => {
+  it('searches all sessions without adding search-only sessions to the archive', async () => {
     const now = Date.now();
-    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    const loadedSessions = [session('recent', now), session('archived', now - 2 * 86_400_000)];
+    const searchOnlySession = session('deep-archive', now - 30 * 86_400_000, {
+      title: 'Flick through old notes',
+    });
+    vi.spyOn(client.session, 'list')
+      .mockResolvedValueOnce({ items: loadedSessions, hasMore: true })
+      .mockResolvedValueOnce({
+        items: [...loadedSessions, session('second-page', now - 10 * 86_400_000)],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        items: [
+          ...loadedSessions,
+          session('second-page', now - 10 * 86_400_000),
+          searchOnlySession,
+        ],
+        hasMore: false,
+      });
+    setState('sessions', loadedSessions);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
 
-    const archive = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
-    ).find((button) => button.textContent?.includes('Archive'))!;
-    archive.click();
+    const getArchive = () =>
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
+      ).find((button) => button.textContent?.includes('Archive'))!;
+    expect(getArchive().textContent).toContain('1+');
+    getArchive().click();
 
     const search = container.querySelector<HTMLInputElement>('.session-list-search-input')!;
-    search.value = 'not loaded yet';
+    search.value = 'flick';
     search.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
-    expect(container.querySelector('.session-list-continuation')).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-item-title-text')?.textContent).toBe(
+        'Flick through old notes'
+      );
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(1, { limit: 100 });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { limit: 200 });
+    expect(client.session.list).toHaveBeenNthCalledWith(3, { limit: 300 });
+    expect(loadMoreSessionsMock).not.toHaveBeenCalled();
+    expect(container.querySelector('.session-list-continuation')).toBeNull();
+    expect(appState.sessions).toEqual(loadedSessions);
+
+    container.querySelector<HTMLButtonElement>('.session-list-search-clear')!.click();
+
+    expect(container.textContent).not.toContain('Flick through old notes');
+    expect(getArchive().textContent).toContain('1+');
+    expect(appState.sessions).toEqual(loadedSessions);
   });
 
   it('shows a retryable error instead of the empty state when sessions fail to load', async () => {

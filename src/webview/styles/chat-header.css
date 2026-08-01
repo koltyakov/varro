@@ -59,12 +59,17 @@
   font-weight: 400;
   color: var(--color-vscode-muted);
   white-space: nowrap;
+  width: 0;
+  margin-left: -4px;
+  overflow: hidden;
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
 .chat-header-session-title:hover ~ .chat-header-session-duration {
+  width: max-content;
+  margin-left: 0;
   opacity: 1;
 }
 

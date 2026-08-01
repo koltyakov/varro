@@ -71,16 +71,6 @@ input:focus-visible {
   position: relative;
 }
 
-.interactive-session.chat-view-entering .chat-header-chat-layout {
-  animation: fade-in 0.18s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .interactive-session.chat-view-entering .chat-header-chat-layout {
-    animation: none;
-  }
-}
-
 .chat-main-column {
   width: min(100%, var(--chat-content-max-width));
   margin-inline: auto;

@@ -254,6 +254,15 @@ describe('sessionStore', () => {
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
 
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
+    sessionStore.setSessionStatuses(
+      {
+        'session-1': { type: 'idle' },
+      },
+      { snapshotStartedAt: Date.now() + 2000 }
+    );
+
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
   });
 
@@ -275,6 +284,15 @@ describe('sessionStore', () => {
     expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [toolPart('completed')] }]);
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+
+    sessionStore.setSessionStatuses(
+      {
+        'session-1': { type: 'idle' },
+      },
+      { snapshotStartedAt: Date.now() + 2000 }
+    );
 
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
   });
@@ -308,13 +326,13 @@ describe('sessionStore', () => {
     nowSpy.mockRestore();
   });
 
-  it('settles stale running status when synced active messages are already complete', () => {
+  it('keeps running status until authoritative idle when synced messages are complete', () => {
     sessionStore.setActiveSessionId('session-1');
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
 
-    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     expect(state.lastSeenSessions['session-1']).toBeGreaterThanOrEqual(2);
     expect(state.completedSessionResponses['session-1']).toBeUndefined();
   });
@@ -331,19 +349,19 @@ describe('sessionStore', () => {
     stopLoading();
   });
 
-  it('marks active synced completions unread when the session list is open', () => {
+  it('marks active synced completions unread without clearing running status', () => {
     sessionStore.setActiveSessionId('session-1');
     setShowSessionPicker(true);
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
 
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);
 
-    expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     expect(state.completedSessionResponses['session-1']).toBeGreaterThanOrEqual(2);
     expect(state.lastSeenSessions['session-1']).toBeUndefined();
   });
 
-  it('lets a fresh busy snapshot revive a settled active chat spinner', () => {
+  it('does not clear a spinner before a fresh busy snapshot arrives', () => {
     sessionStore.setActiveSessionId('session-1');
     sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
     setMessagesIncremental([{ info: completedAssistantMessage(), parts: [] }]);

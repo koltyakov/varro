@@ -352,8 +352,8 @@ describe('RestProxy handleRequest', () => {
 
   it('rejects direct session requests owned by another workspace', async () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
-      if (method === 'GET' && path === '/session?directory=%2Frepo') {
-        return [{ id: 'foreign', directory: '/other' }];
+      if (method === 'GET' && path === '/session/foreign?directory=%2Frepo') {
+        return { id: 'foreign', directory: '/other' };
       }
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
@@ -403,9 +403,9 @@ describe('RestProxy handleRequest', () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
       if (
         method === 'GET' &&
-        path === '/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
+        path === '/session/session%20one?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'
       ) {
-        return [{ id: 'session one', directory: 'c:/users/andrew/projects/VARRO/' }];
+        return { id: 'session one', directory: 'c:/users/andrew/projects/VARRO/' };
       }
       if (method === 'GET' && path === '/session/session%20one/message') return [];
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -430,7 +430,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(93, 'GET', '/session/session%20one/message'));
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'],
+      ['GET', '/session/session%20one?directory=C%3A%5CUsers%5CAndrew%5CProjects%5CVarro'],
       ['GET', '/session/session%20one/message', undefined],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 93, data: [] });
@@ -482,8 +482,8 @@ describe('RestProxy handleRequest', () => {
 
   it('accepts a direct session when its explicit directory matches the selected root', async () => {
     const serverRequest = vi.fn(async (method: string, path: string) => {
-      if (method === 'GET' && path === '/session?directory=%2Frepo') {
-        return [{ id: 'session-a', directory: '/repo' }];
+      if (method === 'GET' && path === '/session/session-a?directory=%2Frepo') {
+        return { id: 'session-a', directory: '/repo' };
       }
       if (method === 'POST' && path === '/session/session-a/prompt_async?directory=%2Frepo') {
         return { ok: true };
@@ -503,7 +503,7 @@ describe('RestProxy handleRequest', () => {
     );
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session?directory=%2Frepo'],
+      ['GET', '/session/session-a?directory=%2Frepo'],
       ['POST', '/session/session-a/prompt_async?directory=%2Frepo', { parts: [] }],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -642,7 +642,7 @@ describe('RestProxy handleRequest', () => {
     );
     const serverRequest = vi.fn((method: string) => {
       if (method === 'DELETE') return Promise.reject(new Error('500 Unexpected server error'));
-      return Promise.resolve([{ id: 'other-session' }]);
+      return Promise.reject(new Error('404 Session not found'));
     });
     const { proxy, callbacks } = createProxy({
       server: {
@@ -1223,7 +1223,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(11, 'DELETE', '/session/some-id'));
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
@@ -1232,7 +1232,7 @@ describe('RestProxy handleRequest', () => {
   it('routes varro permanent delete directly to the server without recycle bin', async () => {
     const serverRequest = vi
       .fn()
-      .mockResolvedValueOnce([{ id: 'some-id', directory: '/repo/archive' }])
+      .mockResolvedValueOnce({ id: 'some-id', directory: '/repo/archive' })
       .mockResolvedValueOnce(true);
     const { proxy, callbacks } = createProxy({
       server: {
@@ -1244,7 +1244,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(111, 'DELETE', '/varro/session/some-id/delete'));
 
     expect(serverRequest.mock.calls).toEqual([
-      ['GET', '/session'],
+      ['GET', '/session/some-id'],
       ['DELETE', '/session/some-id?directory=%2Frepo%2Farchive'],
     ]);
     expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
@@ -1277,7 +1277,7 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(12, 'DELETE', '/session/some-id'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
   });
 

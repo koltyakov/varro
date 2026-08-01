@@ -23,9 +23,13 @@ import {
   shouldPruneEmptySession,
 } from '../lib/empty-session';
 import {
+  createStableSessionIndicators,
   deriveSessionIndicators,
+  getRecentSessions,
+  getRecycleBinSessionIds,
   getPrimarySessionsForFilter,
   getSessionListFilterLabel,
+  groupSessions,
   isPrimarySession,
   shouldShowSessionHeaderBadge,
 } from './chat/SessionListView';
@@ -59,8 +63,8 @@ type HeaderSessionCounts = {
 const DESKTOP_SESSION_LAYOUT_MEDIA_QUERY = '(min-width: 1400px)';
 const RECONNECT_BANNER_SHOW_DELAY_MS = 10_000;
 const RECONNECT_BANNER_MIN_VISIBLE_MS = 2000;
-const CHAT_VIEW_ENTER_DURATION_MS = 180;
 const EMPTY_SESSION_DELETE_DELAY_MS = 0;
+const SESSION_LIST_CLOCK_INTERVAL_MS = 60_000;
 
 function isDesktopSessionPaneRight() {
   return desktopSessionPaneSide() === 'right';
@@ -71,15 +75,35 @@ export function Chat() {
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [sidebarSubagentParentId, setSidebarSubagentParentId] = createSignal<string | null>(null);
   const [isDesktopSessionLayout, setIsDesktopSessionLayout] = createSignal(false);
-  const [isEnteringChatView, setIsEnteringChatView] = createSignal(false);
   const [showReconnectBanner, setShowReconnectBanner] = createSignal(false);
   const [slowApiRequests, setSlowApiRequests] = createSignal<readonly SlowApiRequest[]>([]);
-  const sessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const [sessionListNow, setSessionListNow] = createSignal(Date.now());
+  const rawSessionIndicators = createMemo(() => deriveSessionIndicators(state.sessions));
+  const sessionIndicators = createStableSessionIndicators(rawSessionIndicators);
+  const recycleBinSessionIds = createMemo(() => getRecycleBinSessionIds(state.recycleBinEntries));
   const visibleSessions = createMemo(() => {
     const indicators = sessionIndicators();
-    return state.sessions.filter((session) => !shouldHideSessionFromList(session, indicators));
+    return state.sessions.filter(
+      (session) =>
+        !recycleBinSessionIds().has(session.id) && !shouldHideSessionFromList(session, indicators)
+    );
   });
   const primarySessions = createMemo(() => visibleSessions().filter(isPrimarySession));
+  const recentSessions = createMemo(() => {
+    const indicators = sessionIndicators();
+    return getRecentSessions(
+      groupSessions(
+        visibleSessions(),
+        (sessionId) => indicators.runningIds.has(sessionId),
+        (sessionId) => indicators.attentionIds.has(sessionId),
+        (sessionId) => indicators.failedIds.has(sessionId),
+        (session) => indicators.planReadyIds.has(session.id),
+        (session) => indicators.newlyCompletedIds.has(session.id),
+        sessionListNow(),
+        (sessionId) => state.pinnedSessionIds.includes(sessionId)
+      )
+    );
+  });
   const sessionsById = createMemo(
     () => new Map(state.sessions.map((session) => [session.id, session]))
   );
@@ -90,7 +114,6 @@ export function Chat() {
   let reconnectBannerShowTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerHideTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectBannerVisibleSince = 0;
-  let chatViewEnterTimer: ReturnType<typeof setTimeout> | undefined;
   const pendingEmptySessionDeleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   createEffect(() => {
@@ -129,12 +152,6 @@ export function Chat() {
     reconnectBannerHideTimer = undefined;
   };
 
-  const clearChatViewEnterTimer = () => {
-    if (chatViewEnterTimer == null) return;
-    clearTimeout(chatViewEnterTimer);
-    chatViewEnterTimer = undefined;
-  };
-
   onMount(() => {
     if (typeof window.matchMedia !== 'function') return;
 
@@ -151,6 +168,11 @@ export function Chat() {
   onMount(() => {
     const unsubscribe = onSlowApiRequestsChange(setSlowApiRequests);
     onCleanup(unsubscribe);
+  });
+
+  onMount(() => {
+    const clock = setInterval(() => setSessionListNow(Date.now()), SESSION_LIST_CLOCK_INTERVAL_MS);
+    onCleanup(() => clearInterval(clock));
   });
 
   createEffect(
@@ -240,7 +262,6 @@ export function Chat() {
   onCleanup(() => {
     clearReconnectBannerShowTimer();
     clearReconnectBannerHideTimer();
-    clearChatViewEnterTimer();
     for (const timer of pendingEmptySessionDeleteTimers.values()) {
       clearTimeout(timer);
     }
@@ -256,7 +277,7 @@ export function Chat() {
   const headerSessionCounts = createMemo(() => {
     const indicators = sessionIndicators();
     return getHeaderSessionCounts(
-      primarySessions(),
+      recentSessions(),
       state.activeSessionId,
       showSessionPicker(),
       (sessionId) => indicators.runningIds.has(sessionId),
@@ -290,7 +311,7 @@ export function Chat() {
 
     const indicators = sessionIndicators();
     const autoOpenSessionId = getAutoOpenSessionIdForFilter(
-      primarySessions(),
+      recentSessions(),
       filter,
       state.activeSessionId,
       showSessionPicker(),
@@ -319,23 +340,6 @@ export function Chat() {
       setSubagentParentId(null);
     }
   });
-
-  createEffect(
-    on(showSessionPicker, (isOpen, wasOpen) => {
-      clearChatViewEnterTimer();
-
-      if (isOpen || !wasOpen) {
-        setIsEnteringChatView(false);
-        return;
-      }
-
-      setIsEnteringChatView(true);
-      chatViewEnterTimer = setTimeout(() => {
-        chatViewEnterTimer = undefined;
-        setIsEnteringChatView(false);
-      }, CHAT_VIEW_ENTER_DURATION_MS);
-    })
-  );
 
   createEffect(
     on(
@@ -471,7 +475,7 @@ export function Chat() {
     void openSessionFilter(
       'attention',
       getHeaderAttentionCount(
-        primarySessions(),
+        recentSessions(),
         (sessionId) => sessionIndicators().attentionIds.has(sessionId),
         state.activeSessionId,
         false
@@ -597,7 +601,6 @@ export function Chat() {
 
   return (
     <ChatWorkspace
-      isEnteringChatView={isEnteringChatView()}
       shouldRenderWorkspace={shouldRenderWorkspace()}
       isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
       showSessionPicker={showSessionPicker()}
@@ -667,6 +670,8 @@ export {
   getDiffSummaryStats,
   getMessageToolSummaryStats,
   getPrimarySessionsForFilter,
+  getRecentSessions,
+  getRecycleBinSessionIds,
   getSessionListFilterLabel,
   getSessionSummaryStats,
   getSubagentSessionsForParent,

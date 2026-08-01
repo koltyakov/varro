@@ -211,9 +211,6 @@ export async function syncSessionMessagesWithDependencies(
     deps.handoffTodosToMessages(messages);
   } else if (latestAssistantFinished(messages)) {
     deps.syncFailedSessionsFromMessages(messages);
-    if (status?.type === 'busy' || status?.type === 'retry') {
-      deps.setSessionStatusEntry(sessionId, { type: 'idle' });
-    }
   }
 }
 

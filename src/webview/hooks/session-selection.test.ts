@@ -645,7 +645,7 @@ describe('session-selection helpers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('settles inactive running sessions when synced messages show completion', async () => {
+  it('keeps inactive sessions running when synced messages show completion', async () => {
     const setSessionStatusEntry = vi.fn();
     const syncFailedSessionsFromMessages = vi.fn();
     const completed = assistantMessage('assistant-1');
@@ -672,7 +672,7 @@ describe('session-selection helpers', () => {
     );
 
     expect(syncFailedSessionsFromMessages).toHaveBeenCalledWith([{ info: completed, parts: [] }]);
-    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalled();
   });
 
   it('reconciles stale failures for completed inactive idle sessions', async () => {

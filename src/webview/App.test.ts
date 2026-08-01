@@ -142,24 +142,33 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('ralph failed');
   });
 
-  it('runs the retry action from the error banner and hides it otherwise', () => {
+  it('shows app errors in a toast and runs its retry action', () => {
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setConnectionInitialized(true);
     setError('Failed to send message');
     mountAppRoot();
 
-    expect(container?.textContent).toContain('Failed to send message');
-    expect(container?.textContent).not.toContain('Retry');
+    const errorToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(errorToast?.textContent).toContain('Failed to send message');
+    expect(errorToast?.getAttribute('role')).toBe('alert');
+    expect(errorToast?.getAttribute('aria-live')).toBe('assertive');
+    expect(container?.textContent).not.toContain('Failed to send message');
+    expect(errorToast?.textContent).not.toContain('Retry');
 
     const retry = vi.fn();
     setErrorRetry(retry);
-    const retryButton = Array.from(container?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent === 'Retry'
+    const retryButton = Array.from(errorToast?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Retry'
     );
     expect(retryButton).toBeDefined();
 
     retryButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(retry).toHaveBeenCalledTimes(1);
+
+    errorToast
+      ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.body.querySelector('.session-action-feedback')).toBeNull();
   });
 
   it('clears the retry action whenever the error changes', () => {

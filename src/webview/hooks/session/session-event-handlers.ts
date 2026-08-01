@@ -860,7 +860,6 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (assistantFinished && !isSessionInActiveTree(sessionID)) {
-        deps.setSessionStatusEntry(sessionID, { type: 'idle' });
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
         }

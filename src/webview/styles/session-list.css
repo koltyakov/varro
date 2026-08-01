@@ -487,7 +487,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   max-width: min(280px, calc(100vw - 24px));
   align-items: center;
   gap: 7px;
-  padding: 5px 13px 5px 6px;
+  padding: 5px 3px 5px 6px;
   transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 15%, var(--color-vscode-widget-bg));
   border-radius: var(--radius-pill);
@@ -519,8 +519,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   animation: session-action-feedback-out 160ms ease-in both;
 }
 
-/* Solid success disc with the check knocked out in the widget background, so
-   badge and glyph stay maximally contrasted in both light and dark themes. */
+/* Solid status disc with a high-contrast glyph in both light and dark themes. */
 .session-action-feedback-icon {
   display: flex;
   width: 18px;
@@ -530,7 +529,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   justify-content: center;
   border-radius: var(--radius-pill);
   background: var(--color-vscode-success);
-  color: var(--color-vscode-widget-bg);
+  color: var(--color-vscode-button-fg);
 }
 
 .session-action-feedback.is-error .session-action-feedback-icon {
@@ -579,15 +578,23 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   padding: 0 6px;
 }
 
-.session-action-feedback-dismiss {
+.session-action-feedback-actions .session-action-feedback-dismiss {
   width: 22px;
+  height: 22px;
+  min-height: 22px;
+  flex: 0 0 22px;
   padding: 0;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-error) 24%, var(--color-vscode-widget-bg));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-vscode-error) 10%, var(--color-vscode-widget-bg));
+  line-height: 0;
   color: var(--color-vscode-muted) !important;
 }
 
 .session-action-feedback-dismiss svg {
-  width: 11px;
-  height: 11px;
+  display: block;
+  width: 13px;
+  height: 13px;
 }
 
 @keyframes session-action-feedback-in {
@@ -658,12 +665,21 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   cursor: pointer;
 }
 
+.session-item-indicator-slot {
+  display: flex;
+  width: 10px;
+  height: 12px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
 .session-item-indicator,
 .session-status-indicator {
   position: relative;
   flex-shrink: 0;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   display: inline-block;
 }
@@ -672,11 +688,15 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   flex-shrink: 0;
   width: 10px;
   height: 10px;
+  margin-inline: 0;
   display: inline-block;
 }
 
 .session-item-indicator.is-running,
 .session-status-indicator.is-running {
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
   border: 1.5px solid color-mix(in srgb, var(--color-vscode-fg) 24%, transparent);
   border-top-color: var(--color-vscode-fg);
   background: transparent;
