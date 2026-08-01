@@ -176,6 +176,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.lastStatusBarStateKey = '';
         },
         queuedMessages: () => this.queuedMessages.list(),
+        flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
       }
     );
 

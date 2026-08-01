@@ -60,6 +60,8 @@ export function createComposerHistory(options?: {
   const now = options?.now ?? (() => Date.now());
 
   let stack: ComposerSnapshot[] = [{ text: '', caret: 0, files: [], images: [] }];
+  let entryIds = [0];
+  let nextEntryId = 1;
   let index = 0;
   let lastEditTime = 0;
   let lastEditKind: ComposerEditKind | null = null;
@@ -67,6 +69,7 @@ export function createComposerHistory(options?: {
 
   function reset(snapshot: ComposerSnapshot) {
     stack = [cloneSnapshot(snapshot)];
+    entryIds = [nextEntryId++];
     index = 0;
     lastEditTime = 0;
     lastEditKind = null;
@@ -81,11 +84,12 @@ export function createComposerHistory(options?: {
       // Caret-only movement: keep the entry but track the latest caret so
       // undo/redo restores where the user actually was.
       stack[index] = cloneSnapshot(snapshot);
-      return;
+      return entryIds[index]!;
     }
 
     // A new edit invalidates the redo tail.
     stack.length = index + 1;
+    entryIds.length = index + 1;
 
     const delta = snapshot.text.length - current.text.length;
     const kind: ComposerEditKind =
@@ -111,10 +115,12 @@ export function createComposerHistory(options?: {
       stack[index] = cloneSnapshot(snapshot);
     } else {
       stack.push(cloneSnapshot(snapshot));
+      entryIds.push(nextEntryId++);
       index += 1;
       if (stack.length > maxDepth) {
         const overflow = stack.length - maxDepth;
         stack.splice(0, overflow);
+        entryIds.splice(0, overflow);
         index -= overflow;
       }
     }
@@ -124,6 +130,26 @@ export function createComposerHistory(options?: {
     // Whitespace ends a typing run so undo works word-by-word.
     breakNextCoalesce =
       kind === 'insert' && isSingleCharEdit && /\s/.test(snapshot.text[snapshot.caret - 1] ?? '');
+    return entryIds[index]!;
+  }
+
+  function replaceCurrent(snapshot: ComposerSnapshot) {
+    stack[index] = cloneSnapshot(snapshot);
+    lastEditTime = 0;
+    lastEditKind = null;
+    breakNextCoalesce = false;
+  }
+
+  function rewriteFrom(entryId: number, rewrite: (snapshot: ComposerSnapshot) => ComposerSnapshot) {
+    const start = entryIds.indexOf(entryId);
+    if (start === -1) return false;
+    for (let entryIndex = start; entryIndex < stack.length; entryIndex += 1) {
+      stack[entryIndex] = cloneSnapshot(rewrite(cloneSnapshot(stack[entryIndex]!)));
+    }
+    lastEditTime = 0;
+    lastEditKind = null;
+    breakNextCoalesce = false;
+    return true;
   }
 
   function undo(): ComposerSnapshot | null {
@@ -144,6 +170,8 @@ export function createComposerHistory(options?: {
 
   return {
     record,
+    replaceCurrent,
+    rewriteFrom,
     undo,
     redo,
     reset,

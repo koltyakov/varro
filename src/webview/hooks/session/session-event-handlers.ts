@@ -1,4 +1,5 @@
 import { isAbortedAssistantError } from '../../../shared/error-classification';
+import type { ServerEvent } from '../../../shared/protocol';
 import { serverEvents } from '../../lib/client';
 import {
   hasUnsettledToolPart,
@@ -57,6 +58,30 @@ import type {
 
 const MISSING_PART_RECOVERY_RETRY_MIN_MS = 100;
 const MISSING_PART_RECOVERY_RETRY_MAX_MS = 1_000;
+const MAX_TRACKED_SESSION_SEQUENCES = 512;
+const MAX_EVICTED_SESSION_SEQUENCES = 512;
+const MAX_DIRTY_GAP_SESSIONS = 256;
+const MAX_OVERFLOW_GAP_RECOVERIES = 16;
+const DIRTY_GAP_RETRY_MIN_MS = 100;
+const DIRTY_GAP_RETRY_MAX_MS = 30_000;
+
+type SequenceStatus = 'unknown' | 'ok' | 'gap';
+
+type DirtyGapState = {
+  generation: number;
+  retryDelayMs: number;
+  retryPending: boolean;
+  retryTimer?: ReturnType<typeof setTimeout>;
+  syncing: boolean;
+};
+
+function runGapSync(operation: () => Promise<void>): Promise<void> {
+  try {
+    return Promise.resolve(operation());
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 
 type EventHandlerDependencies = {
   getActiveSessionId(): string | null;
@@ -75,7 +100,7 @@ type EventHandlerDependencies = {
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   clearUsageLimitOnResumedProgress(sessionId: string, status?: SessionStatus | null): void;
   updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
-  syncSession(sessionId: string): Promise<void>;
+  syncSession(sessionId: string, options?: { shouldApply(): boolean }): Promise<void>;
   repairSessionTitle?(sessionId: string): Promise<void>;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
   syncSessionMessages(sessionId: string): Promise<void>;
@@ -192,7 +217,7 @@ export class SessionEventHandlerOperations {
 
 export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const cleanups: Array<() => void> = [];
-  const activeMessageSyncs = new Set<string>();
+  const messageSyncs = new Set<string>();
   const pendingTranscriptMessageSyncs = new Set<string>();
   const pendingMissingPartDeltas = new Map<
     string,
@@ -209,23 +234,52 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingTerminalStepSettles = new Map<string, number>();
   // Per-session durable sequence cursor, advanced by synchronized events (ephemeral
-  // `*.delta` fragments carry no `seq`). Lets us resync only when a durable event was
+  // delta fragments carry no `seq`). Lets us resync only when a durable event was
   // actually missed, instead of defensively on every progress event.
   const lastSeqBySession = new Map<string, number>();
+  const evictedSequenceSessions = new Set<string>();
+  // A cursor can advance past a gap before reconciliation finishes. Keep the session
+  // dirty until both canonical metadata and transcript reads succeed.
+  const dirtyGaps = new Map<string, DirtyGapState>();
+  const overflowGapRecoveries = new Set<string>();
+  let sequenceEvictionOverflow = false;
+  let dirtyGapOverflowLogged = false;
+  let disposed = false;
   let pendingPermissionSync = false;
   let serverReconciliation: Promise<void> | null = null;
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta — caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
+  const rememberSequenceEviction = (sessionId: string) => {
+    if (sequenceEvictionOverflow || evictedSequenceSessions.has(sessionId)) return;
+    if (evictedSequenceSessions.size >= MAX_EVICTED_SESSION_SEQUENCES) {
+      evictedSequenceSessions.clear();
+      sequenceEvictionOverflow = true;
+      return;
+    }
+    evictedSequenceSessions.add(sessionId);
+  };
+  const invalidateSequenceCursor = (sessionId: string) => {
+    lastSeqBySession.delete(sessionId);
+    rememberSequenceEviction(sessionId);
+  };
   const noteSeq = (
     sessionId: string | null | undefined,
     seq: number | undefined
-  ): 'unknown' | 'ok' | 'gap' => {
-    if (!sessionId || typeof seq !== 'number') return 'unknown';
+  ): SequenceStatus => {
+    if (!sessionId || typeof seq !== 'number' || !Number.isFinite(seq)) return 'unknown';
     const last = lastSeqBySession.get(sessionId);
     if (last === undefined) {
+      const requiresRecovery =
+        sequenceEvictionOverflow || evictedSequenceSessions.delete(sessionId);
+      while (lastSeqBySession.size >= MAX_TRACKED_SESSION_SEQUENCES) {
+        const oldestSessionId = lastSeqBySession.keys().next().value;
+        if (oldestSessionId === undefined) break;
+        lastSeqBySession.delete(oldestSessionId);
+        rememberSequenceEviction(oldestSessionId);
+      }
       lastSeqBySession.set(sessionId, seq);
-      return 'ok';
+      return requiresRecovery ? 'gap' : 'ok';
     }
     if (seq <= last) return 'ok';
     lastSeqBySession.set(sessionId, seq);
@@ -243,29 +297,170 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
-  const scheduleActiveMessageSync = (sessionId: string, ensureLatest = false) => {
-    if (!isSessionInActiveTree(sessionId)) return;
-    if (activeMessageSyncs.has(sessionId)) {
+  const scheduleMessageSync = (sessionId: string, ensureLatest = false) => {
+    if (disposed) return;
+    if (messageSyncs.has(sessionId)) {
       if (ensureLatest) pendingTranscriptMessageSyncs.add(sessionId);
       return;
     }
 
-    activeMessageSyncs.add(sessionId);
+    messageSyncs.add(sessionId);
     void deps
       .syncSessionMessages(sessionId)
       .then(() => {
+        if (disposed) return;
         const completedAt = pendingTerminalStepSettles.get(sessionId);
         if (completedAt === undefined) return;
         pendingTerminalStepSettles.delete(sessionId);
         if (!settleLatestAssistantOnIdle(sessionId, completedAt)) return;
         handleSessionIdle(sessionId, deps.hasPendingAbort(sessionId));
       })
-      .catch((err) => deps.logError('syncSessionMessages', err))
+      .catch((err) => {
+        if (!disposed) deps.logError('syncSessionMessages', err);
+      })
       .finally(() => {
-        activeMessageSyncs.delete(sessionId);
+        if (disposed) return;
+        messageSyncs.delete(sessionId);
         if (!pendingTranscriptMessageSyncs.delete(sessionId)) return;
-        scheduleActiveMessageSync(sessionId);
+        scheduleMessageSync(sessionId);
       });
+  };
+  function scheduleDirtyGapRetry(sessionId: string, state: DirtyGapState) {
+    if (
+      disposed ||
+      state.syncing ||
+      state.retryTimer !== undefined ||
+      dirtyGaps.get(sessionId) !== state
+    ) {
+      return;
+    }
+    const delayMs = state.retryDelayMs;
+    state.retryDelayMs = Math.min(state.retryDelayMs * 2, DIRTY_GAP_RETRY_MAX_MS);
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = undefined;
+      recoverDirtyGap(sessionId, state);
+    }, delayMs);
+  }
+  function recoverDirtyGap(sessionId: string, state: DirtyGapState) {
+    if (
+      disposed ||
+      state.syncing ||
+      state.retryTimer !== undefined ||
+      dirtyGaps.get(sessionId) !== state
+    ) {
+      return;
+    }
+
+    state.syncing = true;
+    state.retryPending = false;
+    const generation = state.generation;
+    const metadataSync = runGapSync(() =>
+      deps.syncSession(sessionId, {
+        shouldApply: () =>
+          !disposed &&
+          dirtyGaps.get(sessionId) === state &&
+          state.syncing &&
+          state.generation === generation &&
+          !state.retryPending,
+      })
+    );
+    const transcriptSync = runGapSync(() => deps.syncSessionMessages(sessionId));
+    void Promise.allSettled([metadataSync, transcriptSync]).then(
+      ([metadataResult, transcriptResult]) => {
+        if (disposed || dirtyGaps.get(sessionId) !== state) return;
+        state.syncing = false;
+        if (metadataResult.status === 'rejected') {
+          deps.logError('syncSession', metadataResult.reason);
+        }
+        if (transcriptResult.status === 'rejected') {
+          deps.logError('syncSessionMessages', transcriptResult.reason);
+        }
+        const succeeded =
+          metadataResult.status === 'fulfilled' && transcriptResult.status === 'fulfilled';
+        if (succeeded && state.generation === generation && !state.retryPending) {
+          dirtyGaps.delete(sessionId);
+          return;
+        }
+        if (succeeded) {
+          state.retryDelayMs = DIRTY_GAP_RETRY_MIN_MS;
+          recoverDirtyGap(sessionId, state);
+          return;
+        }
+        scheduleDirtyGapRetry(sessionId, state);
+      }
+    );
+  }
+  const recoverOverflowGap = (sessionId: string) => {
+    if (disposed || overflowGapRecoveries.has(sessionId)) return;
+    if (overflowGapRecoveries.size >= MAX_OVERFLOW_GAP_RECOVERIES) {
+      if (!dirtyGapOverflowLogged) {
+        dirtyGapOverflowLogged = true;
+        deps.logError(
+          'sessionEventGapOverflow',
+          new Error('Too many unresolved session event gaps')
+        );
+      }
+      return;
+    }
+
+    overflowGapRecoveries.add(sessionId);
+    const shouldApply = () => !disposed && overflowGapRecoveries.has(sessionId);
+    const metadataSync = runGapSync(() => deps.syncSession(sessionId, { shouldApply }));
+    const transcriptSync = runGapSync(() => deps.syncSessionMessages(sessionId));
+    void Promise.allSettled([metadataSync, transcriptSync]).then(
+      ([metadataResult, transcriptResult]) => {
+        if (disposed) return;
+        overflowGapRecoveries.delete(sessionId);
+        if (metadataResult.status === 'rejected') {
+          deps.logError('syncSession', metadataResult.reason);
+        }
+        if (transcriptResult.status === 'rejected') {
+          deps.logError('syncSessionMessages', transcriptResult.reason);
+        }
+      }
+    );
+  };
+  const markDirtyGap = (sessionId: string) => {
+    let state = dirtyGaps.get(sessionId);
+    if (!state) {
+      if (dirtyGaps.size >= MAX_DIRTY_GAP_SESSIONS) {
+        invalidateSequenceCursor(sessionId);
+        recoverOverflowGap(sessionId);
+        return;
+      }
+      state = {
+        generation: 0,
+        retryDelayMs: DIRTY_GAP_RETRY_MIN_MS,
+        retryPending: false,
+        syncing: false,
+      };
+      dirtyGaps.set(sessionId, state);
+    }
+    state.generation += 1;
+    if (state.syncing) state.retryPending = true;
+    recoverDirtyGap(sessionId, state);
+  };
+  const sequenceStatusByEvent = new WeakMap<ServerEvent, SequenceStatus>();
+  // Sequence-sensitive handlers observe before their early returns; the wildcard
+  // below covers every other durable event type.
+  const observeSequence = (event: ServerEvent): SequenceStatus => {
+    const observed = sequenceStatusByEvent.get(event);
+    if (observed) return observed;
+
+    const sessionId = getServerEventSessionId(event);
+    const status = noteSeq(sessionId, event.seq);
+    sequenceStatusByEvent.set(event, status);
+    if (sessionId && event.seq !== undefined) {
+      if (status === 'gap') markDirtyGap(sessionId);
+      else {
+        const dirty = dirtyGaps.get(sessionId);
+        if (dirty) {
+          dirty.retryPending = true;
+          recoverDirtyGap(sessionId, dirty);
+        }
+      }
+    }
+    return status;
   };
   const refreshSettledTodos = (sessionId: string) => {
     const sync = deps.syncTodosForSession?.(sessionId, deps.getMessages());
@@ -327,6 +522,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       .catch((err) => deps.logError('streamedCompletionRecheck', err));
   };
   const handleSessionIdle = (sessionId: string, abortedRetry: boolean) => {
+    if (disposed) return;
     const hadActiveAssistantReply = hasActiveAssistantReply(deps.getMessages());
     settleLatestAssistantOnIdle(sessionId, Date.now());
     deps.clearPendingAbort(sessionId);
@@ -524,7 +720,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const message = findStepAssistantMessage(sessionId, assistantMessageID, allowLatestFallback);
     if (!message) {
       if (allowLatestFallback) pendingTerminalStepSettles.set(sessionId, completedAt);
-      if (isSessionInActiveTree(sessionId)) scheduleActiveMessageSync(sessionId);
+      if (isSessionInActiveTree(sessionId)) scheduleMessageSync(sessionId);
       return false;
     }
     if (message.info.role !== 'assistant') return false;
@@ -544,7 +740,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (usage?.finish) getNextInfo().finish = usage.finish;
     if (nextInfo) sessionStore.upsertMessageInfo(nextInfo as Message);
     sessionStore.finishMessageStreaming(assistantInfo.id);
-    if (isSessionInActiveTree(sessionId)) scheduleActiveMessageSync(sessionId);
+    if (isSessionInActiveTree(sessionId)) scheduleMessageSync(sessionId);
     return true;
   };
   const latestUnsettledAssistantEntry = (sessionId: string) => {
@@ -616,7 +812,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     isSessionInActiveTree,
     getMessages: () => deps.getMessages(),
     findAssistantMessage,
-    scheduleActiveMessageSync,
+    scheduleActiveMessageSync: scheduleMessageSync,
     syncTodosFromMessages: () => deps.syncTodosFromMessages(),
   });
 
@@ -624,7 +820,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     const localMessage = deps.getMessages().find((entry) => entry.info.id === message.id);
     if (localMessage && localMessage.parts.length > 0) return;
 
-    scheduleActiveMessageSync(message.sessionID);
+    scheduleMessageSync(message.sessionID);
   };
   const hasMessagePart = (messageID: string, partID: string) =>
     deps
@@ -698,14 +894,28 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     recoverMissingPartDeltas(key, pending);
   };
 
+  cleanups.push(
+    serverEvents.on('*', (event) => {
+      observeSequence(event);
+    })
+  );
+
   cleanups.push(() => {
-    activeMessageSyncs.clear();
+    disposed = true;
+    messageSyncs.clear();
+    pendingTranscriptMessageSyncs.clear();
     pendingTerminalStepSettles.clear();
     for (const pending of pendingMissingPartDeltas.values()) {
       if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
     }
     pendingMissingPartDeltas.clear();
     lastSeqBySession.clear();
+    evictedSequenceSessions.clear();
+    for (const dirty of dirtyGaps.values()) {
+      if (dirty.retryTimer !== undefined) clearTimeout(dirty.retryTimer);
+    }
+    dirtyGaps.clear();
+    overflowGapRecoveries.clear();
     for (const timer of streamedCompletionTimers.values()) clearTimeout(timer);
     streamedCompletionTimers.clear();
     pendingPermissionSync = false;
@@ -874,13 +1084,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (message) {
           sessionStore.upsertMessageInfo(message);
         } else {
-          scheduleActiveMessageSync(sessionID);
+          scheduleMessageSync(sessionID);
         }
         if (assistantFinished) {
           if (assistantMessage) {
             sessionStore.finishMessageStreaming(assistantMessage.id);
             syncMessagePartsIfMissing(assistantMessage);
-            if (assistantCompleted) scheduleActiveMessageSync(sessionID);
+            if (assistantCompleted) scheduleMessageSync(sessionID);
             deps.handoffTodosToMessages();
             refreshSettledTodos(sessionID);
           } else {
@@ -915,9 +1125,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('message.part.updated', (data) => {
+      const seqStatus = observeSequence(data);
       const rawPart = data.properties?.part;
       const partialPart = rawPart as { sessionID?: string; type?: string } | undefined;
-      noteSeq(partialPart?.sessionID, data.seq);
       if (partialPart?.sessionID && partialPart.type === 'compaction') {
         sessionStore.setSessionCompacting(partialPart.sessionID, false);
       }
@@ -925,7 +1135,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
       if (!isCompleteMessagePart(rawPart)) {
         uiStore.startLoading();
-        scheduleActiveMessageSync(partialPart!.sessionID!);
+        if (seqStatus !== 'gap') scheduleMessageSync(partialPart!.sessionID!);
         return;
       }
 
@@ -943,6 +1153,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       };
 
       if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {
+        if (seqStatus === 'gap') return;
         void deps
           .syncSessionMessages(rawPart.sessionID)
           .then(applyPart)
@@ -956,10 +1167,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('message.part.delta', (data) => {
+      const seqStatus = observeSequence(data);
       const p = data.properties;
       if (!p) return;
       const sessionID = p.sessionID as string | undefined;
-      noteSeq(sessionID, data.seq);
       if (!sessionID || !isSessionInActiveTree(sessionID)) return;
 
       const messageID = p.messageID as string;
@@ -975,6 +1186,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         pendingMissingPartDeltas.has(getPartDeltaQueueKey(messageID, partID)) ||
         !hasMessagePart(messageID, partID)
       ) {
+        if (seqStatus === 'gap') return;
         queueMissingPartDelta(sessionID, messageID, partID);
         return;
       }
@@ -985,11 +1197,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   for (const eventName of ACTIVE_SESSION_PROGRESS_EVENTS) {
     cleanups.push(
       serverEvents.on(eventName, (data) => {
+        const seqStatus = observeSequence(data);
         const p = data.properties;
         if (!p) return;
         const sessionID = p.sessionID as string | undefined;
         if (!sessionID) return;
-        const seqStatus = noteSeq(sessionID, data.seq);
         const toolTimingUpdate = recordToolExecutionTime(eventName, p);
         if (toolTimingUpdate?.ended) {
           updateExistingToolPartExecutionTime(toolTimingUpdate.sessionId, toolTimingUpdate.callId);
@@ -1023,14 +1235,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           ? handleProjectedSessionEvent(eventName, p)
           : false;
         if (PROJECTED_SESSION_EVENTS.has(eventName)) {
-          if (!projected || seqStatus === 'gap') scheduleActiveMessageSync(sessionID);
+          if (!projected && seqStatus !== 'gap') scheduleMessageSync(sessionID);
         } else {
           // Synchronized events arrive in durable order, so a contiguous seq means we have
           // not missed anything. Events that create transcript records still need a fetch
           // because Varro does not project those record types directly.
           const transcriptSync = TRANSCRIPT_SYNC_SESSION_EVENTS.has(eventName);
-          if (transcriptSync || seqStatus !== 'ok') {
-            scheduleActiveMessageSync(sessionID, transcriptSync);
+          if (seqStatus !== 'gap' && (transcriptSync || seqStatus !== 'ok')) {
+            scheduleMessageSync(sessionID, transcriptSync);
           }
         }
         if (eventName === 'session.next.text.ended') {
@@ -1104,4 +1316,30 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   );
 
   return cleanups;
+}
+
+function getServerEventSessionId(event: ServerEvent): string | undefined {
+  const properties = event.properties as Record<string, unknown> | undefined;
+  if (typeof properties?.sessionID === 'string' && properties.sessionID) {
+    return properties.sessionID;
+  }
+
+  const part = asEventRecord(properties?.part);
+  if (typeof part?.sessionID === 'string' && part.sessionID) return part.sessionID;
+
+  const info = asEventRecord(properties?.info);
+  if (typeof info?.sessionID === 'string' && info.sessionID) return info.sessionID;
+  if (
+    typeof event.type === 'string' &&
+    event.type.startsWith('session.') &&
+    typeof info?.id === 'string' &&
+    info.id
+  ) {
+    return info.id;
+  }
+  return undefined;
+}
+
+function asEventRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }

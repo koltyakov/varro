@@ -487,6 +487,7 @@ describe('session-lifecycle helpers', () => {
     expect(setState).toHaveBeenCalledWith('activeSessionId', null);
     expect(persistActiveSessionId).toHaveBeenCalledWith(null);
     expect(clearMessages).toHaveBeenCalledTimes(1);
+    expect(setState).toHaveBeenCalledWith('messagesLoading', false);
     expect(stopLoading).toHaveBeenCalledTimes(1);
 
     state.activeSessionId = 'session-1';

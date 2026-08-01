@@ -4,13 +4,14 @@ import { SidebarProvider } from './sidebar-provider';
 import { ContextProvider } from './context-provider';
 import { registerCommands } from './commands';
 import { logger } from './logger';
-import { sweepStaleInjectedConfigDirectories } from './open-code-process';
+import { sweepStaleInjectedConfigDirectories, validateServerPort } from './open-code-process';
 
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
 const PRIMARY_SIDEBAR_MIGRATION_KEY = 'layout.cursorPrimarySidebar.v1';
 const PRIMARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro-primary';
+const SECONDARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro';
 const PRIMARY_SIDEBAR_HOSTS = ['cursor', 'windsurf', 'devin'];
 
 function readCompactionSettings(config: vscode.WorkspaceConfiguration) {
@@ -53,10 +54,8 @@ function usesPrimarySidebarForExtensions(): boolean {
 }
 
 async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Promise<void> {
-  if (
-    !usesPrimarySidebarForExtensions() ||
-    context.globalState.get<boolean>(PRIMARY_SIDEBAR_MIGRATION_KEY)
-  ) {
+  if (!usesPrimarySidebarForExtensions()) return;
+  if (context.globalState.get<boolean>(PRIMARY_SIDEBAR_MIGRATION_KEY)) {
     return;
   }
 
@@ -73,19 +72,43 @@ async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Prom
       viewIds: [SidebarProvider.viewType],
       destinationId: PRIMARY_SIDEBAR_CONTAINER,
     });
-    await context.globalState.update(PRIMARY_SIDEBAR_MIGRATION_KEY, true);
   } catch (err) {
     logger.warn(
       `Failed to move Varro to the Primary Sidebar: ${err instanceof Error ? err.message : String(err)}`
     );
+    return;
   }
+
+  try {
+    await context.globalState.update(PRIMARY_SIDEBAR_MIGRATION_KEY, true);
+  } catch (err) {
+    logger.warn(
+      `Failed to remember Varro's Primary Sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+function createSidebarRevealer(destinationId: string): () => Promise<void> {
+  return async () => {
+    try {
+      await vscode.commands.executeCommand('vscode.moveViews', {
+        viewIds: [SidebarProvider.viewType],
+        destinationId,
+      });
+    } catch (err) {
+      logger.warn(
+        `Failed to restore Varro's sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+      );
+      await vscode.commands.executeCommand(`${SidebarProvider.viewType}.resetViewLocation`);
+    }
+  };
 }
 
 export async function activate(context: vscode.ExtensionContext) {
   logger.info('Activating Varro extension');
 
   const config = vscode.workspace.getConfiguration('varro');
-  const port = config.get<number>('server.port', 4096);
+  const port = validateServerPort(config.get<unknown>('server.port', 4096));
   const autoStart = config.get<boolean>('server.autoStart', true);
   const command = config.get<string>('server.command', '');
   const simulateMissingCli = config.get<boolean>('debug.simulateMissingCli', false);
@@ -185,9 +208,17 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  registerCommands(context, sidebarProvider!, contextProvider!, server!);
-
   await placeViewInPrimarySidebar(context);
+  const sidebarDestination = usesPrimarySidebarForExtensions()
+    ? PRIMARY_SIDEBAR_CONTAINER
+    : SECONDARY_SIDEBAR_CONTAINER;
+  registerCommands(
+    context,
+    sidebarProvider!,
+    contextProvider!,
+    server!,
+    createSidebarRevealer(sidebarDestination)
+  );
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();

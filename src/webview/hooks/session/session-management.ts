@@ -4,6 +4,8 @@ import type { PermissionRule, Session, SessionStatus } from '../../types';
 
 type SessionManagementDependencies = {
   getActiveSessionId(): string | null;
+  getWorkspaceGeneration?(): number;
+  getNewChatDraftGeneration(): number;
   createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
   updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
   forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
@@ -64,6 +66,8 @@ export class SessionManagementOperations {
     return createSessionWithDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
+        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
+        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
         createRemoteSession: this.deps.createRemoteSession,
         buildCreatePermission: this.deps.buildCreatePermission,
         upsertSession: this.deps.upsertSession,
@@ -183,6 +187,8 @@ export class SessionManagementOperations {
 export async function createSessionWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
+    getWorkspaceGeneration?(): number;
+    getNewChatDraftGeneration(): number;
     createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
     buildCreatePermission(mode: PermissionMode): PermissionRule[];
     upsertSession(session: Session): void;
@@ -217,14 +223,35 @@ export async function createSessionWithDependencies(
   title?: string,
   initialPermissionMode: PermissionMode = 'default'
 ): Promise<string | null> {
+  const previousActiveSessionId = deps.getActiveSessionId();
+  const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
+  const draftGeneration = deps.getNewChatDraftGeneration();
   try {
-    const previousActiveSessionId = deps.getActiveSessionId();
+    const defaultModel = deps.getDefaultSelectedModel();
+    const defaultAgent = deps.resolveDefaultAgent();
+    const initialMcpNames = [...deps.getInitialMcpNames()];
     const session = await deps.createRemoteSession({
       ...(title ? { title } : {}),
       permission: deps.buildCreatePermission(initialPermissionMode),
     });
 
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
+
     deps.upsertSession(session);
+    deps.setSessionStatusEntry(session.id, { type: 'idle' });
+    deps.setSessionUsageLimit(session.id, null);
+    deps.setSelectedMcpsForSession(session.id, initialMcpNames);
+    if (initialPermissionMode !== 'default') {
+      deps.setPermissionModeForSession(session.id, initialPermissionMode);
+    }
+
+    if (
+      deps.getActiveSessionId() !== previousActiveSessionId ||
+      deps.getNewChatDraftGeneration() !== draftGeneration
+    ) {
+      return session.id;
+    }
+
     deps.resetToolCallExpansionState();
     deps.setActiveSessionId(session.id);
     if (previousActiveSessionId) {
@@ -232,27 +259,18 @@ export async function createSessionWithDependencies(
     } else {
       deps.adoptDraftCurrentDocumentState(session.id);
     }
-
-    deps.setSessionStatusEntry(session.id, { type: 'idle' });
-    deps.setSessionUsageLimit(session.id, null);
     deps.persistActiveSessionId(session.id);
     deps.markSessionSeen(session.id);
 
-    const defaultModel = deps.getDefaultSelectedModel();
     if (defaultModel) {
       deps.setSelectedModel(defaultModel, { sessionId: session.id, persistGlobal: false });
     }
 
-    const defaultAgent = deps.resolveDefaultAgent();
     if (defaultAgent) {
       deps.setSelectedAgent(defaultAgent, { sessionId: session.id, persistGlobal: false });
     }
 
-    deps.setSelectedMcpsForSession(session.id, deps.getInitialMcpNames());
     deps.resetDraftSelectedMcps();
-    if (initialPermissionMode !== 'default') {
-      deps.setPermissionModeForSession(session.id, initialPermissionMode);
-    }
 
     deps.resetDraftPermissionMode();
     deps.resetTodoSync();
@@ -260,7 +278,13 @@ export async function createSessionWithDependencies(
     deps.stopLoading();
     return session.id;
   } catch (err) {
-    deps.setError(err instanceof Error ? err.message : 'Failed to create session');
+    if (
+      (deps.getWorkspaceGeneration?.() ?? 0) === workspaceGeneration &&
+      deps.getActiveSessionId() === previousActiveSessionId &&
+      deps.getNewChatDraftGeneration() === draftGeneration
+    ) {
+      deps.setError(err instanceof Error ? err.message : 'Failed to create session');
+    }
     return null;
   }
 }

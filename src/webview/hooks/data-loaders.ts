@@ -6,6 +6,7 @@ import { routingStore } from '../lib/stores/routing-store';
 import { sessionStore } from '../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
+import { getEffectiveComposerSessionId } from '../lib/state-view-persistence';
 import type { McpStatus, ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type {
   Agent,
@@ -56,6 +57,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     listMcpStatus: () => client.mcp.status(),
     setMcpStatus: routingStore.setMcpStatus,
     getActiveSessionId: () => appStore.state.activeSessionId,
+    getComposerSessionId: getEffectiveComposerSessionId,
     getSelectedMcpsForSession: routingStore.getSelectedMcpsForSession,
     setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
     listQuestions: () => client.question.list(),
@@ -75,6 +77,7 @@ export function createStateBoundDataLoaderOperations(deps: {
     setProviders: routingStore.setProviders,
     setProviderDefaults: routingStore.setProviderDefaults,
     getSelectedModel: () => appStore.state.selectedModel,
+    getSelectedModelForSession: routingStore.getSelectedModelForSession,
     setSelectedModel: routingStore.setSelectedModel,
     loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
     setProviderLimit: routingStore.setProviderLimit,
@@ -104,6 +107,7 @@ export function createDataLoaderOperations(deps: {
   listMcpStatus(): Promise<Record<string, McpStatus> | null | undefined>;
   setMcpStatus(status: Record<string, McpStatus>): void;
   getActiveSessionId(): string | null;
+  getComposerSessionId(): string | null;
   getSelectedMcpsForSession(sessionId: string): string[] | null | undefined;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   listQuestions(): Promise<QuestionRequest[]>;
@@ -130,7 +134,11 @@ export function createDataLoaderOperations(deps: {
   ): void;
   setProviderDefaults(defaults: Record<string, string>): void;
   getSelectedModel(): SelectedModel | null;
-  setSelectedModel(model: SelectedModel | null): void;
+  getSelectedModelForSession(sessionId: string): SelectedModel | null;
+  setSelectedModel(
+    model: SelectedModel | null,
+    options?: { sessionId?: string | null; persistGlobal?: boolean }
+  ): void;
   loadProviderLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus>;
   setProviderLimit(
     providerID: string,
@@ -287,6 +295,8 @@ export function createDataLoaderOperations(deps: {
         },
         setProviderDefaults: deps.setProviderDefaults,
         getSelectedModel: deps.getSelectedModel,
+        getSelectedModelForSession: deps.getSelectedModelForSession,
+        getComposerSessionId: deps.getComposerSessionId,
         setSelectedModel: deps.setSelectedModel,
       },
       deps.logError,
@@ -639,8 +649,12 @@ export async function loadProvidersWithDependencies(
     setProviders(providers: Provider[], defaults?: Record<string, string>): void;
     setProviderDefaults(defaults: Record<string, string>): void;
     getSelectedModel(): SelectedModel | null;
-    getActiveSessionId?(): string | null;
-    setSelectedModel(model: SelectedModel | null): void;
+    getSelectedModelForSession?(sessionId: string): SelectedModel | null;
+    getComposerSessionId?(): string | null;
+    setSelectedModel(
+      model: SelectedModel | null,
+      options?: { sessionId?: string | null; persistGlobal?: boolean }
+    ): void;
   },
   logError: Logger,
   isCurrent: () => boolean = () => true
@@ -672,14 +686,30 @@ export async function loadProvidersWithDependencies(
     deps.setProviderDefaults(providerDefaults);
     deps.setProvidersLoaded(true);
 
+    const composerSessionId = deps.getComposerSessionId?.() ?? null;
+    const currentSelectedModel = deps.getSelectedModel();
+    const sessionSelectedModel = composerSessionId
+      ? (deps.getSelectedModelForSession?.(composerSessionId) ?? null)
+      : null;
     const routingState = reconcileLoadedProviders({
-      selectedModel: deps.getSelectedModel(),
+      selectedModel: sessionSelectedModel ?? currentSelectedModel,
       providers,
       providerDefaults,
-      allowHiddenSelectedModel: !!deps.getActiveSessionId?.(),
+      allowHiddenSelectedModel: !!composerSessionId,
     });
     if (routingState.nextSelectedModel !== undefined) {
-      deps.setSelectedModel(routingState.nextSelectedModel);
+      if (composerSessionId) {
+        deps.setSelectedModel(
+          routingState.nextSelectedModel,
+          routingState.nextSelectedModel
+            ? { sessionId: composerSessionId, persistGlobal: false }
+            : { persistGlobal: false }
+        );
+      } else {
+        deps.setSelectedModel(routingState.nextSelectedModel);
+      }
+    } else if (composerSessionId && sessionSelectedModel && routingState.effectiveModel) {
+      deps.setSelectedModel(routingState.effectiveModel, { persistGlobal: false });
     }
   } catch (err) {
     if (isCurrent()) logError('loadProviders', err);

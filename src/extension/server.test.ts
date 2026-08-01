@@ -110,6 +110,15 @@ function flushMicrotasks() {
   return Promise.resolve().then(() => Promise.resolve());
 }
 
+describe('OpenCodeServer port validation', () => {
+  it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid runtime port %s',
+    (port) => {
+      expect(() => new OpenCodeServer(port, true)).toThrow('varro.server.port');
+    }
+  );
+});
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -3098,6 +3107,23 @@ describe('OpenCodeServer startup recovery', () => {
 
     await expect(startResult).resolves.toBe(server.url);
     expect(children).toHaveLength(3);
+  });
+
+  it('fails actionably instead of attempting a port above 65535', async () => {
+    const server = new OpenCodeServer(65_535, true);
+    const { children } = configureFailingStartup(server, { resolveAfterAttempt: null });
+
+    const startResult = server.start();
+    await flushMicrotasks();
+    crashDuringStartup(children[0]!, 'Error: listen EADDRINUSE: address already in use :::65535');
+    await settleRecovery();
+
+    await expect(startResult).rejects.toThrow(/varro\.server\.port.*1.*65535/i);
+    expect(children).toHaveLength(1);
+    expect(getProcessManager(server).port).toBe(65_535);
+    expect(
+      spawnMock.mock.calls.some(([, args]) => (args as string[] | undefined)?.includes('65536'))
+    ).toBe(false);
   });
 
   it('retries on the same port with backoff when the crash is not a port conflict', async () => {

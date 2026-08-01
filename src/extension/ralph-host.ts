@@ -26,6 +26,7 @@ import { asRecord } from '../shared/type-utils';
 import type { ContextProvider } from './context-provider';
 import type { OpenCodeServer } from './server';
 import { logger } from './logger';
+import { FULL_SESSION_LIST_PATH } from './util/session-list';
 
 const RALPH_RUNS_KEY = 'varro.ralph.runs';
 const MAX_PERSISTED_RALPH_RUNS = 100;
@@ -347,7 +348,7 @@ export class RalphHost {
       listSessions: async (signal, workspaceDirectory) => {
         const sessions = await this.request(
           'GET',
-          '/session',
+          FULL_SESSION_LIST_PATH,
           undefined,
           workspaceDirectory,
           signal
@@ -378,20 +379,34 @@ export class RalphHost {
         );
         if (!statuses) throw new Error('OpenCode returned an invalid session status snapshot');
         if (!Object.prototype.hasOwnProperty.call(statuses, sessionId)) {
-          const sessions = await this.request(
-            'GET',
-            '/session',
-            undefined,
-            workspaceDirectory,
-            signal
-          );
-          if (!Array.isArray(sessions)) {
-            throw new Error(
-              'OpenCode returned an invalid session list while confirming idle status'
+          try {
+            const authorizedWorkspaceDirectory = this.requireWorkspaceDirectory(workspaceDirectory);
+            const session = asRecord(
+              await this.request(
+                'GET',
+                `/session/${encodeURIComponent(sessionId)}`,
+                undefined,
+                authorizedWorkspaceDirectory,
+                signal
+              )
             );
+            if (getString(session?.id) !== sessionId) {
+              return {
+                type: 'unknown',
+                message: `OpenCode returned a mismatched session id while confirming idle status for ${sessionId}`,
+              };
+            }
+            if (!isSameWorkspacePath(getString(session?.directory), authorizedWorkspaceDirectory)) {
+              return {
+                type: 'unknown',
+                message: `OpenCode returned session ${sessionId} outside the authorized Ralph workspace`,
+              };
+            }
+            return { type: 'idle' };
+          } catch (err) {
+            if (isNotFoundError(err)) return { type: 'missing' };
+            throw err;
           }
-          const exists = sessions.some((session) => getString(asRecord(session)?.id) === sessionId);
-          return exists ? { type: 'idle' } : { type: 'missing' };
         }
         const status = asRecord(statuses?.[sessionId]);
         if (!status) {
@@ -754,6 +769,10 @@ function getRalphSessionSignal(
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && /(?:^|\s)404(?:\s|$)/.test(error.message);
 }
 
 function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

@@ -4,7 +4,7 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 22.12+ or 24+
+- [Node.js](https://nodejs.org/) 22.12+ on Node 22, or Node 24+
 - [VS Code](https://code.visualstudio.com/) 1.120 or newer
 - [OpenCode CLI](https://opencode.ai) installed globally
 
@@ -59,7 +59,7 @@ npm run test
 npm run test:e2e
 ```
 
-Use `npm run vscode:install` when you specifically want to package and install the VSIX into your local VS Code.
+Use `npm run vscode:install` when you specifically want to package and install the VSIX into your local VS Code. The helper removes old Varro VSIX files, packages the current version, and passes its exact filename to the VS Code CLI on macOS, Linux, and Windows. Run `npm run vscode:install -- --dry-run` to inspect those operations without changing files or invoking the build or VS Code.
 
 ## Build
 
@@ -86,11 +86,7 @@ npm run package
 
 This produces `varro-*.vsix` in the project root.
 
-Install it with the VS Code CLI:
-
-```sh
-code --install-extension varro-*.vsix
-```
+To install manually, pass the exact generated VSIX path to `code --install-extension`. Do not use a wildcard, because Windows command shells do not expand it consistently.
 
 You can also install it from the VS Code UI through **Extensions** -> `...` -> **Install from VSIX...**.
 
@@ -99,6 +95,8 @@ There is also a convenience script for this flow:
 ```sh
 npm run vscode:install
 ```
+
+The script requires the `code` CLI on `PATH`. Set `VARRO_VSCODE_CLI` to another executable or command shim, such as `code-insiders`, when needed.
 
 After installation, reload the window:
 
@@ -348,13 +346,13 @@ opencode serve --port 4096
 
 Then configure these VS Code settings as needed:
 
-- `varro.server.port`
+- `varro.server.port` (an integer from 1 through 65535)
 - `varro.server.autoStart`
 - `varro.server.command`
 
 Varro checks `http://127.0.0.1:<port>/global/health` to verify the server.
 
-If Varro launched the server itself and the configured port is already occupied by a different process, it can retry on a nearby port. Set `varro.server.port` explicitly if you want a fixed server address.
+If Varro launched the server itself and the configured port is already occupied by a different process, it can retry on a nearby valid port. It never wraps past port 65535 and reports when no valid fallback remains. Set `varro.server.port` explicitly if you want a fixed server address.
 
 ## Project Structure
 

@@ -280,25 +280,44 @@ describe('SessionStateManager notifications', () => {
     expect(manager.completed.has('session-1')).toBe(false);
   });
 
-  it('does not mark continuation step ends complete', () => {
-    const manager = createManager();
+  it.each([
+    ['tool_calls', 'tool-calls'],
+    ['function_calls', 'function-calls'],
+  ])(
+    'does not mark continuation step %s and assistant %s completions complete',
+    (stepFinish, messageFinish) => {
+      const manager = createManager();
 
-    manager.handleServerEvent({
-      type: 'session.status',
-      properties: { sessionID: 'session-1', status: { type: 'busy' } },
-    });
-    manager.handleServerEvent({
-      type: 'session.next.step.ended',
-      properties: { sessionID: 'session-1', finish: 'tool_calls' },
-    });
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      });
+      manager.handleServerEvent({
+        type: 'session.next.step.ended',
+        properties: { sessionID: 'session-1', finish: stepFinish },
+      });
+      manager.handleServerEvent({
+        type: 'message.updated',
+        properties: {
+          sessionID: 'session-1',
+          info: {
+            sessionID: 'session-1',
+            role: 'assistant',
+            finish: messageFinish,
+            time: { created: 1, completed: 2 },
+          },
+        },
+      });
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      });
 
-    // A tool_calls finish means the turn continues; the session stays busy
-    // until a real finish signal (step.ended stop / message completion /
-    // session.status idle) arrives.
-    expect(manager.busy.has('session-1')).toBe(true);
-    expect(manager.completed.has('session-1')).toBe(false);
-    expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
-  });
+      expect(manager.busy.has('session-1')).toBe(true);
+      expect(manager.completed.has('session-1')).toBe(false);
+      expect(vscodeMock.window.showInformationMessage).not.toHaveBeenCalled();
+    }
+  );
 
   it('does not notify for child session completions', () => {
     const manager = createManager();
@@ -415,6 +434,99 @@ describe('SessionStateManager notifications', () => {
       'Varro has a plan ready for review for "Auth cleanup".',
       'Open Chat'
     );
+  });
+
+  it.each(['assistant completion', 'terminal step end'])(
+    'ignores a trailing stale busy event after %s but accepts a new prompt',
+    (completionKind) => {
+      const manager = createManager();
+      manager.handleServerEvent({
+        type: 'session.updated',
+        properties: { info: { id: 'session-1', title: 'Auth cleanup' } },
+      });
+      manager.handleServerEvent({
+        type: 'message.updated',
+        properties: {
+          info: { sessionID: 'session-1', role: 'assistant', agent: 'plan' },
+        },
+      });
+      markBusy(manager, 'session-1');
+
+      manager.handleServerEvent(
+        completionKind === 'assistant completion'
+          ? {
+              type: 'message.updated',
+              properties: {
+                info: {
+                  sessionID: 'session-1',
+                  role: 'assistant',
+                  agent: 'plan',
+                  finish: 'stop',
+                  time: { completed: 2 },
+                },
+              },
+            }
+          : {
+              type: 'session.next.step.ended',
+              properties: { sessionID: 'session-1', finish: 'stop' },
+            }
+      );
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'busy' } },
+      });
+
+      expect(manager.busy.has('session-1')).toBe(false);
+      expect(manager.completed.has('session-1')).toBe(true);
+      expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(1);
+
+      manager.markSessionBusy('session-1');
+      expect(manager.busy.has('session-1')).toBe(true);
+      expect(manager.completed.has('session-1')).toBe(false);
+      manager.handleServerEvent({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
+
+      expect(manager.completed.has('session-1')).toBe(true);
+      expect(vscodeMock.window.showInformationMessage).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('accepts busy for a newly admitted prompt after suppressing a terminal trailing busy', () => {
+    const manager = createManager();
+    markBusy(manager, 'session-1');
+    manager.handleServerEvent({
+      type: 'message.updated',
+      properties: {
+        sessionID: 'session-1',
+        info: {
+          sessionID: 'session-1',
+          role: 'assistant',
+          finish: 'stop',
+          time: { created: 1, completed: 2 },
+        },
+      },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(false);
+    expect(manager.completed.has('session-1')).toBe(true);
+
+    manager.handleServerEvent({
+      type: 'session.next.prompt.admitted',
+      properties: { sessionID: 'session-1', messageID: 'message-2' },
+    });
+    manager.handleServerEvent({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(manager.busy.has('session-1')).toBe(true);
+    expect(manager.completed.has('session-1')).toBe(false);
   });
 
   it('does not show completion notifications for normal background sessions', () => {
@@ -1071,6 +1183,240 @@ describe('SessionStateManager notifications', () => {
       ],
     });
     expect(workspaceState.remove).toHaveBeenCalledWith('varro.blockingRequests');
+  });
+
+  it('treats recovery cleanup as best-effort and safely retries stale blocking data', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+      [
+        'varro.blockingRequests',
+        [
+          {
+            id: 'permission-1',
+            sessionID: 'session-1',
+            kind: 'permission',
+            props: { id: 'permission-1', sessionID: 'session-1', title: 'Use Bash' },
+          },
+        ],
+      ],
+    ]);
+    let blockingRemoveAttempts = 0;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => storage.get(key)),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn((key: string) => {
+        if (key === 'varro.blockingRequests') {
+          blockingRemoveAttempts += 1;
+          if (blockingRemoveAttempts === 1) return Promise.reject(new Error('cleanup failed'));
+        }
+        storage.delete(key);
+        return Promise.resolve();
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
+      blockingRequests: [{ id: 'permission-1', sessionID: 'session-1' }],
+    });
+    expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining('cleanup failed'));
+
+    manager.handleServerEvent({
+      type: 'permission.replied',
+      properties: { id: 'permission-1', sessionID: 'session-1' },
+    });
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [],
+      blockingRequests: [],
+    });
+    expect(manager.pending.has('permission-1')).toBe(false);
+    expect(blockingRemoveAttempts).toBe(2);
+  });
+
+  it('does not replay interrupted sessions while failed cleanup is retried', async () => {
+    const storage = new Map<string, unknown>([
+      ['varro.interruptedSessions', [{ id: 'session-1', title: 'Interrupted' }]],
+    ]);
+    let interruptedRemoveAttempts = 0;
+    const workspaceState: WorkspaceStateMock = {
+      get: vi.fn((key: string) => storage.get(key)),
+      set: vi.fn(() => Promise.resolve()),
+      remove: vi.fn((key: string) => {
+        if (key === 'varro.interruptedSessions') {
+          interruptedRemoveAttempts += 1;
+          if (interruptedRemoveAttempts === 1) {
+            return Promise.reject(new Error('interrupted cleanup failed'));
+          }
+        }
+        storage.delete(key);
+        return Promise.resolve();
+      }),
+    };
+    const manager = new SessionStateManager(
+      workspaceState as never,
+      { onStatusChange: vi.fn() },
+      { shouldShow: () => false }
+    );
+
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [{ id: 'session-1', title: 'Interrupted' }],
+    });
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [],
+    });
+
+    expect(interruptedRemoveAttempts).toBe(2);
+    expect(storage.has('varro.interruptedSessions')).toBe(false);
+    await expect(manager.consumeRecoverySnapshot()).resolves.toMatchObject({
+      interruptedSessions: [],
+    });
+  });
+
+  it('reconciles permission and question snapshots independently', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-stale', sessionID: 'session-1', title: 'Stale' },
+    });
+    manager.handleServerEvent({
+      type: 'question.asked',
+      properties: { id: 'question-live', sessionID: 'session-2', questions: [] },
+    });
+
+    manager.reconcilePendingAttention('permission', [
+      { id: 'permission-live', sessionID: 'session-3', title: 'Live' },
+    ]);
+
+    expect([...manager.pending.keys()]).toEqual(['question-live', 'permission-live']);
+    expect(manager.pending.get('permission-live')).toMatchObject({
+      kind: 'permission',
+      sessionID: 'session-3',
+      label: 'Live',
+    });
+
+    manager.reconcilePendingAttention('question', []);
+    expect([...manager.pending.keys()]).toEqual(['permission-live']);
+  });
+
+  it('preserves newer ask and reply events while an older snapshot is in flight', () => {
+    const manager = createManager(() => false);
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-replied', sessionID: 'session-1', title: 'Old ask' },
+    });
+    const reconciliation = manager.beginPendingAttentionReconciliation('permission');
+
+    manager.handleServerEvent({
+      type: 'permission.replied',
+      properties: { id: 'permission-replied', sessionID: 'session-1' },
+    });
+    manager.handleServerEvent({
+      type: 'permission.asked',
+      properties: { id: 'permission-new', sessionID: 'session-2', title: 'New ask' },
+    });
+    manager.reconcilePendingAttention(
+      'permission',
+      [{ id: 'permission-replied', sessionID: 'session-1', title: 'Old ask' }],
+      reconciliation
+    );
+
+    expect([...manager.pending.keys()]).toEqual(['permission-new']);
+  });
+
+  it('lets a later concurrent snapshot supersede an earlier snapshot', () => {
+    const manager = createManager(() => false);
+    const first = manager.beginPendingAttentionReconciliation('permission');
+    const second = manager.beginPendingAttentionReconciliation('permission');
+
+    manager.reconcilePendingAttention(
+      'permission',
+      [{ id: 'permission-old', sessionID: 'session-1', title: 'Old' }],
+      first
+    );
+    manager.reconcilePendingAttention(
+      'permission',
+      [{ id: 'permission-new', sessionID: 'session-2', title: 'New' }],
+      second
+    );
+
+    expect([...manager.pending.keys()]).toEqual(['permission-new']);
+  });
+
+  it.each(['permission', 'question'] as const)(
+    'ignores an older %s snapshot that completes after a newer request',
+    (kind) => {
+      const manager = createManager(() => false);
+      const first = manager.beginPendingAttentionReconciliation(kind);
+      const second = manager.beginPendingAttentionReconciliation(kind);
+      const request = (id: string, sessionID: string) => ({
+        id,
+        sessionID,
+        ...(kind === 'permission' ? { title: id } : { questions: [] }),
+      });
+
+      manager.reconcilePendingAttention(kind, [request(`${kind}-new`, 'session-new')], second);
+      manager.reconcilePendingAttention(kind, [request(`${kind}-old`, 'session-old')], first);
+
+      expect([...manager.pending.keys()]).toEqual([`${kind}-new`]);
+    }
+  );
+
+  it.each(['permission', 'question'] as const)(
+    'does not restore a %s snapshot request after its session is deleted',
+    (kind) => {
+      const manager = createManager(() => false);
+      const reconciliation = manager.beginPendingAttentionReconciliation(kind);
+
+      manager.handleServerEvent({
+        type: 'session.deleted',
+        properties: { sessionID: 'session-deleted' },
+      });
+      manager.reconcilePendingAttention(
+        kind,
+        [
+          {
+            id: `${kind}-deleted`,
+            sessionID: 'session-deleted',
+            ...(kind === 'permission' ? { title: 'Deleted' } : { questions: [] }),
+          },
+        ],
+        reconciliation
+      );
+
+      expect(manager.pending.has(`${kind}-deleted`)).toBe(false);
+    }
+  );
+
+  it('prunes event mutation metadata after overlapping reconciliations finish', () => {
+    const manager = createManager(() => false);
+    const first = manager.beginPendingAttentionReconciliation('permission');
+    const second = manager.beginPendingAttentionReconciliation('permission');
+
+    for (let index = 0; index < 250; index += 1) {
+      manager.handleServerEvent({
+        type: 'permission.replied',
+        properties: { id: `permission-${index}`, sessionID: `session-${index}` },
+      });
+    }
+    manager.handleServerEvent({
+      type: 'session.deleted',
+      properties: { sessionID: 'session-deleted' },
+    });
+    manager.reconcilePendingAttention('permission', [], second);
+    manager.reconcilePendingAttention('permission', [], first);
+
+    const reconciliationState = manager as unknown as {
+      pendingAttentionMutationRevisions: Record<'permission', Map<string, number>>;
+      pendingAttentionSessionDeletionRevisions: Record<'permission', Map<string, number>>;
+      activePendingAttentionReconciliations: Record<'permission', Map<number, number>>;
+    };
+    expect(reconciliationState.pendingAttentionMutationRevisions.permission.size).toBe(0);
+    expect(reconciliationState.pendingAttentionSessionDeletionRevisions.permission.size).toBe(0);
+    expect(reconciliationState.activePendingAttentionReconciliations.permission.size).toBe(0);
   });
 
   it('treats malformed persisted snapshot containers as empty', async () => {

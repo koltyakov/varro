@@ -15,6 +15,7 @@ vi.mock('../lib/bridge', async (importOriginal) => {
 
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
+import { startNewChatDraft } from '../lib/new-chat-draft';
 import { replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import { SessionSendOperations } from './session/session-send';
 
@@ -138,6 +139,94 @@ describe('SessionSendOperations', () => {
     expect(resetTodoSync).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+  });
+
+  it('shares one lazy session creation across rapid sends', async () => {
+    appStore.setState('activeSessionId', null);
+    appStore.setState('editorContext', {
+      workspacePath: null,
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const creation = deferred<string | null>();
+    const createSession = vi.fn(async () => {
+      const sessionId = await creation.promise;
+      if (sessionId) appStore.setState('activeSessionId', sessionId);
+      return sessionId;
+    });
+    const sendAsync = vi.fn(async () => {});
+    const operations = new SessionSendOperations({
+      createSession,
+      clearPendingAbort: vi.fn(),
+      resetTodoSync: vi.fn(),
+      syncSessionMcps: vi.fn(async () => {}),
+      sendAsync,
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      recheckSessionStatus: vi.fn(async () => {}),
+      setSessionStatusEntry: vi.fn(),
+      getMessageCount: () => 1,
+      continueInterruptedSession: vi.fn(async () => {}),
+    });
+
+    const first = operations.sendMessage('first');
+    const second = operations.sendMessage('second');
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalled());
+    creation.resolve('session-new');
+    await Promise.all([first, second]);
+
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(sendAsync).toHaveBeenCalledTimes(2);
+    expect(sendAsync.mock.calls.map(([sessionId]) => sessionId)).toEqual([
+      'session-new',
+      'session-new',
+    ]);
+  });
+
+  it('starts a separate lazy creation after the user opens another new-chat draft', async () => {
+    appStore.setState('activeSessionId', null);
+    appStore.setState('editorContext', {
+      workspacePath: null,
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const firstCreation = deferred<string | null>();
+    const secondCreation = deferred<string | null>();
+    const createSession = vi
+      .fn<() => Promise<string | null>>()
+      .mockReturnValueOnce(firstCreation.promise)
+      .mockReturnValueOnce(secondCreation.promise);
+    const sendAsync = vi.fn(async () => {});
+    const operations = new SessionSendOperations({
+      createSession,
+      clearPendingAbort: vi.fn(),
+      resetTodoSync: vi.fn(),
+      syncSessionMcps: vi.fn(async () => {}),
+      sendAsync,
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      recheckSessionStatus: vi.fn(async () => {}),
+      setSessionStatusEntry: vi.fn(),
+      getMessageCount: () => 1,
+      continueInterruptedSession: vi.fn(async () => {}),
+    });
+
+    const first = operations.sendMessage('first draft');
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    startNewChatDraft();
+    const second = operations.sendMessage('second draft');
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
+
+    secondCreation.resolve('session-second');
+    firstCreation.resolve('session-first');
+    await Promise.all([first, second]);
+
+    expect(sendAsync.mock.calls.map(([sessionId]) => sessionId).toSorted()).toEqual([
+      'session-first',
+      'session-second',
+    ]);
   });
 
   it('clears sent attachments restored without inline sequences', async () => {

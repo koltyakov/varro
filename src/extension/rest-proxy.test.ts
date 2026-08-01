@@ -80,8 +80,15 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       getSessionWorkspaceMatch: vi.fn(() => true),
       isSessionInWorkspace: vi.fn(() => true),
       markSessionBusy: vi.fn((sessionID: string) => ({ sessionID, id: 1 })),
+      beginPendingAttentionReconciliation: vi.fn((kind: 'permission' | 'question') => ({
+        kind,
+        mutationRevision: 0,
+        requestGeneration: 1,
+      })),
+      finishPendingAttentionReconciliation: vi.fn(),
       deferPromptFailure: vi.fn(),
       reconcilePromptFailure: vi.fn(),
+      reconcilePendingAttention: vi.fn(),
       removeSessions: vi.fn(),
     },
     sessionTrash: {
@@ -827,7 +834,7 @@ describe('RestProxy handleRequest', () => {
 
   it('returns only aggregate session edit and token data to the webview', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
-      if (path === '/session') {
+      if (path === '/session?limit=1000000') {
         return Promise.resolve([
           { id: 'session-1', directory: '/repo' },
           {
@@ -934,7 +941,7 @@ describe('RestProxy handleRequest', () => {
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/session-1/diff'],
       ['GET', '/session/session-1/message'],
-      ['GET', '/session'],
+      ['GET', '/session?limit=1000000'],
       ['GET', '/session/grandchild-1/message'],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -973,9 +980,50 @@ describe('RestProxy handleRequest', () => {
     expect(JSON.stringify(response)).not.toContain('OTHER_');
   });
 
+  it('includes a descendant beyond OpenCode default session-list page in token totals', async () => {
+    const fullSessionList = [
+      { id: 'session-1', directory: '/repo' },
+      ...Array.from({ length: 100 }, (_, index) => ({
+        id: `unrelated-${index}`,
+        directory: '/repo',
+      })),
+      {
+        id: 'late-descendant',
+        parentID: 'session-1',
+        directory: '/repo',
+        tokens: { total: 9 },
+      },
+    ];
+    const serverRequest = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session') return fullSessionList.slice(0, 100);
+      if (path === '/session?limit=1000000') return fullSessionList;
+      if (path === '/session/session-1/message') {
+        return [{ info: { role: 'assistant', tokens: { total: 1 } } }];
+      }
+      return [];
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(821, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 821,
+      data: expect.objectContaining({
+        tokens: 10,
+        tokenBreakdown: expect.objectContaining({
+          subagents: expect.objectContaining({ total: 9 }),
+          subagentCount: 1,
+        }),
+      }),
+    });
+  });
+
   it('falls back to message tool metadata when the session diff is empty', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
-      if (path === '/session') return Promise.resolve([]);
+      if (path === '/session?limit=1000000') return Promise.resolve([]);
       return Promise.resolve(
         path.endsWith('/diff')
           ? []
@@ -1059,7 +1107,7 @@ describe('RestProxy handleRequest', () => {
   it('shares the session list across concurrent diff summaries', async () => {
     const sessionList = deferred<unknown>();
     const serverRequest = vi.fn((_method: string, path: string) => {
-      if (path === '/session') return sessionList.promise;
+      if (path === '/session?limit=1000000') return sessionList.promise;
       return Promise.resolve([]);
     });
     const { proxy } = createProxy({
@@ -1071,13 +1119,17 @@ describe('RestProxy handleRequest', () => {
       proxy.handleRequest(makePayload(85, 'GET', '/varro/session/session-2/diff-summary')),
     ];
     await vi.waitFor(() => {
-      expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+      expect(
+        serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+      ).toHaveLength(1);
     });
     sessionList.resolve([{ id: 'session-1' }, { id: 'session-2' }]);
 
     await Promise.all(requests);
 
-    expect(serverRequest.mock.calls.filter(([, path]) => path === '/session')).toHaveLength(1);
+    expect(
+      serverRequest.mock.calls.filter(([, path]) => path === '/session?limit=1000000')
+    ).toHaveLength(1);
   });
 
   it('reuses a completed diff summary for the same session revision', async () => {
@@ -1091,7 +1143,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(85, 'GET', path));
 
     expect(
-      serverRequest.mock.calls.filter(([, requestPath]) => requestPath === '/session')
+      serverRequest.mock.calls.filter(([, requestPath]) => requestPath === '/session?limit=1000000')
     ).toHaveLength(1);
     expect(
       serverRequest.mock.calls.filter(
@@ -1138,7 +1190,9 @@ describe('RestProxy handleRequest', () => {
       }))
     );
     const serverRequest = vi.fn(async (_method: string, path: string) => {
-      if (path === '/session') return [{ id: 'session-1' }, { id: 'session-2' }, ...descendants];
+      if (path === '/session?limit=1000000') {
+        return [{ id: 'session-1' }, { id: 'session-2' }, ...descendants];
+      }
       if (/^\/session\/session-\d-child-\d+\/message$/.test(path)) {
         activeDescendantRequests += 1;
         peakDescendantRequests = Math.max(peakDescendantRequests, activeDescendantRequests);
@@ -1385,7 +1439,7 @@ describe('RestProxy handleRequest', () => {
       if (path === '/session/status') {
         return Promise.resolve({ 'foreign-old': { type: 'busy' } });
       }
-      if (path === '/session') {
+      if (path === '/session?limit=1000000') {
         return Promise.resolve([{ id: 'foreign-old', directory: '/other' }]);
       }
       return Promise.resolve(undefined);
@@ -1405,7 +1459,7 @@ describe('RestProxy handleRequest', () => {
     });
     await proxy.handleRequest(makePayload(154, 'GET', '/session/status'));
 
-    expect(serverRequest).toHaveBeenCalledWith('GET', '/session');
+    expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
     expect(callbacks.postApiResponse).toHaveBeenLastCalledWith(1, {
       id: 154,
       data: {},
@@ -1738,6 +1792,104 @@ describe('RestProxy handleRequest', () => {
     expect(filterQuestions).toHaveBeenCalledWith(questions);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 23, data: filtered });
   });
+
+  it.each([
+    ['permission', '/permission'],
+    ['question', '/question'],
+  ] as const)(
+    'reconciles each filtered %s snapshot into host attention state',
+    async (kind, path) => {
+      const visible = { id: `${kind}-visible`, sessionID: 'local' };
+      const foreign = { id: `${kind}-foreign`, sessionID: 'foreign' };
+      const extensionHidden = { id: `${kind}-extension-hidden`, sessionID: 'hidden' };
+      const trashed = { id: `${kind}-trashed`, sessionID: 'trashed' };
+      const reconcilePendingAttention = vi.fn();
+      const { proxy, callbacks } = createProxy({
+        server: {
+          ...createCallbacks().server,
+          request: vi.fn(() => Promise.resolve([visible, foreign, extensionHidden, trashed])),
+        } as never,
+        sessionState: {
+          ...createCallbacks().sessionState,
+          getSessionWorkspaceMatch: vi.fn((sessionID: string) => sessionID !== 'foreign'),
+          reconcilePendingAttention,
+        } as never,
+        hiddenSessions: {
+          ...createCallbacks().hiddenSessions,
+          filterVisibleSessionRequests: vi.fn(<T extends { sessionID: string }>(items: T[]) =>
+            items.filter((item) => item.sessionID !== 'hidden')
+          ) as never,
+        },
+        sessionTrash: {
+          ...createCallbacks().sessionTrash,
+          filterVisibleSessionRequests: vi.fn(<T extends { sessionID: string }>(items: T[]) =>
+            items.filter((item) => item.sessionID !== 'trashed')
+          ) as never,
+        },
+      });
+
+      await proxy.handleRequest(makePayload(231, 'GET', path));
+
+      expect(reconcilePendingAttention).toHaveBeenCalledWith(kind, [visible], {
+        kind,
+        mutationRevision: 0,
+        requestGeneration: 1,
+      });
+      expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 231, data: [visible] });
+    }
+  );
+
+  it.each([
+    ['permission', '/permission'],
+    ['question', '/question'],
+  ] as const)(
+    'keeps the newer %s snapshot when concurrent requests complete in reverse order',
+    async (kind, path) => {
+      const firstResponse = deferred<unknown[]>();
+      const secondResponse = deferred<unknown[]>();
+      let requestCount = 0;
+      const manager = new SessionStateManager(
+        {
+          get: vi.fn(),
+          set: vi.fn(() => Promise.resolve()),
+          remove: vi.fn(() => Promise.resolve()),
+        } as never,
+        { onStatusChange: vi.fn() },
+        { shouldShow: () => false }
+      );
+      for (const id of ['session-old', 'session-new']) {
+        manager.handleServerEvent({
+          type: 'session.updated',
+          properties: { info: { id, directory: '/repo' } },
+        });
+      }
+      const { proxy } = createProxy({
+        server: {
+          ...createCallbacks().server,
+          request: vi.fn((_method: string, requestPath: string) => {
+            if (requestPath !== path) throw new Error(`Unexpected request: ${requestPath}`);
+            requestCount += 1;
+            return requestCount === 1 ? firstResponse.promise : secondResponse.promise;
+          }),
+        } as never,
+        sessionState: manager,
+      });
+      const request = (id: string, sessionID: string) => ({
+        id,
+        sessionID,
+        ...(kind === 'permission' ? { title: id } : { questions: [] }),
+      });
+
+      const first = proxy.handleRequest(makePayload(232, 'GET', path));
+      const second = proxy.handleRequest(makePayload(233, 'GET', path));
+      secondResponse.resolve([request(`${kind}-new`, 'session-new')]);
+      await second;
+      firstResponse.resolve([request(`${kind}-old`, 'session-old')]);
+      await first;
+
+      expect([...manager.pending.keys()]).toEqual([`${kind}-new`]);
+    }
+  );
 
   it('passes through non-session responses without filtering', async () => {
     const configData = { providers: [{ id: 'openai' }] };

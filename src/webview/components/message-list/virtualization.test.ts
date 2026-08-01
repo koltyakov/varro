@@ -33,6 +33,22 @@ describe('buildVirtualMetrics', () => {
     });
   });
 
+  it('keeps an explicitly measured zero-height row out of downstream offsets', () => {
+    expect(
+      buildVirtualMetrics({
+        itemIds: ['empty', 'visible'],
+        measuredHeights: new Map([
+          ['empty', 0],
+          ['visible', 40],
+        ]),
+      })
+    ).toEqual({
+      prefix: [0, 0, 40],
+      totalHeight: 40,
+      itemCount: 2,
+    });
+  });
+
   it('rebuilds cached downstream offsets when a measured height changes', () => {
     const itemIds = ['a', 'b', 'c'];
     const measuredHeights = new Map([

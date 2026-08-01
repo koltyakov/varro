@@ -93,6 +93,16 @@ describe('startNewChatDraft', () => {
     expect(editingMessage()).toBeNull();
   });
 
+  it('clears message loading immediately when a slow session load is abandoned', () => {
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.messagesLoading).toBe(false);
+  });
+
   it('restores global model and reasoning defaults for a new chat', () => {
     const defaultModel = {
       providerID: 'openai',

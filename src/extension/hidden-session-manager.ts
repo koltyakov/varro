@@ -1,8 +1,13 @@
 import type { ServerEvent } from '../shared/protocol';
 
+// Cover queued helper events without retaining IDs forever when deletion events are missed.
+const DELETION_TOMBSTONE_TTL_MS = 30_000;
+const DELETION_TOMBSTONE_LIMIT = 256;
+
 export class HiddenSessionManager {
   private readonly hiddenIds = new Set<string>();
   private readonly pendingTitles = new Set<string>();
+  private readonly deletionTombstones = new Map<string, ReturnType<typeof setTimeout>>();
 
   registerPendingTitle(title: string) {
     if (title) this.pendingTitles.add(title);
@@ -17,7 +22,26 @@ export class HiddenSessionManager {
   }
 
   unhide(sessionID: string | null | undefined) {
-    if (sessionID) this.hiddenIds.delete(sessionID);
+    if (!sessionID) return;
+    this.hiddenIds.delete(sessionID);
+    this.clearDeletionTombstone(sessionID);
+  }
+
+  retainUntilDeleted(sessionID: string | null | undefined) {
+    if (!sessionID || !this.hiddenIds.has(sessionID)) return;
+    this.clearDeletionTombstone(sessionID);
+    while (this.deletionTombstones.size >= DELETION_TOMBSTONE_LIMIT) {
+      const oldest = this.deletionTombstones.keys().next().value;
+      if (!oldest) break;
+      this.unhide(oldest);
+    }
+
+    const timeout = setTimeout(() => {
+      if (this.deletionTombstones.get(sessionID) !== timeout) return;
+      this.deletionTombstones.delete(sessionID);
+      this.hiddenIds.delete(sessionID);
+    }, DELETION_TOMBSTONE_TTL_MS);
+    this.deletionTombstones.set(sessionID, timeout);
   }
 
   isHidden(sessionID: string | null | undefined) {
@@ -29,6 +53,11 @@ export class HiddenSessionManager {
   }
 
   observeEvent(event: ServerEvent) {
+    if (event.type === 'session.deleted') {
+      const id = event.properties?.info?.id || event.properties?.sessionID;
+      this.unhide(id);
+      return;
+    }
     if (event.type !== 'session.created' && event.type !== 'session.updated') return;
     const info = event.properties?.info;
     const id = typeof info?.id === 'string' ? info.id : event.properties?.sessionID;
@@ -49,5 +78,11 @@ export class HiddenSessionManager {
 
   filterVisibleSessionRequests<T extends { sessionID: string }>(items: T[]) {
     return items.filter((item) => !this.isHidden(item.sessionID));
+  }
+
+  private clearDeletionTombstone(sessionID: string) {
+    const timeout = this.deletionTombstones.get(sessionID);
+    if (timeout !== undefined) clearTimeout(timeout);
+    this.deletionTombstones.delete(sessionID);
   }
 }

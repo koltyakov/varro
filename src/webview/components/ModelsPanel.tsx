@@ -48,7 +48,6 @@ export function ModelsPanel() {
   const [isReloading, setIsReloading] = createSignal(false);
   let bodyRef: HTMLDivElement | undefined;
   let reloadIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
-  let minimumReloadIndicatorElapsed = false;
 
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
@@ -118,20 +117,12 @@ export function ModelsPanel() {
 
   function reloadProviders() {
     if (isReloading()) return;
-    minimumReloadIndicatorElapsed = false;
     setIsReloading(true);
     reloadIndicatorTimer = setTimeout(() => {
-      minimumReloadIndicatorElapsed = true;
-      if (state.providersLoaded) setIsReloading(false);
+      setIsReloading(false);
     }, MIN_RELOAD_INDICATOR_MS);
     postMessage({ type: 'providers/refresh' });
   }
-
-  createEffect(() => {
-    if (isReloading() && minimumReloadIndicatorElapsed && state.providersLoaded) {
-      setIsReloading(false);
-    }
-  });
 
   onCleanup(() => clearTimeout(reloadIndicatorTimer));
 

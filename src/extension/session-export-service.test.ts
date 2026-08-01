@@ -66,7 +66,7 @@ type ErrorHandler = (error: Error) => void;
 function createServer() {
   return {
     getWorkspaceCwd: vi.fn(() => '/repo'),
-    request: vi.fn(async () => [{ id: 'session-1', directory: '/repo' }]),
+    request: vi.fn(async () => ({ id: 'session-1', directory: '/repo' })),
     resolveCommand: vi.fn(() => 'opencode'),
   };
 }
@@ -207,19 +207,75 @@ describe('SessionExportService', () => {
 
   it('rejects a session from another workspace before spawning the CLI', async () => {
     const server = createServer();
-    server.request.mockResolvedValue([{ id: 'session-1', directory: '/other' }]);
+    server.request.mockResolvedValue({ id: 'session-1', directory: '/other' });
     const service = new SessionExportService(server, 1000);
 
     await expect(service.exportSession('session-1')).rejects.toThrow(
       'Session does not belong to the current workspace'
     );
 
-    expect(server.request).toHaveBeenCalledWith('GET', '/session');
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
     expect(mocks.mkdtemp).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
     expect(mocks.showErrorMessage).toHaveBeenCalledWith(
       'Failed to export session: Session does not belong to the current workspace'
     );
+  });
+
+  it('rejects malformed direct session metadata before spawning the CLI', async () => {
+    const server = createServer();
+    server.request.mockResolvedValue({ directory: '/repo' } as never);
+    const service = new SessionExportService(server, 1000);
+
+    await expect(service.exportSession('session-1')).rejects.toThrow(
+      'Session does not belong to the current workspace'
+    );
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
+    expect(mocks.mkdtemp).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched direct session ID before spawning the CLI', async () => {
+    const server = createServer();
+    server.request.mockResolvedValue({ id: 'session-2', directory: '/repo' });
+    const service = new SessionExportService(server, 1000);
+
+    await expect(service.exportSession('session-1')).rejects.toThrow(
+      'Session does not belong to the current workspace'
+    );
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-1');
+    expect(mocks.mkdtemp).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('authorizes a session beyond the default list page with direct lookup', async () => {
+    const spawnResult = createSpawnResult();
+    const server = createServer();
+    server.request.mockImplementation(async (_method: string, path: string) => {
+      if (path === '/session/session-101') {
+        return { id: 'session-101', directory: '/repo' };
+      }
+      if (path === '/session') {
+        return Array.from({ length: 100 }, (_, index) => ({
+          id: `session-${index + 1}`,
+          directory: '/repo',
+        }));
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const service = new SessionExportService(server, 1000);
+
+    const exportPromise = service.exportSession('session-101');
+    await vi.waitFor(() => expect(server.request).toHaveBeenCalled());
+    if (server.request.mock.calls[0]?.[1] === '/session/session-101') {
+      await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+      spawnResult.handlers.close(0, null);
+    }
+    await exportPromise;
+
+    expect(server.request).toHaveBeenCalledWith('GET', '/session/session-101');
   });
 
   it('exports without workspace isolation in a folderless window', async () => {

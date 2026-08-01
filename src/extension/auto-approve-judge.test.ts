@@ -38,6 +38,14 @@ function createTemporaryWorkspace() {
   return { root, workspace };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function createAskJudgeRequest() {
   return vi.fn(async (method: string, path: string) => {
     if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
@@ -189,6 +197,18 @@ describe('AutoApproveJudge', () => {
         title: 'bash rtk git diff -- src/extension/auto-approve-judge.ts',
       },
       {
+        id: 'perm-git-diff-pathspecs',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash git diff -- src/app.ts src/lib.ts',
+      },
+      {
+        id: 'perm-git-diff-revision',
+        type: 'bash',
+        sessionID: 'session-1',
+        title: 'bash git diff HEAD~1 -- src/app.ts',
+      },
+      {
         id: 'perm-git-rev-parse-branch',
         type: 'bash',
         sessionID: 'session-1',
@@ -209,6 +229,94 @@ describe('AutoApproveJudge', () => {
       });
     }
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['outside operand', 'git diff --no-index src/app.ts /etc/hosts'],
+    ['quoted flag', 'git diff "--no-index" src/app.ts /etc/hosts'],
+    ['ANSI-C quoted flag', "git diff $'--no-index' src/app.ts /etc/hosts"],
+    ['escaped flag', 'git diff --no\\-index src/app.ts /etc/hosts'],
+    ['reversed operands', 'git diff --no-index /etc/hosts src/app.ts'],
+    ['option separator', 'git diff --no-index -- src/app.ts /etc/hosts'],
+    ['relative escape', 'git diff --no-index src/app.ts src/../../outside.ts'],
+    ['git -C', 'git -C nested diff --no-index app.ts ../../outside.ts'],
+  ])('does not locally allow git diff --no-index with %s', async (_case, command) => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'nested'));
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: `perm-${_case}`,
+          type: 'bash',
+          sessionID: 'session-1',
+          title: `bash ${command}`,
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it.each([
+    ['absolute operands', 'git diff /dev/null /etc/hosts'],
+    ['quoted absolute operands', 'git diff "/dev/null" "/etc/hosts"'],
+    ['reversed operands', 'git diff /etc/hosts /dev/null'],
+    ['option separator', 'git diff -- /dev/null /etc/hosts'],
+    ['relative escapes', 'git diff ../outside-one ../outside-two'],
+    ['home expansion', 'git diff src/app.ts ~/outside-file'],
+    ['git -C', 'git -C nested diff /dev/null ../../outside.ts'],
+  ])('does not locally allow implicit git diff no-index mode with %s', async (_case, command) => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'nested'));
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: `perm-implicit-${_case}`,
+          type: 'bash',
+          sessionID: 'session-1',
+          title: `bash ${command}`,
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it.each([
+    ['semicolon', 'git status; pwd'],
+    ['pipe', 'git status | cat'],
+    ['input redirection', 'git diff < /etc/hosts'],
+    ['output redirection', 'git diff > /tmp/diff.patch'],
+    ['command substitution', 'git diff $(pwd)'],
+  ])('does not locally allow shell commands containing %s', async (_case, command) => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: `perm-shell-${_case}`,
+          type: 'bash',
+          sessionID: 'session-1',
+          title: `bash ${command}`,
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
   it('defers arbitrary npm scripts and executable version commands to the judge', async () => {
@@ -412,6 +520,36 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
+  it.each([
+    ['quoted output option', 'git diff "--output=/tmp/patch"'],
+    ['concatenated output option', 'git diff --out"put"=/tmp/patch'],
+    ['empty-quoted output option', "git diff --out''put=/tmp/patch"],
+    ['escaped output option', 'git diff --out\\put=/tmp/patch'],
+    ['quoted ext-diff option', 'git diff "--ext-diff"'],
+    ['concatenated ext-diff option', 'git diff --ext"-"diff'],
+    ['empty-quoted ext-diff option', "git diff --ext''-diff"],
+    ['escaped ext-diff option', 'git diff --ext\\-diff'],
+  ])('does not locally allow a reconstructed %s', async (_case, command) => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: `perm-reconstructed-${_case}`,
+          type: 'bash',
+          sessionID: 'session-1',
+          title: `bash ${command}`,
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
   it('asks without calling OpenCode when permission context is incomplete', async () => {
     const request = vi.fn();
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
@@ -435,7 +573,7 @@ describe('AutoApproveJudge', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('uses a hidden session and prefers small_model for structured judging', async () => {
+  it('keeps a deleted judge session hidden until its deletion event', async () => {
     const hiddenSessions = new HiddenSessionManager();
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
@@ -465,6 +603,16 @@ describe('AutoApproveJudge', () => {
 
     expect(result).toEqual({ decision: 'allow', reason: 'Read-only git remote.' });
     expect(hiddenSessions.isHidden('judge-session-1')).toBe(true);
+    hiddenSessions.observeEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'judge-session-1', title: 'Queued helper update' } },
+    });
+    expect(hiddenSessions.isHidden('judge-session-1')).toBe(true);
+    hiddenSessions.observeEvent({
+      type: 'session.deleted',
+      properties: { info: { id: 'judge-session-1' } },
+    });
+    expect(hiddenSessions.isHidden('judge-session-1')).toBe(false);
     expect(request).toHaveBeenCalledWith('POST', '/session', {
       title: 'Varro permission judge: perm-1',
       permission: expect.any(Array),
@@ -484,6 +632,32 @@ describe('AutoApproveJudge', () => {
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
   });
+
+  it.each(['false response', 'rejected request'] as const)(
+    'keeps a judge helper session hidden after a %s deletion',
+    async (failure) => {
+      const hiddenSessions = new HiddenSessionManager();
+      const request = vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'POST' && path === '/session') {
+          return { id: 'judge-session-failed-delete' };
+        }
+        if (method === 'POST' && path === '/session/judge-session-failed-delete/message') {
+          return { info: { structured: { decision: 'ask', reason: 'Needs user review.' } } };
+        }
+        if (method === 'DELETE' && path === '/session/judge-session-failed-delete') {
+          if (failure === 'rejected request') throw new Error('delete failed');
+          return false;
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const judge = new AutoApproveJudge({ request } as never, hiddenSessions);
+
+      await judge.judge({ permission: cargoBuildPermission('perm-failed-delete') });
+
+      expect(hiddenSessions.isHidden('judge-session-failed-delete')).toBe(true);
+    }
+  );
 
   it('allows only the StructuredOutput synthetic tool in deny-all judge sessions', async () => {
     let permissionRules: PermissionRule[] = [];
@@ -557,6 +731,117 @@ describe('AutoApproveJudge', () => {
       reason: 'Local build.',
     });
     expect(sessionCount).toBe(1);
+  });
+
+  it('does not cache an allow verdict that arrives after the judge times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const lateResponse = deferred<unknown>();
+      let sessionCount = 0;
+      const request = vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'POST' && path === '/session') {
+          sessionCount += 1;
+          return { id: `judge-session-${sessionCount}` };
+        }
+        if (method === 'POST' && path === '/session/judge-session-1/message') {
+          return lateResponse.promise;
+        }
+        if (method === 'POST' && path === '/session/judge-session-2/message') {
+          return { info: { structured: { decision: 'ask', reason: 'Second judge.' } } };
+        }
+        if (method === 'DELETE') return true;
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      });
+      const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+      const timedOut = judge.judge({ permission: cargoBuildPermission('perm-timeout-1') });
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
+      expect(request).toHaveBeenCalledWith(
+        'POST',
+        '/session/judge-session-1/message',
+        expect.anything()
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(timedOut).resolves.toEqual({
+        decision: 'ask',
+        reason: 'Judge failed; asking user.',
+      });
+
+      lateResponse.resolve({
+        info: { structured: { decision: 'allow', reason: 'Late allow.' } },
+      });
+      for (let index = 0; index < 10; index += 1) await Promise.resolve();
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
+
+      await expect(
+        judge.judge({ permission: cargoBuildPermission('perm-timeout-2') })
+      ).resolves.toEqual({ decision: 'ask', reason: 'Second judge.' });
+      expect(sessionCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reuse an allow verdict across workspace contexts', async () => {
+    const { root, workspace } = createTemporaryWorkspace();
+    const otherWorkspace = join(root, 'other-workspace');
+    mkdirSync(otherWorkspace);
+    let currentWorkspace = workspace;
+    let sessionCount = 0;
+    const request = vi.fn(async (method: string, path: string) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path.endsWith('/message')) {
+        return { info: { structured: { decision: 'allow', reason: 'Local build.' } } };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => currentWorkspace } as never,
+      new HiddenSessionManager()
+    );
+
+    await judge.judge({ permission: cargoBuildPermission('perm-workspace-1') });
+    currentWorkspace = otherWorkspace;
+    await judge.judge({ permission: cargoBuildPermission('perm-workspace-2') });
+
+    expect(sessionCount).toBe(2);
+  });
+
+  it('does not reuse an allow verdict across resolved model contexts', async () => {
+    let sessionCount = 0;
+    let smallModel = 'openai/model-one';
+    const messageModels: unknown[] = [];
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return { small_model: smallModel };
+      if (method === 'POST' && path.endsWith('/message')) {
+        messageModels.push((body as { model?: unknown }).model);
+        return { info: { structured: { decision: 'allow', reason: 'Local build.' } } };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await judge.judge({ permission: cargoBuildPermission('perm-model-1') });
+    smallModel = 'openai/model-two';
+    await judge.judge({ permission: cargoBuildPermission('perm-model-2') });
+
+    expect(sessionCount).toBe(2);
+    expect(messageModels).toEqual([
+      { providerID: 'openai', modelID: 'model-one' },
+      { providerID: 'openai', modelID: 'model-two' },
+    ]);
   });
 
   it('does not reuse an allow verdict when permission metadata changes', async () => {

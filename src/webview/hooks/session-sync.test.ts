@@ -140,6 +140,29 @@ describe('session sync helpers', () => {
     expect(upsertSession).toHaveBeenCalledWith(session('session-1'));
   });
 
+  it('does not apply a metadata snapshot after its generation is invalidated', async () => {
+    let resolveSession: ((value: Session) => void) | undefined;
+    let shouldApply = true;
+    const upsertSession = vi.fn();
+    const syncing = syncSessionWithStateDependencies(
+      {
+        loadSession: () =>
+          new Promise<Session>((resolve) => {
+            resolveSession = resolve;
+          }),
+        upsertSession,
+      },
+      'session-1',
+      { shouldApply: () => shouldApply }
+    );
+
+    shouldApply = false;
+    resolveSession?.(session('session-1'));
+    await syncing;
+
+    expect(upsertSession).not.toHaveBeenCalled();
+  });
+
   it('resolves selected model from messages against available providers', () => {
     const resolved = resolveMessagesSelectedModel(
       [{ info: assistantMessage('assistant-1'), parts: [] }],

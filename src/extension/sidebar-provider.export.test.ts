@@ -12,7 +12,12 @@ const spawnMock = getSpawnMock();
 
 function createExportServer() {
   return createServer({
-    request: vi.fn(async () => [{ id: 'session-1', directory: '/repo' }]),
+    request: vi.fn(async (method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-1') {
+        return { id: 'session-1', directory: '/repo' };
+      }
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    }),
     resolveCommand: vi.fn(() => 'opencode'),
     getWorkspaceCwd: vi.fn(() => '/repo'),
   });

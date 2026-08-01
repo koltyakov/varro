@@ -38,11 +38,13 @@ export class SessionExportService {
   private async assertSessionInCurrentWorkspace(sessionId: string): Promise<void> {
     const workspacePath = this.server.getWorkspaceCwd();
     if (!normalizeWorkspaceIdentity(workspacePath)) return;
-    const sessions = await this.server.request('GET', '/session');
-    const session = Array.isArray(sessions)
-      ? sessions.map(asRecord).find((item) => item?.id === sessionId)
-      : undefined;
-    if (!isSameWorkspacePath(getString(session?.directory), workspacePath)) {
+    const session = asRecord(
+      await this.server.request('GET', `/session/${encodeURIComponent(sessionId)}`)
+    );
+    if (
+      getString(session?.id) !== sessionId ||
+      !isSameWorkspacePath(getString(session?.directory), workspacePath)
+    ) {
       throw new Error('Session does not belong to the current workspace');
     }
   }

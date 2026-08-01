@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import packageJson from '../../package.json';
 
 type ConfigChangeEvent = { affectsConfiguration: (key: string) => boolean };
 type ConfigChangeListener = (event: ConfigChangeEvent) => void;
@@ -125,7 +126,8 @@ vi.mock('./server', () => ({
     }
   },
 }));
-vi.mock('./open-code-process', () => ({
+vi.mock('./open-code-process', async (importOriginal) => ({
+  ...(await importOriginal()),
   sweepStaleInjectedConfigDirectories: sweepStaleInjectedConfigDirectoriesMock,
 }));
 vi.mock('./sidebar-provider', () => ({
@@ -161,6 +163,26 @@ vi.mock('./context-provider', () => ({
 vi.mock('./commands', () => ({ registerCommands: registerCommandsMock }));
 vi.mock('./logger', () => ({ logger: loggerMock }));
 
+function readDefaultConfig(key: string, fallback?: unknown) {
+  switch (key) {
+    case 'server.port':
+      return 4096;
+    case 'server.autoStart':
+      return true;
+    case 'server.command':
+      return '';
+    case 'debug.simulateMissingCli':
+    case 'debug.simulateNoProviders':
+      return false;
+    case 'chat.autoCompact':
+      return false;
+    case 'chat.autoCompactionReservedTokens':
+      return 7777;
+    default:
+      return fallback;
+  }
+}
+
 describe('extension activation', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -171,6 +193,7 @@ describe('extension activation', () => {
     latestSidebarProviderInstance.current = null;
     envMock.appName = 'Visual Studio Code';
     envMock.uriScheme = 'vscode';
+    getMock.mockImplementation(readDefaultConfig);
     sweepStaleInjectedConfigDirectoriesMock.mockResolvedValue(undefined);
   });
 
@@ -317,7 +340,8 @@ describe('extension activation', () => {
       context as never,
       expect.anything(),
       expect.anything(),
-      expect.anything()
+      expect.anything(),
+      expect.any(Function)
     );
     expect(registerCommandsMock.mock.calls[0]?.[1]).toMatchObject(
       latestSidebarProviderInstance.current!
@@ -360,9 +384,16 @@ describe('extension activation', () => {
       destinationId: 'workbench.view.extension.varro-primary',
     });
     expect(globalState.update).toHaveBeenCalledWith('layout.cursorPrimarySidebar.v1', true);
+    expect(registerCommandsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.any(Function)
+    );
   });
 
-  it('preserves the existing fork placement after migration', async () => {
+  it('skips startup migration after the marker but registers a repairing revealer', async () => {
     envMock.appName = 'Devin';
     envMock.uriScheme = 'devin';
     const globalState = {
@@ -382,9 +413,48 @@ describe('extension activation', () => {
     expect(getCommandsMock).not.toHaveBeenCalled();
     expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
     expect(globalState.update).not.toHaveBeenCalled();
+    expect(registerCommandsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.any(Function)
+    );
   });
 
-  it('leaves the manifest placement unchanged in VS Code', async () => {
+  it('reapplies fork placement when revealing after a persisted migration', async () => {
+    envMock.appName = 'Cursor';
+    envMock.uriScheme = 'cursor';
+    const globalState = {
+      get: vi.fn(() => true),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      globalState,
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    const reveal = registerCommandsMock.mock.calls[0]?.[4];
+
+    expect(reveal).toBeTypeOf('function');
+    executeCommandMock.mockClear();
+    await (reveal as () => Promise<void>)();
+
+    expect(executeCommandMock).toHaveBeenCalledWith('vscode.moveViews', {
+      viewIds: ['varro.chat'],
+      destinationId: 'workbench.view.extension.varro-primary',
+    });
+  });
+
+  it.each([
+    ['Visual Studio Code', 'vscode'],
+    ['VSCodium', 'vscodium'],
+  ])('keeps the secondary container in %s', async (appName, uriScheme) => {
+    envMock.appName = appName;
+    envMock.uriScheme = uriScheme;
     const { activate } = await import('./extension');
 
     await activate({
@@ -396,7 +466,84 @@ describe('extension activation', () => {
 
     expect(getCommandsMock).not.toHaveBeenCalled();
     expect(executeCommandMock).not.toHaveBeenCalledWith('vscode.moveViews', expect.anything());
+    expect(registerCommandsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.any(Function)
+    );
   });
+
+  it('reapplies standard-host placement on every reveal', async () => {
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    const reveal = registerCommandsMock.mock.calls[0]?.[4];
+
+    expect(reveal).toBeTypeOf('function');
+    executeCommandMock.mockClear();
+    await (reveal as () => Promise<void>)();
+
+    expect(executeCommandMock).toHaveBeenCalledWith('vscode.moveViews', {
+      viewIds: ['varro.chat'],
+      destinationId: 'workbench.view.extension.varro',
+    });
+  });
+
+  it('resets and opens the manifest view when placement cannot be reapplied', async () => {
+    const { activate } = await import('./extension');
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+    const reveal = registerCommandsMock.mock.calls[0]?.[4];
+    expect(reveal).toBeTypeOf('function');
+    executeCommandMock.mockClear();
+    executeCommandMock
+      .mockRejectedValueOnce(new Error('move command unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await (reveal as () => Promise<void>)();
+
+    expect(executeCommandMock.mock.calls).toEqual([
+      [
+        'vscode.moveViews',
+        {
+          viewIds: ['varro.chat'],
+          destinationId: 'workbench.view.extension.varro',
+        },
+      ],
+      ['varro.chat.resetViewLocation'],
+    ]);
+  });
+
+  it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid configured server port %s before constructing the server',
+    async (configuredPort) => {
+      getMock.mockImplementation((key: string, fallback?: unknown) =>
+        key === 'server.port' ? configuredPort : fallback
+      );
+      const { activate } = await import('./extension');
+
+      await expect(
+        activate({
+          extensionUri: {},
+          extension: { id: 'koltyakov.varro' },
+          workspaceState: {},
+          subscriptions: [],
+        } as never)
+      ).rejects.toThrow('varro.server.port');
+
+      expect(openCodeServerMock).not.toHaveBeenCalled();
+    }
+  );
 
   it('registers the provider and commands before starting non-blocking stale cleanup', async () => {
     sweepStaleInjectedConfigDirectoriesMock.mockReturnValueOnce(new Promise(() => {}));
@@ -643,5 +790,20 @@ describe('extension activation', () => {
     expect(latestContextProviderInstance.current?.dispose).toHaveBeenCalledTimes(1);
     expect(latestServerInstance.current?.disconnect).toHaveBeenCalledTimes(1);
     expect(executeCommandMock).toHaveBeenCalledWith('setContext', 'varro:activated', false);
+  });
+});
+
+describe('extension manifest', () => {
+  it('constrains the server port setting to valid TCP ports', () => {
+    const properties = packageJson.contributes.configuration.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    expect(properties['varro.server.port']).toMatchObject({
+      type: 'integer',
+      minimum: 1,
+      maximum: 65_535,
+    });
   });
 });

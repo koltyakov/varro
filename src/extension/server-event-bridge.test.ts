@@ -179,6 +179,150 @@ describe('ServerEventBridge', () => {
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
+  it('applies an event ID only once', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const event = { id: 'event-1', type: 'session.created', seq: 1 } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(event);
+    handlers.event!(event);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it('does not suppress distinct event IDs', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const first = { id: 'event-1', type: 'session.created', seq: 1 } as ServerEvent;
+    const second = { id: 'event-2', type: 'session.created', seq: 1 } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(first);
+    handlers.event!(second);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([first, second]);
+  });
+
+  it('applies a direct mutation once and forwards its sync sequence metadata', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const direct = { id: 'event-1', type: 'session.created' } as ServerEvent;
+    const sync = { ...direct, seq: 1 } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(direct);
+    handlers.event!(sync);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledOnce();
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(direct);
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'server/event', payload: direct },
+      { type: 'server/event', payload: { ...sync, sequenceOnly: true } },
+    ]);
+  });
+
+  it('applies a direct synchronized event when no sync twin arrives', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const direct = { id: 'event-1', type: 'session.created' } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(direct);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(direct);
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: direct });
+  });
+
+  it('forwards sequence metadata when a sync twin arrives after the fallback window', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const direct = { id: 'event-1', type: 'session.updated' } as ServerEvent;
+    const sync = { ...direct, seq: 2 } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(direct);
+    vi.advanceTimersByTime(100);
+    handlers.event!(sync);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledOnce();
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(direct);
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([
+      direct,
+      { ...sync, sequenceOnly: true },
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('forwards a legacy durable compaction delta sequence without applying it twice', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const direct = {
+      id: 'event-1',
+      type: 'session.next.compaction.delta',
+      properties: { sessionID: 'session-1', messageID: 'message-1', text: 'summary' },
+    } satisfies ServerEvent;
+    const sync = { ...direct, seq: 2 } satisfies ServerEvent;
+    bridge.attach();
+
+    handlers.event!(direct);
+    handlers.event!(sync);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledOnce();
+    expect(sessionState.handleServerEvent).toHaveBeenCalledWith(direct);
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([
+      direct,
+      { ...sync, sequenceOnly: true },
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('does not suppress ID-less ephemeral deltas', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const delta = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'metadata',
+        delta: 'a',
+      },
+    } satisfies ServerEvent;
+    bridge.attach();
+
+    handlers.event!(delta);
+    handlers.event!(delta);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls.map(([message]) => message.payload)).toEqual([delta, delta]);
+  });
+
+  it('bounds remembered event IDs and eventually admits an evicted ID', () => {
+    useParsedEvents();
+    const { bridge, handlers, sessionState } = createMocks();
+    const oldest = { id: 'event-0', type: 'session.created', seq: 1 } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(oldest);
+    handlers.event!(oldest);
+    for (let index = 1; index <= 1_024; index += 1) {
+      handlers.event!({
+        id: `event-${index}`,
+        type: 'session.created',
+        seq: 1,
+      } as ServerEvent);
+    }
+    handlers.event!(oldest);
+
+    expect(sessionState.handleServerEvent).toHaveBeenCalledTimes(1_026);
+  });
+
   it.each([
     [
       'message.part.delta',
@@ -254,6 +398,31 @@ describe('ServerEventBridge', () => {
         properties: { ...second.properties, [fragmentField]: 'ab' },
       },
     });
+    vi.useRealTimers();
+  });
+
+  it('flushes a pending delta through the public ordering hook', () => {
+    vi.useFakeTimers();
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    const delta = {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'late',
+      },
+    } satisfies ServerEvent;
+    bridge.attach();
+    handlers.event!(delta);
+
+    (bridge as unknown as { flushPendingEvents(): void }).flushPendingEvents();
+    vi.runAllTimers();
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: delta });
     vi.useRealTimers();
   });
 

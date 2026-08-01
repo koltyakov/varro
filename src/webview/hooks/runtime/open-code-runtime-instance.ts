@@ -48,7 +48,7 @@ import {
   setSessionHistoryCursor,
   takeCachedSessionHistoryPage,
 } from '../../lib/message-window';
-import { startNewChatDraft } from '../../lib/new-chat-draft';
+import { getNewChatDraftGeneration, startNewChatDraft } from '../../lib/new-chat-draft';
 import {
   createConnectionBootstrapOperations,
   ensureConnectionInitializedWithDependencies,
@@ -551,8 +551,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let permissionSyncGeneration = 0;
   let latestPermissionSyncGeneration = 0;
   let permissionSnapshotGeneration = 0;
-  const fullHistoryLoads = new Map<string, Promise<void>>();
-  const historyPageLoads = new Map<string, Promise<boolean>>();
+  const fullHistoryLoads = new Map<
+    string,
+    { workspaceGeneration: number; selectionGeneration: number; promise: Promise<void> }
+  >();
+  const historyPageLoads = new Map<
+    string,
+    { workspaceGeneration: number; selectionGeneration: number; promise: Promise<boolean> }
+  >();
   const pendingAbortRetryAttempts = new Map<string, number | null>();
   const statusSnapshotStartedAt = new WeakMap<Record<string, SessionStatus>, number>();
   const statusSnapshots = createSessionStatusSnapshotCoordinator(() => client.session.status());
@@ -693,7 +699,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           }
         },
         abortSession: () => {
-          void abortSession();
+          void abortSession().catch(() => {});
         },
         refreshMcps: () => {
           void loadMcps();
@@ -1149,6 +1155,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   const sessionSendOperations = new SessionSendOperations({
+    getWorkspaceGeneration: () => workspaceGeneration,
     createSession: (initialPermissionMode) => createSession(undefined, initialPermissionMode),
     ensureSessionPermission: (sessionId) =>
       ensureSessionPermissionWithDependencies(
@@ -1231,9 +1238,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
       setMessagesLoading: (loading) => appStore.setState('messagesLoading', loading),
-      loadSession: (sessionId) => {
+      loadSession: (sessionId, isCurrentSelection = () => true) => {
         const generation = workspaceGeneration;
-        return loadSessionWithMessages(sessionId, () => generation === workspaceGeneration);
+        return loadSessionWithMessages(
+          sessionId,
+          () => generation === workspaceGeneration && isCurrentSelection()
+        );
       },
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
@@ -1382,6 +1392,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   const sessionManagementOperations = new SessionManagementOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
+    getWorkspaceGeneration: () => workspaceGeneration,
+    getNewChatDraftGeneration,
     createRemoteSession: (body) => client.session.create(body),
     updateRemoteSession: (sessionId, body) => client.session.update(sessionId, body),
     forkRemoteSession: (sessionId, messageID) => client.session.fork(sessionId, messageID),
@@ -1465,13 +1477,22 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
 
   async function loadFullSessionHistory(sessionId: string) {
     const existing = fullHistoryLoads.get(sessionId);
-    if (existing) return existing;
-
     const generation = workspaceGeneration;
+    const selectionGeneration = sessionSelectionGeneration;
+    if (
+      existing?.workspaceGeneration === generation &&
+      existing.selectionGeneration === selectionGeneration
+    ) {
+      return existing.promise;
+    }
+
+    const isCurrent = () =>
+      generation === workspaceGeneration &&
+      selectionGeneration === sessionSelectionGeneration &&
+      appStore.state.activeSessionId === sessionId;
     const load = (async () => {
       const visitedCursors = new Set<string>();
-      while (appStore.state.activeSessionId === sessionId) {
-        if (generation !== workspaceGeneration) return;
+      while (isCurrent()) {
         const cursor = getSessionHistoryCursor(sessionId);
         if (!cursor) return;
         if (visitedCursors.has(cursor)) {
@@ -1482,21 +1503,34 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (!(await loadOlderSessionHistoryPage(sessionId))) return;
       }
     })().finally(() => {
-      if (fullHistoryLoads.get(sessionId) === load) fullHistoryLoads.delete(sessionId);
+      if (fullHistoryLoads.get(sessionId)?.promise === load) fullHistoryLoads.delete(sessionId);
     });
-    fullHistoryLoads.set(sessionId, load);
+    fullHistoryLoads.set(sessionId, {
+      workspaceGeneration: generation,
+      selectionGeneration,
+      promise: load,
+    });
     return load;
   }
 
   function loadOlderSessionHistoryPage(sessionId: string): Promise<boolean> {
     const existing = historyPageLoads.get(sessionId);
-    if (existing) return existing;
-
     const generation = workspaceGeneration;
-    const isCurrent = () => generation === workspaceGeneration;
+    const selectionGeneration = sessionSelectionGeneration;
+    if (
+      existing?.workspaceGeneration === generation &&
+      existing.selectionGeneration === selectionGeneration
+    ) {
+      return existing.promise;
+    }
+
+    const isCurrent = () =>
+      generation === workspaceGeneration &&
+      selectionGeneration === sessionSelectionGeneration &&
+      appStore.state.activeSessionId === sessionId;
     const load = (async () => {
       const cursor = getSessionHistoryCursor(sessionId);
-      if (!cursor || !isCurrent() || appStore.state.activeSessionId !== sessionId) return false;
+      if (!cursor || !isCurrent()) return false;
       try {
         let page = takeCachedSessionHistoryPage(sessionId, cursor);
         if (!page) {
@@ -1507,7 +1541,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           limit: MESSAGE_HISTORY_WINDOW,
           before: cursor,
         });
-        if (!isCurrent() || appStore.state.activeSessionId !== sessionId) return false;
+        if (!isCurrent()) return false;
         const current = appStore.state.messages.filter(
           (entry) => entry.info.sessionID === sessionId
         );
@@ -1518,16 +1552,20 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);
         return page.length > 0;
       } catch (err) {
-        if (isCurrent() && appStore.state.activeSessionId === sessionId) {
+        if (isCurrent()) {
           markSessionHistoryLoadFailed(sessionId, true);
         }
         if (isCurrent()) logError('loadOlderSessionHistoryPage', err);
         return false;
       }
     })().finally(() => {
-      if (historyPageLoads.get(sessionId) === load) historyPageLoads.delete(sessionId);
+      if (historyPageLoads.get(sessionId)?.promise === load) historyPageLoads.delete(sessionId);
     });
-    historyPageLoads.set(sessionId, load);
+    historyPageLoads.set(sessionId, {
+      workspaceGeneration: generation,
+      selectionGeneration,
+      promise: load,
+    });
     return load;
   }
 

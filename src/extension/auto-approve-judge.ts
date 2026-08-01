@@ -12,6 +12,7 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
+type JudgeModel = NonNullable<AutoApproveJudgeRequest['model']>;
 
 const JUDGE_TIMEOUT_MS = 30_000;
 const JUDGE_TITLE_PREFIX = 'Varro permission judge';
@@ -70,29 +71,42 @@ export class AutoApproveJudge {
     if (!hasUsefulPermissionContext(permission)) {
       return { decision: 'ask', reason: 'Permission request lacks enough detail to judge safely.' };
     }
-    const localDecision = this.judgeLocally(permission);
+    const workspacePath = this.server.getWorkspaceCwd?.();
+    const localDecision = this.judgeLocally(permission, workspacePath);
     if (localDecision) {
       this.audit('local-rule', permission, localDecision);
       return localDecision;
     }
 
     const approvedReferences = request.approvedReferences || [];
-    const cacheKey = buildVerdictCacheKey(permission, approvedReferences);
-    const cached = this.readCachedVerdict(cacheKey);
-    if (cached) {
-      this.audit('cache', permission, cached);
-      return cached;
-    }
-
+    let decisionSource: 'cache' | 'judge' = 'judge';
+    let verdictCacheKey: string | null = null;
     const decision = await this.withTimeout(
-      this.runJudge(permission, request.model, approvedReferences),
+      (async () => {
+        const model = await this.resolveJudgeModel(request.model);
+        verdictCacheKey = buildVerdictCacheKey(
+          permission,
+          approvedReferences,
+          workspacePath,
+          model
+        );
+        const cached = this.readCachedVerdict(verdictCacheKey);
+        if (cached) {
+          decisionSource = 'cache';
+          return cached;
+        }
+
+        return this.runJudge(permission, model, approvedReferences);
+      })(),
       JUDGE_TIMEOUT_MS
     ).catch((err): AutoApproveJudgeResponse => {
       logger.warn(`Auto-approve judge failed: ${err instanceof Error ? err.message : String(err)}`);
       return { decision: 'ask', reason: 'Judge failed; asking user.' };
     });
-    if (decision.decision === 'allow') this.storeCachedVerdict(cacheKey, decision);
-    this.audit('judge', permission, decision);
+    if (decisionSource === 'judge' && verdictCacheKey && decision.decision === 'allow') {
+      this.storeCachedVerdict(verdictCacheKey, decision);
+    }
+    this.audit(decisionSource, permission, decision);
     return decision;
   }
 
@@ -134,7 +148,7 @@ export class AutoApproveJudge {
 
   private async runJudge(
     permission: NormalizedJudgePermission,
-    fallbackModel: AutoApproveJudgeRequest['model'],
+    model: JudgeModel | null,
     approvedReferences: AutoApproveJudgeReference[]
   ): Promise<AutoApproveJudgeResponse> {
     const title = `${JUDGE_TITLE_PREFIX}: ${permission.id}`;
@@ -150,7 +164,6 @@ export class AutoApproveJudge {
       this.hiddenSessions.hide(sessionID);
       if (!sessionID) return { decision: 'ask', reason: 'Judge session was not created.' };
 
-      const model = await this.resolveJudgeModel(fallbackModel);
       const response = await this.server.request(
         'POST',
         `/session/${encodeURIComponent(sessionID)}/message`,
@@ -172,7 +185,17 @@ export class AutoApproveJudge {
       this.hiddenSessions.forgetPendingTitle(title);
       if (sessionID) {
         try {
-          await this.server.request('DELETE', `/session/${encodeURIComponent(sessionID)}`);
+          const deleted = await this.server.request(
+            'DELETE',
+            `/session/${encodeURIComponent(sessionID)}`
+          );
+          if (deleted === true) {
+            this.hiddenSessions.retainUntilDeleted(sessionID);
+          } else {
+            logger.warn(
+              'Failed to delete hidden auto-approve judge session: OpenCode did not confirm deletion'
+            );
+          }
         } catch (err) {
           logger.warn(
             `Failed to delete hidden auto-approve judge session: ${
@@ -184,7 +207,9 @@ export class AutoApproveJudge {
     }
   }
 
-  private async resolveJudgeModel(fallbackModel: AutoApproveJudgeRequest['model']) {
+  private async resolveJudgeModel(
+    fallbackModel: AutoApproveJudgeRequest['model']
+  ): Promise<JudgeModel | null> {
     const config = asRecord(await this.server.request('GET', '/config').catch(() => null));
     const smallModel = parseModelRoute(config?.small_model);
     return smallModel || normalizeModel(fallbackModel);
@@ -204,8 +229,10 @@ export class AutoApproveJudge {
     }
   }
 
-  private judgeLocally(permission: NormalizedJudgePermission): AutoApproveJudgeResponse | null {
-    const workspacePath = this.server.getWorkspaceCwd?.();
+  private judgeLocally(
+    permission: NormalizedJudgePermission,
+    workspacePath: string | undefined
+  ): AutoApproveJudgeResponse | null {
     if (isEditPermissionType(permission) && isWorkspaceEditPermission(permission, workspacePath)) {
       return { decision: 'allow', reason: 'Workspace file edit.' };
     }
@@ -350,8 +377,12 @@ function resolveCanonicalWorkspace(workspacePath: string | undefined): Canonical
   }
 }
 
-function isWorkspacePath(filePath: string, workspace: CanonicalWorkspace) {
-  const targetPath = resolvePathFromWorkspace(filePath, workspace.sourcePath);
+function isWorkspacePath(
+  filePath: string,
+  workspace: CanonicalWorkspace,
+  basePath = workspace.sourcePath
+) {
+  const targetPath = resolvePathFromWorkspace(filePath, basePath);
   if (!targetPath) return false;
   const canonicalTarget = resolveCanonicalPotentialPath(targetPath);
   return canonicalTarget !== null && isContainedPath(workspace.canonicalPath, canonicalTarget);
@@ -449,21 +480,116 @@ function isSafeGitInspectionCommand(command: string, workspacePath: string | und
   const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+("[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
   if (!match) return false;
   const gitDirectory = match[1];
+  let gitWorkingDirectory = workspacePath;
   if (gitDirectory) {
     const literalDirectory = parseLiteralShellArgument(gitDirectory);
-    if (!literalDirectory || !isExistingWorkspaceDirectory(literalDirectory, workspacePath)) {
+    if (
+      !literalDirectory ||
+      !workspacePath ||
+      !isExistingWorkspaceDirectory(literalDirectory, workspacePath)
+    ) {
       return false;
     }
+    gitWorkingDirectory = resolvePathFromWorkspace(literalDirectory, workspacePath) || undefined;
   }
   const subcommand = match[2]!;
   const args = match[3]!.trim();
-  if (/\s--(?:output|ext-diff)\b/.test(` ${args}`)) return false;
+  const parsedArgs = parseLiteralShellArguments(args);
+  if (!parsedArgs || hasUnsafeGitInspectionOption(parsedArgs)) return false;
+  if (subcommand === 'diff') {
+    if (parsedArgs.includes('--no-index')) return false;
+    if (hasOutsideWorkspaceDiffPath(parsedArgs, workspacePath, gitWorkingDirectory)) {
+      return false;
+    }
+  }
   if (SAFE_GIT_INSPECTION_COMMANDS.has(subcommand)) return true;
   if (subcommand !== 'branch') return false;
-  if (!args) return true;
-  return args
-    .split(/\s+/)
-    .every((arg) => SAFE_GIT_BRANCH_FLAGS.has(arg) || /^--sort=\S+$/.test(arg));
+  return parsedArgs.every((arg) => SAFE_GIT_BRANCH_FLAGS.has(arg) || /^--sort=\S+$/.test(arg));
+}
+
+function hasUnsafeGitInspectionOption(args: string[]) {
+  return args.some(
+    (argument) =>
+      argument === '--output' ||
+      argument.startsWith('--output=') ||
+      argument === '--ext-diff' ||
+      argument.startsWith('--ext-diff=')
+  );
+}
+
+function hasOutsideWorkspaceDiffPath(
+  args: string[],
+  workspacePath: string | undefined,
+  gitWorkingDirectory: string | undefined
+) {
+  const workspace = resolveCanonicalWorkspace(workspacePath);
+  if (!workspace) return true;
+  const basePath = gitWorkingDirectory || workspace.sourcePath;
+  let pathsOnly = false;
+
+  for (const argument of args) {
+    if (argument === '--') {
+      pathsOnly = true;
+      continue;
+    }
+    if (!pathsOnly && argument.startsWith('-')) continue;
+    if (!isWorkspacePath(argument, workspace, basePath)) return true;
+  }
+  return false;
+}
+
+function parseLiteralShellArguments(value: string): string[] | null {
+  const args: string[] = [];
+  let argument = '';
+  let quote: 'single' | 'double' | null = null;
+  let started = false;
+
+  const pushArgument = () => {
+    if (!started) return;
+    args.push(argument);
+    argument = '';
+    started = false;
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (quote === 'single') {
+      if (character === "'") quote = null;
+      else argument += character;
+      continue;
+    }
+    if (quote === 'double') {
+      if (character === '"') {
+        quote = null;
+      } else {
+        if (character === '$' || character === '`' || character === '\\') return null;
+        argument += character;
+      }
+      continue;
+    }
+    if (/\s/.test(character)) {
+      pushArgument();
+      continue;
+    }
+    if (character === "'") {
+      quote = 'single';
+      started = true;
+      continue;
+    }
+    if (character === '"') {
+      quote = 'double';
+      started = true;
+      continue;
+    }
+    if (character === '~' && argument.length === 0) return null;
+    if (/[$`*?[\]{}()\\]/.test(character)) return null;
+    argument += character;
+    started = true;
+  }
+
+  if (quote) return null;
+  pushArgument();
+  return args;
 }
 
 function parseLiteralShellArgument(value: string) {
@@ -493,15 +619,20 @@ function extractCommand(permission: NormalizedJudgePermission) {
 
 /**
  * Cache key for judge verdicts. Keyed on the complete normalized action
- * context plus the prior-approval references the judge saw, so a verdict is
- * only reused while the judge would receive the same inputs. Session and
- * request IDs are deliberately excluded: identical actions repeat across
- * sessions in agent loops.
+ * context, workspace, resolved model, and prior-approval references the judge
+ * saw, so a verdict is only reused while the judge would receive the same
+ * inputs. Session and request IDs are deliberately excluded: identical
+ * actions repeat across sessions in agent loops.
  */
 function buildVerdictCacheKey(
   permission: NormalizedJudgePermission,
-  approvedReferences: AutoApproveJudgeReference[]
+  approvedReferences: AutoApproveJudgeReference[],
+  workspacePath: string | undefined,
+  model: JudgeModel | null
 ) {
+  const workspace =
+    resolveCanonicalWorkspace(workspacePath)?.canonicalPath ||
+    (workspacePath ? resolve(workspacePath) : null);
   const subject = stableSerialize({
     title: permission.title,
     pattern: permission.pattern ?? null,
@@ -511,7 +642,13 @@ function buildVerdictCacheKey(
     .map((reference) => stableSerialize(reference))
     .toSorted()
     .join('\n');
-  return [permission.type, subject, references].join('\u0000');
+  return [
+    stableSerialize(workspace),
+    stableSerialize(model),
+    permission.type,
+    subject,
+    references,
+  ].join('\u0000');
 }
 
 function stableSerialize(value: unknown): string {

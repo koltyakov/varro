@@ -206,6 +206,26 @@ describe('ModelsPanel', () => {
     expect(reloadButton?.classList.contains('is-loading')).toBe(false);
   });
 
+  it('re-enables provider reload for retry when the refresh remains incomplete', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const reloadButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Reload providers"]'
+    );
+    reloadButton?.click();
+    setState('providersLoaded', false);
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(reloadButton?.disabled).toBe(false);
+    expect(reloadButton?.getAttribute('aria-label')).toBe('Reload providers');
+    reloadButton?.click();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it('renders an inline release date for desktop layouts', async () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();

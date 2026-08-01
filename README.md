@@ -75,12 +75,12 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 
 VS Code and VSCodium are the target containers for Varro. VS Code forks have limited support; see [VS Code fork compatibility](https://github.com/koltyakov/varro/blob/main/docs/vscode-forks.md) for details.
 
-Varro connects to `http://127.0.0.1:4096` by default. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
+Varro connects to `http://127.0.0.1:4096` by default. `varro.server.port` accepts integers from 1 through 65535. To manage the server manually, disable `varro.server.autoStart` and run `opencode serve --port 4096`.
 
 ## Requirements
 
 - [VS Code](https://code.visualstudio.com/) or [VSCodium](https://vscodium.com/) 1.120 or newer
-- [Node.js](https://nodejs.org/) 22.12+ or 24+
+- [Node.js](https://nodejs.org/) 22.12+ on Node 22, or Node 24+
 - The [OpenCode CLI](https://opencode.ai/docs) 1.16.0 or newer on your `PATH`, or its executable path set in `varro.server.command`.
 
 ## Documentation

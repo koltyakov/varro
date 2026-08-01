@@ -22,12 +22,13 @@ export function registerCommands(
   context: vscode.ExtensionContext,
   sidebar: SidebarProvider,
   contextProvider: ContextProvider,
-  server: OpenCodeServer
+  server: OpenCodeServer,
+  revealSidebar: () => PromiseLike<unknown>
 ) {
   context.subscriptions.push(
     vscode.commands.registerCommand('varro.chat.focus', async () => {
       try {
-        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
         sidebar.requestInputFocus();
       } catch (err) {
         logger.error(`varro.chat.focus: ${err instanceof Error ? err.message : String(err)}`);
@@ -36,7 +37,7 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.statusBarClick', async () => {
       try {
-        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
         if (sidebar.hasPendingAttention()) {
           sidebar.openAttentionSessions();
           return;
@@ -51,12 +52,12 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.newSession', async () => {
       sidebar.postCommand('new-session');
-      await vscode.commands.executeCommand('workbench.view.extension.varro');
+      await revealSidebar();
     }),
 
     vscode.commands.registerCommand('varro.chat.searchSessions', async () => {
       try {
-        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
         sidebar.searchSessions();
       } catch (err) {
         logger.error(
@@ -67,17 +68,17 @@ export function registerCommands(
 
     vscode.commands.registerCommand('varro.chat.abort', async () => {
       sidebar.postCommand('abort');
-      await vscode.commands.executeCommand('workbench.view.extension.varro');
+      await revealSidebar();
     }),
 
     vscode.commands.registerCommand('varro.chat.previousSession', async () => {
       sidebar.switchSession('previous');
-      await vscode.commands.executeCommand('workbench.view.extension.varro');
+      await revealSidebar();
     }),
 
     vscode.commands.registerCommand('varro.chat.nextSession', async () => {
       sidebar.switchSession('next');
-      await vscode.commands.executeCommand('workbench.view.extension.varro');
+      await revealSidebar();
     }),
 
     vscode.commands.registerCommand('varro.about', async () => {
@@ -120,7 +121,7 @@ export function registerCommands(
 
       try {
         await openAgentsFile(vscode.Uri.file(workspacePath));
-        await vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
         sidebar.postCommand('new-session', { prefill: '/init' });
         sidebar.requestInputFocus();
       } catch (err) {
@@ -137,7 +138,7 @@ export function registerCommands(
           logger.info(`OpenCode server restarted at ${url}`);
         } catch (err) {
           if (err instanceof RestartBlockedError) {
-            await vscode.commands.executeCommand('workbench.view.extension.varro');
+            await revealSidebar();
             sidebar.post({ type: 'server/restart-blocked', payload: err.blockers });
             return;
           }
@@ -157,7 +158,7 @@ export function registerCommands(
         if (!ok) {
           return;
         }
-        vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
       } catch (err) {
         logger.error(
           `varro.chat.addTerminalSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
@@ -170,7 +171,7 @@ export function registerCommands(
         const selectionTarget = await getEditorSelectionTarget();
         if (!selectionTarget) return;
         sidebar.postDroppedFiles([selectionTarget]);
-        vscode.commands.executeCommand('workbench.view.extension.varro');
+        await revealSidebar();
       } catch (err) {
         logger.error(
           `varro.chat.addSelectionToContext: ${err instanceof Error ? err.message : String(err)}`
@@ -216,7 +217,7 @@ export function registerCommands(
           );
           if (valid.length > 0) {
             sidebar.postDroppedFiles(valid);
-            vscode.commands.executeCommand('workbench.view.extension.varro');
+            await revealSidebar();
           }
         } catch (err) {
           logger.error(

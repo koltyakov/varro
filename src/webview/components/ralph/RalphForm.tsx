@@ -1,8 +1,13 @@
-import { Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
 import { logError } from '../../lib/log';
-import { getStoredVariantForModel, isSessionAwaitingInput, state } from '../../lib/state';
+import {
+  desktopSessionPaneSide,
+  getStoredVariantForModel,
+  isSessionAwaitingInput,
+  state,
+} from '../../lib/state';
 import { deleteSession, selectSession } from '../../hooks/useOpenCode';
 import { getSessionPermissionRulesForMode } from '../../hooks/permission-rules';
 import type { RalphConfig, RalphSelectedModel } from '../../../shared/ralph';
@@ -15,6 +20,7 @@ import { ModelPickerButton, VariantPicker } from '../chat-input/ToolbarPickers';
 import { getPreferredVariant } from '../../lib/model-variants';
 import { formatVariantLabel } from '../../lib/format';
 import { getLeafPathName } from '../../lib/path-display';
+import { trapModalFocus } from '../../lib/modal-focus';
 
 const DEFAULT_ITERATIONS = 10;
 
@@ -72,10 +78,6 @@ function visibleProviders() {
   return state.providers;
 }
 
-function close() {
-  ralphStore.setShowRalphForm(false);
-}
-
 export function RalphForm() {
   const [planPath, setPlanPath] = createSignal('');
   const [planWorkspaceDirectory, setPlanWorkspaceDirectory] = createSignal<string | null>(null);
@@ -89,6 +91,12 @@ export function RalphForm() {
   const [showVariantPicker, setShowVariantPicker] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
   const [modelPickerBoundaryRef, setModelPickerBoundaryRef] = createSignal<HTMLDivElement>();
+
+  function close() {
+    setShowModelPicker(false);
+    setShowVariantPicker(false);
+    ralphStore.setShowRalphForm(false);
+  }
 
   const currentModelInfo = createMemo(() => {
     const sel = model();
@@ -132,6 +140,28 @@ export function RalphForm() {
       setErrorMessage(null);
     }
     return visible;
+  });
+
+  createEffect(() => {
+    if (!ralphStore.showRalphForm()) return;
+
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (showModelPicker()) {
+        setShowModelPicker(false);
+        return;
+      }
+      if (showVariantPicker()) {
+        setShowVariantPicker(false);
+        return;
+      }
+      close();
+    };
+
+    document.addEventListener('keydown', handleKeydown, true);
+    onCleanup(() => document.removeEventListener('keydown', handleKeydown, true));
   });
 
   async function pickPlanPath() {
@@ -254,9 +284,22 @@ export function RalphForm() {
   return (
     <Show when={ralphStore.showRalphForm()}>
       <Portal>
-        <div class="ralph-form-overlay">
+        <div class={`ralph-form-overlay ralph-form-overlay-pane-${desktopSessionPaneSide()}`}>
           <div
+            ref={(element) => {
+              const background = document.querySelector<HTMLElement>('.interactive-session');
+              const backgroundWasInert = background?.hasAttribute('inert') ?? false;
+              const releaseFocusTrap = trapModalFocus(element);
+              background?.setAttribute('inert', '');
+              onCleanup(() => {
+                if (background && !backgroundWasInert) background.removeAttribute('inert');
+                releaseFocusTrap();
+              });
+            }}
             class="ralph-form-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ralph-form-title"
             onClick={(e) => {
               e.stopPropagation();
               const target = e.target as HTMLElement | null;
@@ -267,15 +310,15 @@ export function RalphForm() {
             }}
           >
             <div class="ralph-form-header">
-              <span class="ralph-form-title">Start Ralph loop</span>
+              <span id="ralph-form-title" class="ralph-form-title">
+                Start Ralph loop
+              </span>
               <button type="button" class="ralph-form-close" onClick={close} aria-label="Close">
                 ×
               </button>
             </div>
 
-            <div
-              class={`ralph-form-body${showModelPicker() || showVariantPicker() ? ' showing-model-picker' : ''}`}
-            >
+            <div class="ralph-form-body">
               <Field label="Plan / spec document">
                 <div class="ralph-form-input-row">
                   <input

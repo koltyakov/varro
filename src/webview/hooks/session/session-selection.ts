@@ -32,7 +32,10 @@ type SessionSelectionDeps = {
   resetTodoSync(): void;
   clearMessages(): void;
   setMessagesLoading?(loading: boolean): void;
-  loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
+  loadSession(
+    id: string,
+    isCurrent?: () => boolean
+  ): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
   setMessagesIncremental(
@@ -106,19 +109,30 @@ export async function selectSessionWithDependencies(
 
   const isCurrentSelection = () =>
     deps.isCurrentSelectionGeneration(generation) && deps.getActiveSessionId() === id;
+  const clearMessagesLoadingIfOwned = () => {
+    if (deps.isCurrentSelectionGeneration(generation)) {
+      deps.setMessagesLoading?.(false);
+    }
+  };
 
   deps.setMessagesLoading?.(true);
   let loaded: { session: Session; messages: MessageEntry[] };
   try {
-    loaded = await deps.loadSession(id);
+    loaded = await deps.loadSession(id, isCurrentSelection);
   } catch {
-    if (!isCurrentSelection()) return;
-    deps.setMessagesLoading?.(false);
+    if (!isCurrentSelection()) {
+      clearMessagesLoadingIfOwned();
+      return;
+    }
+    clearMessagesLoadingIfOwned();
     deps.setError('Failed to load messages');
     return;
   }
 
-  if (!isCurrentSelection()) return;
+  if (!isCurrentSelection()) {
+    clearMessagesLoadingIfOwned();
+    return;
+  }
 
   const { session, messages } = loaded;
   deps.upsertSession(session);
@@ -127,7 +141,7 @@ export async function selectSessionWithDependencies(
     deps.markSessionSeen(id);
   }
   deps.setMessagesIncremental(messages);
-  deps.setMessagesLoading?.(false);
+  clearMessagesLoadingIfOwned();
   deps.syncFailedSessionsFromMessages(messages);
   deps.requestMessageListScrollToBottom();
 
@@ -216,8 +230,10 @@ export async function syncSessionMessagesWithDependencies(
 
 export async function syncSessionWithDependencies(
   deps: { loadSession(sessionId: string): Promise<Session>; upsertSession(session: Session): void },
-  sessionId: string
+  sessionId: string,
+  options?: { shouldApply(): boolean }
 ) {
   const session = await deps.loadSession(sessionId);
+  if (options && !options.shouldApply()) return;
   deps.upsertSession(session);
 }

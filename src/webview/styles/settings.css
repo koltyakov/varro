@@ -328,10 +328,6 @@
     display: flex;
   }
 
-  .ralph-form-overlay {
-    right: var(--chat-sidebar-width, 420px);
-  }
-
   .session-list-view-sidebar {
     padding-top: 0;
   }

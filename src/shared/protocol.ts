@@ -373,6 +373,10 @@ export type ServerEventName = (typeof SERVER_EVENT_NAMES)[number];
 
 export type ServerEvent = {
   [Name in ServerEventName]: {
+    /** OpenCode event identity. Sync envelopes use the nested durable event ID. */
+    id?: string;
+    /** Varro transport marker: advance sequence observers without reapplying the mutation. */
+    sequenceOnly?: true;
     type: Name;
     properties?: ServerEventPropertiesByName[Name];
     /**
@@ -414,10 +418,17 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
   const properties = asRecord(
     isServerEventName(record.type) ? (record.properties ?? record.data) : record.data
   );
+  const id = getServerEventId(record);
+  const sequenceOnly = record.sequenceOnly === true;
   // Current `/api/event` payloads put the durable cursor under `durable.seq`;
   // transitional/legacy sync wrappers may still expose it at the top level.
   const seq = getServerEventSeq(record);
-  const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
+  const base = {
+    type: eventType,
+    ...(id === undefined ? {} : { id }),
+    ...(sequenceOnly ? { sequenceOnly: true as const } : {}),
+    ...(seq === undefined ? {} : { seq }),
+  };
   return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
 }
 
@@ -428,9 +439,20 @@ function parseSyncEventRecord(record: Record<string, unknown> | null): ServerEve
   if (!eventType) return null;
 
   const properties = asRecord(record.data);
+  const id = getServerEventId(record);
+  const sequenceOnly = record.sequenceOnly === true;
   const seq = getServerEventSeq(record);
-  const base = seq === undefined ? { type: eventType } : { type: eventType, seq };
+  const base = {
+    type: eventType,
+    ...(id === undefined ? {} : { id }),
+    ...(sequenceOnly ? { sequenceOnly: true as const } : {}),
+    ...(seq === undefined ? {} : { seq }),
+  };
   return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
+}
+
+function getServerEventId(record: Record<string, unknown>): string | undefined {
+  return typeof record.id === 'string' && record.id.length > 0 ? record.id : undefined;
 }
 
 function getServerEventSeq(record: Record<string, unknown>): number | undefined {

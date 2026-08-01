@@ -23,6 +23,12 @@ export type PendingAttentionEntry = {
   eventType?: PermissionAskEventType;
 };
 
+export type PendingAttentionReconciliation = {
+  readonly kind: PendingAttentionKind;
+  readonly mutationRevision: number;
+  readonly requestGeneration: number;
+};
+
 export type InterruptedSessionSnapshot = {
   id: string;
   title?: string;
@@ -87,8 +93,46 @@ export class SessionStateManager {
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
+  private readonly trailingBusyAfterCompletion = new Set<string>();
   private readonly blockingRequestMutations = new Set<string>();
+  private readonly pendingAttentionRevisions: Record<PendingAttentionKind, number> = {
+    permission: 0,
+    question: 0,
+  };
+  private readonly pendingAttentionMutationRevisions: Record<
+    PendingAttentionKind,
+    Map<string, number>
+  > = {
+    permission: new Map(),
+    question: new Map(),
+  };
+  private readonly pendingAttentionSessionDeletionRevisions: Record<
+    PendingAttentionKind,
+    Map<string, number>
+  > = {
+    permission: new Map(),
+    question: new Map(),
+  };
+  private readonly activePendingAttentionReconciliations: Record<
+    PendingAttentionKind,
+    Map<number, number>
+  > = {
+    permission: new Map(),
+    question: new Map(),
+  };
+  private readonly pendingAttentionRequestGenerations: Record<PendingAttentionKind, number> = {
+    permission: 0,
+    question: 0,
+  };
+  private readonly reconciledPendingAttentionRequestGenerations: Record<
+    PendingAttentionKind,
+    number
+  > = {
+    permission: 0,
+    question: 0,
+  };
   private readonly recoveryDeletedSessionIDs = new Set<string>();
+  private readonly consumedInterruptedSessionIDs = new Set<string>();
   private readonly busyAttempts = new Map<string, Set<number>>();
   private readonly deferredPromptFailures = new Map<
     number,
@@ -97,6 +141,7 @@ export class SessionStateManager {
   private readonly reconcileIdleSince = new Map<string, number>();
   private persistenceQueue: Promise<void> = Promise.resolve();
   private recoverySnapshotPromise: Promise<RecoverySnapshot> | undefined;
+  private blockingRecoveryCleanupPending = false;
   private nextBusyAttemptID = 0;
 
   constructor(
@@ -168,6 +213,7 @@ export class SessionStateManager {
   markSessionBusy(sessionID: string): SessionBusyAttempt | undefined {
     if (!sessionID) return undefined;
     this.touchSessionMetadata(sessionID);
+    this.trailingBusyAfterCompletion.delete(sessionID);
     const attempt = { sessionID, id: ++this.nextBusyAttemptID };
     const attempts = this.busyAttempts.get(sessionID) ?? new Set<number>();
     attempts.add(attempt.id);
@@ -231,7 +277,9 @@ export class SessionStateManager {
         const sessionID = getString(props?.sessionID);
         const statusType = getString(asRecord(props?.status)?.type);
         if (!sessionID || !statusType) break;
+        if (statusType === 'busy' && this.trailingBusyAfterCompletion.delete(sessionID)) break;
         if (statusType === 'busy' || statusType === 'retry') {
+          this.trailingBusyAfterCompletion.delete(sessionID);
           changed = this.markBusyInternal(sessionID) || changed;
         } else if (statusType === 'idle') {
           // `session.status { idle }` is opencode's authoritative turn-finish
@@ -253,13 +301,19 @@ export class SessionStateManager {
       }
       case 'session.next.step.ended': {
         const sessionID = getString(props?.sessionID);
-        if (!sessionID || !props || isContinuationStepEnd(props)) break;
-        changed = this.finishBusySession(sessionID, getNumber(props.timestamp)) || changed;
+        if (!sessionID || isContinuationFinish(getString(props?.finish))) break;
+        changed = this.finishBusySession(sessionID, getNumber(props?.timestamp)) || changed;
+        break;
+      }
+      case 'session.next.prompt.admitted': {
+        const sessionID = getString(props?.sessionID);
+        if (sessionID) this.trailingBusyAfterCompletion.delete(sessionID);
         break;
       }
       case 'session.error': {
         const sessionID = getString(props?.sessionID);
         if (!sessionID) break;
+        this.trailingBusyAfterCompletion.delete(sessionID);
         const error = asRecord(props?.error);
         changed =
           (error && isAbortedErrorRecord(error)
@@ -282,7 +336,12 @@ export class SessionStateManager {
           this.setSessionMetadata(this.sessionModes, sessionID, mode);
         }
 
-        if (getString(info?.role) !== 'assistant') break;
+        if (getString(info?.role) !== 'assistant') {
+          if (getString(info?.role) === 'user') {
+            this.trailingBusyAfterCompletion.delete(sessionID);
+          }
+          break;
+        }
 
         const error = asRecord(info?.error);
         if (error) {
@@ -293,7 +352,7 @@ export class SessionStateManager {
         if (error || typeof asRecord(info?.time)?.completed === 'number') {
           if (error) {
             changed = this.clearBusy(sessionID) || changed;
-          } else {
+          } else if (!isContinuationFinish(getString(info?.finish))) {
             changed =
               this.finishBusySession(sessionID, getNumber(asRecord(info?.time)?.completed)) ||
               changed;
@@ -325,6 +384,7 @@ export class SessionStateManager {
         const requestProps = asRecord(propsRecord?.info) || propsRecord;
         changed =
           this.clearBlockingRequest(
+            'permission',
             getString(requestProps?.id) ||
               getString(requestProps?.permissionID) ||
               getString(requestProps?.requestID)
@@ -341,7 +401,10 @@ export class SessionStateManager {
       case 'question.v2.replied':
       case 'question.v2.rejected': {
         changed =
-          this.clearBlockingRequest(getString(props?.requestID) || getString(props?.id)) || changed;
+          this.clearBlockingRequest(
+            'question',
+            getString(props?.requestID) || getString(props?.id)
+          ) || changed;
         break;
       }
     }
@@ -380,12 +443,18 @@ export class SessionStateManager {
     if (this.recoverySnapshotPromise) return this.recoverySnapshotPromise;
 
     const operation = this.enqueuePersistence(async () => {
-      const interruptedSessions = validateInterruptedSessionSnapshots(
+      const persistedInterruptedSessions = validateInterruptedSessionSnapshots(
         this.persistence.get<unknown>(INTERRUPTED_SESSIONS_KEY)
       );
-      const blockingRequests = validateBlockingRequestSnapshots(
-        this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY)
+      const interruptedSessions = persistedInterruptedSessions.filter(
+        (session) => !this.consumedInterruptedSessionIDs.has(session.id)
       );
+      for (const session of interruptedSessions) {
+        this.consumedInterruptedSessionIDs.add(session.id);
+      }
+      const rawBlockingRequests = this.persistence.get<unknown>(BLOCKING_REQUESTS_KEY);
+      const blockingRequests = validateBlockingRequestSnapshots(rawBlockingRequests);
+      if (rawBlockingRequests !== undefined) this.blockingRecoveryCleanupPending = true;
 
       // Merge before yielding so subsequent server events always win. Current
       // process state includes both request replies and session deletions.
@@ -394,11 +463,25 @@ export class SessionStateManager {
         if (!recoveredSessionIDs.has(sessionID)) this.recoveryDeletedSessionIDs.delete(sessionID);
       }
       this.mergeBlockingRequests(blockingRequests);
-      await Promise.all([
-        this.persistence.remove(INTERRUPTED_SESSIONS_KEY),
-        this.persistence.remove(BLOCKING_REQUESTS_KEY),
+      const cleanupResults = await Promise.allSettled([
+        Promise.resolve().then(() => this.persistence.remove(INTERRUPTED_SESSIONS_KEY)),
+        Promise.resolve().then(() => this.persistence.remove(BLOCKING_REQUESTS_KEY)),
       ]);
-      this.blockingRequestMutations.clear();
+      for (const [index, result] of cleanupResults.entries()) {
+        if (result.status === 'fulfilled') continue;
+        const key = index === 0 ? INTERRUPTED_SESSIONS_KEY : BLOCKING_REQUESTS_KEY;
+        logger.warn(
+          `Failed to clean up recovered session state (${key}): ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`
+        );
+      }
+      if (cleanupResults[0]?.status === 'fulfilled') {
+        this.consumedInterruptedSessionIDs.clear();
+      }
+      if (cleanupResults[1]?.status === 'fulfilled') {
+        this.blockingRequestMutations.clear();
+        this.recoveryDeletedSessionIDs.clear();
+        this.blockingRecoveryCleanupPending = false;
+      }
       return {
         interruptedSessions,
         blockingRequests: this.getLiveBlockingRequestSnapshots(),
@@ -407,7 +490,6 @@ export class SessionStateManager {
     this.recoverySnapshotPromise = operation;
     void operation.then(
       () => {
-        this.recoveryDeletedSessionIDs.clear();
         if (this.recoverySnapshotPromise === operation) this.recoverySnapshotPromise = undefined;
       },
       () => {
@@ -415,6 +497,100 @@ export class SessionStateManager {
       }
     );
     return operation;
+  }
+
+  beginPendingAttentionReconciliation(kind: PendingAttentionKind): PendingAttentionReconciliation {
+    const requestGeneration = this.pendingAttentionRequestGenerations[kind] + 1;
+    this.pendingAttentionRequestGenerations[kind] = requestGeneration;
+    const mutationRevision = this.pendingAttentionRevisions[kind];
+    this.activePendingAttentionReconciliations[kind].set(requestGeneration, mutationRevision);
+    return { kind, mutationRevision, requestGeneration };
+  }
+
+  reconcilePendingAttention(
+    kind: PendingAttentionKind,
+    requests: readonly unknown[],
+    reconciliation: PendingAttentionReconciliation = this.beginPendingAttentionReconciliation(kind)
+  ): void {
+    try {
+      if (reconciliation.kind !== kind) {
+        throw new Error(`Pending attention reconciliation kind mismatch: ${kind}`);
+      }
+      const mutationRevision = this.activePendingAttentionReconciliations[kind].get(
+        reconciliation.requestGeneration
+      );
+      if (mutationRevision === undefined) return;
+      if (
+        reconciliation.requestGeneration < this.reconciledPendingAttentionRequestGenerations[kind]
+      ) {
+        return;
+      }
+      this.reconciledPendingAttentionRequestGenerations[kind] = reconciliation.requestGeneration;
+      this.applyPendingAttentionSnapshot(kind, requests, mutationRevision);
+    } finally {
+      this.finishPendingAttentionReconciliation(reconciliation);
+    }
+  }
+
+  finishPendingAttentionReconciliation(reconciliation: PendingAttentionReconciliation): void {
+    this.activePendingAttentionReconciliations[reconciliation.kind].delete(
+      reconciliation.requestGeneration
+    );
+    this.prunePendingAttentionMutationMetadata(reconciliation.kind);
+  }
+
+  private applyPendingAttentionSnapshot(
+    kind: PendingAttentionKind,
+    requests: readonly unknown[],
+    startedAtRevision: number
+  ): void {
+    const snapshots = requests
+      .map((value) => {
+        const props = asRecord(asRecord(value)?.info) || asRecord(value);
+        if (!props) return undefined;
+        const id = getBlockingRequestID(props);
+        const sessionID = getString(props.sessionID);
+        return id && sessionID ? { id, sessionID, props } : undefined;
+      })
+      .filter(
+        (item): item is { id: string; sessionID: string; props: Record<string, unknown> } =>
+          item !== undefined
+      );
+    const snapshotIDs = new Set(snapshots.map((item) => item.id));
+    let changed = false;
+
+    for (const [id, request] of this.pendingAttention) {
+      if (request.kind !== kind || snapshotIDs.has(id)) continue;
+      if ((this.pendingAttentionMutationRevisions[kind].get(id) ?? 0) > startedAtRevision) {
+        continue;
+      }
+      this.blockingRequestMutations.add(id);
+      this.pendingAttention.delete(id);
+      changed = true;
+    }
+
+    for (const snapshot of snapshots) {
+      if (
+        (this.pendingAttentionMutationRevisions[kind].get(snapshot.id) ?? 0) > startedAtRevision ||
+        (this.pendingAttentionSessionDeletionRevisions[kind].get(snapshot.sessionID) ?? 0) >
+          startedAtRevision
+      ) {
+        continue;
+      }
+      if (this.pendingAttention.has(snapshot.id)) continue;
+      changed =
+        this.trackBlockingRequest(
+          kind,
+          snapshot.props,
+          kind === 'permission' ? 'permission.asked' : undefined,
+          false
+        ) || changed;
+    }
+
+    if (changed) {
+      this.listener.onStatusChange();
+      void this.persist();
+    }
   }
 
   private enqueuePersistence<T>(operation: () => Promise<T>): Promise<T> {
@@ -678,18 +854,20 @@ export class SessionStateManager {
   private trackBlockingRequest(
     kind: PendingAttentionKind,
     props: Record<string, unknown>,
-    eventType?: PermissionAskEventType
+    eventType?: PermissionAskEventType,
+    recordEventMutation = true
   ): boolean {
-    const requestID =
-      getString(props.id) || getString(props.permissionID) || getString(props.requestID);
+    const requestID = getBlockingRequestID(props);
     const sessionID = getString(props.sessionID);
     if (!requestID || !sessionID) return false;
-    this.blockingRequestMutations.add(requestID);
+    if (recordEventMutation) this.recordBlockingRequestMutation(kind, requestID);
+    else this.blockingRequestMutations.add(requestID);
     if (this.pendingAttention.has(requestID)) return false;
 
     const label =
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
     this.clearBusy(sessionID);
+    this.trailingBusyAfterCompletion.delete(sessionID);
     this.pendingAttention.set(requestID, {
       sessionID,
       kind,
@@ -704,7 +882,10 @@ export class SessionStateManager {
   }
 
   private removeSession(sessionID: string) {
-    if (this.recoverySnapshotPromise) this.recoveryDeletedSessionIDs.add(sessionID);
+    this.recordPendingAttentionSessionDeletion(sessionID);
+    if (this.recoverySnapshotPromise || this.blockingRecoveryCleanupPending) {
+      this.recoveryDeletedSessionIDs.add(sessionID);
+    }
     let changed = false;
     changed = this.busySessions.delete(sessionID) || changed;
     changed = this.completedSessions.delete(sessionID) || changed;
@@ -715,19 +896,61 @@ export class SessionStateManager {
     changed = this.sessionParentIDs.delete(sessionID) || changed;
     changed = this.sessionModes.delete(sessionID) || changed;
     this.busyStartedAt.delete(sessionID);
+    this.trailingBusyAfterCompletion.delete(sessionID);
     this.clearBusyAttempts(sessionID);
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
+      this.recordBlockingRequestMutation(request.kind, requestID);
       this.pendingAttention.delete(requestID);
       changed = true;
     }
     return changed;
   }
 
-  private clearBlockingRequest(requestID: string | undefined): boolean {
+  private clearBlockingRequest(kind: PendingAttentionKind, requestID: string | undefined): boolean {
     if (!requestID) return false;
-    this.blockingRequestMutations.add(requestID);
+    this.recordBlockingRequestMutation(kind, requestID);
     return this.pendingAttention.delete(requestID);
+  }
+
+  private recordBlockingRequestMutation(kind: PendingAttentionKind, requestID: string): void {
+    const revision = this.pendingAttentionRevisions[kind] + 1;
+    this.pendingAttentionRevisions[kind] = revision;
+    this.pendingAttentionMutationRevisions[kind].set(requestID, revision);
+    this.blockingRequestMutations.add(requestID);
+    this.prunePendingAttentionMutationMetadata(kind);
+  }
+
+  private recordPendingAttentionSessionDeletion(sessionID: string): void {
+    for (const kind of ['permission', 'question'] as const) {
+      const revision = this.pendingAttentionRevisions[kind] + 1;
+      this.pendingAttentionRevisions[kind] = revision;
+      this.pendingAttentionSessionDeletionRevisions[kind].set(sessionID, revision);
+      this.prunePendingAttentionMutationMetadata(kind);
+    }
+  }
+
+  private prunePendingAttentionMutationMetadata(kind: PendingAttentionKind): void {
+    const activeRevisions = this.activePendingAttentionReconciliations[kind].values();
+    let oldestActiveRevision = Number.POSITIVE_INFINITY;
+    for (const revision of activeRevisions) {
+      oldestActiveRevision = Math.min(oldestActiveRevision, revision);
+    }
+    if (!Number.isFinite(oldestActiveRevision)) {
+      this.pendingAttentionMutationRevisions[kind].clear();
+      this.pendingAttentionSessionDeletionRevisions[kind].clear();
+      return;
+    }
+    for (const [requestID, revision] of this.pendingAttentionMutationRevisions[kind]) {
+      if (revision <= oldestActiveRevision) {
+        this.pendingAttentionMutationRevisions[kind].delete(requestID);
+      }
+    }
+    for (const [sessionID, revision] of this.pendingAttentionSessionDeletionRevisions[kind]) {
+      if (revision <= oldestActiveRevision) {
+        this.pendingAttentionSessionDeletionRevisions[kind].delete(sessionID);
+      }
+    }
   }
 
   private hasPendingAttentionForSession(sessionID: string): boolean {
@@ -779,6 +1002,7 @@ export class SessionStateManager {
 
     this.clearBusy(sessionID);
     this.completedSessions.add(sessionID);
+    this.trailingBusyAfterCompletion.add(sessionID);
     this.showCompletionNotification(sessionID);
     return true;
   }
@@ -974,10 +1198,8 @@ function isAbortedErrorRecord(error: Record<string, unknown>): boolean {
   });
 }
 
-function isContinuationStepEnd(props: Record<string, unknown>): boolean {
-  const finish = getString(props.finish)
-    ?.toLowerCase()
-    .replace(/[\s-]+/g, '_');
+function isContinuationFinish(value: string | undefined): boolean {
+  const finish = value?.toLowerCase().replace(/[\s-]+/g, '_');
   return (
     finish === 'tool' ||
     finish === 'tools' ||
@@ -1029,6 +1251,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function getBlockingRequestID(props: Record<string, unknown>): string | undefined {
+  return getString(props.id) || getString(props.permissionID) || getString(props.requestID);
 }
 
 function getNumber(value: unknown): number | undefined {

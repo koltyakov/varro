@@ -49,18 +49,17 @@ beforeEach(() => {
 });
 
 describe('optimistic user message reconciliation', () => {
-  it('replaces the optimistic entry when the server message carries the same text', () => {
+  it('does not reconcile a different server ID based only on matching text', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'hello world')]));
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [textPart('p-2', 'msg-1', 'hello world')],
     });
 
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]!.info.id).toBe('msg-1');
+    expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
-  it('ignores composer context prefixes when matching the optimistic entry', () => {
+  it('does not reconcile a different server ID after stripping composer context', () => {
     upsertMessage(
       optimisticEntry([
         textPart('p-1', OPTIMISTIC_ID, '[Working directory: /repo]'),
@@ -74,8 +73,7 @@ describe('optimistic user message reconciliation', () => {
       parts: [textPart('p-5', 'msg-1', 'explain this')],
     });
 
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]!.info.id).toBe('msg-1');
+    expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
   it('keeps the optimistic entry when the server text does not match', () => {
@@ -98,17 +96,16 @@ describe('optimistic user message reconciliation', () => {
     expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
-  it('reconciles an image-only optimistic entry that has no text signature', () => {
+  it('does not guess the owner of an image-only server message', () => {
     upsertMessage(
       optimisticEntry([imagePart(`${OPTIMISTIC_ID}-optimistic-file-0`, OPTIMISTIC_ID)])
     );
     upsertMessage({ info: userMessage('msg-1'), parts: [] });
 
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]!.info.id).toBe('msg-1');
+    expect(state.messages.map((entry) => entry.info.id)).toEqual([OPTIMISTIC_ID, 'msg-1']);
   });
 
-  it('reconciles the newest optimistic entry first when several are pending', () => {
+  it('keeps all pending entries when another same-text ID arrives', () => {
     upsertMessage({
       info: userMessage('optimistic-user-1'),
       parts: [textPart('p-1', 'optimistic-user-1', 'same text')],
@@ -122,7 +119,11 @@ describe('optimistic user message reconciliation', () => {
       parts: [textPart('p-3', 'msg-1', 'same text')],
     });
 
-    expect(state.messages.map((entry) => entry.info.id)).toEqual(['optimistic-user-1', 'msg-1']);
+    expect(state.messages.map((entry) => entry.info.id)).toEqual([
+      'optimistic-user-1',
+      'optimistic-user-2',
+      'msg-1',
+    ]);
   });
 
   it('acknowledges exact optimistic message ids out of order', () => {
@@ -140,6 +141,35 @@ describe('optimistic user message reconciliation', () => {
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-newer']);
     expect(state.messages[0]!.parts).toEqual([]);
     expect(state.messages[1]!.parts).toHaveLength(1);
+  });
+
+  it('keeps images attached to their exact IDs when acknowledgements arrive out of order', () => {
+    upsertMessage({
+      info: userMessage('msg-older'),
+      parts: [
+        imagePart('msg-older-part-0', 'msg-older', {
+          filename: 'older.png',
+          url: 'data:image/png;base64,OLDER',
+        }),
+      ],
+    });
+    upsertMessage({
+      info: userMessage('msg-newer'),
+      parts: [
+        imagePart('msg-newer-part-0', 'msg-newer', {
+          filename: 'newer.png',
+          url: 'data:image/png;base64,NEWER',
+        }),
+      ],
+    });
+
+    upsertMessageInfo(userMessage('msg-newer'));
+    upsertMessageInfo(userMessage('msg-older'));
+
+    expect(state.messages.map((entry) => [entry.info.id, entry.parts[0]?.url])).toEqual([
+      ['msg-older', 'data:image/png;base64,OLDER'],
+      ['msg-newer', 'data:image/png;base64,NEWER'],
+    ]);
   });
 
   it('drops optimistic text when a server part arrives before message metadata', () => {
@@ -162,22 +192,22 @@ describe('optimistic image parts carried onto the server message', () => {
         imagePart('local-image', OPTIMISTIC_ID),
       ])
     );
-    upsertMessageInfo(userMessage('msg-1'));
+    upsertMessageInfo(userMessage(OPTIMISTIC_ID));
 
     expect(state.messages).toHaveLength(1);
     const entry = state.messages[0]!;
-    expect(entry.info.id).toBe('msg-1');
+    expect(entry.info.id).toBe(OPTIMISTIC_ID);
     expect(entry.parts).toHaveLength(1);
     const carried = entry.parts[0] as FilePart;
-    expect(carried.id).toBe('msg-1-optimistic-file-1');
-    expect(carried.messageID).toBe('msg-1');
+    expect(carried.id).toBe(`${OPTIMISTIC_ID}-optimistic-file-1`);
+    expect(carried.messageID).toBe(OPTIMISTIC_ID);
     expect(carried.sessionID).toBe('session-1');
     expect(carried.url).toBe('data:image/png;base64,AAAA');
   });
 
   it('drops non-image optimistic parts when rebasing onto the server message', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'text only')]));
-    upsertMessageInfo(userMessage('msg-1'));
+    upsertMessageInfo(userMessage(OPTIMISTIC_ID));
 
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0]!.parts).toEqual([]);

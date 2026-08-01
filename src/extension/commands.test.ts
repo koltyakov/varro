@@ -59,7 +59,11 @@ vi.mock('./error-hub', () => ({ errorHub: errorHubMock }));
 import { registerCommands } from './commands';
 import { RestartBlockedError } from './server';
 
-function register(workspacePath: string | null = '/repo', server: unknown = {}) {
+function register(
+  workspacePath: string | null = '/repo',
+  server: unknown = {},
+  viewContainerCommand: string | (() => Promise<unknown>) = 'workbench.view.extension.varro'
+) {
   registeredCommands.clear();
   const sidebar = {
     post: vi.fn(),
@@ -78,8 +82,20 @@ function register(workspacePath: string | null = '/repo', server: unknown = {}) 
     captureTerminalSelection: vi.fn(),
   };
   const context = { subscriptions: [] };
+  const revealSidebar =
+    typeof viewContainerCommand === 'function'
+      ? viewContainerCommand
+      : () => vscodeMock.commands.executeCommand(viewContainerCommand);
 
-  registerCommands(context as never, sidebar as never, contextProvider as never, server as never);
+  (
+    registerCommands as unknown as (
+      context: unknown,
+      sidebar: unknown,
+      contextProvider: unknown,
+      server: unknown,
+      revealSidebar: () => Promise<unknown>
+    ) => void
+  )(context, sidebar, contextProvider, server, revealSidebar);
   return { contextProvider, sidebar };
 }
 
@@ -419,6 +435,48 @@ describe('sidebar navigation commands', () => {
     expect(sidebar.requestInputFocus).toHaveBeenCalledOnce();
   });
 
+  it('reveals the primary container for every direct navigation path in fork hosts', async () => {
+    const primaryContainer = 'workbench.view.extension.varro-primary';
+    register('/repo', {}, primaryContainer);
+
+    for (const command of [
+      'varro.chat.focus',
+      'varro.chat.statusBarClick',
+      'varro.chat.newSession',
+      'varro.chat.searchSessions',
+      'varro.chat.abort',
+      'varro.chat.previousSession',
+      'varro.chat.nextSession',
+    ]) {
+      await runCommand(command);
+    }
+
+    const revealCalls = vscodeMock.commands.executeCommand.mock.calls.filter(([command]) =>
+      String(command).startsWith('workbench.view.extension.varro')
+    );
+    expect(revealCalls).toHaveLength(7);
+    expect(revealCalls.every(([command]) => command === primaryContainer)).toBe(true);
+  });
+
+  it('reveals the primary container for project and context paths in fork hosts', async () => {
+    const primaryContainer = 'workbench.view.extension.varro-primary';
+    const { contextProvider } = register('/repo', {}, primaryContainer);
+    contextProvider.terminalSelection = { text: 'selected output', terminalName: 'Terminal 1' };
+    contextProvider.captureTerminalSelection.mockResolvedValue({ ok: true });
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 0, 1) as never;
+
+    await runCommand('varro.agents.initializeProject');
+    await runCommand('varro.chat.addTerminalSelectionToContext');
+    await runCommand('varro.chat.addSelectionToContext');
+    await runCommand('varro.chat.addToContext', fileUri('/repo/a.ts'));
+
+    const revealCalls = vscodeMock.commands.executeCommand.mock.calls.filter(([command]) =>
+      String(command).startsWith('workbench.view.extension.varro')
+    );
+    expect(revealCalls).toHaveLength(4);
+    expect(revealCalls.every(([command]) => command === primaryContainer)).toBe(true);
+  });
+
   it('swallows a reveal failure so the command never surfaces an error', async () => {
     const { sidebar } = register();
     vscodeMock.commands.executeCommand.mockRejectedValueOnce(new Error('no such view'));
@@ -498,6 +556,54 @@ describe('sidebar navigation commands', () => {
   });
 });
 
+describe('context reveal completion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vscodeMock.window.activeTextEditor = undefined;
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1 });
+  });
+
+  it.each(['terminal', 'selection', 'explorer'] as const)(
+    'awaits the %s reveal before completing the command',
+    async (source) => {
+      let finishReveal!: () => void;
+      const revealSidebar = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishReveal = resolve;
+          })
+      );
+      const { contextProvider } = register('/repo', {}, revealSidebar);
+      let command = 'varro.chat.addTerminalSelectionToContext';
+      let args: unknown[] = [];
+      if (source === 'terminal') {
+        contextProvider.terminalSelection = {
+          text: 'selected output',
+          terminalName: 'Terminal 1',
+        };
+        contextProvider.captureTerminalSelection.mockResolvedValue({ ok: true });
+      } else if (source === 'selection') {
+        command = 'varro.chat.addSelectionToContext';
+        vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 0, 1) as never;
+      } else {
+        command = 'varro.chat.addToContext';
+        args = [fileUri('/repo/a.ts')];
+      }
+      let settled = false;
+
+      const operation = runCommand(command, ...args).then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() => expect(revealSidebar).toHaveBeenCalledOnce());
+
+      expect(settled).toBe(false);
+      finishReveal();
+      await operation;
+      expect(settled).toBe(true);
+    }
+  );
+});
+
 describe('varro.server.restart', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -519,15 +625,19 @@ describe('varro.server.restart', () => {
       totalSessionCount: 2,
       directories: [{ directory: '/repo', sessionCount: 2 }],
     };
-    const { sidebar } = register('/repo', {
-      restart: vi.fn().mockRejectedValue(new RestartBlockedError(blockers)),
-      status: { state: 'running' },
-    });
+    const { sidebar } = register(
+      '/repo',
+      {
+        restart: vi.fn().mockRejectedValue(new RestartBlockedError(blockers)),
+        status: { state: 'running' },
+      },
+      'workbench.view.extension.varro-primary'
+    );
 
     await runCommand('varro.server.restart');
 
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
-      'workbench.view.extension.varro'
+      'workbench.view.extension.varro-primary'
     );
     expect(sidebar.post).toHaveBeenCalledWith({
       type: 'server/restart-blocked',

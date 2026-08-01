@@ -23,6 +23,16 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, rejectPromise) => {
+    resolve = next;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('session management helpers', () => {
   it('creates a session and restores draft routing selections', async () => {
     const setSelectedModel = vi.fn();
@@ -33,6 +43,7 @@ describe('session management helpers', () => {
     const result = await createSessionWithDependencies(
       {
         getActiveSessionId: () => null,
+        getNewChatDraftGeneration: () => 0,
         createRemoteSession: vi.fn(async () => session('session-2')),
         buildCreatePermission: () => [{ permission: 'read', action: 'allow' }],
         upsertSession: vi.fn(),
@@ -81,6 +92,7 @@ describe('session management helpers', () => {
     const result = await createSessionWithDependencies(
       {
         getActiveSessionId: () => null,
+        getNewChatDraftGeneration: () => 0,
         createRemoteSession: vi.fn(async () => session('session-auto')),
         buildCreatePermission: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
         upsertSession: vi.fn(),
@@ -113,6 +125,132 @@ describe('session management helpers', () => {
     expect(result).toBe('session-auto');
     expect(setPermissionModeForSession).toHaveBeenCalledWith('session-auto', 'auto');
   });
+
+  it('does not replace a session selected while remote creation is pending', async () => {
+    let activeSessionId: string | null = null;
+    let initialMcpNames = ['draft-mcp'];
+    const remoteSession = deferred<Session>();
+    const setActiveSessionId = vi.fn((sessionId: string) => {
+      activeSessionId = sessionId;
+    });
+    const setSelectedModel = vi.fn();
+    const setSelectedAgent = vi.fn();
+    const setSelectedMcpsForSession = vi.fn();
+    const adoptDraftCurrentDocumentState = vi.fn();
+    const persistActiveSessionId = vi.fn();
+    const clearMessages = vi.fn();
+
+    const pending = createSessionWithDependencies(
+      {
+        getActiveSessionId: () => activeSessionId,
+        getNewChatDraftGeneration: () => 0,
+        createRemoteSession: vi.fn(() => remoteSession.promise),
+        buildCreatePermission: () => [{ permission: 'read', action: 'allow' }],
+        upsertSession: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        setActiveSessionId,
+        clearDraftCurrentDocumentState: vi.fn(),
+        adoptDraftCurrentDocumentState,
+        setSessionStatusEntry: vi.fn(),
+        setSessionUsageLimit: vi.fn(),
+        persistActiveSessionId,
+        markSessionSeen: vi.fn(),
+        getDefaultSelectedModel: () => ({ providerID: 'openai', modelID: 'draft-model' }),
+        setSelectedModel,
+        resolveDefaultAgent: () => 'plan',
+        setSelectedAgent,
+        getInitialMcpNames: () => initialMcpNames,
+        setSelectedMcpsForSession,
+        resetDraftSelectedMcps: vi.fn(),
+        setPermissionModeForSession: vi.fn(),
+        resetDraftPermissionMode: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearMessages,
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      undefined,
+      'default'
+    );
+
+    activeSessionId = 'session-selected';
+    initialMcpNames = ['selected-session-mcp'];
+    remoteSession.resolve(session('session-created'));
+
+    await expect(pending).resolves.toBe('session-created');
+    expect(activeSessionId).toBe('session-selected');
+    expect(setActiveSessionId).not.toHaveBeenCalled();
+    expect(adoptDraftCurrentDocumentState).not.toHaveBeenCalled();
+    expect(persistActiveSessionId).not.toHaveBeenCalled();
+    expect(clearMessages).not.toHaveBeenCalled();
+    expect(setSelectedModel).not.toHaveBeenCalled();
+    expect(setSelectedAgent).not.toHaveBeenCalled();
+    expect(setSelectedMcpsForSession).toHaveBeenCalledWith('session-created', ['draft-mcp']);
+  });
+
+  it.each(['success', 'failure'] as const)(
+    'does not affect the replacement null draft after stale creation %s',
+    async (outcome) => {
+      let activeSessionId: string | null = null;
+      let draftGeneration = 0;
+      const remoteSession = deferred<Session>();
+      const setActiveSessionId = vi.fn((sessionId: string) => {
+        activeSessionId = sessionId;
+      });
+      const adoptDraftCurrentDocumentState = vi.fn();
+      const persistActiveSessionId = vi.fn();
+      const clearMessages = vi.fn();
+      const setError = vi.fn();
+
+      const pending = createSessionWithDependencies(
+        {
+          getActiveSessionId: () => activeSessionId,
+          getNewChatDraftGeneration: () => draftGeneration,
+          createRemoteSession: vi.fn(() => remoteSession.promise),
+          buildCreatePermission: () => [{ permission: 'read', action: 'allow' }],
+          upsertSession: vi.fn(),
+          resetToolCallExpansionState: vi.fn(),
+          setActiveSessionId,
+          clearDraftCurrentDocumentState: vi.fn(),
+          adoptDraftCurrentDocumentState,
+          setSessionStatusEntry: vi.fn(),
+          setSessionUsageLimit: vi.fn(),
+          persistActiveSessionId,
+          markSessionSeen: vi.fn(),
+          getDefaultSelectedModel: () => null,
+          setSelectedModel: vi.fn(),
+          resolveDefaultAgent: () => null,
+          setSelectedAgent: vi.fn(),
+          getInitialMcpNames: () => [],
+          setSelectedMcpsForSession: vi.fn(),
+          resetDraftSelectedMcps: vi.fn(),
+          setPermissionModeForSession: vi.fn(),
+          resetDraftPermissionMode: vi.fn(),
+          resetTodoSync: vi.fn(),
+          clearMessages,
+          stopLoading: vi.fn(),
+          setError,
+        },
+        undefined,
+        'default'
+      );
+
+      draftGeneration += 1;
+      if (outcome === 'success') {
+        remoteSession.resolve(session('session-abandoned'));
+      } else {
+        remoteSession.reject(new Error('stale failure'));
+      }
+
+      await expect(pending).resolves.toBe(outcome === 'success' ? 'session-abandoned' : null);
+      expect(activeSessionId).toBeNull();
+      expect(setActiveSessionId).not.toHaveBeenCalled();
+      expect(adoptDraftCurrentDocumentState).not.toHaveBeenCalled();
+      expect(persistActiveSessionId).not.toHaveBeenCalled();
+      expect(clearMessages).not.toHaveBeenCalled();
+      expect(setError).not.toHaveBeenCalled();
+    }
+  );
 
   it('deletes a session and selects the next visible session when needed', async () => {
     const selectSession = vi.fn(async () => {});
@@ -241,6 +379,7 @@ describe('session management helpers', () => {
     const result = await createSessionWithDependencies(
       {
         getActiveSessionId: () => null,
+        getNewChatDraftGeneration: () => 0,
         createRemoteSession: vi.fn(async () => {
           throw new Error('create failed');
         }),

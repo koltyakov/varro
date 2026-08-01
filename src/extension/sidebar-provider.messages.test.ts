@@ -7,6 +7,39 @@ import {
 } from './sidebar-provider.test-support';
 
 describe('SidebarProvider session message responses', () => {
+  it('posts pending deltas before a canonical message API response', async () => {
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/session-1?directory=%2Frepo'
+          ? { id: 'session-1', directory: '/repo' }
+          : []
+      ),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const eventHandler = server.on.mock.calls.find(([event]) => event === 'event')?.[1];
+
+    eventHandler?.({
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        partID: 'part-1',
+        field: 'text',
+        delta: 'late',
+      },
+    });
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: { id: 1, method: 'GET', path: '/session/session-1/message' },
+    });
+
+    expect(posted.map((message) => (message as { type: string }).type)).toEqual([
+      'server/event',
+      'api/response',
+    ]);
+  });
+
   it('filters malformed session message entries and parts from API responses', async () => {
     const messages = [
       {

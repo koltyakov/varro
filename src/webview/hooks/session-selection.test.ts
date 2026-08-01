@@ -35,6 +35,77 @@ function selectedModelFromSession(session: Session) {
   };
 }
 
+type SelectionDependencies = Parameters<typeof selectSessionWithDependencies>[0];
+
+function loadedSession(id: string) {
+  return {
+    session: {
+      id,
+      projectID: 'project-1',
+      directory: '/repo',
+      title: `Session ${id}`,
+      version: '1',
+      time: { created: 0, updated: 1 },
+    } satisfies Session,
+    messages: [],
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function createSelectionDependencies(
+  overrides: Partial<SelectionDependencies> = {}
+): SelectionDependencies {
+  return {
+    getActiveSessionId: () => null,
+    setActiveSessionId: vi.fn(),
+    clearPendingAbort: vi.fn(),
+    persistActiveSessionId: vi.fn(),
+    markSessionSeen: vi.fn(),
+    clearDraftCurrentDocumentState: vi.fn(),
+    resetToolCallExpansionState: vi.fn(),
+    resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
+    applySelectedAgent: vi.fn(),
+    getSession: () => undefined,
+    resolveSessionModel: selectedModelFromSession,
+    resolvePersistedModel: () => null,
+    resolveFallbackModel: () => null,
+    applySelectedModel: vi.fn(),
+    getConnectedMcpNames: () => [],
+    hasSelectedMcps: () => false,
+    setSelectedMcpsForSession: vi.fn(),
+    syncSessionMcps: vi.fn(async () => {}),
+    resetTodoSync: vi.fn(),
+    clearMessages: vi.fn(),
+    setMessagesLoading: vi.fn(),
+    loadSession: async (id) => loadedSession(id),
+    isCurrentSelectionGeneration: () => true,
+    upsertSession: vi.fn(),
+    setMessagesIncremental: vi.fn(),
+    syncFailedSessionsFromMessages: vi.fn(),
+    requestMessageListScrollToBottom: vi.fn(),
+    deriveSelectedAgentFromMessages: () => null,
+    deriveSelectedModelFromMessages: () => null,
+    syncTodosForSession: vi.fn(async () => {}),
+    loadQuestions: vi.fn(async () => {}),
+    loadSessionStatuses: vi.fn(async () => ({})),
+    mergeSessionStatuses: vi.fn(),
+    updateUsageLimitState: vi.fn(),
+    startLoading: vi.fn(),
+    stopLoading: vi.fn(),
+    setError: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('session-selection helpers', () => {
   it('restores a locally redefined model while selecting and loading a session', async () => {
     const activeSession = { value: 'session-0' as string | null };
@@ -349,6 +420,88 @@ describe('session-selection helpers', () => {
     expect(markSessionSeen).not.toHaveBeenCalled();
     expect(setError).not.toHaveBeenCalled();
   });
+
+  it.each(['success', 'failure'] as const)(
+    'clears message loading after a current-generation selection is abandoned before load %s',
+    async (outcome) => {
+      const activeSession = { value: null as string | null };
+      const response = deferred<ReturnType<typeof loadedSession>>();
+      const setMessagesLoading = vi.fn();
+      const setError = vi.fn();
+      const selection = selectSessionWithDependencies(
+        createSelectionDependencies({
+          getActiveSessionId: () => activeSession.value,
+          setActiveSessionId: (id) => {
+            activeSession.value = id;
+          },
+          setMessagesLoading,
+          loadSession: () => response.promise,
+          setError,
+        }),
+        { next: () => 1 },
+        'session-1'
+      );
+
+      await vi.waitFor(() => expect(setMessagesLoading).toHaveBeenCalledWith(true));
+      activeSession.value = null;
+      if (outcome === 'success') {
+        response.resolve(loadedSession('session-1'));
+      } else {
+        response.reject(new Error('offline'));
+      }
+      await selection;
+
+      expect(setMessagesLoading.mock.calls).toEqual([[true], [false]]);
+      expect(setError).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['success', 'failure'] as const)(
+    'does not let an older load %s clear a newer selection loading state',
+    async (outcome) => {
+      const activeSession = { value: null as string | null };
+      const generation = { value: 0 };
+      const firstResponse = deferred<ReturnType<typeof loadedSession>>();
+      const secondResponse = deferred<ReturnType<typeof loadedSession>>();
+      const setMessagesLoading = vi.fn();
+      const loadSession = vi
+        .fn<SelectionDependencies['loadSession']>()
+        .mockReturnValueOnce(firstResponse.promise)
+        .mockReturnValueOnce(secondResponse.promise);
+      const deps = createSelectionDependencies({
+        getActiveSessionId: () => activeSession.value,
+        setActiveSessionId: (id) => {
+          activeSession.value = id;
+        },
+        setMessagesLoading,
+        loadSession,
+        isCurrentSelectionGeneration: (value) => value === generation.value,
+      });
+
+      const firstSelection = selectSessionWithDependencies(
+        deps,
+        { next: () => ++generation.value },
+        'session-1'
+      );
+      const secondSelection = selectSessionWithDependencies(
+        deps,
+        { next: () => ++generation.value },
+        'session-2'
+      );
+      if (outcome === 'success') {
+        firstResponse.resolve(loadedSession('session-1'));
+      } else {
+        firstResponse.reject(new Error('offline'));
+      }
+      await firstSelection;
+
+      expect(setMessagesLoading.mock.calls).toEqual([[true], [true]]);
+
+      secondResponse.resolve(loadedSession('session-2'));
+      await secondSelection;
+      expect(setMessagesLoading.mock.lastCall).toEqual([false]);
+    }
+  );
 
   it('does not block message loading on MCP reconciliation', async () => {
     let resolveMcpSync!: () => void;

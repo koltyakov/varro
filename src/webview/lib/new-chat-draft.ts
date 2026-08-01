@@ -18,6 +18,12 @@ import { isEmptySession } from './empty-session';
 import { resetMessageEditState } from './message-edit-state';
 import { resetToolCallExpansionState } from './tool-call-expansion-state';
 
+let newChatDraftGeneration = 0;
+
+export function getNewChatDraftGeneration() {
+  return newChatDraftGeneration;
+}
+
 export function getDiscardableActiveBlankSessionId(): string | false {
   const sessionId = state.activeSessionId;
   if (!sessionId || state.messages.length > 0) return false;
@@ -35,6 +41,7 @@ export function getDiscardableActiveBlankSessionId(): string | false {
  * An untouched blank active session is reused instead of being abandoned.
  */
 export function startNewChatDraft() {
+  newChatDraftGeneration += 1;
   const blankSessionId = getDiscardableActiveBlankSessionId();
   const craftedText = inputText();
   batch(() => {
@@ -42,6 +49,7 @@ export function startNewChatDraft() {
     setInputText(craftedText);
     resetToolCallExpansionState();
     clearMessages();
+    setState('messagesLoading', false);
     if (!blankSessionId) {
       setState('activeSessionId', null);
       persistActiveSessionId(null);

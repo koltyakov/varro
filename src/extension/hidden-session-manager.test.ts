@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ServerEvent } from '../shared/protocol';
 import { HiddenSessionManager } from './hidden-session-manager';
 
@@ -55,6 +55,83 @@ describe('HiddenSessionManager', () => {
     manager.unhide(undefined);
 
     expect(manager.isHidden('hidden-session')).toBe(false);
+  });
+
+  it('keeps deletion tombstones hidden through queued events until session.deleted', () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new HiddenSessionManager();
+      manager.hide('helper-session');
+      manager.retainUntilDeleted('helper-session');
+
+      manager.observeEvent({
+        type: 'session.updated',
+        properties: { info: { id: 'helper-session', title: 'Queued helper update' } },
+      });
+
+      expect(manager.isHidden('helper-session')).toBe(true);
+      expect(manager.filterVisibleSessions([{ id: 'helper-session' }])).toEqual([]);
+
+      manager.observeEvent({
+        type: 'session.deleted',
+        properties: { info: { id: 'helper-session' } },
+      });
+
+      expect(manager.isHidden('helper-session')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not recreate a tombstone when session.deleted arrives before the delete response', () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new HiddenSessionManager();
+      manager.hide('helper-session');
+      manager.observeEvent({
+        type: 'session.deleted',
+        properties: { info: { id: 'helper-session' } },
+      });
+
+      manager.retainUntilDeleted('helper-session');
+
+      expect(manager.isHidden('helper-session')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('expires deletion tombstones when session.deleted is missed', () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new HiddenSessionManager();
+      manager.hide('helper-session');
+      manager.retainUntilDeleted('helper-session');
+
+      vi.advanceTimersByTime(60_000);
+
+      expect(manager.isHidden('helper-session')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds deletion tombstones under sustained missed events', () => {
+    vi.useFakeTimers();
+    try {
+      const manager = new HiddenSessionManager();
+      for (let index = 0; index < 1_000; index += 1) {
+        const sessionID = `helper-${index}`;
+        manager.hide(sessionID);
+        manager.retainUntilDeleted(sessionID);
+      }
+
+      expect(manager.hiddenSessionIds().size).toBe(256);
+      expect(manager.isHidden('helper-0')).toBe(false);
+      expect(manager.isHidden('helper-999')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('filters hidden sessions, statuses, and requests', () => {

@@ -12,6 +12,14 @@ import {
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe('useOpenCode session state flows', () => {
   it('keeps the chat connected when the event stream is degraded', async () => {
     let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
@@ -369,6 +377,64 @@ describe('useOpenCode session state flows', () => {
       'user-3',
     ]);
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-1');
+  });
+
+  it('returns a detached older-history response after A -> B -> A reselection', async () => {
+    const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const initialA = [{ info: userMessage('user-a-initial'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    initialA[0]!.info.sessionID = 'session-a';
+    initialA.nextCursor = 'cursor-stale';
+    const reopenedA = [{ info: userMessage('user-a-current'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    reopenedA[0]!.info.sessionID = 'session-a';
+    reopenedA.nextCursor = 'cursor-current';
+    const initialB = [{ info: userMessage('user-b'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    initialB[0]!.info.sessionID = 'session-b';
+    const staleOlderA = [{ info: userMessage('user-a-stale'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    staleOlderA[0]!.info.sessionID = 'session-a';
+    let initialALoads = 0;
+
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockImplementation(async (id, options) => {
+      if (id === 'session-a' && options?.before === 'cursor-stale') {
+        return stalePage.promise;
+      }
+      if (id === 'session-a' && options?.before === 'cursor-current') return [];
+      if (id === 'session-a') {
+        initialALoads += 1;
+        return initialALoads === 1 ? initialA : reopenedA;
+      }
+      return initialB;
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-a');
+    const staleLoad = hookModule.loadOlderSessionHistoryPage('session-a');
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-a', {
+        limit: 50,
+        before: 'cursor-stale',
+      });
+    });
+
+    await hookModule.selectSession('session-b');
+    await hookModule.selectSession('session-a');
+    stalePage.resolve(staleOlderA);
+
+    await expect(staleLoad).resolves.toBe(false);
+    expect(stateModule.state.activeSessionId).toBe('session-a');
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['user-a-current']);
+    expect(messageWindow.getSessionHistoryCursor('session-a')).toBe('cursor-current');
   });
 
   it('prefetches a user prompt behind an assistant-only history boundary', async () => {

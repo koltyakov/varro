@@ -34,7 +34,10 @@ export async function selectSessionWithStateDependencies(
     resetTodoSync(): void;
     clearMessages(): void;
     setMessagesLoading?(loading: boolean): void;
-    loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
+    loadSession(
+      id: string,
+      isCurrent?: () => boolean
+    ): Promise<{ session: Session; messages: MessageEntry[] }>;
     isCurrentSelectionGeneration(generation: number): boolean;
     upsertSession(session: Session): void;
     setMessagesIncremental(
@@ -99,9 +102,10 @@ export async function syncSessionWithStateDependencies(
     loadSession(sessionId: string): Promise<Session>;
     upsertSession(session: Session): void;
   },
-  sessionId: string
+  sessionId: string,
+  options?: { shouldApply(): boolean }
 ) {
-  await syncSessionWithDependencies(deps, sessionId);
+  await syncSessionWithDependencies(deps, sessionId, options);
 }
 
 type SessionSyncDependencies = {
@@ -129,7 +133,10 @@ type SessionSyncDependencies = {
   resetTodoSync(): void;
   clearMessages(): void;
   setMessagesLoading?(loading: boolean): void;
-  loadSession(id: string): Promise<{ session: Session; messages: MessageEntry[] }>;
+  loadSession(
+    id: string,
+    isCurrent?: () => boolean
+  ): Promise<{ session: Session; messages: MessageEntry[] }>;
   isCurrentSelectionGeneration(generation: number): boolean;
   upsertSession(session: Session): void;
   setMessagesIncremental(
@@ -243,13 +250,14 @@ export class SessionSyncOperations {
     );
   };
 
-  readonly syncSession = async (sessionId: string) => {
+  readonly syncSession = async (sessionId: string, options?: { shouldApply(): boolean }) => {
     await syncSessionWithStateDependencies(
       {
         loadSession: this.deps.loadSessionMetadata,
         upsertSession: this.deps.upsertSession,
       },
-      sessionId
+      sessionId,
+      options
     );
   };
 }

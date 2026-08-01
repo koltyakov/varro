@@ -328,6 +328,93 @@ function clearUsageLimitsForSessionTree(sessionId: string | null | undefined) {
   }
 }
 
+function isAbortSlashCommand(text: string) {
+  const command = getLeadingSlashCommand(text);
+  return !!command && !command.args && (command.name === 'abort' || command.name === 'stop');
+}
+
+function requestAbortSession() {
+  void abortSession().catch(() => {});
+}
+
+type StagedPastedImage = { url: string; mime: string; size: number };
+
+type PasteTransaction = {
+  event: ClipboardEvent;
+  sessionId: string | null;
+  mutationVersion: number;
+  value: string;
+  pastedText: string;
+  contextFiles: DroppedFile[];
+  insertion: RichComposerPasteInsertion | null | undefined;
+  start: number;
+  end: number;
+  historyEntry: number | null;
+  images: Array<StagedPastedImage | null> | undefined;
+  mentions: Awaited<ReturnType<typeof resolvePastedMentionContextFiles>> | undefined;
+};
+
+function mergeTransactionFiles(files: DroppedFile[], committedFiles: DroppedFile[]) {
+  const next = files.map((file) => ({ ...file }));
+  for (const file of committedFiles) {
+    const index = next.findIndex((item) => isSamePath(item.path, file.path));
+    if (index === -1) next.push({ ...file });
+    else next[index] = { ...file };
+  }
+  return next;
+}
+
+function mergeTransactionImages(
+  images: ComposerSnapshot['images'],
+  committedImages: ComposerSnapshot['images']
+) {
+  const next = images.map((image) => ({ ...image }));
+  for (const image of committedImages) {
+    const index = next.findIndex((item) => item.id === image.id);
+    if (index === -1) next.push({ ...image });
+    else next[index] = { ...image };
+  }
+  return next;
+}
+
+function applyPasteTransactionText(
+  snapshot: ComposerSnapshot,
+  transaction: PasteTransaction,
+  withdrawPastedMention: boolean,
+  imageFilenames: string[]
+) {
+  const insertion = transaction.insertion;
+  if (insertion === undefined) return snapshot;
+  const start = Math.min(transaction.start, snapshot.text.length);
+  const end = Math.min(transaction.end, snapshot.text.length);
+  const insertedText = snapshot.text.slice(start, end);
+  if (insertion && insertedText !== insertion.text) return snapshot;
+
+  const sourceText = insertion && !withdrawPastedMention ? insertedText : '';
+  const before = snapshot.text.slice(0, start);
+  const after = snapshot.text.slice(end);
+  const textWithoutMarker = `${before}${sourceText}${after}`;
+  const marker = imageFilenames.map((filename) => `[${filename}]`).join(' ');
+  const markerOffset = before.length + sourceText.length;
+  const shouldInsertMarker =
+    marker.length > 0 && (insertion !== null || textWithoutMarker.trim().length > 0);
+  const prefix =
+    shouldInsertMarker && shouldPadInlineInsertion(textWithoutMarker[markerOffset - 1]) ? ' ' : '';
+  const suffix = shouldInsertMarker
+    ? getInlineInsertionSuffix(textWithoutMarker, markerOffset)
+    : '';
+  const replacement = `${sourceText}${prefix}${shouldInsertMarker ? marker : ''}${suffix}`;
+  const nextText = `${before}${replacement}${after}`;
+  const delta = replacement.length - (end - start);
+  const nextCaret =
+    snapshot.caret > end
+      ? snapshot.caret + delta
+      : snapshot.caret >= start
+        ? start + replacement.length
+        : snapshot.caret;
+  return { ...snapshot, text: nextText, caret: nextCaret };
+}
+
 export async function sendDroppedContent(droppedFiles: File[]) {
   if (droppedFiles.length === 0) return;
 
@@ -473,14 +560,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [caretPosition, setCaretPosition] = createSignal(0);
   // Guards async paste follow-ups against landing in a torn-down composer.
   let composerDisposed = false;
-  const pendingImagePastes = new Set<{
-    sessionId: string | null;
-    mutationVersion: number;
-    value: string;
-  }>();
+  const pendingPasteTransactions: PasteTransaction[] = [];
+  const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
   onCleanup(() => {
     composerDisposed = true;
-    pendingImagePastes.clear();
+    pendingPasteTransactions.length = 0;
+    pasteTransactionsByEvent.clear();
   });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
@@ -1069,6 +1154,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
+      if (!canSend()) return;
       if ((e.ctrlKey || e.metaKey) && isComposerBusy() && !composerEditingMessage()) {
         handleSend('steer');
       } else {
@@ -1162,6 +1248,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setComposerValue(`/${SKILLS_COMMAND_NAME} `);
       return true;
     }
+    if ((name === 'abort' || name === 'stop') && !args) {
+      requestAbortSession();
+      return true;
+    }
     const runBuiltInSlashCommand = () => {
       if ((name === 'undo' || name === 'revert') && !args) {
         return undoSession();
@@ -1177,9 +1267,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       if (name === 'fork' && !args) {
         return forkActiveSession();
-      }
-      if ((name === 'abort' || name === 'stop') && !args) {
-        return abortSession();
       }
       if (name === 'init' && !args) {
         return initSession();
@@ -1208,6 +1295,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function handleSend(mode?: 'queue' | 'steer' | 'after-stop') {
     const text = inputText();
+    if (isAbortSlashCommand(text)) {
+      requestAbortSession();
+      return;
+    }
     const sendSessionId = composerSessionId();
     const queuedEdit = queuedMessageEdit();
     const sendableText = getSendableInputText(text);
@@ -1362,6 +1453,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         void handleSend();
       });
     }
+  }
+
+  async function handleStopAndSend() {
+    try {
+      await abortSession();
+    } catch {
+      return;
+    }
+    await handleSend('after-stop');
+    setShowBusyMenu(false);
   }
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
@@ -1554,32 +1655,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
   }
 
-  function replaceComposerSelection(value: string, padWithSpaces = false) {
-    const text = inputText();
-    const selectionStart = caretPosition();
-    const selectionEnd = selectionStart;
-    const prefix = padWithSpaces && shouldPadInlineInsertion(text[selectionStart - 1]) ? ' ' : '';
-    const suffix = padWithSpaces ? getInlineInsertionSuffix(text, selectionEnd) : '';
-    const insertedValue = `${prefix}${value}${suffix}`;
-    const nextValue = `${text.slice(0, selectionStart)}${insertedValue}${text.slice(selectionEnd)}`;
-    const nextCaret = selectionStart + insertedValue.length;
-
-    batch(() => {
-      setHistoryIndex(null);
-      setHistoryDraft('');
-      setInputText(nextValue);
-      setCaretPosition(nextCaret);
-      setCompletionIndex(0);
-      setSuppressCompletion(false);
-    });
-
-    queueMicrotask(() => {
-      if (richEditorRef) {
-        richEditorRef.focus();
-      }
-    });
-  }
-
   const messageHistory = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId) return [];
@@ -1731,7 +1806,136 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     await sendDroppedContent(droppedFiles);
   }
 
-  async function handlePaste(e: ClipboardEvent) {
+  function updatePasteTransactionOwners(
+    sessionId: string | null,
+    previousMutationVersion: number,
+    previousValue: string
+  ) {
+    for (const transaction of pendingPasteTransactions) {
+      if (
+        transaction.sessionId !== sessionId ||
+        transaction.mutationVersion !== previousMutationVersion ||
+        transaction.value !== previousValue
+      ) {
+        continue;
+      }
+      transaction.mutationVersion = inputTextMutationVersion();
+      transaction.value = inputText();
+    }
+  }
+
+  function commitPasteTransaction(transaction: PasteTransaction) {
+    const mentions = transaction.mentions!;
+    const contextFiles = [...transaction.contextFiles, ...mentions.files];
+    const withdrawPastedMention =
+      !!transaction.insertion &&
+      mentions.mentionCount > 0 &&
+      mentions.resolvedCount === mentions.mentionCount &&
+      getPromptTextWithoutContextReferences(transaction.pastedText).length === 0;
+    const previousMutationVersion = transaction.mutationVersion;
+    const previousValue = transaction.value;
+    const committedImageIds: string[] = [];
+    const imageFilenames: string[] = [];
+    const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
+    const usedFilenames = new Set(state.clipboardImages.map((image) => image.filename));
+    let imageIndex = nextPastedImageIndex();
+
+    applyingComposerHistory = true;
+    try {
+      batch(() => {
+        for (const file of contextFiles) addContextFile(file);
+        for (const image of transaction.images!) {
+          if (!image || imageFilenames.length >= availableSlots) continue;
+
+          let filename = getPastedImageFilename(imageIndex);
+          while (usedFilenames.has(filename)) {
+            imageIndex += 1;
+            filename = getPastedImageFilename(imageIndex);
+          }
+
+          const id = createAttachmentID();
+          if (!addClipboardImage({ id, ...image, filename })) continue;
+          committedImageIds.push(id);
+          imageFilenames.push(filename);
+          usedFilenames.add(filename);
+          imageIndex += 1;
+        }
+        if (imageFilenames.length > 0) setNextPastedImageIndex(imageIndex);
+
+        const next = applyPasteTransactionText(
+          captureComposerSnapshot(),
+          transaction,
+          withdrawPastedMention,
+          imageFilenames
+        );
+        setInputText(next.text);
+        setCaretPosition(next.caret);
+      });
+
+      const committedFiles = state.droppedFiles.filter((file) =>
+        contextFiles.some((candidate) => isSamePath(candidate.path, file.path))
+      );
+      const committedImages = state.clipboardImages.filter((image) =>
+        committedImageIds.includes(image.id)
+      );
+      const rewrite = (snapshot: ComposerSnapshot) => {
+        const next = applyPasteTransactionText(
+          snapshot,
+          transaction,
+          withdrawPastedMention,
+          imageFilenames
+        );
+        return {
+          ...next,
+          files: mergeTransactionFiles(next.files, committedFiles),
+          images: mergeTransactionImages(next.images, committedImages),
+        };
+      };
+      if (transaction.historyEntry === null) {
+        composerHistory.record(captureComposerSnapshot());
+      } else {
+        composerHistory.rewriteFrom(transaction.historyEntry, rewrite);
+      }
+    } finally {
+      applyingComposerHistory = false;
+    }
+
+    const textDelta = inputText().length - previousValue.length;
+    if (textDelta !== 0) {
+      for (const pending of pendingPasteTransactions) {
+        if (pending === transaction || pending.start < transaction.end) continue;
+        pending.start += textDelta;
+        pending.end += textDelta;
+      }
+    }
+    updatePasteTransactionOwners(transaction.sessionId, previousMutationVersion, previousValue);
+  }
+
+  function drainPasteTransactions() {
+    while (pendingPasteTransactions.length > 0) {
+      const transaction = pendingPasteTransactions[0]!;
+      if (
+        transaction.insertion === undefined ||
+        transaction.images === undefined ||
+        transaction.mentions === undefined
+      ) {
+        return;
+      }
+      pendingPasteTransactions.shift();
+      pasteTransactionsByEvent.delete(transaction.event);
+      if (
+        composerDisposed ||
+        composerSessionId() !== transaction.sessionId ||
+        inputTextMutationVersion() !== transaction.mutationVersion ||
+        inputText() !== transaction.value
+      ) {
+        continue;
+      }
+      commitPasteTransaction(transaction);
+    }
+  }
+
+  function handlePaste(e: ClipboardEvent) {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
@@ -1741,35 +1945,39 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const pasteHandledAsContextOnly =
       pastedContextFiles.length > 0 && pastedPromptText.length === 0;
     if (pastedContextFiles.length > 0) {
-      for (const file of pastedContextFiles) {
-        addContextFile(file);
-      }
       (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
-      if (pasteHandledAsContextOnly) {
-        e.preventDefault();
-        resolvePastedMentions(pastedText, null);
-      }
     }
 
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
+    if (imageItems.length === 0) {
+      for (const file of pastedContextFiles) addContextFile(file);
+      if (pasteHandledAsContextOnly) {
+        e.preventDefault();
+        resolvePastedMentions(pastedText, null);
+      }
+      return;
+    }
 
-    if (imageItems.length === 0) return;
-
-    e.preventDefault();
-
-    const owner = {
+    if (!pastedText || pasteHandledAsContextOnly) e.preventDefault();
+    const transaction: PasteTransaction = {
+      event: e,
       sessionId: composerSessionId(),
       mutationVersion: inputTextMutationVersion(),
       value: inputText(),
+      pastedText,
+      contextFiles: pastedContextFiles,
+      insertion: undefined,
+      start: caretPosition(),
+      end: caretPosition(),
+      historyEntry: null,
+      images: undefined,
+      mentions: undefined,
     };
-    pendingImagePastes.add(owner);
-    const ownsActiveComposer = () =>
-      !composerDisposed &&
-      composerSessionId() === owner.sessionId &&
-      inputTextMutationVersion() === owner.mutationVersion &&
-      inputText() === owner.value;
+    pendingPasteTransactions.push(transaction);
+    pasteTransactionsByEvent.set(e, transaction);
+
     const imageFiles: File[] = [];
     for (const item of imageItems) {
       const file = item.getAsFile();
@@ -1777,8 +1985,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       imageFiles.push(file);
       if (imageFiles.length >= MAX_CLIPBOARD_IMAGES) break;
     }
-
-    const stagedImages = await Promise.all(
+    void Promise.all(
       imageFiles.map(async (file) => {
         try {
           return {
@@ -1791,66 +1998,36 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           return null;
         }
       })
-    );
-    pendingImagePastes.delete(owner);
-    if (!ownsActiveComposer()) return;
-
-    const availableSlots = Math.max(0, MAX_CLIPBOARD_IMAGES - state.clipboardImages.length);
-    if (availableSlots === 0) return;
-
-    const usedFilenames = new Set(state.clipboardImages.map((image) => image.filename));
-    const insertedPlaceholders: string[] = [];
-    let imageIndex = nextPastedImageIndex();
-
-    for (const image of stagedImages) {
-      if (!image) continue;
-      if (insertedPlaceholders.length >= availableSlots) break;
-
-      let filename = getPastedImageFilename(imageIndex);
-      while (usedFilenames.has(filename)) {
-        imageIndex += 1;
-        filename = getPastedImageFilename(imageIndex);
-      }
-
-      const didAddImage = addClipboardImage({
-        id: createAttachmentID(),
-        url: image.url,
-        mime: image.mime,
-        filename,
-        size: image.size,
-      });
-
-      if (!didAddImage) continue;
-
-      usedFilenames.add(filename);
-      insertedPlaceholders.push(filename);
-      imageIndex += 1;
-    }
-
-    if (insertedPlaceholders.length > 0) setNextPastedImageIndex(imageIndex);
-
-    if (insertedPlaceholders.length === 0 || inputText().trim().length === 0) return;
-
-    const previousMutationVersion = inputTextMutationVersion();
-    const previousValue = inputText();
-    replaceComposerSelection(
-      insertedPlaceholders.map((filename) => `[${filename}]`).join(' '),
-      true
-    );
-    for (const pendingPaste of pendingImagePastes) {
-      if (
-        pendingPaste.sessionId !== owner.sessionId ||
-        pendingPaste.mutationVersion !== previousMutationVersion ||
-        pendingPaste.value !== previousValue
-      ) {
-        continue;
-      }
-      pendingPaste.mutationVersion = inputTextMutationVersion();
-      pendingPaste.value = inputText();
-    }
+    ).then((images) => {
+      transaction.images = images;
+      drainPasteTransactions();
+    });
+    void resolvePastedMentionContextFiles(pastedText)
+      .then((mentions) => {
+        transaction.mentions = mentions;
+      })
+      .catch((err) => {
+        logError('chat-input:resolvePastedMentions', err);
+        transaction.mentions = { mentionCount: 0, resolvedCount: 0, files: [] };
+      })
+      .then(drainPasteTransactions);
   }
 
   function handlePasteInsertion(e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) {
+    const transaction = pasteTransactionsByEvent.get(e);
+    if (transaction) {
+      const previousMutationVersion = transaction.mutationVersion;
+      const previousValue = transaction.value;
+      transaction.insertion = insertion;
+      if (insertion) {
+        transaction.start = insertion.start;
+        transaction.end = insertion.end;
+        updatePasteTransactionOwners(transaction.sessionId, previousMutationVersion, previousValue);
+        transaction.historyEntry = composerHistory.record(captureComposerSnapshot());
+      }
+      drainPasteTransactions();
+      return;
+    }
     if (!insertion) return;
     const pastedText = e.clipboardData?.getData('text/plain') ?? '';
     if (!pastedText) return;
@@ -2118,14 +2295,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   const canSend = () =>
-    !pendingWorkspacePath() &&
-    !composerHasActiveQuestion() &&
-    !composerHasActivePermission() &&
-    (getSendableInputText().trim().length > 0 ||
-      state.droppedFiles.length > 0 ||
-      hasSendableClipboardImages() ||
-      !!state.terminalSelection ||
-      !!state.attachedDiagnostics);
+    isAbortSlashCommand(inputText()) ||
+    (!pendingWorkspacePath() &&
+      !composerHasActiveQuestion() &&
+      !composerHasActivePermission() &&
+      (getSendableInputText().trim().length > 0 ||
+        state.droppedFiles.length > 0 ||
+        hasSendableClipboardImages() ||
+        !!state.terminalSelection ||
+        !!state.attachedDiagnostics));
   const isBusyWithoutInterruption = createMemo(
     () => isComposerBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
@@ -2393,6 +2571,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const shouldResumeActiveSession =
       retryingSessionIds.includes(activeSessionId) && (activeRunWasRunning || !activeRun);
 
+    if (retryingSessionIds.length > 0) {
+      try {
+        await abortSession();
+      } catch {
+        return;
+      }
+    }
+
     if (activeRunWasRunning && retryingSessionIds.includes(activeSessionId)) {
       ralphRunner.pause(activeRun.config.managerSessionId);
     }
@@ -2408,14 +2594,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setSessionUsageLimit(sessionId, null);
     }
 
-    if (retryingSessionIds.length > 0) {
-      abortSession()
-        .catch(() => {})
-        .finally(() => {
-          if (shouldResumeActiveSession) {
-            continueInterruptedSession(activeSessionId).catch(() => {});
-          }
-        });
+    if (shouldResumeActiveSession) {
+      try {
+        await continueInterruptedSession(activeSessionId);
+      } catch {}
     }
   }
 
@@ -2564,7 +2746,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             !composerHasActiveQuestion() &&
             !composerHasActivePermission()
           }
-          onStopRetrying={() => abortSession()}
+          onStopRetrying={requestAbortSession}
           onSwitchProvider={() => {
             closePopups();
             setShowModelPicker(true);
@@ -2905,7 +3087,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             showAttachmentsControl={isToolbarControlVisible('attachments')}
             onAttach={() => postMessage({ type: 'files/pick' })}
             showStopButton={showStopButton()}
-            onStop={() => abortSession()}
+            onStop={requestAbortSession}
             showSendControl={showSendControl()}
             showBusySendControls={showBusySendControls()}
             canSend={canSend()}
@@ -2930,11 +3112,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               handleSend('steer');
               setShowBusyMenu(false);
             }}
-            onStopAndSend={async () => {
-              await abortSession();
-              await handleSend('after-stop');
-              setShowBusyMenu(false);
-            }}
+            onStopAndSend={() => void handleStopAndSend()}
           />
         </div>
 
@@ -3068,7 +3246,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           showAttachmentsControl={isToolbarControlVisible('attachments')}
           onAttach={() => postMessage({ type: 'files/pick' })}
           showStopButton={showStopButton()}
-          onStop={() => abortSession()}
+          onStop={requestAbortSession}
           showSendControl={showSendControl()}
           showBusySendControls={showBusySendControls()}
           canSend={canSend()}
@@ -3093,11 +3271,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             handleSend('steer');
             setShowBusyMenu(false);
           }}
-          onStopAndSend={() => {
-            abortSession();
-            handleSend();
-            setShowBusyMenu(false);
-          }}
+          onStopAndSend={() => void handleStopAndSend()}
         />
       </div>
 

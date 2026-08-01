@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { PermissionRule } from '../shared/opencode-types';
+
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
+import { HiddenSessionManager } from './hidden-session-manager';
 import { SessionTitleFallback } from './session-title-fallback';
 
 function deferred<T>() {
@@ -21,7 +24,13 @@ function createHiddenSessions() {
     registerPendingTitle: vi.fn(),
     forgetPendingTitle: vi.fn(),
     hide: vi.fn(),
+    unhide: vi.fn(),
+    retainUntilDeleted: vi.fn(),
   };
+}
+
+function resolveToolAction(rules: PermissionRule[], tool: string) {
+  return rules.findLast((rule) => rule.permission === '*' || rule.permission === tool)?.action;
 }
 
 describe('SessionTitleFallback', () => {
@@ -57,15 +66,108 @@ describe('SessionTitleFallback', () => {
       throw new Error(`Unexpected request ${method} ${path}`);
     });
 
-    const hiddenSessions = createHiddenSessions();
+    const hiddenSessions = new HiddenSessionManager();
     const fallback = new SessionTitleFallback({ request }, hiddenSessions, () => true);
 
     await expect(fallback.renameIfUntitled('session-1')).resolves.toEqual({
       id: 'session-1',
       title: 'Fix Failing Build',
     });
-    expect(hiddenSessions.hide).toHaveBeenCalledWith('hidden-1');
+    expect(hiddenSessions.isHidden('hidden-1')).toBe(true);
+    hiddenSessions.observeEvent({
+      type: 'session.updated',
+      properties: { info: { id: 'hidden-1', title: 'Queued helper update' } },
+    });
+    expect(hiddenSessions.isHidden('hidden-1')).toBe(true);
+    hiddenSessions.observeEvent({
+      type: 'session.deleted',
+      properties: { info: { id: 'hidden-1' } },
+    });
+    expect(hiddenSessions.isHidden('hidden-1')).toBe(false);
     expect(request).toHaveBeenCalledWith('DELETE', '/session/hidden-1');
+  });
+
+  it.each(['false response', 'rejected request'] as const)(
+    'keeps a title helper session hidden after a %s deletion',
+    async (failure) => {
+      const request = vi.fn(async (method: string, path: string) => {
+        if (method === 'GET' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'New session' };
+        }
+        if (method === 'GET' && path === '/session/session-1/message?limit=20') {
+          return [
+            {
+              info: { role: 'user' },
+              parts: [{ type: 'text', text: 'Keep failed cleanup hidden' }],
+            },
+          ];
+        }
+        if (method === 'POST' && path === '/session') return { id: 'hidden-failed-delete' };
+        if (method === 'GET' && path === '/config') return {};
+        if (method === 'POST' && path === '/session/hidden-failed-delete/message') {
+          return { info: { structured: { title: 'Keep Failed Cleanup Hidden' } } };
+        }
+        if (method === 'DELETE' && path === '/session/hidden-failed-delete') {
+          if (failure === 'rejected request') throw new Error('delete failed');
+          return false;
+        }
+        if (method === 'PATCH' && path === '/session/session-1') {
+          return { id: 'session-1', title: 'Keep Failed Cleanup Hidden' };
+        }
+        throw new Error(`Unexpected request ${method} ${path}`);
+      });
+      const hiddenSessions = createHiddenSessions();
+      const fallback = new SessionTitleFallback({ request }, hiddenSessions, () => true);
+
+      await fallback.renameIfUntitled('session-1');
+
+      expect(hiddenSessions.hide).toHaveBeenCalledWith('hidden-failed-delete');
+      expect(hiddenSessions.unhide).not.toHaveBeenCalled();
+      expect(hiddenSessions.retainUntilDeleted).not.toHaveBeenCalled();
+    }
+  );
+
+  it('allows only the StructuredOutput synthetic tool in deny-all title sessions', async () => {
+    let permissionRules: PermissionRule[] = [];
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/session/session-1') {
+        return { id: 'session-1', title: 'New session' };
+      }
+      if (method === 'GET' && path === '/session/session-1/message?limit=20') {
+        return [
+          {
+            info: { role: 'user' },
+            parts: [{ type: 'text', text: 'Fix helper tool permissions' }],
+          },
+        ];
+      }
+      if (method === 'POST' && path === '/session') {
+        permissionRules = (body as { permission: PermissionRule[] }).permission;
+        return { id: 'hidden-1' };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path === '/session/hidden-1/message') {
+        return { info: { structured: { title: 'Fix Helper Permissions' } } };
+      }
+      if (method === 'PATCH' && path === '/session/session-1') {
+        return { id: 'session-1', title: 'Fix Helper Permissions' };
+      }
+      if (method === 'DELETE' && path === '/session/hidden-1') return true;
+      throw new Error(`Unexpected request ${method} ${path}`);
+    });
+    const fallback = new SessionTitleFallback({ request }, createHiddenSessions(), () => true);
+
+    await fallback.renameIfUntitled('session-1');
+
+    expect([
+      resolveToolAction(permissionRules, 'StructuredOutput'),
+      resolveToolAction(permissionRules, 'unknown_custom_tool'),
+      resolveToolAction(permissionRules, 'mcp_database_query'),
+    ]).toEqual(['allow', 'deny', 'deny']);
+    expect(permissionRules.slice(-2)).toEqual([
+      { permission: '*', pattern: '*', action: 'deny' },
+      { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+    ]);
   });
 
   it('does not overwrite a session OpenCode renamed while the fallback was generating', async () => {

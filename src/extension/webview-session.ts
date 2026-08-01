@@ -86,6 +86,7 @@ export class WebviewSession {
       onHidden(): void;
       resetStatusBarCache(): void;
       queuedMessages(): InitialWebviewState['queuedMessages'];
+      flushPendingServerEvents(): void;
     }
   ) {}
 
@@ -98,6 +99,7 @@ export class WebviewSession {
     requestGeneration: number
   ) {
     if (!this.bridge.getView() || requestGeneration !== this.webviewLoadGeneration) return;
+    this.deps.flushPendingServerEvents();
     this.bridge.post({ type: 'api/response', payload });
   }
 

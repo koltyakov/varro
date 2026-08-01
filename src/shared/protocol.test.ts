@@ -33,6 +33,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'event-1',
       type: 'session.updated',
       properties: {
         sessionID: 'session-1',
@@ -64,6 +65,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'event-1',
       type: 'session.updated',
       seq: 42,
       properties: {
@@ -99,6 +101,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'event-2',
       type: 'session.next.text.ended',
       seq: 42,
       properties: {
@@ -130,6 +133,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'event-1',
       type: 'message.updated',
       seq: 42,
       properties: {
@@ -141,6 +145,50 @@ describe('protocol parsers', () => {
           time: { created: 1, completed: 2 },
         },
       },
+    });
+  });
+
+  it('parses legacy durable compaction deltas', () => {
+    expect(
+      parseServerEvent({
+        type: 'sync',
+        name: 'session.next.compaction.delta.1',
+        id: 'event-1',
+        seq: 9,
+        aggregateID: 'session-1',
+        data: {
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          text: 'summary',
+        },
+      })
+    ).toEqual({
+      id: 'event-1',
+      type: 'session.next.compaction.delta',
+      seq: 9,
+      properties: {
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        text: 'summary',
+      },
+    });
+  });
+
+  it('preserves Varro sequence-only event upgrades', () => {
+    expect(
+      parseServerEvent({
+        id: 'event-1',
+        type: 'session.updated',
+        seq: 2,
+        sequenceOnly: true,
+        properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+      })
+    ).toEqual({
+      id: 'event-1',
+      type: 'session.updated',
+      seq: 2,
+      sequenceOnly: true,
+      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
     });
   });
 
@@ -183,6 +231,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'evt_1',
       type: 'session.next.text.ended',
       seq: 7,
       properties: {
@@ -208,6 +257,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'evt_1',
       type: 'session.next.text.ended',
       seq: 8,
       properties: {
@@ -227,6 +277,7 @@ describe('protocol parsers', () => {
         properties: {},
       })
     ).toEqual({
+      id: 'evt_1',
       type: 'server.connected',
       properties: {},
     });
@@ -244,6 +295,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'evt_1',
       type: 'session.next.revert.staged',
       properties: {
         timestamp: 1_234,
@@ -262,6 +314,7 @@ describe('protocol parsers', () => {
         },
       })
     ).toEqual({
+      id: 'evt_2',
       type: 'lsp.client.diagnostics',
       properties: {
         serverID: 'tsserver',

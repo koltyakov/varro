@@ -24,7 +24,11 @@ import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
 import type { OpenCodeResponseMetadata } from './open-code-transport';
-import type { SessionBusyAttempt, SessionStateManager } from './session-state-manager';
+import type {
+  PendingAttentionReconciliation,
+  SessionBusyAttempt,
+  SessionStateManager,
+} from './session-state-manager';
 import type { SessionTitleFallback } from './session-title-fallback';
 import type { SessionDeleteTarget, SessionTrashManager } from './session-trash-manager';
 import { asRecord, parseModelRoute } from './sidebar-provider-utils';
@@ -34,13 +38,13 @@ import {
   normalizePlanMarkdown,
 } from './util/plan-file';
 import { getRelativePath } from './util/path';
+import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
-const MAX_SESSION_PAGE_LIMIT = 1_000_000;
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -80,8 +84,11 @@ export interface RestProxyCallbacks {
     | 'getSessionWorkspaceMatch'
     | 'isSessionInWorkspace'
     | 'markSessionBusy'
+    | 'beginPendingAttentionReconciliation'
+    | 'finishPendingAttentionReconciliation'
     | 'deferPromptFailure'
     | 'reconcilePromptFailure'
+    | 'reconcilePendingAttention'
     | 'removeSessions'
   >;
   sessionTrash: Pick<
@@ -314,6 +321,16 @@ export class RestProxy {
       const promptAttempt = promptSessionID
         ? this.callbacks.sessionState.markSessionBusy(promptSessionID)
         : undefined;
+      const requestPathname = new URL(payload.path, 'http://localhost').pathname;
+      const pendingAttentionKind =
+        method === 'GET' && requestPathname === '/permission'
+          ? ('permission' as const)
+          : method === 'GET' && requestPathname === '/question'
+            ? ('question' as const)
+            : undefined;
+      const pendingAttentionReconciliation = pendingAttentionKind
+        ? this.callbacks.sessionState.beginPendingAttentionReconciliation(pendingAttentionKind)
+        : undefined;
 
       const sessionPageLimit = this.parseSessionPageLimit(method, payload.path);
       if (sessionPageLimit !== null) {
@@ -334,6 +351,11 @@ export class RestProxy {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }
       } catch (err) {
+        if (pendingAttentionReconciliation) {
+          this.callbacks.sessionState.finishPendingAttentionReconciliation(
+            pendingAttentionReconciliation
+          );
+        }
         if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
         throw err;
       }
@@ -341,18 +363,37 @@ export class RestProxy {
       try {
         response = await responsePromise;
       } catch (err) {
+        if (pendingAttentionReconciliation) {
+          this.callbacks.sessionState.finishPendingAttentionReconciliation(
+            pendingAttentionReconciliation
+          );
+        }
         if (promptAttempt) await this.reconcileFailedPrompt(promptAttempt, err);
         throw err;
       }
-      const data = paginatedMessages
-        ? await this.formatPaginatedMessagesResponse(
-            method,
-            payload.path,
-            response as OpenCodeResponseMetadata
-          )
-        : sessionPageLimit !== null
-          ? await this.formatPaginatedSessionsResponse(response, sessionPageLimit)
-          : await this.filterApiResponse(method, payload.path, response);
+      let data: unknown;
+      try {
+        data = paginatedMessages
+          ? await this.formatPaginatedMessagesResponse(
+              method,
+              payload.path,
+              response as OpenCodeResponseMetadata
+            )
+          : sessionPageLimit !== null
+            ? await this.formatPaginatedSessionsResponse(response, sessionPageLimit)
+            : await this.filterApiResponse(
+                method,
+                payload.path,
+                response,
+                pendingAttentionReconciliation
+              );
+      } finally {
+        if (pendingAttentionReconciliation) {
+          this.callbacks.sessionState.finishPendingAttentionReconciliation(
+            pendingAttentionReconciliation
+          );
+        }
+      }
       this.callbacks.postApiResponse(requestGeneration, {
         id: payload.id,
         data,
@@ -435,7 +476,7 @@ export class RestProxy {
     const url = new URL(path, 'http://localhost');
     if (url.pathname !== '/session' || !url.searchParams.has('limit')) return null;
     const limit = Number(url.searchParams.get('limit'));
-    return Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_SESSION_PAGE_LIMIT
+    return Number.isSafeInteger(limit) && limit > 0 && limit <= FULL_SESSION_LIST_LIMIT
       ? limit
       : null;
   }
@@ -592,7 +633,7 @@ export class RestProxy {
     if (cached && cached.expiresAt > now) {
       return cached.request;
     }
-    const request = this.callbacks.server.request('GET', '/session');
+    const request = this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH);
     const entry = {
       expiresAt: now + SESSION_SUMMARY_CACHE_TTL_MS,
       request,
@@ -630,7 +671,12 @@ export class RestProxy {
     return this.isHiddenSession(sessionID) ? sessionID : null;
   }
 
-  private async filterApiResponse(method: string, path: string, data: unknown) {
+  private async filterApiResponse(
+    method: string,
+    path: string,
+    data: unknown,
+    pendingAttentionReconciliation?: PendingAttentionReconciliation
+  ) {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
       this.rememberSessionList(data);
@@ -656,18 +702,30 @@ export class RestProxy {
       );
     }
     if (method === 'GET' && url.pathname === '/question' && Array.isArray(data)) {
-      return this.callbacks.sessionTrash.filterVisibleSessionRequests(
+      const requests = this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
           await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
+      this.callbacks.sessionState.reconcilePendingAttention(
+        'question',
+        requests,
+        pendingAttentionReconciliation
+      );
+      return requests;
     }
     if (method === 'GET' && url.pathname === '/permission' && Array.isArray(data)) {
-      return this.callbacks.sessionTrash.filterVisibleSessionRequests(
+      const requests = this.callbacks.sessionTrash.filterVisibleSessionRequests(
         this.callbacks.hiddenSessions.filterVisibleSessionRequests(
           await this.filterSessionRequestsForCurrentWorkspace(data as Array<{ sessionID: string }>)
         )
       );
+      this.callbacks.sessionState.reconcilePendingAttention(
+        'permission',
+        requests,
+        pendingAttentionReconciliation
+      );
+      return requests;
     }
     return data;
   }
@@ -757,7 +815,7 @@ export class RestProxy {
       return Promise.resolve(new Map(this.sessionDirectories));
     }
     return this.trackSessionDirectoryBootstrap(
-      this.callbacks.server.request('GET', '/session'),
+      this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH),
       true
     );
   }
@@ -958,10 +1016,9 @@ export class RestProxy {
   }
 
   private async moveSessionToRecycleBin(sessionID: string) {
-    const sessions = (await this.callbacks.server.request(
-      'GET',
-      `/session?limit=${MAX_SESSION_PAGE_LIMIT}`
-    )) as Array<Record<string, unknown>>;
+    const sessions = (await this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH)) as Array<
+      Record<string, unknown>
+    >;
     const entry = await this.callbacks.sessionTrash.moveToTrash(sessionID, sessions);
     if (!entry) {
       throw new Error('404 Session not found');

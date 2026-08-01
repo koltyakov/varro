@@ -160,6 +160,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
     queuedMessages: vi.fn(() => undefined),
+    flushPendingServerEvents: vi.fn(),
   };
 
   const session = new WebviewSession(
@@ -637,5 +638,22 @@ describe('WebviewSession', () => {
     session.postApiResponse({ id: 3 }, generation);
 
     expect(bridge.post).not.toHaveBeenCalled();
+  });
+
+  it('flushes pending server events before posting an API response', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+    const order: string[] = [];
+    deps.flushPendingServerEvents.mockImplementation(() => order.push('flush'));
+    bridge.post.mockImplementation(() => {
+      order.push('post');
+    });
+    await session.resolve(view as never);
+    bridge.post.mockClear();
+    order.length = 0;
+
+    session.postApiResponse({ id: 1, data: [] }, session.getRequestGeneration());
+
+    expect(order).toEqual(['flush', 'post']);
   });
 });

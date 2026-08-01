@@ -236,6 +236,29 @@ describe('areCompactionSettingsEqual', () => {
   });
 });
 
+describe('OpenCodeProcess port validation', () => {
+  it.each([0, -1, 1.5, 65_536, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid runtime port %s',
+    (port) => {
+      expect(() => new OpenCodeProcess(port, true)).toThrow('varro.server.port');
+    }
+  );
+
+  it('accepts both valid port boundaries', () => {
+    expect(new OpenCodeProcess(1, true).port).toBe(1);
+    expect(new OpenCodeProcess(65_535, true).port).toBe(65_535);
+  });
+
+  it('never advances a conflict fallback above port 65535', () => {
+    const manager = new OpenCodeProcess(65_534, true);
+
+    expect(manager.tryAdvancePort()).toBe(true);
+    expect(manager.port).toBe(65_535);
+    expect(manager.tryAdvancePort()).toBe(false);
+    expect(manager.port).toBe(65_535);
+  });
+});
+
 describe('OpenCodeProcess Windows termination', () => {
   it('taskkills only the known managed wrapper tree, then verifies the port is free', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });

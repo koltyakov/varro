@@ -124,6 +124,43 @@ describe('createComposerHistory', () => {
     expect(history.undo()).toMatchObject({ text: '' });
   });
 
+  it('replaces a paste entry with its asynchronously completed attachment state', () => {
+    const history = createComposerHistory();
+    history.record(snap('pasted text'));
+    history.replaceCurrent(
+      snap('pasted text [Image] ', 20, {
+        images: [image('img-1')],
+      })
+    );
+
+    expect(history.undo()).toEqual(snap(''));
+    expect(history.redo()).toMatchObject({
+      text: 'pasted text [Image] ',
+      images: [expect.objectContaining({ id: 'img-1' })],
+    });
+  });
+
+  it('rewrites an async transaction through later history entries without merging undo steps', () => {
+    const history = createComposerHistory();
+    const firstPaste = history.record(snap('First'));
+    history.record(snap('First Second'));
+
+    history.rewriteFrom(firstPaste, (snapshot) => ({
+      ...snapshot,
+      text: snapshot.text.replace('First', 'First [Image]'),
+      caret: snapshot.caret + ' [Image]'.length,
+      images: [image('img-1'), ...snapshot.images],
+    }));
+
+    expect(history.undo()).toMatchObject({
+      text: 'First [Image]',
+      images: [expect.objectContaining({ id: 'img-1' })],
+    });
+    expect(history.undo()).toEqual(snap(''));
+    expect(history.redo()).toMatchObject({ text: 'First [Image]' });
+    expect(history.redo()).toMatchObject({ text: 'First [Image] Second' });
+  });
+
   it('clears the redo tail on a new edit', () => {
     const history = createComposerHistory();
     history.record(snap('one'));

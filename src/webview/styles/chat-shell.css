@@ -154,11 +154,16 @@ input:focus-visible {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-anchor: none;
+  overflow-anchor: auto;
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
   padding: 0 0 8px 0;
   scrollbar-color: var(--color-vscode-chat-scrollbar-thumb) transparent;
+}
+
+.interactive-list.managed-scroll-anchor,
+.interactive-list.editing-message {
+  overflow-anchor: none;
 }
 
 .interactive-list.showing-model-picker {

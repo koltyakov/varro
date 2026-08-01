@@ -1,10 +1,58 @@
 import { createRoot } from 'solid-js';
-import { describe, expect, it } from 'vitest';
-import { getClientMocks, loadModules, provider, session } from './useOpenCode.test-support';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  getBridgeMocks,
+  getClientMocks,
+  loadModules,
+  provider,
+  session,
+} from './useOpenCode.test-support';
 
 const clientMocks = getClientMocks();
+const bridgeMocks = getBridgeMocks();
 
 describe('useOpenCode session control flows', () => {
+  it('handles a rejected abort requested by the command bridge', async () => {
+    let bridgeHandler: ((message: { type: string }) => void) | undefined;
+    bridgeMocks.onMessage.mockImplementation((handler) => {
+      bridgeHandler = handler as typeof bridgeHandler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.providerLimit.mockResolvedValue(null);
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.sessionAbort.mockRejectedValue(new Error('abort failed'));
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('sessionStatus', 'session-1', { type: 'busy' });
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({ type: 'command/abort' });
+
+      await vi.waitFor(() =>
+        expect(stateModule.error()).toBe('Failed to stop the run: abort failed')
+      );
+      expect(stateModule.state.sessionStatus['session-1']).toEqual({ type: 'busy' });
+    } finally {
+      dispose();
+    }
+  });
+
   it('ignores stale retry status updates after aborting a retrying session', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
     clientMocks.serverEventsOn.mockImplementation((event, handler) => {

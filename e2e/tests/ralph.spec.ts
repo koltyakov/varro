@@ -1,5 +1,172 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { getE2EState } from './helpers';
+
+async function openRalphForm(page: Page) {
+  await expect(page.locator('.chat-workspace')).toBeVisible();
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.fill('/ralph');
+  await expect(page.getByText('Start a Ralph loop on a plan document')).toBeVisible();
+  await composer.press('Enter');
+  await expect(page.locator('.ralph-form-card')).toBeVisible();
+  return composer;
+}
+
+test('start form behaves as a modal and restores focus on Escape', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  const composer = await openRalphForm(page);
+
+  const dialog = page.getByRole('dialog', { name: 'Start Ralph loop' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
+
+  await page.keyboard.press('Escape');
+
+  await expect(dialog).toHaveCount(0);
+  await expect(composer).toBeFocused();
+});
+
+test('start form keeps actions reachable while its model picker is open at short heights', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 600, height: 360 });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  await openRalphForm(page);
+
+  await page.getByRole('button', { name: /Advanced/ }).click();
+  await page.locator('.ralph-form-card .model-picker-btn').click();
+  await expect(page.locator('.ralph-form-card .dropdown-menu')).toBeVisible();
+
+  const layout = await page.locator('.ralph-form-card').evaluate((card) => {
+    const body = card.querySelector<HTMLElement>('.ralph-form-body');
+    const footer = card.querySelector<HTMLElement>('.ralph-form-footer');
+    if (!body || !footer) throw new Error('Ralph form layout is incomplete');
+    const cardBox = card.getBoundingClientRect();
+    const footerBox = footer.getBoundingClientRect();
+    return {
+      bodyOverflowY: getComputedStyle(body).overflowY,
+      bodyHasOverflow: body.scrollHeight > body.clientHeight,
+      cardTop: cardBox.top,
+      cardBottom: cardBox.bottom,
+      footerTop: footerBox.top,
+      footerBottom: footerBox.bottom,
+      viewportHeight: window.innerHeight,
+    };
+  });
+
+  expect(layout.bodyOverflowY).toBe('auto');
+  expect(layout.bodyHasOverflow).toBe(true);
+  expect(layout.cardTop).toBeGreaterThanOrEqual(0);
+  expect(layout.cardBottom).toBeLessThanOrEqual(layout.viewportHeight);
+  expect(layout.footerTop).toBeGreaterThanOrEqual(layout.cardTop);
+  expect(layout.footerBottom).toBeLessThanOrEqual(layout.viewportHeight);
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Start loop' })).toBeInViewport();
+});
+
+test('start form overlay leaves the wide desktop sessions pane uncovered', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.addInitScript(() => {
+    let initialState: unknown;
+    Object.defineProperty(window, '__initialWebviewState', {
+      configurable: true,
+      get: () => initialState,
+      set: (value: unknown) => {
+        initialState = {
+          ...(value as Record<string, unknown>),
+          desktopSessionPaneSide: 'right',
+        };
+      },
+    });
+  });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  await expect(page.locator('.chat-workspace')).toHaveClass(/chat-workspace-pane-right/);
+  await openRalphForm(page);
+
+  const overlay = page.locator('.ralph-form-overlay');
+  const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
+  const geometry = await page.evaluate(() => {
+    const overlayElement = document.querySelector<HTMLElement>('.ralph-form-overlay');
+    const sessionsElement = document.querySelector<HTMLElement>(
+      '.chat-session-sidebar[aria-label="Sessions"]'
+    );
+    if (!overlayElement || !sessionsElement) throw new Error('Desktop layout is incomplete');
+    const overlayBox = overlayElement.getBoundingClientRect();
+    const sessionsBox = sessionsElement.getBoundingClientRect();
+    return {
+      overlayRight: overlayBox.right,
+      sessionsLeft: sessionsBox.left,
+      sessionsWidth: sessionsBox.width,
+    };
+  });
+
+  await expect(overlay).toBeVisible();
+  await expect(sessionsPane).toBeVisible();
+  expect(geometry.sessionsWidth).toBeGreaterThan(0);
+  expect(Math.abs(geometry.overlayRight - geometry.sessionsLeft)).toBeLessThanOrEqual(1);
+});
+
+test('start form overlay leaves the default left sessions pane uncovered', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=slash-commands');
+  await expect(page.locator('.chat-workspace')).not.toHaveClass(/chat-workspace-pane-right/);
+  await openRalphForm(page);
+
+  const overlay = page.locator('.ralph-form-overlay');
+  const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
+  const geometry = await page.evaluate(() => {
+    const overlayElement = document.querySelector<HTMLElement>('.ralph-form-overlay');
+    const sessionsElement = document.querySelector<HTMLElement>(
+      '.chat-session-sidebar[aria-label="Sessions"]'
+    );
+    if (!overlayElement || !sessionsElement) throw new Error('Desktop layout is incomplete');
+    const overlayBox = overlayElement.getBoundingClientRect();
+    const sessionsBox = sessionsElement.getBoundingClientRect();
+    return {
+      overlayLeft: overlayBox.left,
+      sessionsRight: sessionsBox.right,
+      sessionsWidth: sessionsBox.width,
+    };
+  });
+
+  await expect(overlay).toBeVisible();
+  await expect(sessionsPane).toBeVisible();
+  expect(geometry.sessionsWidth).toBeGreaterThan(0);
+  expect(Math.abs(geometry.overlayLeft - geometry.sessionsRight)).toBeLessThanOrEqual(1);
+});
+
+test('start form blocks the uncovered sessions pane and restores it on close', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=command-events');
+  const composer = await openRalphForm(page);
+
+  const dialog = page.getByRole('dialog', { name: 'Start Ralph loop' });
+  const sessionsPane = page.getByRole('complementary', { name: 'Sessions' });
+  const targetSession = sessionsPane
+    .locator('.session-item')
+    .filter({ hasText: 'Build approval required' })
+    .getByRole('button')
+    .first();
+  await expect(targetSession).toBeVisible();
+  const targetBox = await targetSession.boundingBox();
+  if (!targetBox) throw new Error('Target session has no pointer geometry');
+
+  await page.mouse.click(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
+
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText('Host command events');
+  await expect(page.locator('.interactive-session')).toHaveAttribute('inert', '');
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await expect(page.locator('.interactive-session')).not.toHaveAttribute('inert', '');
+  await expect(composer).toBeFocused();
+  await targetSession.click();
+  await expect(page.locator('.chat-header-title-text').first()).toHaveText(
+    'Build approval required'
+  );
+});
 
 test('running dashboard shows status and iteration count', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=ralph-dashboard');

@@ -684,6 +684,614 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('MessageList history pagination', () => {
+  async function mountDeferredHistory(
+    initialMessages = [
+      {
+        info: userMessage('current-user'),
+        parts: [textPart('current-user-text', 'Current prompt')],
+      },
+      {
+        info: assistantMessage('current-assistant'),
+        parts: [textPart('current-assistant-text', 'Current response')],
+      },
+    ],
+    getMessageLayoutOffset: (messageId: string) => number = () => 0
+  ) {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const olderPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
+      {
+        info: assistantMessage('older-assistant'),
+        parts: [textPart('older-assistant-text', 'Older response')],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releasePage: ((page: typeof olderPage) => void) | undefined;
+    const pendingPage = new Promise<typeof olderPage>((resolve) => {
+      releasePage = resolve;
+    });
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValue(pendingPage);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, state.messages.length * 100);
+      }
+      if (this.dataset.msgId) {
+        const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);
+        const documentTop = index * 100 + getMessageLayoutOffset(this.dataset.msgId);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    replaceMessages(initialMessages);
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => 1200 + Math.max(0, state.messages.length - initialMessages.length) * 100,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    return {
+      animationFrames,
+      list,
+      getScrollTop: () => scrollTopValue,
+      setScrollTop: (value: number) => {
+        scrollTopValue = value;
+      },
+      async startLoad(top: number) {
+        list!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+        scrollTopValue = top;
+        list!.dispatchEvent(new Event('scroll'));
+        await vi.waitFor(() => {
+          expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+            limit: 50,
+            before: 'cursor-1',
+          });
+        });
+      },
+      async resolveLoad() {
+        releasePage?.(olderPage);
+        await vi.waitFor(() => {
+          expect(state.messages[0]?.info.id).toBe('older-user');
+        });
+        for (let frame = 0; frame < 3; frame += 1) {
+          await Promise.resolve();
+          animationFrames.flush();
+        }
+        await Promise.resolve();
+      },
+    };
+  }
+
+  it('keeps a pending history anchor after an upward wheel cannot move past the top boundary', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(0);
+
+    harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(200);
+    harness.animationFrames.restore();
+  });
+
+  it('updates pending history ownership for inertial movement after touch release', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+
+    const touchStart = new MouseEvent('pointerdown', { bubbles: true, button: 0 });
+    Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
+    Object.defineProperty(touchStart, 'isPrimary', { value: true });
+    harness.list.dispatchEvent(touchStart);
+    harness.setScrollTop(120);
+    harness.list.dispatchEvent(new Event('scroll'));
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+
+    harness.setScrollTop(160);
+    harness.list.dispatchEvent(new Event('scroll'));
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(360);
+    harness.animationFrames.restore();
+  });
+
+  it.each([
+    { name: 'ArrowUp', key: 'ArrowUp', shiftKey: false, nextTop: 0 },
+    { name: 'PageUp', key: 'PageUp', shiftKey: false, nextTop: 0 },
+    { name: 'Home', key: 'Home', shiftKey: false, nextTop: 0 },
+    { name: 'Shift+Space', key: ' ', shiftKey: true, nextTop: 0 },
+    { name: 'ArrowDown', key: 'ArrowDown', shiftKey: false, nextTop: 120 },
+    { name: 'PageDown', key: 'PageDown', shiftKey: false, nextTop: 420 },
+    { name: 'End', key: 'End', shiftKey: false, nextTop: 800 },
+    { name: 'Space', key: ' ', shiftKey: false, nextTop: 420 },
+  ])('transfers pending history ownership after $name movement', async (input) => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+    vi.advanceTimersByTime(600);
+
+    harness.list.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        key: input.key,
+        shiftKey: input.shiftKey,
+      })
+    );
+    harness.setScrollTop(input.nextTop);
+    harness.list.dispatchEvent(new Event('scroll'));
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(input.nextTop + 200);
+    harness.animationFrames.restore();
+  });
+
+  it('transfers pending history ownership for an actual scroll after input is idle', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+    vi.advanceTimersByTime(600);
+
+    harness.setScrollTop(140);
+    harness.list.dispatchEvent(new Event('scroll'));
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(340);
+    harness.animationFrames.restore();
+  });
+
+  it('transfers pending history ownership during a scrollbar pointer movement', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+    vi.advanceTimersByTime(600);
+
+    harness.list.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 })
+    );
+    harness.setScrollTop(140);
+    harness.list.dispatchEvent(new Event('scroll'));
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(340);
+    harness.animationFrames.restore();
+  });
+
+  it('transfers pending history ownership after an expansion correction', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    let expansionOffset = 0;
+    const harness = await mountDeferredHistory(
+      [
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+        { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+        { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+      ],
+      (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? expansionOffset : 0)
+    );
+    await harness.startLoad(20);
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
+    );
+    const expandedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    const expansionControl = document.createElement('button');
+    expansionControl.setAttribute('aria-expanded', 'false');
+    expansionControl.getBoundingClientRect = () =>
+      new DOMRect(0, 200 + expansionOffset - harness.getScrollTop(), 500, 20);
+    expandedRow.append(expansionControl);
+    expansionControl.click();
+
+    expansionOffset = 100;
+    layoutObserver!.callback(
+      [{ target: track } as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
+    harness.animationFrames.flush();
+    await Promise.resolve();
+    expect(harness.getScrollTop()).toBe(120);
+    const visibleRow = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    const visibleTopBefore =
+      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+
+    await harness.resolveLoad();
+
+    const visibleTopAfter =
+      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+    expect(visibleTopAfter).toBe(visibleTopBefore);
+    expect(harness.getScrollTop()).toBe(320);
+    harness.animationFrames.restore();
+  });
+
+  it('transfers pending history anchoring to the edited row through a prepend', async () => {
+    const harness = await mountDeferredHistory([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+    await harness.startLoad(20);
+
+    harness.setScrollTop(120);
+    harness.list.dispatchEvent(new Event('scroll'));
+    startEditingMessage('user-2', 'session-1', 'Prompt 2');
+    await Promise.resolve();
+    const editedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    const editedTopBefore =
+      editedRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+    await harness.resolveLoad();
+
+    const editedTopAfter =
+      editedRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+    expect(editedTopAfter).toBe(editedTopBefore);
+    expect(harness.getScrollTop()).toBe(320);
+    harness.animationFrames.restore();
+  });
+
+  it('permanently yields pending history restoration to an explicit bottom-follow request', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    harness.animationFrames.flush();
+    await Promise.resolve();
+    expect(harness.getScrollTop()).toBe(800);
+
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(1000);
+    harness.animationFrames.restore();
+  });
+
+  it('does not reuse a pending history load or anchor after switching A to B and back to A', async () => {
+    const sessionOneMessages = [
+      {
+        info: userMessage('current-user'),
+        parts: [textPart('current-user-text', 'Current prompt')],
+      },
+      {
+        info: assistantMessage('current-assistant'),
+        parts: [textPart('current-assistant-text', 'Current response')],
+      },
+    ];
+    const harness = await mountDeferredHistory(sessionOneMessages);
+    await harness.startLoad(20);
+
+    setState('activeSessionId', 'session-2');
+    replaceMessages([
+      {
+        info: { ...userMessage('session-2-user'), sessionID: 'session-2' },
+        parts: [{ ...textPart('session-2-text', 'Session 2'), sessionID: 'session-2' }],
+      },
+    ]);
+    await Promise.resolve();
+    harness.animationFrames.flush();
+    await Promise.resolve();
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(sessionOneMessages);
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.animationFrames.flush();
+    await Promise.resolve();
+    const staleLoadShown = container
+      ?.querySelector('.message-history-banner')
+      ?.classList.contains('is-loading');
+
+    expect(harness.getScrollTop()).toBe(800);
+    await harness.resolveLoad();
+
+    expect(staleLoadShown).toBe(false);
+    expect(harness.getScrollTop()).toBe(1000);
+    harness.animationFrames.restore();
+  });
+
+  it('invalidates pending history state before a late response resolves after cleanup', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+
+    cleanup?.();
+    cleanup = undefined;
+    await Promise.resolve();
+    await harness.resolveLoad();
+
+    expect(harness.getScrollTop()).toBe(20);
+    harness.animationFrames.restore();
+  });
+
+  it('preserves a DOM anchor when a history prepend crosses from 49 to 50 rows', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const olderPage = [
+      {
+        info: userMessage('older-boundary'),
+        parts: [textPart('older-boundary-text', 'A taller older boundary row')],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releasePage: ((page: typeof olderPage) => void) | undefined;
+    const pendingPage = new Promise<typeof olderPage>((resolve) => {
+      releasePage = resolve;
+    });
+    vi.spyOn(client.session, 'messages').mockReturnValue(pendingPage);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    const olderBoundaryId = olderPage[0]!.info.id;
+    const olderLoaded = () => state.messages[0]?.info.id === olderBoundaryId;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, olderLoaded() ? 5200 : 4900);
+      }
+      if (this.dataset.msgId === 'older-boundary') {
+        return new DOMRect(0, -scrollTopValue, 500, 300);
+      }
+      if (this.dataset.msgId?.startsWith('current-')) {
+        const index = Number(this.dataset.msgId.replace('current-', ''));
+        const documentTop = index * 100 + (olderLoaded() ? 300 : 0);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-49');
+    replaceMessages(
+      Array.from({ length: 49 }, (_, index) => {
+        const messageId = `current-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`${messageId}-text`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => (olderLoaded() ? 5400 : 4900),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    scrollTopValue = 20;
+    list.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      expect(client.session.messages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-49',
+      });
+    });
+    const anchorBefore = container
+      ?.querySelector<HTMLElement>('[data-msg-id="current-0"]')
+      ?.getBoundingClientRect().top;
+
+    releasePage?.(olderPage);
+    await vi.waitFor(() => expect(olderLoaded()).toBe(true));
+    for (let frame = 0; frame < 3; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    await Promise.resolve();
+
+    const anchorAfter = container
+      ?.querySelector<HTMLElement>('[data-msg-id="current-0"]')
+      ?.getBoundingClientRect().top;
+    expect(anchorAfter).toBe(anchorBefore);
+    expect(scrollTopValue).toBe(320);
+    animationFrames.restore();
+  });
+
+  it.each([
+    { interaction: 'without later user interaction', userScrollTop: null, expectedScrollTop: 220 },
+    {
+      interaction: 'after the user scrolls while loading',
+      userScrollTop: 120,
+      expectedScrollTop: 320,
+    },
+  ])('anchors a history prepend $interaction', async ({ userScrollTop, expectedScrollTop }) => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const olderPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
+      {
+        info: assistantMessage('older-assistant'),
+        parts: [textPart('older-assistant-text', 'Older response')],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releasePage: ((page: typeof olderPage) => void) | undefined;
+    const pendingPage = new Promise<typeof olderPage>((resolve) => {
+      releasePage = resolve;
+    });
+    vi.spyOn(client.session, 'messages').mockReturnValue(pendingPage);
+
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, state.messages.length * 100);
+      }
+      if (this.dataset.msgId) {
+        const index = state.messages.findIndex((message) => message.info.id === this.dataset.msgId);
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    replaceMessages([
+      {
+        info: userMessage('current-user'),
+        parts: [textPart('current-user-text', 'Current prompt')],
+      },
+      {
+        info: assistantMessage('current-assistant'),
+        parts: [textPart('current-assistant-text', 'Current response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => 1200 + Math.max(0, state.messages.length - 2) * 100,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    scrollTopValue = 20;
+    list.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      expect(client.session.messages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-1',
+      });
+    });
+
+    if (userScrollTop !== null) {
+      list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+      scrollTopValue = userScrollTop;
+      list.dispatchEvent(new Event('scroll'));
+    }
+
+    releasePage?.(olderPage);
+    await vi.waitFor(() => {
+      expect(state.messages[0]?.info.id).toBe('older-user');
+    });
+    animationFrames.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(expectedScrollTop);
+    animationFrames.restore();
+  });
+
+  it('does not let one session pagination request lock another session', async () => {
+    const pageFor = (sessionId: string, messageId: string) =>
+      [
+        {
+          info: { ...userMessage(messageId), sessionID: sessionId },
+          parts: [{ ...textPart(`${messageId}-text`, 'Older prompt'), sessionID: sessionId }],
+        },
+      ] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseFirstPage: ((page: ReturnType<typeof pageFor>) => void) | undefined;
+    const firstPage = new Promise<ReturnType<typeof pageFor>>((resolve) => {
+      releaseFirstPage = resolve;
+    });
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockImplementation((sessionId) => {
+      if (sessionId === 'session-1') return firstPage;
+      return Promise.resolve(pageFor('session-2', 'session-2-older'));
+    });
+
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    markSessionHistoryLoadFailed('session-1', true);
+    replaceMessages([
+      { info: userMessage('session-1-current'), parts: [textPart('session-1-text', 'Current')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
+    await vi.waitFor(() => {
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', { limit: 50, before: 'cursor-1' });
+    });
+
+    setSessionHistoryCursor('session-2', 'cursor-2');
+    markSessionHistoryLoadFailed('session-2', true);
+    setState('activeSessionId', 'session-2');
+    replaceMessages([
+      {
+        info: { ...userMessage('session-2-current'), sessionID: 'session-2' },
+        parts: [{ ...textPart('session-2-text', 'Current'), sessionID: 'session-2' }],
+      },
+    ]);
+    await Promise.resolve();
+
+    const secondRetry = container?.querySelector<HTMLButtonElement>(
+      '.message-history-banner-retry'
+    );
+    const secondRetryEnabled = secondRetry?.disabled === false;
+    secondRetry?.click();
+    await Promise.resolve();
+    const secondSessionRequested = messagesSpy.mock.calls.some(
+      ([sessionId]) => sessionId === 'session-2'
+    );
+
+    releaseFirstPage?.(pageFor('session-1', 'session-1-older'));
+    await Promise.resolve();
+
+    expect(secondRetryEnabled).toBe(true);
+    expect(secondSessionRequested).toBe(true);
+  });
+});
+
 describe('MessageList prompt numbers', () => {
   it('numbers user prompts in transcript order', () => {
     const numbers = getPromptNumberMap([
@@ -3163,6 +3771,91 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('suspends bottom follow on edit entry until an explicit follow request', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let scrollHeightValue = 1200;
+    let trackHeight = 1200;
+    const assignedScrollTops: number[] = [];
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId === 'user-2') {
+        return new DOMRect(0, 700 - scrollTopValue, 500, 80);
+      }
+      return new DOMRect(0, 0, 500, 100);
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        assignedScrollTops.push(value);
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(800);
+
+    startEditingMessage('user-2', 'session-1', 'Prompt 2');
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(692);
+
+    trackHeight = 1400;
+    scrollHeightValue = 1400;
+    setState('streamingPartId', 'text-4');
+    setState('streamingText', 'Streaming growth while editing');
+    await Promise.resolve();
+
+    expect(assignedScrollTops).not.toContain(1000);
+    expect(scrollTopValue).toBe(692);
+
+    resetMessageEditState();
+    trackHeight = 1600;
+    scrollHeightValue = 1600;
+    setState('streamingText', 'More streaming growth after edit cancellation');
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(assignedScrollTops).not.toContain(1200);
+    expect(scrollTopValue).toBe(692);
+
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(1200);
+    animationFrames.restore();
+  });
+
   it('shows the prompt that belongs to the response currently in view', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
@@ -4497,6 +5190,267 @@ describe('MessageList auto-scroll', () => {
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(40);
     expect(container?.querySelector('.virtual-spacer-top')).toBeTruthy();
 
+    animationFrames.restore();
+  });
+
+  it('does not give an explicitly render-empty row a provisional virtual height', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 4900);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 0 ? 0 : 100;
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts:
+            index === 0
+              ? []
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 4900 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    expect(
+      container?.querySelector('.interactive-list-track')?.classList.contains('virtualized')
+    ).toBe(true);
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 3000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId).toBe(
+      'assistant-16'
+    );
+    animationFrames.restore();
+  });
+
+  it('retains the prior height when a rendered nonempty row reports a transient zero', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, 5000);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
+    const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
+    expect(firstRow.childElementCount).toBeGreaterThan(0);
+    expect(rowObserver).toBeDefined();
+    rowObserver!.callback(
+      [
+        {
+          target: firstRow,
+          borderBoxSize: [{ blockSize: 0, inlineSize: 500 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 3000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector<HTMLElement>('[data-msg-id]')?.dataset.msgId).toBe(
+      'assistant-15'
+    );
+    animationFrames.restore();
+  });
+
+  it('remounts and remeasures a cached zero-height row after it gains content', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      const zeroRowHasContent =
+        state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length !== 0;
+      const trackHeight = zeroRowHasContent ? 5000 : 4900;
+      if (this === list || this.classList.contains('interactive-list')) {
+        return new DOMRect(0, 0, 500, 400);
+      }
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      if (this.dataset.msgId) {
+        const index = Number(this.dataset.msgId.replace('assistant-', ''));
+        const height = index === 30 && !zeroRowHasContent ? 0 : 100;
+        const documentTop = index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
+        return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts:
+            index === 30
+              ? []
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () =>
+        state.messages.find((message) => message.info.id === 'assistant-30')?.parts.length
+          ? 5000
+          : 4900,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    scrollTopValue = 4450;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
+
+    let emptyRowRemounted = false;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    const mutationObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            (node.dataset.msgId === 'assistant-30' ||
+              node.querySelector('[data-msg-id="assistant-30"]'))
+          ) {
+            emptyRowRemounted = true;
+          }
+        }
+      }
+    });
+    mutationObserver.observe(track, { childList: true, subtree: true });
+    upsertPart({
+      ...textPart('text-0-extra', 'An unrelated message changed'),
+      messageID: 'assistant-0',
+    });
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(emptyRowRemounted).toBe(false);
+
+    upsertPart({
+      ...textPart('text-30', 'Content appeared after the zero-height row unmounted'),
+      messageID: 'assistant-30',
+    });
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeInstanceOf(HTMLDivElement);
+    mutationObserver.disconnect();
     animationFrames.restore();
   });
 

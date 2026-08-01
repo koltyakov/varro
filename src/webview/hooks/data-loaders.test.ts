@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, QuestionRequest, Session, SessionStatus } from '../types';
-import { setState } from '../lib/state';
-import { provider, session } from './useOpenCode.test-support';
+import {
+  getPersistedSelectedModel,
+  getSelectedModelForSession,
+  resetDefaultAppState,
+  setPersistentShowSessionPicker,
+  setSelectedModel as setStateSelectedModel,
+  setState,
+  state,
+} from '../lib/state';
+import { getClientMocks, provider, session } from './useOpenCode.test-support';
 import {
   createDataLoaderOperations,
+  createStateBoundDataLoaderOperations,
   hydrateSessionStatusesWithDependencies,
   loadAgentsWithDependencies,
   loadCommandsWithDependencies,
@@ -27,12 +36,14 @@ const buildAgent = (name: string): Agent => ({
 });
 
 type DataLoaderDependencies = Parameters<typeof createDataLoaderOperations>[0];
+const clientMocks = getClientMocks();
 
 function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): DataLoaderDependencies {
   return {
     listMcpStatus: async () => ({}),
     setMcpStatus: vi.fn(),
     getActiveSessionId: () => null,
+    getComposerSessionId: () => null,
     getSelectedMcpsForSession: () => null,
     setSelectedMcpsForSession: vi.fn(),
     listQuestions: async () => [],
@@ -52,6 +63,7 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     setProviders: vi.fn(),
     setProviderDefaults: vi.fn(),
     getSelectedModel: () => null,
+    getSelectedModelForSession: () => null,
     setSelectedModel: vi.fn(),
     loadProviderLimit: async () => ({
       providerID: 'openai',
@@ -78,6 +90,16 @@ function createLoaderDeps(overrides: Partial<DataLoaderDependencies> = {}): Data
     logError: vi.fn(),
     ...overrides,
   };
+}
+
+function createStateBoundLoader() {
+  return createStateBoundDataLoaderOperations({
+    applySessions: vi.fn(),
+    updateUsageLimitState: vi.fn(),
+    logError: (_context, error) => {
+      throw error;
+    },
+  });
 }
 
 function deferred<T>() {
@@ -295,7 +317,7 @@ describe('data loaders', () => {
           setProviders: vi.fn(),
           setProviderDefaults: vi.fn(),
           getSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
-          getActiveSessionId: () => 'session-1',
+          getComposerSessionId: () => 'session-1',
           setSelectedModel,
         },
         vi.fn()
@@ -305,6 +327,179 @@ describe('data loaders', () => {
     } finally {
       setState('hiddenModels', []);
     }
+  });
+
+  it('preserves a hidden active-session model through provider operation wiring', async () => {
+    const setSelectedModel = vi.fn();
+    setState('hiddenModels', ['openai:gpt-5']);
+
+    try {
+      const operations = createDataLoaderOperations(
+        createLoaderDeps({
+          getComposerSessionId: () => 'session-1',
+          getSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
+          listProviders: async () => ({
+            providers: [
+              provider('openai', {
+                'gpt-5': {
+                  id: 'gpt-5',
+                  name: 'GPT-5',
+                  capabilities: { toolcall: true },
+                  cost: { input: 0, output: 0 },
+                },
+              }),
+            ],
+            default: { openai: 'gpt-5' },
+          }),
+          setSelectedModel,
+        })
+      );
+
+      await operations.loadProviders();
+
+      expect(setSelectedModel).not.toHaveBeenCalled();
+    } finally {
+      setState('hiddenModels', []);
+    }
+  });
+
+  it('does not persist active-session model reconciliation as the global default', async () => {
+    const setSelectedModel = vi.fn();
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        getComposerSessionId: () => 'session-1',
+        getSelectedModel: () => ({ providerID: 'missing', modelID: 'removed' }),
+        listProviders: async () => ({
+          providers: [provider('openai', {})],
+          default: {},
+        }),
+        setSelectedModel,
+      })
+    );
+
+    await operations.loadProviders();
+
+    expect(setSelectedModel).toHaveBeenCalledWith(null, {
+      persistGlobal: false,
+    });
+  });
+
+  it('restores a preserved session model after an incomplete provider snapshot is retried', async () => {
+    const persistedModel = { providerID: 'openai', modelID: 'gpt-5' };
+    let selectedModel: typeof persistedModel | null = persistedModel;
+    let providers = [provider('openai', {})];
+    const setSelectedModel = vi.fn(
+      (
+        model: typeof persistedModel | null,
+        options?: { sessionId?: string | null; persistGlobal?: boolean }
+      ) => {
+        selectedModel = model;
+        expect(options?.sessionId).toBeUndefined();
+      }
+    );
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        getComposerSessionId: () => 'session-1',
+        getSelectedModel: () => selectedModel,
+        getSelectedModelForSession: () => persistedModel,
+        listProviders: async () => ({ providers, default: {} }),
+        setSelectedModel,
+      })
+    );
+
+    await operations.loadProviders();
+
+    expect(selectedModel).toBeNull();
+    expect(setSelectedModel).toHaveBeenLastCalledWith(null, { persistGlobal: false });
+
+    providers = [
+      provider('openai', {
+        'gpt-5': {
+          id: 'gpt-5',
+          name: 'GPT-5',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+    await operations.loadProviders();
+
+    expect(selectedModel).toEqual(persistedModel);
+    expect(setSelectedModel).toHaveBeenLastCalledWith(persistedModel, { persistGlobal: false });
+  });
+
+  describe('state-bound provider loading', () => {
+    const globalModel = { providerID: 'openai', modelID: 'gpt-global' };
+    const sessionModel = { providerID: 'openai', modelID: 'gpt-session' };
+    const loadedProvider = provider('openai', {
+      'gpt-global': {
+        id: 'gpt-global',
+        name: 'GPT Global',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      'gpt-session': {
+        id: 'gpt-session',
+        name: 'GPT Session',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    });
+
+    beforeEach(() => {
+      window.localStorage.clear();
+      resetDefaultAppState();
+      clientMocks.providerList.mockResolvedValue({
+        providers: [loadedProvider],
+        default: { openai: globalModel.modelID },
+      });
+    });
+
+    afterEach(() => {
+      window.localStorage.clear();
+      resetDefaultAppState();
+    });
+
+    function selectSessionModel() {
+      setStateSelectedModel({ ...globalModel });
+      setState('activeSessionId', 'session-1');
+      setStateSelectedModel({ ...sessionModel }, { sessionId: 'session-1', persistGlobal: false });
+    }
+
+    it('keeps the global draft model when the session picker retains an active session', async () => {
+      selectSessionModel();
+      setPersistentShowSessionPicker(true);
+      expect(state.activeSessionId).toBe('session-1');
+      expect(state.selectedModel).toEqual(globalModel);
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(globalModel);
+      expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(globalModel);
+    });
+
+    it('restores the scoped model when the active session owns the composer', async () => {
+      selectSessionModel();
+      setStateSelectedModel(null, { persistGlobal: false });
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(globalModel);
+    });
+
+    it('preserves a hidden model owned by the active composer session', async () => {
+      selectSessionModel();
+      setState('hiddenModels', ['openai:gpt-session']);
+
+      await createStateBoundLoader().loadProviders();
+
+      expect(state.selectedModel).toEqual(sessionModel);
+      expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
+      expect(getPersistedSelectedModel()).toEqual(globalModel);
+    });
   });
 
   it('initializes model visibility only for providers connected after the initial load', async () => {

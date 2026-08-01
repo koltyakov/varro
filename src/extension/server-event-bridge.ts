@@ -12,6 +12,7 @@ type PostMessage = (message: ExtensionMessage) => void;
 
 const UNKNOWN_EVENT_LOG_INTERVAL_MS = 60_000;
 const MAX_TRACKED_UNKNOWN_EVENT_TYPES = 100;
+const MAX_TRACKED_EVENT_IDS = 1_024;
 const DELTA_BATCH_INTERVAL_MS = 16;
 const MAX_BATCHED_DELTA_FRAGMENTS = 256;
 const MAX_BATCHED_DELTA_CHARACTERS = 64 * 1024;
@@ -27,12 +28,18 @@ type PendingDelta = CoalescableDelta & {
   fragmentCount: number;
 };
 
+type RecentEventState = {
+  sequenceObserved: boolean;
+  forwarded: boolean;
+};
+
 export class ServerEventBridge {
   private readonly statusBarItem: vscode.StatusBarItem;
   private status: ServerStatus = { state: 'stopped' };
   private serverStatusHandler: ((status: ServerStatus) => void) | undefined;
   private serverEventHandler: ((event: unknown) => void) | undefined;
   private readonly unknownEventLoggedAt = new Map<string, number>();
+  private readonly recentEvents = new Map<string, RecentEventState>();
   private pendingDelta: PendingDelta | undefined;
   private pendingDeltaTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -68,6 +75,10 @@ export class ServerEventBridge {
     return this.statusBarItem;
   }
 
+  flushPendingEvents() {
+    this.flushPendingDelta();
+  }
+
   attach() {
     this.serverStatusHandler = (status: ServerStatus) => {
       this.flushPendingDelta();
@@ -87,16 +98,7 @@ export class ServerEventBridge {
         this.logUnknownEvent(event);
         return;
       }
-      const delta = getCoalescableDelta(parsed);
-      if (!delta || this.pendingDelta?.key !== delta.key) this.flushPendingDelta();
-      this.hiddenSessions.observeEvent?.(parsed);
-      if (this.shouldSuppress(parsed) || this.shouldSuppressWorkspace(parsed)) {
-        this.flushPendingDelta();
-        return;
-      }
-      this.sessionState.handleServerEvent(parsed);
-      if (delta) this.enqueueDelta(parsed, delta);
-      else this.post({ type: 'server/event', payload: parsed });
+      this.acceptParsedEvent(parsed);
     };
 
     this.server.on('status', this.serverStatusHandler);
@@ -113,7 +115,50 @@ export class ServerEventBridge {
     void this.sessionState.persist();
     await this.sessionState.flush();
     this.unknownEventLoggedAt.clear();
+    this.recentEvents.clear();
     this.statusBarItem.dispose();
+  }
+
+  private acceptParsedEvent(event: ServerEvent) {
+    let recent: RecentEventState | undefined;
+    if (event.id) {
+      recent = this.recentEvents.get(event.id);
+      if (recent) {
+        // A direct compatibility event may precede its sequenced sync twin. Forward
+        // only the new cursor so the webview does not replay the mutation.
+        if (event.seq !== undefined && !recent.sequenceObserved) {
+          recent.sequenceObserved = true;
+          if (recent.forwarded) {
+            this.flushPendingDelta();
+            this.post({
+              type: 'server/event',
+              payload: { ...event, sequenceOnly: true } as ServerEvent,
+            });
+          }
+        }
+        return;
+      }
+
+      recent = { sequenceObserved: event.seq !== undefined, forwarded: false };
+      this.recentEvents.set(event.id, recent);
+      while (this.recentEvents.size > MAX_TRACKED_EVENT_IDS) {
+        const oldestId = this.recentEvents.keys().next().value;
+        if (oldestId === undefined) break;
+        this.recentEvents.delete(oldestId);
+      }
+    }
+
+    const delta = getCoalescableDelta(event);
+    if (!delta || this.pendingDelta?.key !== delta.key) this.flushPendingDelta();
+    this.hiddenSessions.observeEvent?.(event);
+    if (this.shouldSuppress(event) || this.shouldSuppressWorkspace(event)) {
+      this.flushPendingDelta();
+      return;
+    }
+    this.sessionState.handleServerEvent(event);
+    if (recent) recent.forwarded = true;
+    if (delta) this.enqueueDelta(event, delta);
+    else this.post({ type: 'server/event', payload: event });
   }
 
   private enqueueDelta(event: ServerEvent, delta: CoalescableDelta) {

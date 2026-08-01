@@ -19,6 +19,7 @@ const stateMock = vi.hoisted(() => ({
   messages: [],
   queuedMessages: [],
   sessionStatus: {},
+  desktopSessionPaneSide: 'left' as 'left' | 'right',
   editorContext: {
     workspacePath: null,
     activeFile: null,
@@ -46,6 +47,7 @@ vi.mock('../../lib/client', () => ({
 }));
 
 vi.mock('../../lib/state', () => ({
+  desktopSessionPaneSide: () => stateMock.desktopSessionPaneSide,
   getStoredVariantForModel: vi.fn(() => null),
   getVisibleProviders: vi.fn((providers) => providers),
   isSessionAwaitingInput: vi.fn(() => false),
@@ -98,6 +100,7 @@ beforeEach(() => {
   stateMock.messages = [];
   stateMock.queuedMessages = [];
   stateMock.sessionStatus = {};
+  stateMock.desktopSessionPaneSide = 'left';
   stateMock.editorContext.workspacePath = null;
   stateMock.editorContext.activeFile = null;
   container = document.createElement('div');
@@ -115,6 +118,59 @@ afterEach(() => {
 });
 
 describe('RalphForm', () => {
+  it('is a labelled modal and moves focus to its first control', async () => {
+    cleanup = render(() => RalphForm(), container!);
+    await flushMicrotasks();
+
+    const dialog = document.body.querySelector<HTMLElement>('.ralph-form-card');
+    const title = document.body.querySelector<HTMLElement>('.ralph-form-title');
+    const closeButton = document.body.querySelector<HTMLButtonElement>('.ralph-form-close');
+
+    expect(dialog?.getAttribute('role')).toBe('dialog');
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    expect(title?.id).not.toBe('');
+    expect(dialog?.getAttribute('aria-labelledby')).toBe(title?.id);
+    expect(document.activeElement).toBe(closeButton);
+  });
+
+  it('keeps Tab inside the modal and restores focus when it closes', async () => {
+    container!.tabIndex = -1;
+    container!.focus();
+    cleanup = render(() => RalphForm(), container!);
+    await flushMicrotasks();
+
+    const dialog = document.body.querySelector<HTMLElement>('.ralph-form-card');
+    const closeButton = document.body.querySelector<HTMLButtonElement>('.ralph-form-close');
+    const startButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('button')
+    ).find((button) => button.textContent?.trim() === 'Start loop');
+    expect(dialog).toBeInstanceOf(HTMLElement);
+    expect(startButton).toBeInstanceOf(HTMLButtonElement);
+
+    startButton?.focus();
+    startButton?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    );
+
+    expect(document.activeElement).toBe(closeButton);
+
+    closeButton?.click();
+
+    expect(document.body.querySelector('.ralph-form-overlay')).toBeNull();
+    expect(document.activeElement).toBe(container);
+  });
+
+  it('makes the session UI inert until the modal closes', () => {
+    container!.className = 'interactive-session';
+    cleanup = render(() => RalphForm(), container!);
+
+    expect(container?.hasAttribute('inert')).toBe(true);
+
+    document.body.querySelector<HTMLButtonElement>('.ralph-form-close')?.click();
+
+    expect(container?.hasAttribute('inert')).toBe(false);
+  });
+
   it('does not close when the backdrop is clicked', () => {
     cleanup = render(() => RalphForm(), container!);
 
@@ -127,13 +183,41 @@ describe('RalphForm', () => {
     expect(ralphStore.showRalphForm()).toBe(true);
   });
 
-  it('does not close when Escape is pressed', () => {
+  it('closes on Escape and restores focus to the opener', async () => {
+    container!.tabIndex = -1;
+    container!.focus();
     cleanup = render(() => RalphForm(), container!);
+    await flushMicrotasks();
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
 
-    expect(document.body.querySelector('.ralph-form-overlay')).toBeInstanceOf(HTMLDivElement);
-    expect(ralphStore.showRalphForm()).toBe(true);
+    expect(document.body.querySelector('.ralph-form-overlay')).toBeNull();
+    expect(ralphStore.showRalphForm()).toBe(false);
+    expect(document.activeElement).toBe(container);
+  });
+
+  it('closes a nested picker before closing the modal and resets it for the next open', async () => {
+    cleanup = render(() => RalphForm(), container!);
+    await flushMicrotasks();
+
+    document.body
+      .querySelector<HTMLButtonElement>('.ralph-form-card .model-picker-btn')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushMicrotasks();
+    expect(document.body.querySelector('.ralph-form-card .dropdown-menu')).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+
+    expect(document.body.querySelector('.ralph-form-overlay')).not.toBeNull();
+    expect(document.body.querySelector('.ralph-form-card .dropdown-menu')).toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    expect(document.body.querySelector('.ralph-form-overlay')).toBeNull();
+
+    ralphStore.setShowRalphForm(true);
+    await flushMicrotasks();
+    expect(document.body.querySelector('.ralph-form-overlay')).not.toBeNull();
+    expect(document.body.querySelector('.ralph-form-card .dropdown-menu')).toBeNull();
   });
 
   it('still closes from the explicit cancel button', () => {

@@ -12,6 +12,16 @@
   padding: 16px;
 }
 
+@media (min-width: 1400px) {
+  .ralph-form-overlay-pane-right {
+    right: var(--chat-sidebar-width, 420px);
+  }
+
+  .ralph-form-overlay-pane-left {
+    left: var(--chat-sidebar-width, 420px);
+  }
+}
+
 .ralph-form-card {
   /* The overlay is fixed-position, so it renders outside `.interactive-session`
      and has to restate the chat aliases — but from the same scale, not its own. */
@@ -32,6 +42,7 @@
 
 .ralph-form-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
@@ -59,13 +70,11 @@
 .ralph-form-body {
   padding: 14px;
   display: flex;
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
-}
-
-.ralph-form-body.showing-model-picker {
-  overflow: visible;
+  overscroll-behavior-y: contain;
 }
 
 .ralph-form-field {
@@ -286,6 +295,7 @@
 
 .ralph-form-footer {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 14px;

@@ -141,7 +141,12 @@ import {
 } from './session/session-event-handlers';
 import { setShowSessionPicker } from '../lib/state';
 
-type EventData = { properties?: Record<string, unknown>; seq?: number };
+type EventData = {
+  type?: string;
+  properties?: Record<string, unknown>;
+  seq?: number;
+  sequenceOnly?: true;
+};
 
 function installHandlers() {
   const handlers = new Map<string, (data: EventData) => void>();
@@ -153,6 +158,16 @@ function installHandlers() {
     };
   });
   return handlers;
+}
+
+function emitServerEvent(
+  handlers: Map<string, (data: EventData) => void>,
+  eventName: string,
+  data: Omit<EventData, 'type'>
+) {
+  const event = { ...data, type: eventName };
+  handlers.get(eventName)?.(event);
+  handlers.get('*')?.(event);
 }
 
 function createDefaultDeps(
@@ -1958,8 +1973,44 @@ describe('registerSessionEventHandlers', () => {
     await vi.waitFor(() => expect(syncSessionMessages).toHaveBeenCalledTimes(2));
   });
 
-  it('resyncs active messages when a v2 sequence gap reveals a missed event', () => {
+  it('does not run a trailing transcript sync after cleanup', async () => {
     const handlers = installHandlers();
+    let resolveFirstSync: (() => void) | undefined;
+    const syncSessionMessages = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstSync = resolve;
+          })
+      )
+      .mockResolvedValue(undefined);
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('session.next.shell.started')?.({
+      properties: { sessionID: 'session-1', messageID: 'message-1', callID: 'call-1' },
+      seq: 1,
+    });
+    handlers.get('session.next.shell.ended')?.({
+      properties: { sessionID: 'session-1', callID: 'call-1', output: 'done' },
+      seq: 2,
+    });
+    for (const cleanup of cleanups) cleanup();
+
+    resolveFirstSync?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+  });
+
+  it('reconciles session metadata and messages when a sequence gap reveals a missed event', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
     const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
 
@@ -1967,6 +2018,7 @@ describe('registerSessionEventHandlers', () => {
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
         getMessages: () => [assistantEntry],
+        syncSession,
         syncSessionMessages,
       })
     );
@@ -1981,8 +2033,577 @@ describe('registerSessionEventHandlers', () => {
       seq: 3,
     });
 
-    expect(syncSessionMessages).toHaveBeenCalledTimes(1);
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSession).toHaveBeenCalledWith('session-1', expect.anything());
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('reconciles a gap observed from sequence-only upgrades', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const upsertSession = vi.fn();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({ syncSession, syncSessionMessages, upsertSession })
+    );
+
+    for (const seq of [1, 3]) {
+      handlers.get('*')?.({
+        type: 'session.updated',
+        properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+        seq,
+        sequenceOnly: true,
+      });
+    }
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(upsertSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed gap dirty and retries both reconciliations on a later durable event', async () => {
+    const handlers = installHandlers();
+    const failure = new Error('metadata unavailable');
+    const syncSession = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const logError = vi.fn();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages,
+        logError,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 3,
+    });
+
+    await vi.waitFor(() => {
+      expect(syncSession).toHaveBeenCalledOnce();
+      expect(syncSessionMessages).toHaveBeenCalledOnce();
+      expect(logError).toHaveBeenCalledWith('syncSession', failure);
+    });
+
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-2' },
+      seq: 4,
+    });
+    await vi.waitFor(() => {
+      expect(syncSession).toHaveBeenCalledTimes(2);
+      expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    });
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-2' },
+      seq: 5,
+    });
+    await Promise.resolve();
+
+    expect(syncSession).toHaveBeenCalledTimes(2);
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces later durable events while gap reconciliation is in flight', async () => {
+    const handlers = installHandlers();
+    let rejectSession: ((error: Error) => void) | undefined;
+    let resolveMessages: (() => void) | undefined;
+    const syncSession = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSession = reject;
+          })
+      )
+      .mockResolvedValue(undefined);
+    const syncSessionMessages = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveMessages = resolve;
+          })
+      )
+      .mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+
+    for (const seq of [1, 3, 4, 5]) {
+      emitServerEvent(handlers, 'session.next.step.started', {
+        properties: { sessionID: 'background-session', assistantMessageID: `assistant-${seq}` },
+        seq,
+      });
+    }
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+
+    rejectSession?.(new Error('offline'));
+    resolveMessages?.();
+    await vi.waitFor(() => {
+      expect(syncSession).toHaveBeenCalledTimes(2);
+      expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    });
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-5' },
+      seq: 6,
+    });
+
+    expect(syncSession).toHaveBeenCalledTimes(2);
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs one trailing reconciliation after a durable event arrives during success', async () => {
+    const handlers = installHandlers();
+    let resolveSession: (() => void) | undefined;
+    let resolveMessages: (() => void) | undefined;
+    const syncSession = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSession = resolve;
+          })
+      )
+      .mockResolvedValue(undefined);
+    const syncSessionMessages = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveMessages = resolve;
+          })
+      )
+      .mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+
+    for (const seq of [1, 3, 4]) {
+      emitServerEvent(handlers, 'session.next.step.started', {
+        properties: { sessionID: 'background-session', assistantMessageID: `assistant-${seq}` },
+        seq,
+      });
+    }
+
+    resolveSession?.();
+    resolveMessages?.();
+    await vi.waitFor(() => {
+      expect(syncSession).toHaveBeenCalledTimes(2);
+      expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+    });
+
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-4' },
+      seq: 5,
+    });
+
+    expect(syncSession).toHaveBeenCalledTimes(2);
+    expect(syncSessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries terminal gap failures with bounded backoff without another event', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSession = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline-1'))
+      .mockRejectedValueOnce(new Error('offline-2'))
+      .mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 3,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(syncSession).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(syncSession).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(199);
+    expect(syncSession).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(syncSession).toHaveBeenCalledTimes(3);
+    expect(syncSessionMessages).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it('cancels a scheduled terminal gap retry on cleanup', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockRejectedValue(new Error('offline'));
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({ syncSession, syncSessionMessages })
+    );
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1' },
+      seq: 3,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    for (const cleanup of cleanups) cleanup();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it('guards metadata application after cleanup', async () => {
+    const handlers = installHandlers();
+    let finishMetadataSync: (() => void) | undefined;
+    const applied = vi.fn();
+    const syncSession = vi.fn(
+      (
+        _sessionId: string,
+        options?: {
+          shouldApply(): boolean;
+        }
+      ) =>
+        new Promise<void>((resolve) => {
+          finishMetadataSync = () => {
+            if (options?.shouldApply() ?? true) applied();
+            resolve();
+          };
+        })
+    );
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      })
+    );
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 3,
+    });
+    for (const cleanup of cleanups) cleanup();
+
+    finishMetadataSync?.();
+    await Promise.resolve();
+
+    expect(applied).not.toHaveBeenCalled();
+  });
+
+  it('does not retry dirty gap reconciliation after cleanup', async () => {
+    const handlers = installHandlers();
+    let resolveSession: (() => void) | undefined;
+    let resolveMessages: (() => void) | undefined;
+    const syncSession = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSession = resolve;
+        })
+    );
+    const syncSessionMessages = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveMessages = resolve;
+        })
+    );
+    const cleanups = registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages,
+      })
+    );
+
+    for (const seq of [1, 3, 5]) {
+      emitServerEvent(handlers, 'session.next.step.started', {
+        properties: { sessionID: 'background-session', assistantMessageID: `assistant-${seq}` },
+        seq,
+      });
+    }
+    for (const cleanup of cleanups) cleanup();
+
+    resolveSession?.();
+    resolveMessages?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+  });
+
+  it('reconciles a session when its bounded sequence cursor was evicted', () => {
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockResolvedValue(undefined);
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    registerSessionEventHandlers(createDefaultDeps({ syncSession, syncSessionMessages }));
+
+    for (let index = 0; index <= 512; index += 1) {
+      handlers.get('*')?.({
+        type: 'session.updated',
+        properties: { sessionID: `session-${index}`, info: { id: `session-${index}` } },
+        seq: 1,
+        sequenceOnly: true,
+      });
+    }
+    handlers.get('*')?.({
+      type: 'session.updated',
+      properties: { sessionID: 'session-0', info: { id: 'session-0' } },
+      seq: 2,
+      sequenceOnly: true,
+    });
+
+    expect(syncSession).toHaveBeenCalledOnce();
+    expect(syncSession).toHaveBeenCalledWith('session-0', expect.anything());
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-0');
+  });
+
+  it('does not evict unresolved dirty sessions when dirty tracking reaches capacity', async () => {
+    vi.useFakeTimers();
+    const handlers = installHandlers();
+    const syncSession = vi.fn().mockRejectedValue(new Error('offline'));
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    registerSessionEventHandlers(
+      createDefaultDeps({ syncSession, syncSessionMessages, logError: vi.fn() })
+    );
+
+    for (let index = 0; index <= 256; index += 1) {
+      for (const seq of [1, 3]) {
+        handlers.get('*')?.({
+          type: 'session.updated',
+          properties: { sessionID: `session-${index}`, info: { id: `session-${index}` } },
+          seq,
+          sequenceOnly: true,
+        });
+      }
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+
+    const sessionZeroCalls = syncSession.mock.calls.filter(
+      ([sessionId]) => sessionId === 'session-0'
+    );
+    expect(sessionZeroCalls).toHaveLength(2);
+    vi.useRealTimers();
+  });
+
+  it('advances one session sequence across message and v2 progress events', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'message.updated', {
+      properties: { sessionID: 'session-1', info: assistantEntry.info },
+      seq: 2,
+    });
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-3' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('advances the sequence for durable session events without dedicated handlers', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.context.updated', {
+      properties: { sessionID: 'session-1', messageID: 'message-1', text: 'context' },
+      seq: 2,
+    });
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-3' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('advances the shared sequence through reasoning events', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.reasoning.started', {
+      properties: {
+        sessionID: 'session-1',
+        assistantMessageID: 'assistant-1',
+        reasoningID: 'reasoning-1',
+      },
+      seq: 2,
+    });
+    emitServerEvent(handlers, 'session.next.tool.called', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-3' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it('recovers a sequence gap on message.part.updated', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistantEntry],
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'message.updated', {
+      properties: { sessionID: 'session-1', info: assistantEntry.info },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'message.part.updated', {
+      properties: {
+        sessionID: 'session-1',
+        part: {
+          id: 'part-1',
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          type: 'text',
+          text: 'recovered',
+        },
+      },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('recovers a sequence gap before stale progress returns early', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    loadingStartedAt.mockReturnValue(null);
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.text.started', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', textID: 'text-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.text.ended', {
+      properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', textID: 'text-1' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('recovers a sequence gap for an inactive session before returning', () => {
+    const handlers = installHandlers();
+    const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSessionMessages,
+      })
+    );
+
+    emitServerEvent(handlers, 'session.next.step.started', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 1,
+    });
+    emitServerEvent(handlers, 'session.next.step.ended', {
+      properties: { sessionID: 'background-session', assistantMessageID: 'assistant-1' },
+      seq: 3,
+    });
+
+    expect(syncSessionMessages).toHaveBeenCalledOnce();
+    expect(syncSessionMessages).toHaveBeenCalledWith('background-session');
   });
 
   it('keeps the defensive resync for ephemeral progress events that carry no seq', () => {

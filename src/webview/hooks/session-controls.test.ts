@@ -28,10 +28,10 @@ function userMessage(id: string): Message {
   };
 }
 
-function assistantMessage(id: string): Message {
+function assistantMessage(id: string, sessionID = 'session-1'): Message {
   return {
     id,
-    sessionID: 'session-1',
+    sessionID,
     role: 'assistant',
     time: { created: 1 },
     parentID: 'user-1',
@@ -81,28 +81,30 @@ describe('session-controls helpers', () => {
     const setError = vi.fn();
     const logError = vi.fn();
 
-    await abortSessionWithDependencies({
-      getActiveSessionId: () => 'session-1',
-      getSessionTreeRootId: () => null,
-      getSessionTreeIds: () => ['session-1', 'child-1'],
-      getSelectedAgentForSession: () => 'plan',
-      skipPlanSession: vi.fn(),
-      getSessionStatus: (sessionId) =>
-        sessionId === 'session-1'
-          ? { type: 'retry', attempt: 1, message: 'retry', next: 3 }
-          : { type: 'busy' },
-      getSessionUsageLimit: (sessionId) => ({ sessionID: sessionId, attempt: 1 }),
-      markPendingAbortTree: vi.fn(),
-      setSessionStatusEntry,
-      stopLoading: vi.fn(),
-      abortRemoteSession: vi.fn(async () => {
-        throw new Error('abort failed');
-      }),
-      clearPendingAbortTree: vi.fn(),
-      setSessionUsageLimit,
-      setError,
-      logError,
-    });
+    await expect(
+      abortSessionWithDependencies({
+        getActiveSessionId: () => 'session-1',
+        getSessionTreeRootId: () => null,
+        getSessionTreeIds: () => ['session-1', 'child-1'],
+        getSelectedAgentForSession: () => 'plan',
+        skipPlanSession: vi.fn(),
+        getSessionStatus: (sessionId) =>
+          sessionId === 'session-1'
+            ? { type: 'retry', attempt: 1, message: 'retry', next: 3 }
+            : { type: 'busy' },
+        getSessionUsageLimit: (sessionId) => ({ sessionID: sessionId, attempt: 1 }),
+        markPendingAbortTree: vi.fn(),
+        setSessionStatusEntry,
+        stopLoading: vi.fn(),
+        abortRemoteSession: vi.fn(async () => {
+          throw new Error('abort failed');
+        }),
+        clearPendingAbortTree: vi.fn(),
+        setSessionUsageLimit,
+        setError,
+        logError,
+      })
+    ).rejects.toThrow('abort failed');
 
     expect(setSessionStatusEntry).toHaveBeenNthCalledWith(1, 'session-1', { type: 'idle' });
     expect(setSessionStatusEntry).toHaveBeenNthCalledWith(2, 'child-1', { type: 'idle' });
@@ -143,6 +145,27 @@ describe('session-controls helpers', () => {
     });
 
     expect(revertSession).toHaveBeenCalledWith('session-1', 'assistant-1');
+  });
+
+  it('undos from the latest assistant in the active session instead of a child session', async () => {
+    const revertSession = vi.fn(async () => {});
+
+    await undoSessionWithDependencies({
+      getActiveSessionId: () => 'session-1',
+      getMessages: () => [
+        { info: userMessage('user-1') },
+        { info: assistantMessage('assistant-active') },
+        { info: assistantMessage('assistant-child', 'child-1') },
+      ],
+      startLoading: vi.fn(),
+      revertSession,
+      syncSession: vi.fn(async () => {}),
+      syncSessionMessages: vi.fn(async () => {}),
+      stopLoading: vi.fn(),
+      setError: vi.fn(),
+    });
+
+    expect(revertSession).toHaveBeenCalledWith('session-1', 'assistant-active');
   });
 
   it('edits a user message by deleting its history tail and resending the new text', async () => {
@@ -264,6 +287,36 @@ describe('session-controls helpers', () => {
     );
 
     expect(callOrder).toEqual(['abort', 'delete', 'send']);
+  });
+
+  it('does not delete or resend an edit when stopping the active run fails', async () => {
+    const deleteMessage = vi.fn(async () => {});
+    const sendEditedMessage = vi.fn(async () => true);
+    const syncSessionMessages = vi.fn(async () => {});
+
+    const result = await editMessageWithDependencies(
+      {
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [{ info: userMessage('user-1') }],
+        isSessionWorking: () => true,
+        abortSession: vi.fn(async () => {
+          throw new Error('abort failed');
+        }),
+        startLoading: vi.fn(),
+        deleteMessage,
+        syncSessionMessages,
+        sendEditedMessage,
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      'user-1',
+      'updated prompt'
+    );
+
+    expect(result).toBe(false);
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(sendEditedMessage).not.toHaveBeenCalled();
+    expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
   it('keeps an edit targeted to its captured session when the active session changes', async () => {

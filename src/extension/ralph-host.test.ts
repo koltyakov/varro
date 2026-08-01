@@ -863,6 +863,59 @@ describe('RalphHost', () => {
     expect(host.getStatePayload().activeIds).toEqual([]);
   });
 
+  it('aggregates a descendant beyond OpenCode default session-list page', async () => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    const defaultRequest = server.request.getMockImplementation()!;
+    const fullSessionList = [
+      ...Array.from({ length: 100 }, (_, index) => ({ id: `unrelated-${index}` })),
+      { id: 'child-1', parentID: config.managerSessionId },
+      { id: 'late-descendant', parentID: 'child-1' },
+    ];
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const url = new URL(path, 'http://localhost');
+      if (method === 'GET' && url.pathname === '/session') {
+        return url.searchParams.has('limit') ? fullSessionList : fullSessionList.slice(0, 100);
+      }
+      if (method === 'GET' && url.pathname === '/session/late-descendant/message') {
+        return [
+          {
+            info: {
+              role: 'assistant',
+              tokens: {
+                input: 7,
+                output: 0,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+            parts: [],
+          },
+        ];
+      }
+      return defaultRequest(method, path, body);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.tokens?.total).toBe(
+      7
+    );
+    expect(
+      server.request.mock.calls.some(([method, path]) => {
+        const url = new URL(path as string, 'http://localhost');
+        return (
+          method === 'GET' &&
+          url.pathname === '/session' &&
+          url.searchParams.get('limit') === '1000000'
+        );
+      })
+    ).toBe(true);
+  });
+
   it('keeps every request and plan read bound to the originating workspace', async () => {
     const readFile = vi.fn(async () => '# Plan\n- [x] all done');
     const { host, server } = createHost({ readFile });
@@ -1071,7 +1124,9 @@ describe('RalphHost', () => {
         return {};
       }
       if (method === 'GET' && pathname === '/session/status') return {};
-      if (method === 'GET' && pathname === '/session') return [{ id: 'child-polled' }];
+      if (method === 'GET' && pathname === '/session/child-polled') {
+        return { id: 'child-polled', directory: '/workspace' };
+      }
       if (method === 'GET' && pathname.endsWith('/message')) {
         return [
           {
@@ -1093,7 +1148,65 @@ describe('RalphHost', () => {
     );
 
     expectScopedRequest(server, 'GET', '/session/status');
-    expectScopedRequest(server, 'GET', '/session');
+    expectScopedRequest(server, 'GET', '/session/child-polled');
+  });
+
+  it.each([
+    {
+      label: 'a stale session id',
+      lookup: { id: 'different-child', directory: '/workspace' },
+      expected: 'mismatched session id',
+    },
+    {
+      label: 'a session from another workspace',
+      lookup: { id: 'child-invalid', directory: '/other' },
+      expected: 'outside the authorized Ralph workspace',
+    },
+  ])('does not treat direct lookup with $label as idle', async ({ lookup, expected }) => {
+    const { host, server } = createHost();
+    const config = createConfig();
+    let promptMessageID = '';
+    server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
+      const pathname = requestPath(path);
+      if (method === 'POST' && pathname === '/session') return { id: 'child-invalid' };
+      if (method === 'POST' && pathname.endsWith('/prompt_async')) {
+        promptMessageID = (body as { messageID: string }).messageID;
+        server.emit('event', {
+          directory: config.workspaceDirectory,
+          payload: {
+            type: 'session.next.prompt.admitted',
+            properties: { sessionID: 'child-invalid', messageID: promptMessageID },
+          },
+        });
+        return {};
+      }
+      if (method === 'GET' && pathname === '/session/status') return {};
+      if (method === 'GET' && pathname === '/session/child-invalid') return lookup;
+      if (method === 'GET' && pathname === '/session/child-invalid/message') {
+        return [
+          {
+            info: {
+              role: 'assistant',
+              parentID: promptMessageID,
+              time: { created: 1, completed: 2 },
+            },
+            parts: [{ type: 'text', text: 'lint: PASS\ntest: PASS' }],
+          },
+        ];
+      }
+      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'POST' && pathname.endsWith('/abort')) return {};
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+
+    host.handleMessage({ type: 'ralph/start', payload: { config } });
+    await vi.waitFor(() =>
+      expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('failed')
+    );
+
+    expect(host.getStatePayload().runs[config.managerSessionId]?.iterations[0]?.note).toContain(
+      expected
+    );
   });
 
   it('surfaces terminal status errors with child-session context', async () => {
@@ -1197,7 +1310,9 @@ describe('RalphHost', () => {
         return {};
       }
       if (method === 'GET' && pathname === '/session/status') return statuses;
-      if (method === 'GET' && pathname === '/session') return [];
+      if (method === 'GET' && pathname === '/session/child-status') {
+        throw new Error('404 Session not found');
+      }
       if (method === 'POST' && pathname.endsWith('/abort')) return {};
       throw new Error(`Unexpected request: ${method} ${path}`);
     });

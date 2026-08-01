@@ -470,7 +470,7 @@ export function invalidateClientWorkspaceCaches(): void {
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
-  if (evt.type === 'workspace.status') {
+  if (!evt.sequenceOnly && evt.type === 'workspace.status') {
     const entry = normalizeWorkspaceStatusEntry(evt.properties);
     if (entry) {
       const existing = workspaceStatusSummary.entries.find(
@@ -489,7 +489,7 @@ onMessage((msg) => {
       }
     }
   }
-  if (evt.type === 'workspace.ready') {
+  if (!evt.sequenceOnly && evt.type === 'workspace.ready') {
     const message =
       typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected';
     if (
@@ -502,7 +502,7 @@ onMessage((msg) => {
       };
     }
   }
-  if (evt.type === 'workspace.failed') {
+  if (!evt.sequenceOnly && evt.type === 'workspace.failed') {
     const message =
       typeof evt.properties?.message === 'string'
         ? evt.properties.message
@@ -518,7 +518,7 @@ onMessage((msg) => {
     }
   }
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
-  if (handlers) {
+  if (!evt.sequenceOnly && handlers) {
     for (const h of handlers) {
       try {
         h(evt);

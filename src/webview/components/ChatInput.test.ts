@@ -151,6 +151,8 @@ afterEach(() => {
   setState('activeSessionId', null);
   setState('messages', []);
   setState('sessions', []);
+  setState('questions', []);
+  setState('permissions', []);
   setState('providers', []);
   setState('agents', []);
   setState('allAgents', []);
@@ -227,6 +229,46 @@ function setupModelState() {
   ]);
   setState('providerDefaults', { openai: 'gpt-4o' });
   setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+}
+
+function setupRetryingProviderSwitchState() {
+  setupModelState();
+  setState('activeSessionId', 'session-1');
+  setState('sessions', [session('session-1', 2_000)]);
+  setState('providers', [
+    ...state.providers,
+    {
+      id: 'anthropic',
+      name: 'Anthropic',
+      source: 'api',
+      models: {
+        claude: {
+          id: 'claude',
+          name: 'Claude',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+          limit: { context: 1000 },
+        },
+      },
+    },
+  ]);
+  setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
+  setState('sessionStatus', {
+    'session-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
+  });
+  setState('sessionUsageLimits', {
+    'session-1': {
+      source: 'status',
+      statusCode: 429,
+      message: 'messages exhausted · retry in 408s · attempt #9',
+      unit: 'messages',
+      retryAt: 408_000,
+      attempt: 9,
+      sessionID: 'session-1',
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+    },
+  });
 }
 
 function assistantMessageEntry(tokens: { input: number; output: number }) {
@@ -308,14 +350,14 @@ function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTran
   return event;
 }
 
-function dispatchImagePaste(target: Element, files: File[], text = '') {
+function dispatchImagePaste(target: Element, files: Array<File | null>, text = '') {
   const event = new Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'clipboardData', {
     value: {
       getData: (type: string) => (type === 'text/plain' ? text : ''),
       items: files.map((file) => ({
         kind: 'file',
-        type: file.type,
+        type: file?.type || 'image/png',
         getAsFile: () => file,
       })),
     },
@@ -326,21 +368,29 @@ function dispatchImagePaste(target: Element, files: File[], text = '') {
 
 function installControllableFileReader() {
   const originalFileReader = globalThis.FileReader;
-  const pendingReads = new Map<string, () => void>();
+  const pendingReads = new Map<string, { resolve: () => void; reject: () => void }>();
 
   class MockFileReader {
     result: string | ArrayBuffer | null = null;
     error: DOMException | null = null;
     private loadListener: (() => void) | undefined;
+    private errorListener: (() => void) | undefined;
 
     addEventListener(type: string, listener: () => void) {
       if (type === 'load') this.loadListener = listener;
+      if (type === 'error') this.errorListener = listener;
     }
 
     readAsDataURL(file: File) {
-      pendingReads.set(file.name, () => {
-        this.result = `data:${file.type};base64,${file.name}`;
-        this.loadListener?.();
+      pendingReads.set(file.name, {
+        resolve: () => {
+          this.result = `data:${file.type};base64,${file.name}`;
+          this.loadListener?.();
+        },
+        reject: () => {
+          this.error = new DOMException(`Failed to read ${file.name}`);
+          this.errorListener?.();
+        },
       });
     }
   }
@@ -348,10 +398,16 @@ function installControllableFileReader() {
   globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
   return {
     resolve(filename: string) {
-      const complete = pendingReads.get(filename);
-      if (!complete) throw new Error(`No pending FileReader for ${filename}`);
+      const pending = pendingReads.get(filename);
+      if (!pending) throw new Error(`No pending FileReader for ${filename}`);
       pendingReads.delete(filename);
-      complete();
+      pending.resolve();
+    },
+    reject(filename: string) {
+      const pending = pendingReads.get(filename);
+      if (!pending) throw new Error(`No pending FileReader for ${filename}`);
+      pendingReads.delete(filename);
+      pending.reject();
     },
     restore() {
       globalThis.FileReader = originalFileReader;
@@ -2275,6 +2331,222 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('draft prompt');
   });
 
+  it('does not submit on Enter while an active question blocks the send button', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setInputText('Wait for the answer');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Wait for the answer');
+  });
+
+  it('does not submit on Enter while an active permission blocks the send button', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    setInputText('Wait for permission');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Wait for permission');
+  });
+
+  it('does not submit on Enter while a workspace switch is pending', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setInputText('Send after switching');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Select workspace folder"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('button[title="/repo-b"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    expect(sendButton?.disabled).toBe(true);
+
+    editor?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Send after switching');
+  });
+
+  it('still selects a completion on Enter while sending is blocked', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setState('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputText('@hel');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '@hel'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('@helper ');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('runs /abort with attachments while a question blocks normal sends', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setState('droppedFiles', [
+      { path: '/repo/question.ts', relativePath: 'question.ts', type: 'file' },
+    ]);
+    setInputText('/abort');
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('/abort');
+    expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/question.ts' })]);
+  });
+
+  it('runs /stop with attachments while a permission blocks normal sends', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 1_000)]);
+    setState('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    setState('clipboardImages', [
+      {
+        id: 'permission-image',
+        url: 'data:image/png;base64,permission',
+        mime: 'image/png',
+        filename: 'permission.png',
+        size: 1,
+      },
+    ]);
+    setInputText('/stop');
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('/stop');
+    expect(state.clipboardImages).toEqual([expect.objectContaining({ id: 'permission-image' })]);
+  });
+
+  it('runs /abort with attachments while a workspace switch blocks normal sends', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo-a',
+      workspaceFolders: [
+        { name: 'Repo A', path: '/repo-a' },
+        { name: 'Repo B', path: '/repo-b' },
+      ],
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    setState('droppedFiles', [
+      { path: '/repo-a/workspace.ts', relativePath: 'workspace.ts', type: 'file' },
+    ]);
+    setInputText('/abort');
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Select workspace folder"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    container
+      ?.querySelector<HTMLButtonElement>('button[title="/repo-b"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    container
+      ?.querySelector<HTMLDivElement>('.rich-composer')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('/abort');
+    expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo-a/workspace.ts' })]);
+  });
+
   it('shows only the stop button while loading with nothing sendable', () => {
     setIsLoading(true);
 
@@ -2285,6 +2557,20 @@ describe('ChatInput', () => {
     expect(container?.textContent).not.toContain('Stop');
     expect(container?.querySelector('[title="Send (Enter)"]')).toBeNull();
     expect(container?.querySelector('[title="Add to queue (Enter)"]')).toBeNull();
+  });
+
+  it('handles a rejected direct stop without an unhandled promise', async () => {
+    abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Stop"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the stop button through a short idle gap', async () => {
@@ -2354,6 +2640,28 @@ describe('ChatInput', () => {
     expect(abortSessionMock).toHaveBeenCalledTimes(1);
     expect(sendMessageMock).toHaveBeenCalledWith('Follow up after stopping', { noReply: false });
     expect(state.queuedMessages).toEqual([]);
+  });
+
+  it('does not send from the busy menu when stopping fails', async () => {
+    abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setInputText('Do not send after a failed stop');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="More send options"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Stop and Send')
+    );
+    stopAndSendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(inputText()).toBe('Do not send after a failed stop');
   });
 
   it('runs a typed slash command with args on Enter', async () => {
@@ -2865,7 +3173,7 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('@README.md and notes');
   });
 
-  it('does not claim existing mention text when an image-bearing paste is prevented', async () => {
+  it('withdraws only the pasted mention copy when its paired image is null', async () => {
     setInputText('@README.md');
     cleanup = render(() => ChatInput(), container!);
     await flushAsyncWork();
@@ -2885,9 +3193,371 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(event.defaultPrevented).toBe(true);
-    expect(client.varro.resolveWorkspacePath).not.toHaveBeenCalled();
+    expect(client.varro.resolveWorkspacePath).toHaveBeenCalledWith('README.md');
     expect(inputText()).toBe('@README.md');
-    expect(state.droppedFiles).toEqual([]);
+    expect(state.droppedFiles).toEqual([
+      {
+        path: '/repo/README.md',
+        relativePath: 'README.md',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      },
+    ]);
+  });
+
+  it('inserts mixed-paste text once while attaching the pasted image', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+
+      dispatchImagePaste(
+        editor,
+        [new File(['image'], 'mixed.png', { type: 'image/png' })],
+        'Pasted description'
+      );
+      fileReader.resolve('mixed.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(inputText().match(/Pasted description/g)).toHaveLength(1);
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image']);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it.each(['image first', 'mention first'])(
+    'retains an image and mention-only file attachment when %s completes',
+    async (completionOrder) => {
+      const fileReader = installControllableFileReader();
+      let resolveLookup:
+        | ((value: Awaited<ReturnType<typeof client.varro.resolveWorkspacePath>>) => void)
+        | undefined;
+      vi.mocked(client.varro.resolveWorkspacePath).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveLookup = resolve;
+          })
+      );
+      try {
+        setState('editorContext', {
+          workspacePath: '/repo',
+          activeFile: null,
+          selection: null,
+          diagnostics: [],
+        });
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
+
+        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+        if (!editor) throw new Error('Expected composer editor');
+        editor.focus();
+        setCollapsedSelection(editor, 0);
+        dispatchImagePaste(
+          editor,
+          [new File(['mention'], 'mention.png', { type: 'image/png' })],
+          '@README.md'
+        );
+
+        const completeImage = () => fileReader.resolve('mention.png');
+        const completeMention = () =>
+          resolveLookup?.({ path: '/repo/README.md', relativePath: 'README.md', type: 'file' });
+        if (completionOrder === 'image first') {
+          completeImage();
+          await flushAsyncWork();
+          completeMention();
+        } else {
+          completeMention();
+          await flushAsyncWork();
+          completeImage();
+        }
+        await flushAsyncWork();
+
+        expect(inputText()).toBe('[Image] ');
+        expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/README.md' })]);
+        expect(state.clipboardImages).toEqual([
+          expect.objectContaining({
+            url: 'data:image/png;base64,mention.png',
+            filename: 'Image',
+          }),
+        ]);
+      } finally {
+        fileReader.restore();
+      }
+    }
+  );
+
+  it('keeps an image and stripped context reference in one undoable paste transaction', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('editorContext', {
+        workspacePath: '/repo',
+        activeFile: null,
+        selection: null,
+        diagnostics: [],
+      });
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+      dispatchImagePaste(
+        editor,
+        [new File(['context'], 'context.png', { type: 'image/png' })],
+        'Inspect this\n[Selection from src/app.ts lines 3-5]'
+      );
+      fileReader.resolve('context.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Inspect this [Image] ');
+      expect(state.droppedFiles).toEqual([
+        expect.objectContaining({
+          path: '/repo/src/app.ts',
+          lineRanges: [{ startLine: 3, endLine: 5 }],
+        }),
+      ]);
+      expect(state.clipboardImages).toEqual([
+        expect.objectContaining({ url: 'data:image/png;base64,context.png' }),
+      ]);
+
+      pressKey(editor, { key: 'z', metaKey: true });
+      expect(inputText()).toBe('');
+      expect(state.droppedFiles).toEqual([]);
+      expect(state.clipboardImages).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it.each([
+    { label: 'source order', reads: ['first-mixed.png', 'second-mixed.png'] },
+    { label: 'reverse order', reads: ['second-mixed.png', 'first-mixed.png'] },
+  ])(
+    'keeps overlapping mixed pastes ordered and independently undoable in $label',
+    async ({ reads }) => {
+      const fileReader = installControllableFileReader();
+      try {
+        cleanup = render(() => ChatInput(), container!);
+        await flushAsyncWork();
+
+        const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+        if (!editor) throw new Error('Expected composer editor');
+        editor.focus();
+        setCollapsedSelection(editor, 0);
+
+        dispatchImagePaste(
+          editor,
+          [new File(['first'], 'first-mixed.png', { type: 'image/png' })],
+          'First'
+        );
+        await Promise.resolve();
+        if (!editor.firstChild) throw new Error('Expected first pasted text');
+        setCollapsedSelection(editor.firstChild, inputText().length);
+        dispatchImagePaste(
+          editor,
+          [new File(['second'], 'second-mixed.png', { type: 'image/png' })],
+          ' Second'
+        );
+
+        for (const filename of reads) {
+          fileReader.resolve(filename);
+          await flushAsyncWork();
+        }
+
+        expect(inputText()).toBe('First [Image] Second [Image 2] ');
+        expect(
+          state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
+        ).toEqual([
+          { filename: 'Image', url: 'data:image/png;base64,first-mixed.png' },
+          { filename: 'Image 2', url: 'data:image/png;base64,second-mixed.png' },
+        ]);
+
+        pressKey(editor, { key: 'z', metaKey: true });
+        expect(inputText()).toBe('First [Image] ');
+        expect(state.clipboardImages).toEqual([
+          expect.objectContaining({ url: 'data:image/png;base64,first-mixed.png' }),
+        ]);
+
+        pressKey(editor, { key: 'z', metaKey: true });
+        expect(inputText()).toBe('');
+        expect(state.clipboardImages).toEqual([]);
+      } finally {
+        fileReader.restore();
+      }
+    }
+  );
+
+  it('undoes mixed pasted text, image, and placeholder as one composer edit', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+      dispatchImagePaste(
+        editor,
+        [new File(['image'], 'undo-mixed.png', { type: 'image/png' })],
+        'Pasted description'
+      );
+      fileReader.resolve('undo-mixed.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(state.clipboardImages).toHaveLength(1);
+
+      pressKey(editor, { key: 'z', metaKey: true });
+      expect(inputText()).toBe('');
+      expect(state.clipboardImages).toEqual([]);
+
+      pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
+      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(state.clipboardImages).toHaveLength(1);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('keeps mixed-paste text when the clipboard image is null', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+
+    dispatchImagePaste(editor, [null], 'Text from a null image paste');
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Text from a null image paste');
+    expect(state.clipboardImages).toEqual([]);
+  });
+
+  it('keeps mixed-paste text when the clipboard image is oversized', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'oversized.png', {
+      type: 'image/png',
+    });
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.focus();
+    setCollapsedSelection(editor, 0);
+
+    dispatchImagePaste(editor, [oversized], 'Text from an oversized image paste');
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Text from an oversized image paste');
+    expect(state.clipboardImages).toEqual([]);
+  });
+
+  it('keeps mixed-paste text when the clipboard image cannot be read', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+
+      dispatchImagePaste(
+        editor,
+        [new File(['broken'], 'unreadable.png', { type: 'image/png' })],
+        'Text from an unreadable image paste'
+      );
+      fileReader.reject('unreadable.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Text from an unreadable image paste');
+      expect(state.clipboardImages).toEqual([]);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('keeps mixed-paste text when the clipboard image is rejected as a duplicate', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState('clipboardImages', [
+        {
+          id: 'existing-image',
+          url: 'data:image/png;base64,duplicate.png',
+          mime: 'image/png',
+          filename: 'Existing',
+          size: 1,
+        },
+      ]);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+
+      dispatchImagePaste(
+        editor,
+        [new File(['duplicate'], 'duplicate.png', { type: 'image/png' })],
+        'Text from a rejected image paste'
+      );
+      fileReader.resolve('duplicate.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Text from a rejected image paste');
+      expect(state.clipboardImages.map((image) => image.id)).toEqual(['existing-image']);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('keeps mixed-paste text when clipboard image capacity is full', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setState(
+        'clipboardImages',
+        Array.from({ length: MAX_CLIPBOARD_IMAGES }, (_, index) => ({
+          id: `existing-${index}`,
+          url: `data:image/png;base64,existing-${index}`,
+          mime: 'image/png',
+          filename: `Existing ${index}`,
+          size: 1,
+        }))
+      );
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+      editor.focus();
+      setCollapsedSelection(editor, 0);
+
+      dispatchImagePaste(
+        editor,
+        [new File(['extra'], 'capacity.png', { type: 'image/png' })],
+        'Text at image capacity'
+      );
+      fileReader.resolve('capacity.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('Text at image capacity');
+      expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
+    } finally {
+      fileReader.restore();
+    }
   });
 
   it('rejects oversized clipboard images before reading them', async () => {
@@ -2959,7 +3629,7 @@ describe('ChatInput', () => {
     }
   });
 
-  it('stages overlapping image pastes and commits live capacity and unique indices', async () => {
+  it('stages later image pastes until earlier reads finish, then applies live capacity', async () => {
     const fileReader = installControllableFileReader();
     try {
       cleanup = render(() => ChatInput(), container!);
@@ -2984,11 +3654,7 @@ describe('ChatInput', () => {
       fileReader.resolve('second-2.png');
       fileReader.resolve('second-3.png');
       await flushAsyncWork();
-      expect(state.clipboardImages.map((image) => image.filename)).toEqual([
-        'Image',
-        'Image 2',
-        'Image 3',
-      ]);
+      expect(state.clipboardImages).toEqual([]);
 
       for (const file of firstPaste) fileReader.resolve(file.name);
       await flushAsyncWork();
@@ -3004,13 +3670,20 @@ describe('ChatInput', () => {
       expect(new Set(state.clipboardImages.map((image) => image.filename)).size).toBe(
         MAX_CLIPBOARD_IMAGES
       );
+      expect(state.clipboardImages.map((image) => image.url)).toEqual([
+        'data:image/png;base64,first-1.png',
+        'data:image/png;base64,first-2.png',
+        'data:image/png;base64,first-3.png',
+        'data:image/png;base64,second-1.png',
+        'data:image/png;base64,second-2.png',
+      ]);
       expect(nextPastedImageIndex()).toBe(MAX_CLIPBOARD_IMAGES + 1);
     } finally {
       fileReader.restore();
     }
   });
 
-  it('commits overlapping image pastes into a non-empty composer out of order', async () => {
+  it('commits overlapping image-only pastes into a non-empty composer in source order', async () => {
     const fileReader = installControllableFileReader();
     try {
       setInputText('Review this');
@@ -3028,13 +3701,19 @@ describe('ChatInput', () => {
 
       fileReader.resolve('second.png');
       await flushAsyncWork();
-      expect(inputText()).toBe('Review this [Image] ');
+      expect(inputText()).toBe('Review this');
+      expect(state.clipboardImages).toEqual([]);
 
       fileReader.resolve('first.png');
       await flushAsyncWork();
 
       expect(inputText()).toBe('Review this [Image] [Image 2] ');
-      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image', 'Image 2']);
+      expect(
+        state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
+      ).toEqual([
+        { filename: 'Image', url: 'data:image/png;base64,first.png' },
+        { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
+      ]);
       expect(nextPastedImageIndex()).toBe(3);
     } finally {
       fileReader.restore();
@@ -3386,56 +4065,7 @@ describe('ChatInput', () => {
   it('continues a regular retry after switching away from the limited provider', async () => {
     abortSessionMock.mockResolvedValue(undefined);
     continueInterruptedSessionMock.mockResolvedValue(undefined);
-    setState('activeSessionId', 'session-1');
-    setState('sessions', [session('session-1', 2_000)]);
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
-          },
-        },
-      },
-      {
-        id: 'anthropic',
-        name: 'Anthropic',
-        source: 'api',
-        models: {
-          claude: {
-            id: 'claude',
-            name: 'Claude',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
-          },
-        },
-      },
-    ]);
-    setState('providerDefaults', { openai: 'gpt-4o', anthropic: 'claude' });
-    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    setState('sessionStatus', {
-      'session-1': { type: 'retry', attempt: 9, message: 'messages exhausted', next: 408 },
-    });
-    setState('sessionUsageLimits', {
-      'session-1': {
-        source: 'status',
-        statusCode: 429,
-        message: 'messages exhausted · retry in 408s · attempt #9',
-        unit: 'messages',
-        retryAt: 408_000,
-        attempt: 9,
-        sessionID: 'session-1',
-        providerID: 'openai',
-        modelID: 'gpt-4o',
-      },
-    });
+    setupRetryingProviderSwitchState();
 
     cleanup = render(() => ChatInput(), container!);
 
@@ -3461,6 +4091,39 @@ describe('ChatInput', () => {
     expect(state.sessionStatus['session-1']).toEqual({ type: 'idle' });
     expect(state.sessionUsageLimits['session-1']).toBeUndefined();
     expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
+  it('does not continue a retry when provider-switch abort fails', async () => {
+    abortSessionMock.mockRejectedValueOnce(new Error('abort failed'));
+    setupRetryingProviderSwitchState();
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const switchProviderButton = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('button')
+    ).find((button) => button.textContent === 'Switch provider');
+    switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const claudeOption = Array.from(
+      container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
+    ).find((button) => button.textContent?.includes('Claude'));
+    claudeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(abortSessionMock).toHaveBeenCalledTimes(1);
+    expect(continueInterruptedSessionMock).not.toHaveBeenCalled();
+    expect(state.sessionStatus['session-1']).toEqual({
+      type: 'retry',
+      attempt: 9,
+      message: 'messages exhausted',
+      next: 408,
+    });
+    expect(state.sessionUsageLimits['session-1']).toMatchObject({
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      attempt: 9,
+    });
   });
 
   it('clears usage-limit notices across the active tree before sending a prompt', async () => {

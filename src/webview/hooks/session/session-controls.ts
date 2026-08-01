@@ -71,6 +71,7 @@ export async function abortSessionWithDependencies(
       err instanceof Error ? `Failed to stop the run: ${err.message}` : 'Failed to stop the run'
     );
     deps.logError('abortSession', err);
+    throw err;
   }
 }
 
@@ -89,7 +90,7 @@ export async function undoSessionWithDependencies(deps: {
 
   const lastAssistant = [...deps.getMessages()]
     .toReversed()
-    .find((entry) => entry.info.role === 'assistant');
+    .find((entry) => entry.info.role === 'assistant' && entry.info.sessionID === sessionId);
   if (!lastAssistant) return;
 
   try {

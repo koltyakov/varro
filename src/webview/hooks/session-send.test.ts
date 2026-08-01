@@ -560,6 +560,7 @@ describe('session-send helpers', () => {
       sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
     expect(optimisticEntry?.info).toMatchObject({
+      id: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       sessionID: 'session-1',
       role: 'user',
       agent: 'build',
@@ -569,10 +570,14 @@ describe('session-send helpers', () => {
       { type: 'text', text: 'hello' },
       { type: 'text', text: '[Working directory: /repo]' },
     ]);
-    expect(sendAsync).toHaveBeenCalledWith(
-      'session-1',
-      expect.objectContaining({ messageID: optimisticEntry?.info.id })
-    );
+    expect(sendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: optimisticEntry?.info.id,
+      parts: [
+        { type: 'text', text: 'hello' },
+        { type: 'text', text: '[Working directory: /repo]' },
+      ],
+      model: { providerID: 'openai', modelID: 'gpt-4o' },
+    });
 
     resolveSend?.();
     await promise;

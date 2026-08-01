@@ -198,11 +198,26 @@ const STALE_INJECTED_CONFIG_AGE_MS = 7 * 24 * 60 * 60_000;
 const LEGACY_OWNERSHIP_CLAIM_STALE_AGE_MS = 30_000;
 const OWNERSHIP_CLAIM_MAX_AGE_MS = 2 * 60_000;
 const SERVER_OWNER_ENV = 'VARRO_SERVER_OWNER';
+const MAX_SERVER_PORT = 65_535;
 const maximumTestedOpenCodeVersion = readMaximumTestedOpenCodeVersion();
 let staleConfigSweep: Promise<void> = Promise.resolve();
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function validateServerPort(value: unknown): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_SERVER_PORT
+  ) {
+    throw new Error(
+      `Invalid varro.server.port value (${String(value)}). Set varro.server.port to an integer between 1 and ${MAX_SERVER_PORT}.`
+    );
+  }
+  return value;
 }
 
 function parsePids(text: string) {
@@ -769,8 +784,9 @@ export class OpenCodeProcess {
     ownershipLeasePath = getManagedServerOwnershipLeasePath(port),
     private readonly linuxProcRoot = '/proc'
   ) {
-    this._port = port;
-    this.originalPort = port;
+    const validatedPort = validateServerPort(port);
+    this._port = validatedPort;
+    this.originalPort = validatedPort;
     this.autoStart = autoStart;
     this.command = command?.trim() || '';
     this.simulateMissingCli = simulateMissingCli;
@@ -798,7 +814,7 @@ export class OpenCodeProcess {
   }
 
   set port(value: number) {
-    this._port = value;
+    this._port = validateServerPort(value);
   }
 
   get url(): string {
@@ -1307,8 +1323,11 @@ export class OpenCodeProcess {
 
   tryAdvancePort(): boolean {
     if (this.portFallbackAttempts >= OpenCodeProcess.PORT_FALLBACK_MAX_OFFSET) return false;
-    this.portFallbackAttempts += 1;
-    this._port = this.originalPort + this.portFallbackAttempts;
+    const nextAttempt = this.portFallbackAttempts + 1;
+    const nextPort = this.originalPort + nextAttempt;
+    if (nextPort > MAX_SERVER_PORT) return false;
+    this.portFallbackAttempts = nextAttempt;
+    this._port = nextPort;
     return true;
   }
 

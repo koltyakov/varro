@@ -1342,17 +1342,17 @@ describe('state helpers', () => {
     const stateModule = await loadState();
     const optimisticParts: Part[] = [
       {
-        id: 'optimistic-user-1-part-0',
+        id: 'message-1-part-0',
         sessionID: 'session-1',
-        messageID: 'optimistic-user-1',
+        messageID: 'message-1',
         type: 'text',
         text: 'Test message',
         synthetic: true,
       },
       {
-        id: 'optimistic-user-1-part-1',
+        id: 'message-1-part-1',
         sessionID: 'session-1',
-        messageID: 'optimistic-user-1',
+        messageID: 'message-1',
         type: 'text',
         text: '[Working directory: /repo]',
         synthetic: true,
@@ -1360,7 +1360,7 @@ describe('state helpers', () => {
     ];
 
     stateModule.upsertMessage({
-      info: userMessage('optimistic-user-1'),
+      info: userMessage('message-1'),
       parts: optimisticParts,
     });
 
@@ -1373,17 +1373,17 @@ describe('state helpers', () => {
     const stateModule = await loadState();
     const optimisticParts: Part[] = [
       {
-        id: 'optimistic-user-1-part-0',
+        id: 'message-1-part-0',
         sessionID: 'session-1',
-        messageID: 'optimistic-user-1',
+        messageID: 'message-1',
         type: 'text',
         text: 'Review [image.png]',
         synthetic: true,
       },
       {
-        id: 'optimistic-user-1-part-1',
+        id: 'message-1-part-1',
         sessionID: 'session-1',
-        messageID: 'optimistic-user-1',
+        messageID: 'message-1',
         type: 'file',
         mime: 'image/png',
         filename: 'image.png',
@@ -1392,7 +1392,7 @@ describe('state helpers', () => {
     ];
 
     stateModule.upsertMessage({
-      info: userMessage('optimistic-user-1'),
+      info: userMessage('message-1'),
       parts: optimisticParts,
     });
 
@@ -1416,12 +1416,12 @@ describe('state helpers', () => {
   it('replaces an optimistic user image part when the server file part arrives', async () => {
     const stateModule = await loadState();
     stateModule.upsertMessage({
-      info: userMessage('optimistic-user-1'),
+      info: userMessage('message-1'),
       parts: [
         {
-          id: 'optimistic-user-1-part-0',
+          id: 'message-1-part-0',
           sessionID: 'session-1',
-          messageID: 'optimistic-user-1',
+          messageID: 'message-1',
           type: 'file',
           mime: 'image/png',
           filename: 'image.png',

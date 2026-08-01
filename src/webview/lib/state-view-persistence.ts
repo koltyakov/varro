@@ -1,5 +1,5 @@
 import type { SelectedModel } from './app-state-types';
-import { setShowSessionPicker, state } from './app-state';
+import { setShowSessionPicker, showSessionPicker, state } from './app-state';
 import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import { readStoredSelectedModel, readStoredString } from './state-stored-values';
@@ -27,6 +27,10 @@ export function setPersistentShowSessionPicker(value: boolean) {
       ? { type: 'session', sessionId: state.activeSessionId }
       : { type: 'new-session' }
   );
+}
+
+export function getEffectiveComposerSessionId(): string | null {
+  return showSessionPicker() ? null : state.activeSessionId;
 }
 
 export function restoreSelectedModelForComposer(sessionId: string | null) {

@@ -42,6 +42,25 @@ async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 6) {
   }, frameCount);
 }
 
+async function sampleMessageTopAcrossFrames(list: Locator, messageId: string, frameCount = 8) {
+  return list.evaluate(
+    async (element, args) => {
+      const samples: Array<number | null> = [];
+      for (let frame = 0; frame < args.frameCount; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (candidate) => candidate.dataset.msgId === args.messageId
+        );
+        samples.push(
+          row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null
+        );
+      }
+      return samples;
+    },
+    { messageId, frameCount }
+  );
+}
+
 test.describe('auto-scroll', () => {
   test('starts at the bottom of the conversation', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
@@ -269,7 +288,7 @@ test.describe('auto-scroll', () => {
       element.scrollTop = 20;
       element.dispatchEvent(new Event('scroll'));
     });
-    await expect(page.locator('[data-msg-id="message-assistant-heavy-target"]')).toBeAttached();
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
     await waitForAnimationFrames(page, 4);
 
     const box = await list.boundingBox();
@@ -306,6 +325,261 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('preserves the same row through exact 50 plus 50 plus final pagination', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
+
+    const loadPageAtTop = async () => {
+      await list.evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+        element.scrollTop = 0;
+        element.dispatchEvent(new Event('scroll'));
+      });
+      await expect(historyBanner).toHaveClass(/is-loading/);
+      const anchor = await list.evaluate((element) => {
+        const containerRect = element.getBoundingClientRect();
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+          }
+        );
+        if (!row?.dataset.msgId) throw new Error('Paginated history anchor is missing');
+        return {
+          id: row.dataset.msgId,
+          top: row.getBoundingClientRect().top - containerRect.top,
+        };
+      });
+      const released = await page.evaluate(() => {
+        const harness = window as Window & {
+          __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+        };
+        return harness.__varroE2E?.releaseNextHistoryRequest?.() ?? false;
+      });
+      expect(released).toBe(true);
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id);
+      for (const top of samples) {
+        expect(top).not.toBeNull();
+        expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+      }
+    };
+
+    await loadPageAtTop();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
+    await loadPageAtTop();
+    await expect(historyBanner).toHaveCount(0);
+
+    const historyRequestCursors = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { requests?: Array<{ path: string }> };
+      };
+      return (harness.__varroE2E?.requests ?? [])
+        .filter((request) =>
+          request.path.includes('/session/session-assistant-heavy-history/message')
+        )
+        .map((request) => new URL(request.path, 'https://example.test').searchParams.get('before'));
+    });
+    expect(historyRequestCursors).toEqual([null, '79', '29']);
+  });
+
+  test('transfers deferred history ownership after native PageDown movement', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+      element.tabIndex = 0;
+      element.focus();
+    });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+    await page.keyboard.press('PageDown');
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+    await list.evaluate(async (element) => {
+      let previousTop = element.scrollTop;
+      let stableFrames = 0;
+      while (stableFrames < 3) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const nextTop = element.scrollTop;
+        stableFrames = Math.abs(nextTop - previousTop) <= 0.5 ? stableFrames + 1 : 0;
+        previousTop = nextTop;
+      }
+    });
+
+    const anchor = await list.evaluate((element) => {
+      const containerRect = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      if (!row?.dataset.msgId) throw new Error('PageDown history anchor is missing');
+      return {
+        id: row.dataset.msgId,
+        top: row.getBoundingClientRect().top - containerRect.top,
+      };
+    });
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+      };
+      if (!harness.__varroE2E?.releaseNextHistoryRequest?.()) {
+        throw new Error('Deferred history page was not pending');
+      }
+    });
+
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id);
+    for (const top of samples) {
+      expect(top).not.toBeNull();
+      expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+    }
+  });
+
+  test('does not restore a stale history anchor after the user scrolls during the request', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop = 20;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+
+    const userOwnedAnchor = await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: 600, bubbles: true }));
+      element.scrollTop = 620;
+      element.dispatchEvent(new Event('scroll'));
+      const containerRect = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      if (!row?.dataset.msgId) throw new Error('User-owned history anchor is missing');
+      return {
+        id: row.dataset.msgId,
+        top: row.getBoundingClientRect().top - containerRect.top,
+      };
+    });
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseHistoryRequests?: () => void };
+      };
+      harness.__varroE2E?.releaseHistoryRequests?.();
+    });
+
+    await expect(historyBanner).not.toHaveClass(/is-loading/);
+    await waitForAnimationFrames(page, 6);
+    await expect
+      .poll(() =>
+        list.evaluate((element, anchorId) => {
+          const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+            (candidate) => candidate.dataset.msgId === anchorId
+          );
+          return row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
+        }, userOwnedAnchor.id)
+      )
+      .toBeCloseTo(userOwnedAnchor.top, 0);
+  });
+
+  test('keeps history anchored when an upward wheel cannot move past the top boundary', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+
+    const anchor = await list.evaluate((element) => {
+      const containerRect = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      if (!row?.dataset.msgId) throw new Error('Boundary history anchor is missing');
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+      return {
+        id: row.dataset.msgId,
+        top: row.getBoundingClientRect().top - containerRect.top,
+        scrollTop: element.scrollTop,
+      };
+    });
+    expect(anchor.scrollTop).toBe(0);
+
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseHistoryRequests?: () => void };
+      };
+      harness.__varroE2E?.releaseHistoryRequests?.();
+    });
+    await expect(historyBanner).not.toHaveClass(/is-loading/);
+    await waitForAnimationFrames(page, 6);
+    await expect
+      .poll(() =>
+        list.evaluate((element, anchorId) => {
+          const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+            (candidate) => candidate.dataset.msgId === anchorId
+          );
+          return row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
+        }, anchor.id)
+      )
+      .toBeCloseTo(anchor.top, 0);
+  });
+
   test('mixed small chat scrolls upward without random jumps', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=mixed-small-transcript');
     const list = page.locator('.interactive-list');
@@ -332,6 +606,57 @@ test.describe('auto-scroll', () => {
       expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
       expect(upwardDelta).toBeLessThan(viewportHeight * 0.75);
     }
+  });
+
+  test('keeps a detached small-chat anchor stable when rows above grow and collapse', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=mixed-small-transcript');
+    const list = page.locator('.interactive-list');
+    const track = page.locator('.interactive-list-track');
+    const anchor = page.locator('[data-msg-id="message-small-user-12"]');
+    const rowAbove = page.locator('[data-msg-id="message-small-assistant-2"]');
+    await expect(track).not.toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      const target = element.querySelector<HTMLElement>('[data-msg-id="message-small-user-12"]');
+      if (!target) throw new Error('Small-chat anchor is missing');
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop +=
+        target.getBoundingClientRect().top - element.getBoundingClientRect().top - 120;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    const anchorTop = await anchor.evaluate((element) => {
+      const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+    });
+    await rowAbove.evaluate((element) => {
+      element.style.paddingBottom = '280px';
+    });
+    await waitForAnimationFrames(page, 3);
+    await expect
+      .poll(() =>
+        anchor.evaluate((element) => {
+          const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+          return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+        })
+      )
+      .toBeCloseTo(anchorTop, 0);
+
+    await rowAbove.evaluate((element) => {
+      element.style.paddingBottom = '';
+    });
+    await waitForAnimationFrames(page, 3);
+    await expect
+      .poll(() =>
+        anchor.evaluate((element) => {
+          const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+          return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+        })
+      )
+      .toBeCloseTo(anchorTop, 0);
   });
 
   test('follows assistant response growth while pinned to the bottom', async ({ page }) => {

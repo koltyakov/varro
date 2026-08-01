@@ -95,6 +95,7 @@ export class SessionLifecycleOperations {
       sessionStore.setActiveSessionId(null);
       sessionStore.persistActiveSessionId(null);
       sessionStore.clearMessages();
+      appStore.setState('messagesLoading', false);
       uiStore.stopLoading();
     });
   };

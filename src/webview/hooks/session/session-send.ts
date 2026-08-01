@@ -28,6 +28,7 @@ import {
 } from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant } from '../../lib/model-variants';
+import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
 import type {
   MessageEntry,
@@ -93,6 +94,7 @@ type CapturedComposerAttachments = {
 };
 
 type StateBoundSendDependencies = {
+  getWorkspaceGeneration?(): number;
   createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
   ensureSessionPermission?(sessionId: string): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
@@ -499,7 +501,39 @@ function areAttachedDiagnosticsEqual(
 }
 
 export class SessionSendOperations {
+  private pendingLazySessionCreation: {
+    draftGeneration: number;
+    workspaceGeneration: number;
+    promise: Promise<string | null>;
+  } | null = null;
+
   constructor(private readonly deps: StateBoundSendDependencies) {}
+
+  private readonly createSessionForSend = (
+    initialPermissionMode: PermissionMode,
+    draftGeneration: number,
+    workspaceGeneration: number
+  ) => {
+    if (
+      this.pendingLazySessionCreation?.draftGeneration === draftGeneration &&
+      this.pendingLazySessionCreation.workspaceGeneration === workspaceGeneration
+    ) {
+      return this.pendingLazySessionCreation.promise;
+    }
+
+    const creation = this.deps.createSession(initialPermissionMode);
+    const pending = { draftGeneration, workspaceGeneration, promise: creation };
+    this.pendingLazySessionCreation = pending;
+    void creation.then(
+      () => {
+        if (this.pendingLazySessionCreation === pending) this.pendingLazySessionCreation = null;
+      },
+      () => {
+        if (this.pendingLazySessionCreation === pending) this.pendingLazySessionCreation = null;
+      }
+    );
+    return creation;
+  };
 
   readonly prepareSendMessage = (text: string, options?: SessionSendOptions) => {
     const activeSessionId = appStore.state.activeSessionId;
@@ -528,6 +562,8 @@ export class SessionSendOperations {
     };
     const currentDocumentEnabled = composerStore.getCurrentDocumentEnabled(targetSessionId);
     const ensureSessionPermission = this.deps.ensureSessionPermission;
+    const draftGeneration = getNewChatDraftGeneration();
+    const workspaceGeneration = this.deps.getWorkspaceGeneration?.() ?? 0;
     return () =>
       sendMessageWithDependencies(
         {
@@ -536,7 +572,8 @@ export class SessionSendOperations {
           getSelectedAgent: () => selectedAgent,
           applySelectedAgentForSession: (agent, sessionId) =>
             routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
-          createSession: this.deps.createSession,
+          createSession: (initialPermissionMode) =>
+            this.createSessionForSend(initialPermissionMode, draftGeneration, workspaceGeneration),
           ensureSessionPermission,
           clearPendingAbort: this.deps.clearPendingAbort,
           syncSessionMcps: this.deps.syncSessionMcps,
@@ -668,7 +705,9 @@ export async function sendMessageWithDependencies(
     const createdId = await deps.createSession(deps.getDefaultPermissionMode());
     if (!createdId) return false;
     sessionId = createdId;
-    if (intendedAgent) deps.applySelectedAgentForSession?.(intendedAgent, sessionId);
+    if (intendedAgent && deps.getActiveSessionId() === sessionId) {
+      deps.applySelectedAgentForSession?.(intendedAgent, sessionId);
+    }
   }
 
   if (deps.ensureSessionPermission && !(await deps.ensureSessionPermission(sessionId)))
@@ -680,7 +719,9 @@ export async function sendMessageWithDependencies(
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
   if (!sendPayload) return false;
   const { body, effectiveModel } = sendPayload;
-  const sendBody = { ...body, messageID: createOpenCodeMessageID() };
+  const messageId = createOpenCodeMessageID();
+  const sendBody = { ...body, messageID: messageId };
+  if (sendBody.variant === undefined) delete sendBody.variant;
 
   const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';
   if (expectsAssistantReply) {
@@ -697,6 +738,7 @@ export async function sendMessageWithDependencies(
   deps.clearSessionUsageLimit(sessionId);
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
+    messageId,
     sendBody,
     sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
     effectiveModel
@@ -786,6 +828,7 @@ function removeOptimisticMessageFromActiveSession(messageId: string) {
 
 function createOptimisticUserMessage(
   sessionId: string,
+  messageId: string,
   body: SessionSendBody,
   agent: string,
   effectiveModel: SelectedModel | null
@@ -794,8 +837,6 @@ function createOptimisticUserMessage(
   if (!model) return null;
 
   const created = Date.now();
-  const messageId = body.messageID;
-  if (!messageId) return null;
   const parts = body.parts.flatMap((part, index): Part[] => {
     const id = `${messageId}-part-${index}`;
     if (part.type === 'text') {

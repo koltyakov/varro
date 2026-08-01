@@ -57,11 +57,15 @@ const DENY_ALL_PERMISSION_NAMES = [
   'skill',
 ] as const;
 
-const DENY_ALL_PERMISSION_RULES: PermissionRule[] = DENY_ALL_PERMISSION_NAMES.map((permission) => ({
-  permission,
-  pattern: '*',
-  action: 'deny',
-}));
+const DENY_ALL_PERMISSION_RULES: PermissionRule[] = [
+  ...DENY_ALL_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
+    permission,
+    pattern: '*',
+    action: 'deny',
+  })),
+  { permission: '*', pattern: '*', action: 'deny' },
+  { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+];
 
 export class SessionTitleFallback {
   private readonly inFlight = new Map<string, RenameAttempt>();
@@ -178,9 +182,17 @@ export class SessionTitleFallback {
       attempt.pendingTitle = null;
     }
     if (!attempt.hiddenSessionID || attempt.hiddenSessionCleanupStarted) return;
+    const sessionID = attempt.hiddenSessionID;
     attempt.hiddenSessionCleanupStarted = true;
     try {
-      await this.server.request('DELETE', sessionPath(attempt.hiddenSessionID));
+      const deleted = await this.server.request('DELETE', sessionPath(sessionID));
+      if (deleted === true) {
+        this.hiddenSessions.retainUntilDeleted(sessionID);
+      } else {
+        logger.warn(
+          'Failed to delete hidden session title fallback: OpenCode did not confirm deletion'
+        );
+      }
     } catch (err) {
       logger.warn(
         `Failed to delete hidden session title fallback: ${

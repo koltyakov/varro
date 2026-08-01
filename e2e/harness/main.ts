@@ -153,6 +153,9 @@ type HarnessWindow = Window & {
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
     exportSessionIds?: string[];
     updateMessagePart?: (part: Part) => void;
+    releaseHistoryRequests?: () => void;
+    releaseNextHistoryRequest?: () => boolean;
+    pendingHistoryRequestCount?: () => number;
   };
 };
 
@@ -160,6 +163,7 @@ const WORKSPACE_PATH = '/workspace/varro';
 const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
 const BASE_TIME = Date.now();
 const THEME = getThemeKind();
+const deferredHistoryRequestResolves: Array<() => void> = [];
 
 function getThemeKind(): WebviewThemeKind {
   const value = new URLSearchParams(window.location.search).get('theme');
@@ -2627,7 +2631,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 100_000
     );
     messages.push(firstUser);
-    for (let index = 0; index < 15; index += 1) {
+    for (let index = 0; index < 49; index += 1) {
       const detail = 'Variable-height history detail. '.repeat((index % 5) * 3);
       messages.push(
         makeAssistantMessage(
@@ -2646,7 +2650,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 80_000
     );
     messages.push(targetUser);
-    for (let index = 0; index < 62; index += 1) {
+    for (let index = 0; index < 78; index += 1) {
       const detail = 'Variable-height implementation detail. '.repeat((index % 7) * 2);
       messages.push(
         makeAssistantMessage(
@@ -3755,6 +3759,12 @@ async function handleApiRequest(
 
     const limit = Math.max(1, Number(url.searchParams.get('limit')) || 50);
     const before = url.searchParams.get('before');
+    if (
+      before !== null &&
+      new URLSearchParams(window.location.search).get('deferHistory') === '1'
+    ) {
+      await new Promise<void>((resolve) => deferredHistoryRequestResolves.push(resolve));
+    }
     const requestedEnd = before === null ? messages.length : Number(before);
     const end = Number.isFinite(requestedEnd)
       ? Math.max(0, Math.min(messages.length, requestedEnd))
@@ -4231,6 +4241,16 @@ function setUpHarness() {
     filePickCount: 0,
     openTargets: [],
     exportSessionIds: [],
+    releaseHistoryRequests: () => {
+      for (const resolve of deferredHistoryRequestResolves) resolve();
+      deferredHistoryRequestResolves.length = 0;
+    },
+    releaseNextHistoryRequest: () => {
+      const resolve = deferredHistoryRequestResolves.shift();
+      resolve?.();
+      return !!resolve;
+    },
+    pendingHistoryRequestCount: () => deferredHistoryRequestResolves.length,
     updateMessagePart: (part) => {
       const messages = scenarioState.messagesBySessionId[part.sessionID];
       const message = messages?.find((entry) => entry.info.id === part.messageID);

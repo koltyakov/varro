@@ -633,6 +633,27 @@ describe('client', () => {
     expect(wildcard).toHaveBeenNthCalledWith(2, message.payload);
   });
 
+  it('delivers sequence-only upgrades only to wildcard listeners', async () => {
+    const { serverEvents } = await loadClient();
+    const specific = vi.fn();
+    const wildcard = vi.fn();
+    serverEvents.on('session.updated', specific);
+    serverEvents.on('*', wildcard);
+    const event = {
+      id: 'event-1',
+      type: 'session.updated',
+      seq: 2,
+      sequenceOnly: true,
+      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+    } as const;
+
+    emitMessage({ type: 'server/event', payload: event });
+
+    expect(specific).not.toHaveBeenCalled();
+    expect(wildcard).toHaveBeenCalledOnce();
+    expect(wildcard).toHaveBeenCalledWith(event);
+  });
+
   it('logs errors from server event handlers without aborting other listeners', async () => {
     const { serverEvents } = await loadClient();
     const healthy = vi.fn();

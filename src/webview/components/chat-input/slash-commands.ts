@@ -215,7 +215,7 @@ export function getSlashCommands(props: {
       aliases: ['stop'],
       description: 'Stop the current run',
       action: () => {
-        abortSession();
+        void abortSession().catch(() => {});
       },
     });
   }

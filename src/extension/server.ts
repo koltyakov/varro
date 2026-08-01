@@ -786,12 +786,20 @@ export class OpenCodeServer extends EventEmitter {
           return;
         }
 
-        if (this.processManager.hasPortInUseDetected() && this.tryAdvancePort()) {
-          logger.warn(
-            `Port ${this.processManager.port - 1} in use by another process; retrying on ${this.processManager.port}`
+        if (this.processManager.hasPortInUseDetected()) {
+          const occupiedPort = this.processManager.port;
+          if (this.tryAdvancePort()) {
+            logger.warn(
+              `Port ${occupiedPort} in use by another process; retrying on ${this.processManager.port}`
+            );
+            this.processManager.setPortInUseDetected(false);
+            scheduleStartupRetry(100);
+            return;
+          }
+
+          failStartup(
+            `Port ${occupiedPort} is already in use, and Varro has no valid fallback port available. Set varro.server.port to an available integer between 1 and 65535.`
           );
-          this.processManager.setPortInUseDetected(false);
-          scheduleStartupRetry(100);
           return;
         }
 
