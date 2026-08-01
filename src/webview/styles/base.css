@@ -509,7 +509,13 @@ body.vscode-dark.varro-flat-dark {
 }
 
 body.vscode-light
-  :is(.assistant-turn-content, .todo-block, .chat-tool-invocation-part, .chat-thinking-box) {
+  :is(
+    .assistant-turn-content,
+    .todo-block,
+    .chat-queue-container,
+    .chat-tool-invocation-part,
+    .chat-thinking-box
+  ) {
   background: color-mix(in srgb, var(--color-vscode-fg) 2.5%, var(--color-vscode-sidebar));
   border-color: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-sidebar));
 }
