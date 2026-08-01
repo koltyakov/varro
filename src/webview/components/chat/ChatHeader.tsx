@@ -9,6 +9,7 @@ import { clampPopupToViewport } from '../../lib/popup-position';
 import { shareSession, unshareSession } from '../../lib/session-sharing';
 import { setError, setState, state } from '../../lib/state';
 import { writeClipboard } from '../../lib/write-clipboard';
+import { postMessage } from '../../lib/bridge';
 import {
   AttentionSessionsBadge,
   CompletedSessionsBadge,
@@ -453,6 +454,22 @@ export function ActiveChatHeader(props: {
                     </Show>
                     <button type="button" role="menuitem" onClick={() => void copySessionId()}>
                       Copy session ID
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        const sessionId = actionsSessionId();
+                        closeActions();
+                        if (sessionId) {
+                          postMessage({
+                            type: 'session/open-in-opencode',
+                            payload: { sessionId },
+                          });
+                        }
+                      }}
+                    >
+                      Open in OpenCode
                     </button>
                     <button
                       type="button"

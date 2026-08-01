@@ -34,6 +34,7 @@ export interface MessageRouterCallbacks {
   refreshProviders(): Promise<void>;
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
+  openSessionInOpenCode(sessionId: string): void | Promise<void>;
   exportSession(sessionId: string): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
@@ -92,6 +93,9 @@ export class MessageRouter {
           break;
         case 'terminal/run':
           await this.handleTerminalRunMessage(msg);
+          break;
+        case 'session/open-in-opencode':
+          await this.callbacks.openSessionInOpenCode(msg.payload.sessionId);
           break;
         case 'session/export':
           await this.handleSessionExportMessage(msg);

@@ -107,6 +107,8 @@ afterEach(() => {
   setState('sessionsLoadingMore', false);
   setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
+  delete (window as unknown as { __sendToExtension?: (message: unknown) => void })
+    .__sendToExtension;
   vi.restoreAllMocks();
   if (originalIntersectionObserver) {
     globalThis.IntersectionObserver = originalIntersectionObserver;
@@ -989,7 +991,35 @@ describe('SessionListView actions', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
+    expect(menu?.textContent).toContain('Open in OpenCode');
     expect(menu?.textContent).toContain('Share session');
+  });
+
+  it('opens a session in OpenCode from its row menu', () => {
+    const send = vi.fn();
+    (window as unknown as { __sendToExtension?: (message: unknown) => void }).__sendToExtension =
+      send;
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setSessions([session('session-1', Date.now())]);
+    cleanup = render(() => <SessionListView />, container);
+
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Open in OpenCode')!
+      .click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'session/open-in-opencode',
+      payload: { sessionId: 'session-1' },
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
   it('shares, copies, and unshares a session from its row menu', async () => {

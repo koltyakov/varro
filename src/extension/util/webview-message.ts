@@ -90,6 +90,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'providers/refresh': true,
   'terminal-selection/clear': true,
   'terminal/run': true,
+  'session/open-in-opencode': true,
   'session/export': true,
   'vscode/open-settings': true,
   'vscode/show-output': true,
@@ -159,6 +160,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       return Number.isSafeInteger(payload?.checkId) && (payload?.checkId as number) >= 0
         ? { type, payload: { checkId: payload?.checkId as number } }
+        : null;
+    }
+
+    case 'session/open-in-opencode': {
+      const payload = asRecord(message?.payload);
+      const sessionId = getBoundedString(payload?.sessionId, 512);
+      return sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId)
+        ? { type, payload: { sessionId } }
         : null;
     }
 

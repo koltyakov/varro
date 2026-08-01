@@ -578,6 +578,7 @@ export type WebviewMessage =
   | { type: 'providers/refresh' }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
+  | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }

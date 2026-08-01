@@ -63,6 +63,24 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'server/restart/check' })).toBeNull();
   });
 
+  it('accepts safe OpenCode session ids and rejects shell input', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'session/open-in-opencode',
+        payload: { sessionId: 'ses_abc-123' },
+      })
+    ).toEqual({
+      type: 'session/open-in-opencode',
+      payload: { sessionId: 'ses_abc-123' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'session/open-in-opencode',
+        payload: { sessionId: 'ses_abc; rm -rf .' },
+      })
+    ).toBeNull();
+  });
+
   it('accepts known API routes used by the webview client', () => {
     expect(isAllowedApiRequest('GET', '/command')).toBe(true);
     expect(isAllowedApiRequest('GET', '/session')).toBe(true);

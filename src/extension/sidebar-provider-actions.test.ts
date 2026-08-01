@@ -119,6 +119,17 @@ describe('createSidebarProviderActions', () => {
     mocks.vscode.Uri.parse.mockImplementation((value: string) => ({ value }));
   });
 
+  it('opens an OpenCode session in the terminal', async () => {
+    const { actions, deps } = createActionFixture();
+
+    await actions.openSessionInOpenCode('session-1');
+
+    expect(deps.runInTerminal).toHaveBeenCalledWith(
+      'opencode --session session-1',
+      'OpenCode Session'
+    );
+  });
+
   it('posts blocker updates while polling and restarts once the server is idle', async () => {
     const { actions, deps, server } = createActionFixture();
 

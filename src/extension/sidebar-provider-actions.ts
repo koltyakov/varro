@@ -96,6 +96,8 @@ export function createSidebarProviderActions(
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
+    openSessionInOpenCode: (sessionId) =>
+      deps.runInTerminal(`opencode --session ${sessionId}`, 'OpenCode Session'),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),

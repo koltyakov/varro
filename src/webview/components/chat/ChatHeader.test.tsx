@@ -101,6 +101,7 @@ describe('ActiveChatHeader', () => {
     expect(menu!.textContent).toContain('Rename');
     expect(menu!.textContent).toContain('Pin');
     expect(menu!.textContent).toContain('Copy session ID');
+    expect(menu!.textContent).toContain('Open in OpenCode');
     expect(menu!.textContent).toContain('Share session');
     expect(menu!.textContent).not.toContain('Unshare session');
     expect(menu!.textContent).toContain('Move to Recycle Bin');
@@ -120,6 +121,7 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).not.toContain('Rename');
     expect(menu?.textContent).not.toContain('Move to Recycle Bin');
     expect(menu?.textContent).toContain('Copy session ID');
+    expect(menu?.textContent).toContain('Open in OpenCode');
     expect(menu?.textContent).toContain('Share session');
   });
 

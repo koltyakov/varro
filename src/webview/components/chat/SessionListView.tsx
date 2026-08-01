@@ -52,6 +52,7 @@ import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
 import { shareSession, unshareSession } from '../../lib/session-sharing';
 import { writeClipboard } from '../../lib/write-clipboard';
+import { postMessage } from '../../lib/bridge';
 import { showSessionActionFeedback } from './SessionActionFeedback';
 import { SharedSessionIcon } from './SharedSessionIcon';
 
@@ -2140,6 +2141,19 @@ function SessionListItem(props: {
                   </Show>
                   <button type="button" role="menuitem" onClick={() => void copySessionId()}>
                     Copy session ID
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      props.actions.close();
+                      postMessage({
+                        type: 'session/open-in-opencode',
+                        payload: { sessionId: props.session.id },
+                      });
+                    }}
+                  >
+                    Open in OpenCode
                   </button>
                   <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
                     {props.session.share?.url ? 'Copy share link' : 'Share session'}

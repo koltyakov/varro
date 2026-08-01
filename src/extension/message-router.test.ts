@@ -21,6 +21,7 @@ function createCallbacks(): MessageRouterCallbacks {
     refreshProviders: vi.fn(() => Promise.resolve()),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
+    openSessionInOpenCode: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
@@ -128,6 +129,16 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'session/export', payload: { sessionId: 's1' } });
     expect(cb.exportSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('dispatches session/open-in-opencode', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({
+      type: 'session/open-in-opencode',
+      payload: { sessionId: 'session-1' },
+    });
+    expect(cb.openSessionInOpenCode).toHaveBeenCalledWith('session-1');
   });
 
   it('dispatches vscode/open-settings with query', async () => {
