@@ -749,19 +749,19 @@ export function SessionListView(props: {
   let recycleBinHeaderRef: HTMLDivElement | undefined;
   let hasPointerInteraction = false;
 
-  const handleControlDown = (event: KeyboardEvent) => {
-    if (event.key === 'Control') setShowAllModelDetails(true);
+  const handleAltDown = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') setShowAllModelDetails(true);
   };
   const hideAllModelDetails = () => setShowAllModelDetails(false);
-  const handleControlUp = (event: KeyboardEvent) => {
-    if (event.key === 'Control') hideAllModelDetails();
+  const handleAltUp = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') hideAllModelDetails();
   };
-  window.addEventListener('keydown', handleControlDown);
-  window.addEventListener('keyup', handleControlUp);
+  window.addEventListener('keydown', handleAltDown);
+  window.addEventListener('keyup', handleAltUp);
   window.addEventListener('blur', hideAllModelDetails);
   onCleanup(() => {
-    window.removeEventListener('keydown', handleControlDown);
-    window.removeEventListener('keyup', handleControlUp);
+    window.removeEventListener('keydown', handleAltDown);
+    window.removeEventListener('keyup', handleAltUp);
     window.removeEventListener('blur', hideAllModelDetails);
   });
 

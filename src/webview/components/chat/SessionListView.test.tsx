@@ -257,7 +257,7 @@ describe('SessionListView model details', () => {
     });
   });
 
-  it('reveals model details for every row while Control is held', async () => {
+  it('reveals model details for every row while Alt is held', async () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -277,12 +277,15 @@ describe('SessionListView model details', () => {
     const list = container.querySelector('.session-list-view')!;
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control' }));
-    expect(list.classList.contains('show-all-model-details')).toBe(true);
-
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }));
     expect(list.classList.contains('show-all-model-details')).toBe(false);
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(list.classList.contains('show-all-model-details')).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    expect(list.classList.contains('show-all-model-details')).toBe(false);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
     window.dispatchEvent(new Event('blur'));
     expect(list.classList.contains('show-all-model-details')).toBe(false);
   });
