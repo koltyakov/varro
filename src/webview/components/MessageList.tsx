@@ -474,6 +474,7 @@ export function MessageList() {
     const contentFollowRequired = !!(
       state.streamingPartId ||
       state.streamingText.length > 0 ||
+      visibleRunningToolPart() ||
       pendingExpansionScrollAnchor
     );
     if (!contentFollowRequired && activeFollowLoopSessionId && initialScrollRafId) {
@@ -1647,7 +1648,8 @@ export function MessageList() {
         performScroll({ force: true });
       }
 
-      const isStreaming = state.streamingText.length > 0 || state.streamingPartId;
+      const isStreaming =
+        state.streamingText.length > 0 || state.streamingPartId || visibleRunningToolPart();
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&

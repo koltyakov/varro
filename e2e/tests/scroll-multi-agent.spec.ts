@@ -23,14 +23,12 @@ async function getVisibleAnchor(list: Locator, messageId?: string) {
   }, messageId);
 }
 
-async function sampleVisibleAnchorAcrossFrames(
-  list: Locator,
-  frameCount = 4,
-  messageId?: string
-) {
+async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 4, messageId?: string) {
   const samples: Awaited<ReturnType<typeof getVisibleAnchor>>[] = [];
   for (let index = 0; index < frameCount; index += 1) {
-    await list.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await list.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    );
     samples.push(await getVisibleAnchor(list, messageId));
   }
   return samples;
@@ -237,6 +235,56 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
+  });
+
+  test('keeps following a rapid tool burst while the transcript is unfocused', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+
+    const composer = page.locator('[contenteditable="true"]');
+    await composer.focus();
+    await expect(composer).toBeFocused();
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      for (let index = 0; index < 40; index += 1) {
+        const part = {
+          id: `message-mla-assistant-streaming-burst-tool-${index}`,
+          sessionID: 'session-multi-agent-large-streaming',
+          messageID: 'message-mla-assistant-streaming',
+          type: 'tool' as const,
+          callID: `message-mla-assistant-streaming-burst-tool-${index}-call`,
+          tool: 'bash',
+          state: {
+            status: 'running' as const,
+            input: { command: `npm run burst-${index}` },
+            title: `npm run burst-${index}`,
+            metadata: {},
+            time: { start: Date.now() },
+          },
+        };
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          },
+          '*'
+        );
+      }
+    });
+
+    await expect(page.getByText('npm run burst-39', { exact: true })).toBeVisible();
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await expect(composer).toBeFocused();
   });
 
   test('slow upward scrolling stays anchored while new content streams', async ({ page }) => {

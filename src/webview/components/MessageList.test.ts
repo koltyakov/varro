@@ -4760,6 +4760,53 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('keeps following running tool growth when a resize notification is delayed', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list-track')) {
+        return new DOMRect(0, 0, 500, trackHeight);
+      }
+      return new DOMRect(0, 0, 500, 400);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Run checks')] },
+      { info: assistantMessage('assistant-1'), parts: [toolPart('tool-1', 'assistant-1')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(800);
+    animationFrames.flush();
+
+    trackHeight = 1700;
+    scrollHeightValue = 1700;
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
+  });
+
   it('does not auto-scroll again when the track bounces back to an already-followed height', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];
