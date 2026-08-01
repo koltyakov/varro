@@ -57,6 +57,7 @@ export type { ParsedUserMessageContent } from './message/UserMessageContent';
 export function Message(props: {
   info: MessageType;
   parts: Part[];
+  promptNumber?: number;
   isLastAssistant?: boolean;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -289,6 +290,13 @@ export function Message(props: {
               canEditUserMessage() && !isEditingUserMessage() ? 'Click to edit message' : undefined
             }
           >
+            <Show when={isUser() && props.promptNumber}>
+              {(promptNumber) => (
+                <span class="prompt-number-badge" aria-hidden="true">
+                  {promptNumber()}
+                </span>
+              )}
+            </Show>
             <Show when={isUser() && hasUserContent()}>
               <UserMessageContent parts={normalizedParts()} />
             </Show>

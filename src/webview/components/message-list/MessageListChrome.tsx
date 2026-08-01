@@ -40,6 +40,7 @@ export type StickyUserMessagePreview = {
 
 export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
+  promptNumber?: number;
   onClick?: (preview: StickyUserMessagePreview) => void;
   title?: string;
   loading?: boolean;
@@ -52,6 +53,13 @@ export function StickyUserMessagePreviewCard(props: {
       <div class="latest-user-message-sticky-overlay">
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
+          <Show when={props.promptNumber}>
+            {(promptNumber) => (
+              <span class="prompt-number-badge" aria-hidden="true">
+                {promptNumber()}
+              </span>
+            )}
+          </Show>
           <div
             class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
             title={props.loading ? 'Loading message' : props.title}

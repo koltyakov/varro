@@ -43,6 +43,8 @@ export function VirtualizedContent(
               msg={msg}
               nearViewport={nearViewport()}
               modelChangeMap={props.modelChangeMap}
+              promptNumberMap={props.promptNumberMap}
+              showPromptNumbers={props.showPromptNumbers}
               lastAssistantID={props.lastAssistantID}
               previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
               fileEditStackGroupMap={props.fileEditStackGroupMap}

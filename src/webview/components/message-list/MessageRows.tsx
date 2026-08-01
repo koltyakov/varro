@@ -30,6 +30,8 @@ export type AssistantDialogSummaryInfo = {
 
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
+  promptNumberMap: ReadonlyMap<string, number>;
+  showPromptNumbers: boolean;
   lastAssistantID: string | null;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -157,6 +159,9 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
         <MessageComponent
           info={props.msg.info}
           parts={props.msg.parts}
+          promptNumber={
+            props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
+          }
           isLastAssistant={props.msg.info.id === props.lastAssistantID}
           nearViewport={props.nearViewport}
           outerListVirtualized={props.outerListVirtualized}

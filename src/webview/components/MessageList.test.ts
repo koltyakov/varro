@@ -29,6 +29,7 @@ import {
   getChangedInlinePreviewMessageIds,
   getInlinePreviewLayoutSignatures,
   getNewlyAppendedMessageIds,
+  getPromptNumberMap,
 } from './MessageList';
 import {
   getStandalonePermissionPrompts,
@@ -59,6 +60,7 @@ import {
   markSessionHistoryLoadFailed,
   resetMessageWindowState,
   setSessionHistoryCursor,
+  setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
 } from '../lib/message-window';
 import { client } from '../lib/client';
@@ -680,6 +682,145 @@ afterEach(async () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   }
   vi.restoreAllMocks();
+});
+
+describe('MessageList prompt numbers', () => {
+  it('numbers user prompts in transcript order', () => {
+    const numbers = getPromptNumberMap([
+      { info: userMessage('user-1'), parts: [] },
+      { info: assistantMessage('assistant-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [] },
+    ]);
+
+    expect([...numbers]).toEqual([
+      ['user-1', 1],
+      ['user-2', 2],
+    ]);
+  });
+
+  it('shows prompt counters only while Alt is held', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'First prompt')] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text-1', 'First response')],
+      },
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Second prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(
+        [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['1', '2']);
+    });
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    await Promise.resolve();
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+  });
+
+  it('includes prefetched prompts outside the loaded message window', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPrompts(
+      'session-1',
+      Array.from({ length: 12 }, (_, index) => ({
+        info: userMessage(`user-${index + 1}`),
+        parts: [textPart(`user-text-${index + 1}`, `Prompt ${index + 1}`)],
+      }))
+    );
+    replaceMessages([
+      { info: userMessage('user-13'), parts: [textPart('user-text-13', 'Prompt 13')] },
+      {
+        info: assistantMessage('assistant-13'),
+        parts: [textPart('assistant-text-13', 'Response 13')],
+      },
+      { info: userMessage('user-14'), parts: [textPart('user-text-14', 'Prompt 14')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(
+        [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['13', '14']);
+    });
+  });
+
+  it('loads every older prompt page before showing absolute counters', async () => {
+    const promptPage = (start: number, end: number, nextCursor?: string) => {
+      const page = Array.from({ length: end - start + 1 }, (_, index) => {
+        const promptNumber = start + index;
+        return {
+          info: userMessage(`user-${promptNumber}`),
+          parts: [textPart(`user-text-${promptNumber}`, `Prompt ${promptNumber}`)],
+        };
+      }) as Awaited<ReturnType<typeof client.session.messages>>;
+      page.nextCursor = nextCursor;
+      return page;
+    };
+
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-12');
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockResolvedValueOnce(promptPage(7, 12, 'cursor-6'))
+      .mockResolvedValueOnce(promptPage(1, 6));
+    replaceMessages([
+      { info: userMessage('user-13'), parts: [textPart('user-text-13', 'Prompt 13')] },
+      {
+        info: assistantMessage('assistant-13'),
+        parts: [textPart('assistant-text-13', 'Response 13')],
+      },
+      { info: userMessage('user-14'), parts: [textPart('user-text-14', 'Prompt 14')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(
+        [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['13', '14']);
+    });
+    expect(messagesSpy).toHaveBeenNthCalledWith(1, 'session-1', {
+      limit: 50,
+      before: 'cursor-12',
+    });
+    expect(messagesSpy).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 50,
+      before: 'cursor-6',
+    });
+  });
+
+  it('hides prompt counters when the window loses focus', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'First prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('1');
+    });
+
+    window.dispatchEvent(new Event('blur'));
+    await Promise.resolve();
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+  });
 });
 
 describe('buildPlanImplementationPrompt', () => {

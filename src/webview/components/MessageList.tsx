@@ -31,7 +31,7 @@ import {
 } from '../lib/state';
 import { isAssistantMessage } from '../lib/message-metrics';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
-import type { AssistantMessage, Part } from '../types';
+import type { AssistantMessage, MessageEntry, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
@@ -43,7 +43,11 @@ import {
   markSessionHistoryLoadFailed,
   mergeOlderHistory,
 } from '../lib/message-window';
-import { loadOlderSessionHistoryPage, recheckSessionStatus } from '../hooks/useOpenCode';
+import {
+  loadOlderSessionHistoryPage,
+  loadOlderSessionPrompts,
+  recheckSessionStatus,
+} from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
@@ -192,12 +196,102 @@ export function getNewlyAppendedMessageIds(
   return currentIds.slice(previousIds.length);
 }
 
+export function getPromptNumberMap(messages: readonly MessageEntry[]) {
+  const result = new Map<string, number>();
+  let promptNumber = 0;
+  for (const message of messages) {
+    if (message.info.role !== 'user') continue;
+    promptNumber += 1;
+    result.set(message.info.id, promptNumber);
+  }
+  return result;
+}
+
 export function MessageList() {
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
   let trackRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
+  const [showPromptNumbers, setShowPromptNumbers] = createSignal(false);
+  const [promptNumberReadySessionIds, setPromptNumberReadySessionIds] = createSignal<
+    ReadonlySet<string>
+  >(new Set());
+  const promptNumberLoads = new Map<string, Promise<void>>();
+  let promptNumberSessionId: string | null = null;
+  let altHeld = false;
+  let disposed = false;
+
+  function ensurePromptNumbersReady(sessionId: string) {
+    const existing = promptNumberLoads.get(sessionId);
+    if (existing) return existing;
+
+    const load = (async () => {
+      while (await loadOlderSessionPrompts(sessionId)) {
+        // Continue until the prompt cursor reaches the beginning of the session.
+      }
+      if (disposed) return;
+      setPromptNumberReadySessionIds((current) => new Set(current).add(sessionId));
+    })().finally(() => promptNumberLoads.delete(sessionId));
+    promptNumberLoads.set(sessionId, load);
+    return load;
+  }
+
+  function showPromptNumbersForAlt() {
+    if (altHeld) return;
+    altHeld = true;
+    setShowPromptNumbers(true);
+    const sessionId = state.activeSessionId;
+    if (sessionId) void ensurePromptNumbersReady(sessionId);
+  }
+
+  function hidePromptNumbersForAlt() {
+    altHeld = false;
+    setShowPromptNumbers(false);
+  }
+
+  const handleAltDown = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') showPromptNumbersForAlt();
+  };
+  const handleAltUp = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') hidePromptNumbersForAlt();
+  };
+  const syncAltState = (event: MouseEvent) => {
+    if (event.altKey) showPromptNumbersForAlt();
+    else hidePromptNumbersForAlt();
+  };
+  window.addEventListener('keydown', handleAltDown);
+  window.addEventListener('keyup', handleAltUp);
+  window.addEventListener('mousemove', syncAltState);
+  window.addEventListener('blur', hidePromptNumbersForAlt);
+  onCleanup(() => {
+    disposed = true;
+    altHeld = false;
+    window.removeEventListener('keydown', handleAltDown);
+    window.removeEventListener('keyup', handleAltUp);
+    window.removeEventListener('mousemove', syncAltState);
+    window.removeEventListener('blur', hidePromptNumbersForAlt);
+  });
+  createEffect(() => {
+    const sessionId = state.activeSessionId;
+    if (sessionId !== promptNumberSessionId) {
+      promptNumberSessionId = sessionId;
+      if (sessionId) {
+        setPromptNumberReadySessionIds((current) => {
+          if (!current.has(sessionId)) return current;
+          const next = new Set(current);
+          next.delete(sessionId);
+          return next;
+        });
+      }
+    }
+    if (!showPromptNumbers() || !sessionId || promptNumberReadySessionIds().has(sessionId)) return;
+    void ensurePromptNumbersReady(sessionId);
+  });
+  const promptNumbersVisible = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    return !!sessionId && showPromptNumbers() && promptNumberReadySessionIds().has(sessionId);
+  });
   const lastAssistantID = createMemo(() => {
     const msgs = state.messages;
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -341,6 +435,11 @@ export function MessageList() {
     for (const [index, entry] of messages().entries()) result.set(entry.info.id, index);
     return result;
   });
+  const promptNumberMap = createMemo(() =>
+    getPromptNumberMap(
+      mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId))
+    )
+  );
 
   function clearObservedVisibleMessages() {
     observedVisibleMessageBounds.clear();
@@ -2689,6 +2788,9 @@ export function MessageList() {
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
+                promptNumber={
+                  promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
+                }
                 title={stickyPreviewTitle}
                 loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
@@ -2765,6 +2867,8 @@ export function MessageList() {
             <VirtualizedContent
               messages={messages()}
               modelChangeMap={modelChangeMap()}
+              promptNumberMap={promptNumberMap()}
+              showPromptNumbers={promptNumbersVisible()}
               lastAssistantID={lastAssistantID()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}

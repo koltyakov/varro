@@ -63,6 +63,29 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.latest-user-message-sticky-bottom-fade')).not.toBeNull();
   });
 
+  it('renders a prompt number counter on the sticky card when provided', () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-1',
+            index: 3,
+            text: 'A numbered prompt.',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+          promptNumber={4}
+        />
+      ),
+      container!
+    );
+
+    expect(
+      container?.querySelector('.latest-user-message-sticky-shell > .prompt-number-badge')
+        ?.textContent
+    ).toBe('4');
+  });
+
   it('toggles the overflow fade as the preview scrolls', async () => {
     cleanup = render(
       () => (

@@ -233,6 +233,7 @@ input:focus-visible {
 }
 
 .latest-user-message-sticky-shell {
+  position: relative;
   background: var(--color-vscode-list-bg);
   transform: translateZ(0);
 }
@@ -540,6 +541,7 @@ input:focus-visible {
 }
 
 .user-message-card {
+  position: relative;
   border: 1px solid color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
   box-shadow: var(--chat-shadow-card);
 }
