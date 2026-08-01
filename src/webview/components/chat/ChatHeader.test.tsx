@@ -108,6 +108,21 @@ describe('ActiveChatHeader', () => {
     expect(menu!.style.top).toBe('50px');
   });
 
+  it('hides rename and recycle-bin actions for an active sub-agent session', () => {
+    setState('sessions', [session({ parentID: 'parent' })]);
+    renderHeader();
+
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    const menu = document.body.querySelector<HTMLElement>('[aria-label="Session actions"]');
+    expect(menu?.textContent).not.toContain('Rename');
+    expect(menu?.textContent).not.toContain('Move to Recycle Bin');
+    expect(menu?.textContent).toContain('Copy session ID');
+    expect(menu?.textContent).toContain('Share session');
+  });
+
   it('shows the pinned marker and toggles pinning from the context menu', async () => {
     setState('pinnedSessionIds', ['session-1']);
     const setPinned = vi.spyOn(client.varro.session, 'setPinned').mockResolvedValueOnce([]);

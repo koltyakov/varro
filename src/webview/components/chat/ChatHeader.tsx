@@ -441,9 +441,11 @@ export function ActiveChatHeader(props: {
                 when={renaming()}
                 fallback={
                   <>
-                    <button type="button" role="menuitem" onClick={beginRename}>
-                      Rename
-                    </button>
+                    <Show when={!session().parentID}>
+                      <button type="button" role="menuitem" onClick={beginRename}>
+                        Rename
+                      </button>
+                    </Show>
                     <Show when={!session().parentID}>
                       <button type="button" role="menuitem" onClick={() => void togglePinned()}>
                         {isActionsSessionPinned() ? 'Unpin' : 'Pin'}
@@ -468,18 +470,20 @@ export function ActiveChatHeader(props: {
                         Unshare session
                       </button>
                     </Show>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="is-destructive"
-                      onClick={() => {
-                        const sessionId = actionsSessionId();
-                        closeActions();
-                        if (sessionId) void deleteSession(sessionId);
-                      }}
-                    >
-                      Move to Recycle Bin
-                    </button>
+                    <Show when={!session().parentID}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class="is-destructive"
+                        onClick={() => {
+                          const sessionId = actionsSessionId();
+                          closeActions();
+                          if (sessionId) void deleteSession(sessionId);
+                        }}
+                      >
+                        Move to Recycle Bin
+                      </button>
+                    </Show>
                   </>
                 }
               >

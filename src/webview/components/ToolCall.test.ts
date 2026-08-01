@@ -1238,6 +1238,45 @@ describe('ToolCall', () => {
     expect(detail?.textContent).toContain('Aborted');
   });
 
+  it('clamps generic tool errors and opens the full error in an editor tab', () => {
+    const send = setExtensionSender();
+    const error = Array.from({ length: 7 }, (_, index) => `browser failure ${index + 1}`).join(
+      '\n'
+    );
+    const part: ToolPart = {
+      id: 'tool-long-error',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-long-error',
+      tool: 'browser-bridge_browser_investigate',
+      state: {
+        status: 'error',
+        input: { objective: 'Check current page' },
+        error,
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detail = container?.querySelector<HTMLPreElement>('.tool-invocation-error');
+    expect(detail?.classList).toContain('is-truncated');
+    expect(detail?.textContent).not.toContain('browser failure 6');
+
+    detail?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: error,
+        title: 'browser-bridge_browser_investigate (error)',
+        language: 'text',
+      },
+    });
+  });
+
   it('hides the command card when a linked permission prompt is pending', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -2116,6 +2155,51 @@ describe('FileChangeCard', () => {
     expect(errorDetail?.querySelector('script')).toBeNull();
     expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
     expect(container?.textContent).not.toContain('Edited');
+  });
+
+  it('clamps long file edit errors and opens the full error in an editor tab', () => {
+    const send = setExtensionSender();
+    const error = Array.from({ length: 8 }, (_, index) => `failure line ${index + 1}`).join('\n');
+    const part: ToolPart = {
+      id: 'tool-long-patch-error',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-long-patch-error',
+      tool: 'apply_patch',
+      state: {
+        status: 'error',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** End Patch`,
+        },
+        error,
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const errorDetail = container?.querySelector<HTMLPreElement>('.file-edit-error-detail');
+    expect(errorDetail?.classList).toContain('is-truncated');
+    expect(errorDetail?.textContent).toContain('failure line 5');
+    expect(errorDetail?.textContent).not.toContain('failure line 6');
+
+    errorDetail?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: error,
+        title: 'Edit error',
+        language: 'text',
+      },
+    });
   });
 
   it('keeps aborted apply_patch status visible beside proposed inline changes', () => {

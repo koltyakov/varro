@@ -1465,6 +1465,14 @@ kbd {
   opacity: 0.85;
 }
 
+.chat-tool-invocation-part .tool-invocation-detail > .tool-invocation-error.tool-text-clamped {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
 .chat-tool-invocation-part .tool-invocation-error.is-aborted {
   color: var(--color-vscode-fg-muted);
   opacity: 0.82;
@@ -1582,9 +1590,11 @@ kbd {
 }
 
 .file-edit-error-detail {
+  margin: 0;
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-error) 22%, transparent);
   color: var(--color-vscode-error);
   background: color-mix(in srgb, var(--color-vscode-error) 5%, transparent);
+  font-family: inherit;
 }
 
 .file-change-card-header,

@@ -29,6 +29,7 @@ import {
   getSessionTreeRootId,
   isSessionAwaitingInput,
   isSessionTreeStatusWorking,
+  syncQueuedMessages,
 } from '../../lib/state';
 import {
   cacheSessionHistoryPage,
@@ -711,6 +712,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       });
 
       postMessage({ type: 'ready' });
+      syncQueuedMessages();
 
       postFocusState();
 

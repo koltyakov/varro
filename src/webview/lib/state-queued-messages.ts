@@ -1,5 +1,6 @@
 import type { QueuedMessage } from './app-state-types';
 import { setState, state } from './app-state';
+import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
 function commitQueuedMessages(messages: QueuedMessage[]) {
@@ -15,13 +16,36 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   if (failedIds.length !== state.failedQueuedMessageIds.length) {
     setState('failedQueuedMessageIds', failedIds);
   }
-  // Data URLs can make a single queued image message tens of megabytes. Keep those messages fully
-  // functional while the retained webview is alive, but do not synchronously serialize them into
-  // VS Code state and localStorage. Restoring a partial text-only message would change user intent.
-  writeStored(
-    STORAGE_KEYS.queuedMessages,
-    messages.filter((message) => (message.clipboardImages?.length ?? 0) === 0)
+  // Data URLs can make a single queued image message tens of megabytes. Persist them through the
+  // asynchronous extension bridge, but not synchronously in webview state and localStorage.
+  const browserPersisted = messages.filter(
+    (message) => (message.clipboardImages?.length ?? 0) === 0
   );
+  writeStored(STORAGE_KEYS.queuedMessages, browserPersisted);
+  const hostPersisted = messages.map(
+    ({
+      id,
+      sessionId,
+      text,
+      droppedFiles = [],
+      clipboardImages = [],
+      terminalSelection = null,
+      attachedDiagnostics,
+    }) => ({
+      id,
+      sessionId,
+      text,
+      droppedFiles,
+      clipboardImages,
+      terminalSelection,
+      ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
+    })
+  );
+  postMessage({ type: 'queued-messages/update', payload: { messages: hostPersisted } });
+}
+
+export function syncQueuedMessages() {
+  commitQueuedMessages([...state.queuedMessages]);
 }
 
 export function setQueuedMessageDispatchingId(id: string | null) {

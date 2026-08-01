@@ -311,7 +311,7 @@ export function createAppState(): AppStateInstance {
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,
     compactingSessionIds: [],
-    queuedMessages: readStoredQueuedMessages(),
+    queuedMessages: readStoredQueuedMessages(initialWebviewState.queuedMessages),
     queuedMessageDispatchingId: null,
     failedQueuedMessageIds: [],
     queuedMessageEdit: null,

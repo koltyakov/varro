@@ -85,6 +85,7 @@ export class WebviewSession {
       postThemeUpdate(): void;
       onHidden(): void;
       resetStatusBarCache(): void;
+      queuedMessages(): InitialWebviewState['queuedMessages'];
     }
   ) {}
 
@@ -315,6 +316,7 @@ export class WebviewSession {
         )
         .map((item) => item.props),
       pinnedSessionIds: this.pinnedSessions.list(),
+      queuedMessages: this.deps.queuedMessages(),
     };
   }
 

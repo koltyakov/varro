@@ -1072,6 +1072,7 @@ describe('Message user editing', () => {
 
   afterEach(() => {
     setAppState('activeSessionId', null);
+    setAppState('sessions', []);
     setAppState('sessionStatus', {});
     resetMessageEditState();
   });
@@ -1160,6 +1161,27 @@ describe('Message user editing', () => {
 
   it('does not offer editing while the active session is working', () => {
     setAppState('sessionStatus', { 'session-1': { type: 'busy' } });
+    renderEditableUserMessage();
+
+    const card = container?.querySelector<HTMLElement>('.user-message-card');
+    expect(card?.classList.contains('user-message-card-editable')).toBe(false);
+
+    card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(editingMessage()).toBeNull();
+  });
+
+  it('does not offer editing in a managed sub-agent session', () => {
+    setAppState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'parent',
+        title: 'Child session',
+        version: '1',
+        time: { created: 0, updated: 1 },
+      },
+    ]);
     renderEditableUserMessage();
 
     const card = container?.querySelector<HTMLElement>('.user-message-card');

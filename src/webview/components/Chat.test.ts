@@ -122,7 +122,12 @@ afterEach(() => {
   setState('completedSessionResponses', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
   setState('sessionSelectedAgents', reconcile({}));
+  setState('sessionSelectedModels', reconcile({}));
   setState('selectedAgent', null);
+  setState('selectedModel', null);
+  setState('providers', []);
+  setState('providerDefaults', reconcile({}));
+  setState('providerLimits', reconcile({}));
   setState('activeSessionId', null);
   setState('messages', []);
   setState('queuedMessages', []);
@@ -1304,6 +1309,122 @@ describe('header status badges', () => {
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
     expect(subagentsButton).toBeNull();
+  });
+
+  it('replaces a managed sub-agent composer with a link to its parent session', async () => {
+    const selectSessionSpy = vi
+      .spyOn(openCodeModule, 'selectSession')
+      .mockResolvedValue(undefined as never);
+    setState('sessions', [
+      session('parent', 500, { title: 'Parent task' }),
+      session('child', 400, {
+        parentID: 'parent',
+        model: { id: 'gpt-5.6-sol', providerID: 'openai', variant: 'high' },
+      }),
+    ]);
+    setState('activeSessionId', 'child');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.6-sol': {
+            id: 'gpt-5.6-sol',
+            name: 'GPT-5.6 Sol',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            limit: { context: 1000 },
+            variants: { medium: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setState('messages', [
+      {
+        ...assistantMessageEntry('assistant-child'),
+        info: {
+          ...assistantMessageEntry('assistant-child').info,
+          sessionID: 'child',
+          providerID: 'openai',
+          modelID: 'gpt-5.6-sol',
+          variant: 'high',
+          tokens: {
+            input: 600,
+            output: 100,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerLimits', {
+      'openai:gpt-5.6-sol': {
+        providerID: 'openai',
+        modelID: 'gpt-5.6-sol',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5-Hour Limit',
+            unit: 'requests',
+            remaining: 39,
+            limit: 100,
+            resetAt: null,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => Chat(), container!);
+
+    const footer = container?.querySelector('.managed-subagent-footer');
+    const returnButton = footer?.querySelector<HTMLButtonElement>(
+      '.managed-subagent-footer-button'
+    );
+    expect(footer?.querySelector('.managed-subagent-footer-title')?.textContent).toBe(
+      'Managed subagent'
+    );
+    expect(footer?.querySelector('.managed-subagent-footer-description')?.textContent).toContain(
+      '"Parent task"'
+    );
+    expect(container?.querySelector('.interactive-input-part')).toBeNull();
+    expect(
+      footer?.querySelector('.chat-input-container.managed-subagent-container')
+    ).toBeInstanceOf(HTMLDivElement);
+    expect(footer?.querySelector('.managed-subagent-toolbar.toolbar-main')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(footer?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 Sol');
+    expect(footer?.querySelector('.provider-icon')).toBeInstanceOf(HTMLSpanElement);
+    expect(footer?.querySelector('.managed-subagent-reasoning')?.textContent?.trim()).toBe('High');
+    const contextButton = footer?.querySelector<HTMLButtonElement>('.chat-context-usage');
+    const providerLimitButton = footer?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+    expect(contextButton?.getAttribute('aria-label')).toBe('Context usage (70%)');
+    expect(providerLimitButton?.textContent).toContain('Limits:');
+    expect(providerLimitButton?.textContent).toContain('39');
+    expect(returnButton?.textContent?.trim()).toBe('Return to parent');
+
+    contextButton?.click();
+    expect(footer?.querySelector('.context-popup')).toBeInstanceOf(HTMLDivElement);
+    expect(footer?.querySelector('.context-popup-action')).toBeNull();
+
+    providerLimitButton?.click();
+    expect(footer?.querySelector('.context-popup')).toBeNull();
+    expect(footer?.querySelector('.provider-limit-popup')).toBeInstanceOf(HTMLDivElement);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    await Promise.resolve();
+    expect(footer?.querySelector('.provider-limit-popup')).toBeNull();
+    expect(container?.querySelector('.managed-subagent-footer')).toBeInstanceOf(HTMLDivElement);
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+
+    returnButton?.click();
+    await Promise.resolve();
+
+    expect(selectSessionSpy).toHaveBeenCalledWith('parent');
   });
 
   it('returns from an active sub-agent session to its top session sub-agent list', async () => {

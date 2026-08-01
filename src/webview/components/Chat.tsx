@@ -520,6 +520,18 @@ export function Chat() {
     const sessionId = state.activeSessionId;
     return sessionId ? sessionsById().get(sessionId) || null : null;
   });
+  const managedSubagentParent = createMemo(() => {
+    const parentId = activeSession()?.parentID;
+    return parentId ? sessionsById().get(parentId) || null : null;
+  });
+  const managedSubagentParentTitle = createMemo(() => {
+    const parent = managedSubagentParent();
+    return parent ? normalizeSessionTitle(parent.title) || null : null;
+  });
+  const returnToManagedSubagentParent = () => {
+    const parentId = activeSession()?.parentID;
+    if (parentId) void openParentSession(parentId);
+  };
   const activeBackTitle = createMemo(() => {
     if (
       getDirectSessionReturnId(state.activeSessionId) ||
@@ -640,10 +652,13 @@ export function Chat() {
       activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
       activeSubagentCount={activeSubagentCount()}
       activeSubagentLabel={activeSubagentLabel()}
+      managedSubagentParentId={activeSession()?.parentID || null}
+      managedSubagentParentTitle={managedSubagentParentTitle()}
       onClearSessionListView={clearSessionListView}
       onOpenAllSessions={() => {
         void openAllSessions();
       }}
+      onReturnToManagedSubagentParent={returnToManagedSubagentParent}
       onOpenParentSession={openSubagentListParentSession}
       onOpenSubagentSessions={openSubagentSessions}
       onOpenSidebarSubagentSessions={openSidebarSubagentSessions}

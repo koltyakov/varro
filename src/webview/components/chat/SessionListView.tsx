@@ -2121,9 +2121,11 @@ function SessionListItem(props: {
               when={props.actions.renaming()}
               fallback={
                 <>
-                  <button type="button" role="menuitem" onClick={beginRename}>
-                    Rename
-                  </button>
+                  <Show when={!props.session.parentID}>
+                    <button type="button" role="menuitem" onClick={beginRename}>
+                      Rename
+                    </button>
+                  </Show>
                   <Show when={!props.session.parentID}>
                     <button
                       type="button"
@@ -2147,17 +2149,19 @@ function SessionListItem(props: {
                       Unshare session
                     </button>
                   </Show>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class="is-destructive"
-                    onClick={() => {
-                      props.actions.close();
-                      void deleteSession(props.session.id);
-                    }}
-                  >
-                    Move to Recycle Bin
-                  </button>
+                  <Show when={!props.session.parentID}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="is-destructive"
+                      onClick={() => {
+                        props.actions.close();
+                        void deleteSession(props.session.id);
+                      }}
+                    >
+                      Move to Recycle Bin
+                    </button>
+                  </Show>
                 </>
               }
             >

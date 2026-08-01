@@ -10,6 +10,7 @@ type DroppedContentFile = Extract<
 type LogPayload = Extract<WebviewMessage, { type: 'log' }>['payload'];
 type OpenPathPayload = Extract<WebviewMessage, { type: 'vscode/open' }>['payload'];
 type OpenTextPayload = Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'];
+type QueuedMessagesPayload = Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload'];
 type RalphMessage = Extract<
   WebviewMessage,
   {
@@ -52,6 +53,7 @@ export interface MessageRouterCallbacks {
   updateConfig(payload: ConfigUpdatePayload): Promise<void>;
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
   handleRalphMessage(msg: RalphMessage): void;
+  updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   log(payload: LogPayload): void;
 }
 
@@ -63,6 +65,9 @@ export class MessageRouter {
       switch (msg.type) {
         case 'ready':
           await this.handleReadyMessage();
+          break;
+        case 'queued-messages/update':
+          await this.callbacks.updateQueuedMessages(msg.payload);
           break;
         case 'commands/state':
           this.callbacks.updateCommandState(msg.payload.canAbort, msg.payload.canSwitchSessions);

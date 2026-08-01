@@ -971,6 +971,27 @@ describe('SessionListView ordering', () => {
 });
 
 describe('SessionListView actions', () => {
+  it('hides rename and recycle-bin actions for sub-agent sessions', () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setSessions([session('parent', 2), session('child', 1, { parentID: 'parent' })]);
+
+    cleanup = render(() => <SessionListView subagentParentId="parent" />, container);
+    openSessionActions(container.querySelector<HTMLElement>('.session-item')!);
+
+    const menu = document.querySelector<HTMLElement>('[aria-label="Session actions"]');
+    expect(menu?.textContent).not.toContain('Rename');
+    expect(menu?.textContent).not.toContain('Move to Recycle Bin');
+    expect(menu?.textContent).toContain('Copy session ID');
+    expect(menu?.textContent).toContain('Share session');
+  });
+
   it('shares, copies, and unshares a session from its row menu', async () => {
     const activityUpdatedAt = Date.now() - 60_000;
     const shareUpdatedAt = Date.now();

@@ -41,6 +41,7 @@ export function ContextPopup(props: {
   subagentCount: number;
   model: { providerName: string; modelName: string };
   compactDisabled: boolean;
+  showCompactAction?: boolean;
   onClose: () => void;
   onCompact: () => void;
 }) {
@@ -168,7 +169,9 @@ export function ContextPopup(props: {
         </div>
       </Show>
 
-      <Show when={shouldShowContextCompact(props.usage.percent)}>
+      <Show
+        when={props.showCompactAction !== false && shouldShowContextCompact(props.usage.percent)}
+      >
         <div class="context-popup-actions">
           <button
             type="button"

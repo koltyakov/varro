@@ -454,6 +454,24 @@ export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contra
 
 export type DesktopSessionPaneSide = 'left' | 'right';
 
+export type QueuedMessageSnapshot = {
+  id: string;
+  sessionId: string;
+  text: string;
+  droppedFiles: DroppedFile[];
+  clipboardImages: Array<{
+    id: string;
+    url: string;
+    mime: string;
+    filename: string;
+    size: number;
+    contentKey?: string;
+    attachmentSequence?: number;
+  }>;
+  terminalSelection: { text: string; terminalName: string } | null;
+  attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
+};
+
 export type InitialWebviewState = {
   theme: WebviewThemeKind;
   serverStatus: ServerStatus;
@@ -475,6 +493,7 @@ export type InitialWebviewState = {
   pendingQuestions?: Array<Record<string, unknown>>;
   recycleBinEntries?: RecycleBinEntry[];
   pinnedSessionIds?: string[];
+  queuedMessages?: QueuedMessageSnapshot[];
 };
 
 /**
@@ -549,6 +568,7 @@ export type WebviewMessage =
     }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
+  | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }
   | { type: 'files/pick' }
   | { type: 'files/search'; payload: { requestId: number; query: string; limit?: number } }
   | { type: 'file/read'; payload: { path: string } }

@@ -4,6 +4,99 @@
   display: contents;
 }
 
+.managed-subagent-footer {
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 8px var(--chat-horizontal-padding) 0;
+  position: relative;
+}
+
+.managed-subagent-footer > * {
+  position: relative;
+  z-index: var(--z-raised);
+}
+
+.interactive-session .managed-subagent-container {
+  cursor: default;
+}
+
+.managed-subagent-container .managed-subagent-footer-copy {
+  padding: 2px 6px 10px;
+}
+
+.managed-subagent-footer-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.managed-subagent-footer-title {
+  color: var(--color-vscode-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.managed-subagent-footer-description {
+  overflow: hidden;
+  color: var(--color-vscode-fg-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interactive-session .managed-subagent-toolbar .toolbar-left {
+  overflow: hidden;
+}
+
+.interactive-session .managed-subagent-info-chip {
+  cursor: default;
+  flex: 0 1 auto;
+}
+
+.interactive-session .managed-subagent-info-chip:hover {
+  border-color: var(--color-vscode-border-default);
+  background: var(--color-vscode-input-surface);
+}
+
+.interactive-session .managed-subagent-reasoning {
+  max-width: 15ch;
+}
+
+.managed-subagent-footer-button {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-chip);
+  background: var(--color-vscode-button-bg);
+  color: var(--color-vscode-button-fg);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.managed-subagent-footer-button:hover {
+  background: var(--color-vscode-button-hover);
+}
+
+.managed-subagent-footer-button:active {
+  transform: translateY(1px);
+}
+
+.interactive-session .managed-subagent-meta {
+  padding-right: 2px;
+  position: relative;
+  z-index: var(--z-chrome-raised);
+}
+
+.interactive-session .managed-subagent-meta :is(.context-anchor, .provider-limit-anchor) {
+  z-index: var(--z-popup);
+}
+
 .inline-edit-composer-slot {
   width: 100%;
 }

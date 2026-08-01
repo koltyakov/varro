@@ -159,6 +159,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     postThemeUpdate: vi.fn(),
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
+    queuedMessages: vi.fn(() => undefined),
   };
 
   const session = new WebviewSession(
@@ -322,6 +323,27 @@ describe('WebviewSession', () => {
         pinnedSessionIds: ['pinned-session'],
       })
     );
+  });
+
+  it('includes the persisted queued messages in the initial webview state', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+    const queuedMessages = [
+      {
+        id: 'queue-1',
+        sessionId: 'session-1',
+        text: 'continue after restart',
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+    ];
+    deps.queuedMessages.mockReturnValue(queuedMessages);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledWith(expect.objectContaining({ queuedMessages }));
   });
 
   it('marks the initial state when the extension host is remote', async () => {

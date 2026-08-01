@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import type { JSX } from 'solid-js';
 import { postMessage } from '../lib/bridge';
 
 /** Logical lines shown before a value is clamped. Deliberately short: the
@@ -57,6 +58,8 @@ export function ClampedToolText(props: {
   title: string;
   language?: string;
   class?: string;
+  role?: JSX.HTMLAttributes<HTMLPreElement>['role'];
+  'aria-label'?: string;
 }) {
   const result = createMemo(() => clampToolText(props.content));
 
@@ -102,7 +105,9 @@ export function ClampedToolText(props: {
       class={`${props.class ?? ''} tool-text-clamped`}
       classList={{ 'is-truncated': truncated() }}
       onClick={openUnlessSelecting}
-      title={truncated() ? 'Open full output in an editor tab' : undefined}
+      title={truncated() ? 'Open full text in an editor tab' : undefined}
+      role={props.role}
+      aria-label={props['aria-label']}
     >
       {result().preview}
     </pre>

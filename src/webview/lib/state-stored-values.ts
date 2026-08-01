@@ -95,6 +95,40 @@ function normalizeStoredAttachmentSequence(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
+function normalizeStoredClipboardImage(
+  value: unknown
+): NonNullable<QueuedMessage['clipboardImages']>[number] | null {
+  const record = asStoredRecord(value);
+  const id = normalizeStoredString(record?.id);
+  const url = normalizeStoredString(record?.url);
+  const mime = normalizeStoredString(record?.mime);
+  const filename = normalizeStoredString(record?.filename);
+  if (
+    !id ||
+    !url ||
+    !mime ||
+    !filename ||
+    typeof record?.size !== 'number' ||
+    !Number.isFinite(record.size) ||
+    record.size < 0
+  ) {
+    return null;
+  }
+
+  const image: NonNullable<QueuedMessage['clipboardImages']>[number] = {
+    id,
+    url,
+    mime,
+    filename,
+    size: record.size,
+  };
+  const contentKey = normalizeStoredString(record.contentKey);
+  if (contentKey) image.contentKey = contentKey;
+  const attachmentSequence = normalizeStoredAttachmentSequence(record.attachmentSequence);
+  if (attachmentSequence !== undefined) image.attachmentSequence = attachmentSequence;
+  return image;
+}
+
 function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
   const record = asStoredRecord(value);
   const path = normalizeStoredString(record?.path);
@@ -166,20 +200,25 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
   const id = normalizeStoredString(record?.id);
   const sessionId = normalizeStoredString(record?.sessionId);
   if (!id || !sessionId || typeof record?.text !== 'string') return null;
-  // Older versions persisted image data URLs. Drop the whole message rather than replaying it
-  // without its attachments, then canonicalize storage in readStoredQueuedMessages().
-  if (Array.isArray(record.clipboardImages) && record.clipboardImages.length > 0) return null;
-
   const droppedFiles = Array.isArray(record.droppedFiles)
     ? record.droppedFiles
         .map(normalizeStoredDroppedFile)
         .filter((file): file is DroppedFile => file !== null)
+    : [];
+  const clipboardImages = Array.isArray(record.clipboardImages)
+    ? record.clipboardImages
+        .slice(0, 5)
+        .map(normalizeStoredClipboardImage)
+        .filter(
+          (image): image is NonNullable<QueuedMessage['clipboardImages']>[number] => image !== null
+        )
     : [];
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
   const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
   if (
     record.text.trim().length === 0 &&
     droppedFiles.length === 0 &&
+    clipboardImages.length === 0 &&
     !terminalSelection &&
     !attachedDiagnostics
   ) {
@@ -191,14 +230,14 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     sessionId,
     text: record.text,
     droppedFiles,
-    clipboardImages: [],
+    clipboardImages,
     terminalSelection,
     ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
   };
 }
 
-export function readStoredQueuedMessages(): QueuedMessage[] {
-  const value = readStored<unknown>(STORAGE_KEYS.queuedMessages);
+export function readStoredQueuedMessages(hostValue?: unknown): QueuedMessage[] {
+  const value = hostValue ?? readStored<unknown>(STORAGE_KEYS.queuedMessages);
   const ids = new Set<string>();
   const messages: QueuedMessage[] = [];
   for (const item of Array.isArray(value) ? value : []) {
@@ -207,8 +246,11 @@ export function readStoredQueuedMessages(): QueuedMessage[] {
     ids.add(message.id);
     messages.push(message);
   }
-  // Purge legacy image payloads and keep both browser persistence mirrors canonical.
-  writeStored(STORAGE_KEYS.queuedMessages, messages);
+  // Image data URLs stay in host persistence; browser persistence is synchronous and size-sensitive.
+  writeStored(
+    STORAGE_KEYS.queuedMessages,
+    messages.filter((message) => (message.clipboardImages?.length ?? 0) === 0)
+  );
   return messages;
 }
 

@@ -58,7 +58,6 @@ const EDIT_TOOL_NAMES = new Set([
 ]);
 const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
-const MAX_FILE_ERROR_DISPLAY_CHARS = 4000;
 
 export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
@@ -866,9 +865,7 @@ function FileChangeCard(props: {
   const errorMessage = () => {
     if (!isError()) return null;
     const message = (s() as ToolStateError).error.trim();
-    if (!message) return null;
-    if (message.length <= MAX_FILE_ERROR_DISPLAY_CHARS) return message;
-    return `${message.slice(0, MAX_FILE_ERROR_DISPLAY_CHARS)}\n... error truncated`;
+    return message || null;
   };
 
   return (
@@ -1008,9 +1005,14 @@ function FileChangeCard(props: {
           </div>
           <Show when={errorMessage()}>
             {(message) => (
-              <div class="file-edit-error-detail" role="alert" aria-label="File change error">
-                {message()}
-              </div>
+              <ClampedToolText
+                content={message()}
+                title={`${action()} error`}
+                language="text"
+                class="file-edit-error-detail"
+                role="alert"
+                aria-label="File change error"
+              />
             )}
           </Show>
         </div>
@@ -1392,9 +1394,12 @@ function GenericToolCall(props: {
             />
           </Show>
           <Show when={props.state.status === 'error' && !usesStructuredCard()}>
-            <div class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}>
-              {(props.state as ToolStateError).error}
-            </div>
+            <ClampedToolText
+              content={(props.state as ToolStateError).error}
+              title={`${props.title} (error)`}
+              language="text"
+              class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
+            />
           </Show>
           <Show when={props.state.status === 'running' && !isBash()}>
             <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>

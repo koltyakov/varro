@@ -195,6 +195,51 @@ describe('state helpers', () => {
     ]);
   });
 
+  it('restores the host queue ahead of the legacy browser mirror', async () => {
+    window.localStorage.setItem(
+      'varro.queuedMessages',
+      JSON.stringify([{ id: 'legacy', sessionId: 'session-1', text: 'legacy' }])
+    );
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      queuedMessages: [
+        {
+          id: 'host',
+          sessionId: 'session-1',
+          text: 'host snapshot',
+          droppedFiles: [],
+          clipboardImages: [
+            {
+              id: 'image-1',
+              url: 'data:image/png;base64,AA==',
+              mime: 'image/png',
+              filename: 'image.png',
+              size: 1,
+            },
+          ],
+          terminalSelection: null,
+        },
+      ],
+    };
+
+    try {
+      const stateModule = await loadState();
+
+      expect(stateModule.state.queuedMessages.map((message) => message.id)).toEqual(['host']);
+      expect(stateModule.state.queuedMessages[0]?.clipboardImages).toEqual([
+        {
+          id: 'image-1',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'image.png',
+          size: 1,
+        },
+      ]);
+      expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([]);
+    } finally {
+      delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
+    }
+  });
+
   it('keeps queued images live without serializing them', async () => {
     const stateModule = await loadState();
     const imageMessage = {
@@ -269,6 +314,22 @@ describe('state helpers', () => {
     const stateModule = await loadState();
 
     expect(stateModule.state.queuedMessages).toEqual([
+      {
+        id: 'legacy-image',
+        sessionId: 'session-1',
+        text: 'drop atomically',
+        droppedFiles: [],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'img.png',
+            size: 1,
+          },
+        ],
+        terminalSelection: null,
+      },
       {
         id: 'valid',
         sessionId: 'session-1',

@@ -54,6 +54,12 @@ export {
 export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
 export type { ParsedUserMessageContent } from './message/UserMessageContent';
 
+function isManagedSubagentSession() {
+  return state.sessions.some(
+    (session) => session.id === state.activeSessionId && Boolean(session.parentID)
+  );
+}
+
 export function Message(props: {
   info: MessageType;
   parts: Part[];
@@ -249,6 +255,7 @@ export function Message(props: {
     isUser() &&
     hasUserContent() &&
     props.info.sessionID === state.activeSessionId &&
+    !isManagedSubagentSession() &&
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {

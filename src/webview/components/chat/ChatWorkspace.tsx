@@ -11,6 +11,7 @@ import { RalphDashboard } from '../ralph/RalphDashboard';
 import { inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
+import { ManagedSubagentFooter } from './ManagedSubagentFooter';
 
 function activeRalphSessionId() {
   const id = state.activeSessionId;
@@ -79,8 +80,11 @@ export function ChatWorkspace(props: {
   activeSubagentRootId: string | null;
   activeSubagentCount: number;
   activeSubagentLabel: string;
+  managedSubagentParentId: string | null;
+  managedSubagentParentTitle: string | null;
   onClearSessionListView: () => void;
   onOpenAllSessions: () => void;
+  onReturnToManagedSubagentParent: () => void;
   onOpenParentSession: () => void;
   onOpenSubagentSessions: (parentSessionId: string) => void;
   onOpenSidebarSubagentSessions: (parentSessionId: string) => void;
@@ -194,7 +198,12 @@ export function ChatWorkspace(props: {
           fallback={
             <>
               <MessageList />
-              <ComposerHost />
+              <Show when={props.managedSubagentParentId} fallback={<ComposerHost />}>
+                <ManagedSubagentFooter
+                  parentTitle={props.managedSubagentParentTitle}
+                  onReturnToParent={props.onReturnToManagedSubagentParent}
+                />
+              </Show>
             </>
           }
         >

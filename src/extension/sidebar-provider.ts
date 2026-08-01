@@ -17,6 +17,7 @@ import type { ProviderSignatureFileSystem } from './provider-file-refresh-contro
 import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { PinnedSessionManager } from './pinned-session-manager';
+import { QueuedMessageStore } from './queued-message-store';
 import { RalphHost } from './ralph-host';
 import { RestProxy } from './rest-proxy';
 import type { OpenCodeServer } from './server';
@@ -45,6 +46,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionState: SessionStateManager;
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
+  private readonly queuedMessages: QueuedMessageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
   private readonly sessionTitleFallback: SessionTitleFallback;
@@ -108,6 +110,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);
     this.pinnedSessions = new PinnedSessionManager(persistence);
+    this.queuedMessages = new QueuedMessageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions);
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
@@ -172,6 +175,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         resetStatusBarCache: () => {
           this.lastStatusBarStateKey = '';
         },
+        queuedMessages: () => this.queuedMessages.list(),
       }
     );
 
@@ -250,6 +254,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         searchFiles: (requestId, query, limit) => this.searchFiles(requestId, query, limit),
         runInTerminal: (command, title) => this.runInTerminal(command, title),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
+        updateQueuedMessages: ({ messages }) => this.queuedMessages.update(messages),
       })
     );
 
@@ -361,6 +366,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.webviewSession.dispose();
     await this.ralphHost.dispose();
     await this.serverEventBridge.dispose();
+    await this.queuedMessages.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
     this.providerFileRefresh.dispose();

@@ -97,6 +97,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'files/drop-content': true,
   'files/remove': true,
   'files/clear': true,
+  'queued-messages/update': true,
   'files/pick': true,
   'files/search': true,
   'file/read': true,
@@ -135,6 +136,23 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'server/restart': {
       const payload = asRecord(message?.payload);
       return payload?.force === true ? { type, payload: { force: true } } : { type };
+    }
+
+    case 'queued-messages/update': {
+      const payload = asRecord(message?.payload);
+      const messages = sanitizeApiRequestBody(payload?.messages);
+      if (messages === INVALID_JSON_VALUE || !Array.isArray(messages) || messages.length > 1_000) {
+        return null;
+      }
+      return {
+        type,
+        payload: {
+          messages: messages as unknown as Extract<
+            WebviewMessage,
+            { type: 'queued-messages/update' }
+          >['payload']['messages'],
+        },
+      };
     }
 
     case 'server/restart/check': {
