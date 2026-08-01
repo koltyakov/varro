@@ -516,6 +516,7 @@ body.vscode-high-contrast
   :is(
     .assistant-turn-content,
     .todo-block,
+    .chat-queue-container,
     .chat-tool-invocation-part,
     .diff-view-widget,
     .composer-completion-menu,
@@ -528,6 +529,7 @@ body.vscode-high-contrast-light
   :is(
     .assistant-turn-content,
     .todo-block,
+    .chat-queue-container,
     .chat-tool-invocation-part,
     .diff-view-widget,
     .composer-completion-menu,

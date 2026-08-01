@@ -49,7 +49,46 @@ test('shows todos and queues follow-up messages while a session is busy', async 
     'Queue the follow-up after the current response finishes'
   );
 
+  await page.getByRole('button', { name: /Todos/i }).click();
+  const queueGeometry = await page.evaluate(() => {
+    const queue = document.querySelector('.chat-queue-container')?.getBoundingClientRect();
+    const row = document.querySelector('.chat-queue-item')?.getBoundingClientRect();
+    const todo = document.querySelector('.todo-block')?.getBoundingClientRect();
+    return {
+      queueWidth: queue?.width ?? 0,
+      rowHeight: row?.height ?? 0,
+      todoWidth: todo?.width ?? 0,
+      todoHeight: todo?.height ?? 0,
+    };
+  });
+  expect(Math.abs(queueGeometry.queueWidth - queueGeometry.todoWidth)).toBeLessThanOrEqual(1);
+  expect(queueGeometry.rowHeight).toBe(28);
+  expect(queueGeometry.rowHeight).toBeLessThan(queueGeometry.todoHeight);
+
+  const queueControls = queueList.getByRole('listitem').locator('.chat-queue-control');
+  await expect(queueControls).toHaveCount(4);
+  const controlSizes = await queueControls.evaluateAll((controls) =>
+    controls.map((control) => {
+      const rect = control.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    })
+  );
+  expect(controlSizes).toEqual(Array.from({ length: 4 }, () => ({ width: 24, height: 24 })));
+  const iconSizes = await queueControls.locator('svg').evaluateAll((icons) =>
+    icons.map((icon) => {
+      const rect = icon.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    })
+  );
+  expect(iconSizes).toEqual([
+    { width: 10, height: 10 },
+    { width: 14, height: 14 },
+    { width: 14, height: 14 },
+    { width: 14, height: 14 },
+  ]);
+
   const steerButton = page.getByRole('button', { name: 'Send as Steer' });
+  await expect(steerButton).toHaveText('');
   await expect(steerButton).toBeVisible();
   await steerButton.focus();
   await page.keyboard.press('Enter');
@@ -71,6 +110,17 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
   const queueList = page.getByRole('list', { name: 'Queued messages' });
   const labels = queueList.locator('.chat-queue-label');
   await expect(labels).toHaveText(['First follow-up', 'Second follow-up', 'Third follow-up']);
+  const rows = queueList.getByRole('listitem');
+  const firstActions = rows.first().locator('.chat-queue-actions');
+  const secondActions = rows.nth(1).locator('.chat-queue-actions');
+  await expect(firstActions).toHaveCSS('position', 'absolute');
+  await expect(firstActions).toHaveCSS('opacity', '0');
+  await expect(secondActions).toHaveCSS('opacity', '0');
+  await rows.first().hover();
+  await expect(firstActions).toHaveCSS('opacity', '1');
+  await rows.nth(1).hover();
+  await expect(secondActions).toHaveCSS('opacity', '1');
+  await expect(firstActions).toHaveCSS('opacity', '0');
 
   await queueList
     .getByRole('button', { name: 'Reorder queued message: First follow-up' })
@@ -85,8 +135,19 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
     .getByRole('button', { name: 'Edit queued message' })
     .click();
   await expect(queueList.getByRole('listitem')).toHaveCount(3);
-  await expect(queueList.getByRole('listitem').nth(1)).toHaveClass(/is-editing/);
-  await expect(queueList.getByRole('listitem').nth(1)).toContainText('Editing');
+  const editingRow = queueList.getByRole('listitem').nth(1);
+  await expect(editingRow).toHaveClass(/is-editing/);
+  await expect(editingRow).toContainText('Editing');
+  await expect(editingRow).toHaveCSS('border-color', 'rgba(0, 0, 0, 0)');
+  await expect(editingRow).toHaveCSS('border-radius', '0px');
+  await expect(editingRow.locator('[aria-label="Send as Steer"]')).toBeHidden();
+  await expect(editingRow.locator('[aria-label="Remove from queue"]')).toBeHidden();
+  const cancelEditButton = editingRow.getByRole('button', { name: 'Cancel queued message edit' });
+  await expect(cancelEditButton).toBeVisible();
+  await expect(cancelEditButton).toHaveCSS('color', 'rgb(255, 255, 255)');
+  await expect(
+    editingRow.getByRole('button', { name: 'Reorder queued message: First follow-up' })
+  ).toHaveCSS('visibility', 'visible');
   await composer.fill('First follow-up edited');
   await page.getByTitle('Add to queue (Enter)').click();
 

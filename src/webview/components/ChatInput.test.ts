@@ -1518,7 +1518,7 @@ describe('ChatInput', () => {
     });
   });
 
-  it('shows an attachment badge in queued rows', () => {
+  it('groups queued rows with attachment metadata and icon-only actions', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -1531,13 +1531,18 @@ describe('ChatInput', () => {
           { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
         ],
       },
+      { id: 'q2', sessionId: 'session-1', text: 'Another follow-up' },
     ]);
 
     cleanup = render(() => ChatInput(), container!);
 
     const meta = container?.querySelector('.chat-queue-meta');
+    expect(container?.querySelector('.chat-queue-summary')).toBeNull();
     expect(meta?.textContent).toContain('2');
+    expect(meta?.closest('.chat-queue-actions')).toBeNull();
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Send as Steer"]')?.textContent).toBe('');
+    expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(8);
   });
 
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
@@ -1563,6 +1568,7 @@ describe('ChatInput', () => {
 
     expect(rows[0]?.classList.contains('is-dragging')).toBe(true);
     expect(rows[1]?.classList.contains('is-drag-over')).toBe(true);
+    expect(container?.querySelector('.chat-queue-container.is-reordering')).not.toBeNull();
     expect(document.querySelector('.chat-drop-overlay')).toBeNull();
 
     dispatchDragEvent(rows[1]!, 'drop', dataTransfer);
@@ -1572,6 +1578,7 @@ describe('ChatInput', () => {
     expect(
       [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent)
     ).toEqual(['second', 'first', 'third']);
+    expect(container?.querySelector('.chat-queue-container.is-reordering')).toBeNull();
   });
 
   it('keeps an edited queue row visible and cancels editing from the row', () => {
@@ -1625,6 +1632,19 @@ describe('ChatInput', () => {
       '[aria-label="Cancel queued message edit"]'
     );
     expect(cancelButton?.disabled).toBe(false);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.hidden
+    ).toBe(true);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Remove from queue"]')?.hidden
+    ).toBe(true);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label^="Reorder queued message:"]')
+        ?.disabled
+    ).toBe(true);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label^="Reorder queued message:"]')?.hidden
+    ).toBe(false);
 
     cancelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2081,6 +2101,7 @@ describe('ChatInput', () => {
       preserveComposer: true,
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
+    expect(container?.querySelector('[aria-label="Retry send as Steer"]')).not.toBeNull();
   });
 
   it('restores edited message context and restores draft context on cancel', async () => {

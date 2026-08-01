@@ -1331,28 +1331,39 @@
 }
 
 .chat-queue-container {
+  margin: 0 0 4px;
+  padding: 0;
+  border: 1px solid var(--color-vscode-border-soft);
+  border-radius: var(--radius-card);
+  background: var(--color-vscode-surface-soft);
+  overflow: hidden;
+}
+
+.chat-queue-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 2px 2px 6px 2px;
+  border-radius: var(--radius-control);
 }
 
 .chat-queue-item {
+  --chat-queue-row-surface: var(--color-vscode-surface-soft);
   position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 1px 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
   font-size: 11.5px;
-  padding: 8px 8px 8px 10px;
-  border: 1px solid var(--color-vscode-border-soft);
-  border-radius: var(--radius-card);
-  background: var(--color-vscode-surface-softer);
   color: var(--color-vscode-fg);
   min-width: 0;
+  user-select: none;
   transition:
     border-color 0.12s,
-    background-color 0.12s,
     opacity 0.12s;
 }
 
@@ -1361,49 +1372,90 @@
 }
 
 .chat-queue-item.is-drag-over {
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 65%, var(--color-vscode-border));
-  background: color-mix(
+  --chat-queue-row-surface: color-mix(
     in srgb,
     var(--color-vscode-accent) 12%,
-    var(--color-vscode-surface-softer)
+    var(--color-vscode-surface-soft)
   );
+  border-color: transparent;
+  border-radius: 0;
+  background: var(--chat-queue-row-surface);
 }
 
 .chat-queue-item.is-editing {
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 55%, var(--color-vscode-border));
-  background: color-mix(in srgb, var(--color-vscode-accent) 9%, var(--color-vscode-surface-softer));
+  --chat-queue-row-surface: color-mix(
+    in srgb,
+    var(--color-vscode-accent) 9%,
+    var(--color-vscode-surface-soft)
+  );
+  border-radius: 0;
+  background: var(--chat-queue-row-surface);
+}
+
+.chat-queue-item:hover:not(.is-editing):not(.is-drag-over) {
+  --chat-queue-row-surface: color-mix(
+    in srgb,
+    var(--color-vscode-fg) 5%,
+    var(--color-vscode-surface-soft)
+  );
+  border-color: transparent;
+  border-radius: 0;
+  background: var(--chat-queue-row-surface);
 }
 
 .chat-queue-body {
   display: flex;
   align-items: center;
   flex: 1;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
-.chat-queue-drag-handle {
-  display: flex;
+.chat-queue-control {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: none;
   border-radius: var(--radius-inset);
-  background: none;
-  color: var(--color-vscode-muted);
-  padding: 2px;
-  cursor: grab;
+  background: transparent;
+  color: var(--color-vscode-fg-muted);
+  cursor: pointer;
   flex-shrink: 0;
+  transition:
+    color 0.1s,
+    background-color 0.1s;
+}
+
+.chat-queue-control:hover:not(:disabled) {
+  color: var(--color-vscode-fg);
+  background: color-mix(in srgb, var(--color-vscode-fg) 5%, transparent);
+}
+
+.chat-queue-control:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: -1px;
+  color: var(--color-vscode-fg);
+}
+
+.chat-queue-control:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.chat-queue-drag-handle {
+  margin-right: -2px;
+  margin-left: -2px;
+  color: var(--color-vscode-muted);
+  cursor: grab;
 }
 
 .chat-queue-drag-handle:hover:not(:disabled),
 .chat-queue-drag-handle:focus-visible {
-  color: var(--color-vscode-fg);
-  background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
-}
-
-.chat-queue-drag-handle:focus-visible {
-  outline: 1px solid var(--color-vscode-accent);
-  outline-offset: 1px;
+  outline: none;
+  background: transparent;
 }
 
 .chat-queue-drag-handle:active:not(:disabled) {
@@ -1412,7 +1464,6 @@
 
 .chat-queue-drag-handle:disabled {
   cursor: default;
-  opacity: 0.35;
 }
 
 .chat-queue-label {
@@ -1428,10 +1479,14 @@
 .chat-queue-meta {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 3px;
   flex-shrink: 0;
   color: var(--color-vscode-muted);
-  font-size: 10.5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-queue-editing-label {
@@ -1445,50 +1500,65 @@
 .chat-queue-attachment-icon {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 
 .chat-queue-actions {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  background: var(--chat-queue-row-surface);
+  transition: opacity 0.1s;
 }
 
-.chat-queue-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  color: var(--color-vscode-fg-muted);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0 6px;
-  border-radius: var(--radius-chip);
-  cursor: pointer;
-  transition:
-    color 0.1s,
-    background-color 0.1s;
-  flex-shrink: 0;
+.chat-queue-item.is-editing .chat-queue-body {
+  padding-right: 30px;
 }
 
-.chat-queue-action:hover:not(:disabled) {
-  color: var(--color-vscode-fg);
-  background: var(--color-vscode-toolbar-hover);
+.chat-queue-item:is(:hover, :focus-within) .chat-queue-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.chat-queue-action:focus-visible {
-  outline: 1px solid var(--color-vscode-accent);
-  outline-offset: 1px;
-  color: var(--color-vscode-fg);
+.chat-queue-item.is-editing .chat-queue-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.chat-queue-action:disabled {
-  cursor: default;
-  opacity: 0.55;
+.chat-queue-container.is-reordering .chat-queue-item .chat-queue-actions {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.chat-queue-container.is-reordering .chat-queue-item.is-drag-over .chat-queue-meta {
+  visibility: hidden;
+}
+
+.chat-queue-action.is-pending {
+  color: var(--color-vscode-accent);
+}
+
+.chat-queue-action.is-error {
+  color: var(--color-vscode-warning);
+}
+
+.chat-queue-icon-action.is-active {
+  color: #fff;
+  background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
+}
+
+.chat-queue-remove:hover:not(:disabled) {
+  color: var(--color-vscode-error);
+  background: color-mix(in srgb, var(--color-vscode-error) 10%, transparent);
 }
 
 .chat-usage-limit-banner {
@@ -1679,49 +1749,6 @@
     justify-content: flex-start;
     flex-wrap: wrap;
   }
-}
-
-.chat-queue-action-label {
-  line-height: 1;
-}
-
-.chat-queue-icon-action,
-.chat-queue-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: none;
-  color: var(--color-vscode-fg-muted);
-  padding: 2px;
-  cursor: pointer;
-  transition: color 0.1s;
-  flex-shrink: 0;
-}
-
-.chat-queue-icon-action:hover:not(:disabled),
-.chat-queue-remove:hover:not(:disabled) {
-  color: var(--color-vscode-fg);
-}
-
-.chat-queue-icon-action:focus-visible,
-.chat-queue-remove:focus-visible {
-  outline: none;
-  border-radius: var(--radius-inset);
-  background: color-mix(in srgb, var(--color-vscode-accent) 14%, transparent);
-  color: var(--color-vscode-fg);
-}
-
-.chat-queue-icon-action.is-active {
-  color: var(--color-vscode-accent);
-  background: color-mix(in srgb, var(--color-vscode-accent) 12%, transparent);
-  border-radius: var(--radius-inset);
-}
-
-.chat-queue-icon-action:disabled,
-.chat-queue-remove:disabled {
-  cursor: default;
-  opacity: 0.35;
 }
 
 .chat-attachments-container {
