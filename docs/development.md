@@ -41,6 +41,10 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 - `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`
 - `npm run test:e2e -- e2e/tests/layout.spec.ts`
 
+For message-list scrolling, pagination, sticky prompts, row measurement, attachments, or inline
+editing, read [Message List Virtualization](message-list-virtualization.md) before making changes.
+That guide defines the required invariants and exact-data debugging workflow for this coupled area.
+
 Before packaging or publishing, a fuller verification sweep is:
 
 ```sh

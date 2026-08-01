@@ -25,6 +25,38 @@ test('resets padding injected by legacy webview hosts', async ({ page }) => {
   });
 });
 
+test('single image messages reserve their preview height before loading', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await expect(page.locator('.interactive-session')).toBeVisible();
+
+  const trigger = page.locator('.chat-image-preview-trigger');
+  await page.locator('.interactive-session').evaluate((root) => {
+    const figure = document.createElement('figure');
+    figure.className = 'chat-image-figure';
+    const button = document.createElement('button');
+    button.className = 'chat-image-preview-trigger';
+    const image = document.createElement('img');
+    image.className = 'chat-image-img';
+    button.append(image);
+    figure.append(button);
+    root.append(figure);
+  });
+
+  await expect
+    .poll(() => trigger.evaluate((element) => element.getBoundingClientRect().height))
+    .toBe(224);
+  await trigger.locator('img').evaluate((image: HTMLImageElement) => {
+    image.src =
+      'data:image/svg+xml,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="482" height="485"/>');
+    return image.decode();
+  });
+  await expect
+    .poll(() => trigger.evaluate((element) => element.getBoundingClientRect().height))
+    .toBe(224);
+});
+
 test('sticky preview hides before the next prompt can overlap it', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
 
@@ -249,4 +281,64 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   expect(result.hideGapFromOverlay, JSON.stringify(result)).not.toBeNull();
   expect(Math.abs(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
   await expect(nextPrompt).toContainText('Continue if you have next steps');
+});
+
+test('terminal attachment sticky preview navigates to its original message', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  const terminalCard = page.locator(
+    '[data-msg-id="message-sticky-terminal-user"] .user-message-card'
+  );
+  const laterAssistant = page.locator('[data-msg-id="message-sticky-terminal-assistant-13"]');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  await list.evaluate((element) => {
+    const target = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-sticky-terminal-assistant-13"]'
+    );
+    if (!target) throw new Error('Later assistant is not mounted');
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(laterAssistant).toBeInViewport();
+  await expect(sticky).toContainText('Terminal: zsh');
+  await expect(terminalCard).toHaveCount(0);
+
+  await sticky.click();
+  await expect
+    .poll(() =>
+      terminalCard.evaluate((card) => {
+        const scrollList = card.closest<HTMLElement>('.interactive-list')!;
+        return card.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+      })
+    )
+    .toBeGreaterThanOrEqual(6);
+  await expect
+    .poll(() =>
+      terminalCard.evaluate((card) => {
+        const scrollList = card.closest<HTMLElement>('.interactive-list')!;
+        return card.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+      })
+    )
+    .toBeLessThanOrEqual(10);
+  await expect(terminalCard).toBeInViewport();
+  await page.waitForTimeout(500);
+  await expect(terminalCard).toBeInViewport();
+
+  await terminalCard.evaluate((card) => (card as HTMLElement).click());
+  await expect(list).toHaveClass(/editing-message/);
+  const editedRow = page.locator('[data-msg-id="message-sticky-terminal-user"]');
+  await expect(page.locator('.inline-edit-composer-slot .interactive-input-part')).toBeVisible();
+  await expect
+    .poll(() =>
+      editedRow.evaluate((row) => {
+        const scrollList = row.closest<HTMLElement>('.interactive-list')!;
+        return row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+      })
+    )
+    .toBeGreaterThanOrEqual(6);
 });

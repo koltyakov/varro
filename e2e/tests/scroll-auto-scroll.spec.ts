@@ -259,6 +259,53 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('keeps visible rows stable after prepending heterogeneous history', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1');
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      element.scrollTop = 20;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(page.locator('[data-msg-id="message-assistant-heavy-target"]')).toBeAttached();
+    await waitForAnimationFrames(page, 4);
+
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+    for (let step = 0; step < 32; step += 1) {
+      const before = await list.evaluate((element) => {
+        const containerRect = element.getBoundingClientRect();
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+          }
+        );
+        return {
+          scrollTop: element.scrollTop,
+          id: row?.dataset.msgId ?? '',
+          top: row ? row.getBoundingClientRect().top - containerRect.top : 0,
+        };
+      });
+      if (before.scrollTop <= 1) break;
+      await page.mouse.wheel(0, -80);
+      await waitForAnimationFrames(page, 2);
+      const afterTop = await list.evaluate((element, id) => {
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (candidate) => candidate.dataset.msgId === id
+        );
+        return row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
+      }, before.id);
+      if (afterTop !== null) {
+        expect(Math.abs(afterTop - before.top - 80), `wheel step ${step}`).toBeLessThan(70);
+      }
+    }
+  });
+
   test('mixed small chat scrolls upward without random jumps', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=mixed-small-transcript');
     const list = page.locator('.interactive-list');

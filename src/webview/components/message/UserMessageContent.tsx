@@ -347,8 +347,10 @@ export function getUserMessagePreviewText(parts: Part[]): string {
     switch (firstAttachment.type) {
       case 'file-selection':
         return `Selection: ${getLeafPathName(firstAttachment.filename)}`;
-      case 'terminal-selection':
-        return `Terminal: ${firstAttachment.terminalName}`;
+      case 'terminal-selection': {
+        const lineCount = getTerminalLineCountLabel(firstAttachment.text);
+        return `Terminal: ${firstAttachment.terminalName}${lineCount ? ` (${lineCount})` : ''}`;
+      }
       case 'file-reference':
         return `${firstAttachment.isDirectory ? 'Folder' : 'File'}: ${getLeafPathName(firstAttachment.path)}`;
     }
@@ -970,12 +972,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       return <span class="chip-detail">{formatContextLineRanges(value.lineRanges)}</span>;
     }
     if (value.type === 'terminal-selection') {
-      const lineCount = value.text ? value.text.split('\n').length : null;
-      return (
-        <span class="chip-detail">
-          {lineCount === null ? 'terminal' : `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}`}
-        </span>
-      );
+      return <span class="chip-detail">{getTerminalLineCountLabel(value.text) ?? 'terminal'}</span>;
     }
     return null;
   };
@@ -1007,6 +1004,12 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       </span>
     </Show>
   );
+}
+
+function getTerminalLineCountLabel(text: string | undefined): string | null {
+  if (!text) return null;
+  const lineCount = text.split('\n').length;
+  return `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}`;
 }
 
 function getAttachmentLabel(attachment: MessageAttachment): string {

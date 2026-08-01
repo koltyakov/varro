@@ -37,6 +37,7 @@ const SCENARIO_NAMES = [
   'plan-ready',
   'sticky-preview',
   'sticky-preview-large-transcript',
+  'sticky-preview-terminal-attachment',
   'todo-queue',
   'status-filters',
   'file-search',
@@ -1216,6 +1217,65 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 51;
+    return state;
+  }
+
+  if (name === 'sticky-preview-terminal-attachment') {
+    const session = makeSession(
+      'session-sticky-preview-terminal',
+      'Terminal attachment sticky navigation',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    const historyUser = makeUserMessage(
+      session.id,
+      'message-sticky-terminal-history-user',
+      ['Earlier request that fills the virtualized transcript.'],
+      BASE_TIME - 100_000
+    );
+    messages.push(historyUser);
+    for (let index = 0; index < 34; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-terminal-history-assistant-${index}`,
+          historyUser.info.id,
+          `Earlier implementation step ${index + 1}.`,
+          BASE_TIME - 99_000 + index
+        )
+      );
+    }
+
+    const terminalUser = makeUserMessage(
+      session.id,
+      'message-sticky-terminal-user',
+      [
+        `[Working directory: ${WORKSPACE_PATH}]`,
+        '[Selection from terminal zsh]\n```text\nnpm run test:e2e\n3 failed\n```',
+      ],
+      BASE_TIME - 20_000
+    );
+    messages.push(terminalUser);
+    for (let index = 0; index < 14; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-terminal-assistant-${index}`,
+          terminalUser.info.id,
+          Array.from(
+            { length: 8 },
+            (_, line) => `Assistant step ${index + 1}, terminal failure detail ${line + 1}.`
+          ).join('\n\n'),
+          BASE_TIME - 19_000 + index
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 70;
     return state;
   }
 
@@ -2568,12 +2628,13 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     );
     messages.push(firstUser);
     for (let index = 0; index < 15; index += 1) {
+      const detail = 'Variable-height history detail. '.repeat((index % 5) * 3);
       messages.push(
         makeAssistantMessage(
           session.id,
           `message-assistant-heavy-before-${index}`,
           firstUser.info.id,
-          `Initial response step ${index}.`,
+          `Initial response step ${index}. ${detail}`,
           BASE_TIME - (99_000 - index)
         )
       );
@@ -2586,12 +2647,13 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     );
     messages.push(targetUser);
     for (let index = 0; index < 62; index += 1) {
+      const detail = 'Variable-height implementation detail. '.repeat((index % 7) * 2);
       messages.push(
         makeAssistantMessage(
           session.id,
           `message-assistant-heavy-after-${index}`,
           targetUser.info.id,
-          `Implementation step ${index}.`,
+          `Implementation step ${index}. ${detail}`,
           BASE_TIME - (79_000 - index)
         )
       );

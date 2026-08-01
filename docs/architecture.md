@@ -225,6 +225,10 @@ Key components:
 - `src/webview/components/ralph/RalphForm.tsx`: Ralph loop setup form for plan path, iteration cap, model selection, and prompt-template overrides
 - `src/webview/components/ralph/RalphDashboard.tsx` and `RalphIterationCard.tsx`: manager-session dashboard, controls, stop reasons, and per-iteration summaries
 
+`MessageList` has coupled identity, height, pagination, visible-anchor, and scroll-ownership
+requirements. Read [Message List Virtualization](message-list-virtualization.md) before changing that
+area.
+
 ## Ralph Loop Flow
 
 Ralph is a plan-driven orchestration layer that runs on the extension host, so in-flight loops keep executing while the sidebar is hidden and resume after a window reload without waiting for the webview.

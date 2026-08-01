@@ -214,6 +214,8 @@ export function MessageList() {
   let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
+  let stickyJumpSettleEpoch = 0;
+  let editRevealEpoch = 0;
   let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
   let stickyPreviewDebounceTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let firstVisibleMessageObserver: IntersectionObserver | null = null;
@@ -335,14 +337,9 @@ export function MessageList() {
     );
   });
   const messageIndexById = createMemo(() => {
-    messageInfoVersion();
-    return untrack(() => {
-      const result = new Map<string, number>();
-      for (const [index, entry] of messages().entries()) {
-        result.set(entry.info.id, index);
-      }
-      return result;
-    });
+    const result = new Map<string, number>();
+    for (const [index, entry] of messages().entries()) result.set(entry.info.id, index);
+    return result;
   });
 
   function clearObservedVisibleMessages() {
@@ -1678,7 +1675,29 @@ export function MessageList() {
 
     const containerRect = containerRef.getBoundingClientRect();
     const rowRect = row.getBoundingClientRect();
-    return Math.max(0, top + rowRect.top - containerRect.top);
+    return Math.max(0, top + rowRect.top - containerRect.top - getMessageJumpTopInset());
+  }
+
+  async function keepEditingMessageTopVisible(messageId: string, revealEpoch: number) {
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await waitForAnimationFrame();
+      if (editRevealEpoch !== revealEpoch || editingMessage()?.messageId !== messageId) return;
+
+      const container = containerRef;
+      const row = mountedMessageRows.get(messageId);
+      if (!container || !row) return;
+      const minimumTop = getMessageJumpTopInset();
+      const rowTop = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      if (rowTop >= minimumTop - 0.5) {
+        stableFrames += 1;
+        if (stableFrames >= 2) return;
+        continue;
+      }
+
+      stableFrames = 0;
+      setPreservedScrollTop(container.scrollTop + rowTop - minimumTop);
+    }
   }
 
   function clampEditScrollTop(top: number) {
@@ -1827,6 +1846,10 @@ export function MessageList() {
   }
 
   function handlePointerDown(event: PointerEvent) {
+    const pointerTarget = event.target;
+    if (pointerTarget instanceof Element && pointerTarget.closest('.user-message-card')) {
+      stickyJumpSettleEpoch += 1;
+    }
     if (
       !containerRef ||
       event.button !== 0 ||
@@ -1896,6 +1919,7 @@ export function MessageList() {
     if (!containerRef) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
+    if (target.closest('.user-message-card')) stickyJumpSettleEpoch += 1;
     if (target.closest('.diff-view-filename')) return;
     const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
     if (!control || !containerRef.contains(control)) return;
@@ -2085,7 +2109,14 @@ export function MessageList() {
   });
 
   createEffect(() => {
-    if (editingMessage()) finishWidthResizeNow();
+    const editing = editingMessage();
+    const revealEpoch = ++editRevealEpoch;
+    if (!editing) return;
+    finishWidthResizeNow();
+    queueMicrotask(() => {
+      if (editRevealEpoch !== revealEpoch) return;
+      void keepEditingMessageTopVisible(editing.messageId, revealEpoch);
+    });
   });
 
   createEffect(() => {
@@ -2445,6 +2476,14 @@ export function MessageList() {
     disengageBottomFollow();
     const row = mountedMessageRows.get(preview.id);
     if (!row) return false;
+    if (shouldMeasureRows() && containerRef) {
+      const target = getStickyUserMessageSourceElement(preview.id) ?? row;
+      const containerRect = containerRef.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const offset = targetRect.top - containerRect.top - getMessageJumpTopInset();
+      if (Math.abs(offset) > 0.5) setPreservedScrollTop(containerRef.scrollTop + offset);
+      return true;
+    }
     row.scrollIntoView({ block: 'start' });
     return true;
   }
@@ -2455,7 +2494,13 @@ export function MessageList() {
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
     if (messages().some((entry) => entry.info.id === preview.id) && !activeOlderHistoryLoad) {
-      if (!navigateToMountedMessage(preview)) void waitAndNavigateToMessage(preview);
+      const settleEpoch = ++stickyJumpSettleEpoch;
+      if (!navigateToMountedMessage(preview)) {
+        void waitAndNavigateToMessage(preview, () => stickyJumpSettleEpoch === settleEpoch);
+      } else if (shouldMeasureRows()) {
+        const sessionId = state.activeSessionId;
+        if (sessionId) void settleMountedStickyPreviewJump(preview, sessionId, settleEpoch);
+      }
       return;
     }
     const sessionId = state.activeSessionId;
@@ -2464,6 +2509,40 @@ export function MessageList() {
       setPendingStickyJump(jump);
       void loadAndScrollToStickyPreview(jump);
     }
+  }
+
+  async function settleMountedStickyPreviewJump(
+    preview: StickyUserMessagePreview,
+    sessionId: string,
+    settleEpoch: number
+  ) {
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await waitForAnimationFrame();
+      if (state.activeSessionId !== sessionId || stickyJumpSettleEpoch !== settleEpoch) return;
+
+      const container = containerRef;
+      const target = getStickyUserMessageSourceElement(preview.id);
+      const row = mountedMessageRows.get(preview.id);
+      if (!container || !target || !row) return;
+      const targetRect = target.getBoundingClientRect();
+      const offset =
+        targetRect.top - container.getBoundingClientRect().top - getMessageJumpTopInset();
+      if (Math.abs(offset) <= 0.5) {
+        stableFrames += 1;
+        if (stableFrames >= 2) return;
+        continue;
+      }
+
+      stableFrames = 0;
+      setPreservedScrollTop(container.scrollTop + offset);
+    }
+  }
+
+  function getMessageJumpTopInset() {
+    if (!trackRef) return 8;
+    const value = getComputedStyle(trackRef).getPropertyValue('--latest-user-message-sticky-gap');
+    return Number.parseFloat(value) || 8;
   }
 
   async function waitAndNavigateToMessage(
@@ -2531,7 +2610,13 @@ export function MessageList() {
     clearPendingJump();
     if (!ready || state.activeSessionId !== sessionId) return;
     await waitForAnimationFrame();
-    if (state.activeSessionId === sessionId) await waitAndNavigateToMessage(preview);
+    if (state.activeSessionId === sessionId) {
+      const settleEpoch = ++stickyJumpSettleEpoch;
+      await waitAndNavigateToMessage(
+        preview,
+        () => state.activeSessionId === sessionId && stickyJumpSettleEpoch === settleEpoch
+      );
+    }
   }
 
   const stickyPreviewTitle = 'Click to scroll to message';

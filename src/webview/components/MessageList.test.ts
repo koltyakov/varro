@@ -2964,17 +2964,62 @@ describe('MessageList sticky prompt preview', () => {
     list?.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
-    expect(list!.scrollTop).toBe(380);
+    expect(list!.scrollTop).toBe(372);
 
     list!.scrollTop = 350;
-    rectMap.set(editedRow!, new DOMRect(0, 30, 500, 80));
+    rectMap.set(editedRow!, new DOMRect(0, 22, 500, 80));
 
     const wheelAllowed = list?.dispatchEvent(
       new WheelEvent('wheel', { cancelable: true, deltaY: 80 })
     );
 
     expect(wheelAllowed).toBe(false);
-    expect(list!.scrollTop).toBe(380);
+    expect(list!.scrollTop).toBe(364);
+  });
+
+  it('reveals a partially hidden message panel when editing starts', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let scrollTopValue = 500;
+    let editedRowDocumentTop = 380;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+      if (this.dataset.msgId === 'user-2') {
+        return new DOMRect(0, editedRowDocumentTop - scrollTopValue, 500, 180);
+      }
+      return new DOMRect(0, 0, 500, 40);
+    });
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    startEditingMessage('user-2', 'session-1', 'Prompt 2');
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(372);
+    editedRowDocumentTop = 340;
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(332);
+
+    animationFrames.restore();
   });
 
   it('shows the prompt that belongs to the response currently in view', async () => {
@@ -3500,6 +3545,128 @@ describe('MessageList sticky prompt preview', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
     expect(editingMessage()).toBeNull();
 
+    animationFrames.restore();
+  });
+
+  it('scrolls a measured terminal-attachment prompt within the message list only', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let targetLayoutShift = 0;
+    let jumpStarted = false;
+    const targetIndex = 40;
+    const targetScrollTop = targetIndex * 120;
+    const stickyTopInset = 8;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === list) return new DOMRect(0, 0, 500, 500);
+      const row = this.classList.contains('interactive-item-container')
+        ? this
+        : this.closest<HTMLElement>('.interactive-item-container');
+      const messageIndex = Number(row?.dataset.msgId?.replace('message-', ''));
+      if (Number.isFinite(messageIndex)) {
+        const layoutShift = messageIndex === targetIndex ? targetLayoutShift : 0;
+        return new DOMRect(0, messageIndex * 120 - scrollTopValue + layoutShift, 500, 120);
+      }
+      return new DOMRect(0, 0, 500, 500);
+    });
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => ({
+        info:
+          index === targetIndex
+            ? userMessage(`message-${index}`)
+            : assistantMessage(`message-${index}`),
+        parts:
+          index === targetIndex
+            ? [
+                {
+                  ...textPart(`text-${index}-1`, '[Working directory: /workspace/varro]'),
+                  messageID: `message-${index}`,
+                },
+                {
+                  ...textPart(
+                    `text-${index}-2`,
+                    '[Selection from terminal zsh]\n```text\nnpm run test:e2e\n3 failed\n```'
+                  ),
+                  messageID: `message-${index}`,
+                },
+              ]
+            : [
+                {
+                  ...textPart(`text-${index}`, `Response ${index}`),
+                  messageID: `message-${index}`,
+                },
+              ],
+      }))
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        if (!jumpStarted && value === targetScrollTop - stickyTopInset) {
+          jumpStarted = true;
+          targetLayoutShift = -100;
+        }
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    scrollTopValue = 42 * 120;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Terminal: zsh (2 lines)');
+    sticky?.click();
+
+    expect(scrollTopValue).toBe(targetScrollTop - stickyTopInset);
+    expect(
+      container
+        ?.querySelector<HTMLElement>(`[data-msg-id="message-${targetIndex}"] .user-message-card`)
+        ?.getBoundingClientRect().top
+    ).toBe(stickyTopInset - 100);
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(
+      container
+        ?.querySelector<HTMLElement>(`[data-msg-id="message-${targetIndex}"] .user-message-card`)
+        ?.getBoundingClientRect().top
+    ).toBe(stickyTopInset);
+
+    const originalCard = container?.querySelector<HTMLElement>(
+      `[data-msg-id="message-${targetIndex}"] .user-message-card`
+    );
+    originalCard?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(editingMessage()?.messageId).toBe(`message-${targetIndex}`);
+    const scrollTopAfterEdit = scrollTopValue;
+    targetLayoutShift -= 50;
+    for (let frame = 0; frame < 3; frame += 1) {
+      animationFrames.flush();
+      await Promise.resolve();
+    }
+    expect(scrollTopValue).toBe(scrollTopAfterEdit - 50);
+    expect(scrollIntoView).not.toHaveBeenCalled();
     animationFrames.restore();
   });
 

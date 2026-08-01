@@ -721,6 +721,17 @@ describe('getUserMessagePreviewText', () => {
     ).toBe('File: Chat.tsx');
   });
 
+  it('includes the line count when terminal context is the only prompt content', () => {
+    expect(
+      getUserMessagePreviewText([
+        textPart(
+          'text-1',
+          '[Selection from terminal zsh]\n```text\nnpm run test:e2e\n3 failed\n```'
+        ),
+      ])
+    ).toBe('Terminal: zsh (2 lines)');
+  });
+
   it('falls back to file attachments when no text or attachment refs exist', () => {
     expect(getUserMessagePreviewText([imageFilePart('file-1', 'diagram.png')])).toBe(
       'Attachment: diagram.png'
