@@ -1,4 +1,5 @@
 import { render } from 'solid-js/web';
+import { reconcile } from 'solid-js/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
@@ -69,6 +70,7 @@ beforeEach(() => {
   resetSessionDiffSummaryStateForTests();
   setState('sessions', []);
   setState('providers', []);
+  setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('activeSessionId', null);
   setState('sessionStatus', {});
@@ -88,6 +90,7 @@ afterEach(() => {
   container.remove();
   setState('sessions', []);
   setState('providers', []);
+  setState('sessionSelectedModels', reconcile({}));
   setState('pinnedSessionIds', []);
   setState('sessionStatus', {});
   setState('sessionsLoadError', null);
@@ -144,6 +147,16 @@ describe('SessionListView model details', () => {
       expect(icon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
       expect(row?.querySelector('.session-item-provider-name')).toBeNull();
     });
+
+    vi.mocked(selectSession).mockClear();
+    container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    expect(selectSession).toHaveBeenCalledWith('session-1', {
+      selectedModel: {
+        providerID: 'openai',
+        modelID: 'gpt-5.6-sol',
+        variant: 'very_high',
+      },
+    });
   });
 
   it('shows the provider name when no provider icon is available', async () => {
@@ -186,6 +199,61 @@ describe('SessionListView model details', () => {
       expect(container.querySelector('.session-item-provider-name')?.textContent).toBe(
         'Local Gateway'
       );
+    });
+  });
+
+  it('shows and opens with a locally redefined model instead of the message summary', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.6-sol': {
+            id: 'gpt-5.6-sol',
+            name: 'GPT-5.6 Sol',
+            capabilities: {},
+            cost: { input: 0, output: 0 },
+          },
+          'gpt-5.6-luna': {
+            id: 'gpt-5.6-luna',
+            name: 'GPT-5.6 Luna',
+            capabilities: {},
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('sessionSelectedModels', {
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.6-luna', variant: 'max' },
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('.session-item-model-meta')?.textContent).toBe(
+        ' · GPT-5.6 Luna · Max'
+      );
+    });
+
+    vi.mocked(selectSession).mockClear();
+    container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
+    expect(selectSession).toHaveBeenCalledWith('session-1', {
+      selectedModel: {
+        providerID: 'openai',
+        modelID: 'gpt-5.6-luna',
+        variant: 'max',
+      },
     });
   });
 

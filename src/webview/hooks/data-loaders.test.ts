@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderLimitStatus, RecycleBinEntry } from '../../shared/protocol';
 import type { Agent, QuestionRequest, Session, SessionStatus } from '../types';
+import { setState } from '../lib/state';
 import { provider, session } from './useOpenCode.test-support';
 import {
   createDataLoaderOperations,
@@ -264,6 +265,42 @@ describe('data loaders', () => {
     expect(setProvidersLoaded).toHaveBeenNthCalledWith(2, true);
     expect(setSelectedModel).toHaveBeenCalledWith(null);
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it('keeps a hidden selected model while an existing session is active', async () => {
+    const setSelectedModel = vi.fn();
+    setState('hiddenModels', ['openai:gpt-5']);
+
+    try {
+      await loadProvidersWithDependencies(
+        {
+          listProviders: async () => ({
+            providers: [
+              provider('openai', {
+                'gpt-5': {
+                  id: 'gpt-5',
+                  name: 'GPT-5',
+                  capabilities: { toolcall: true },
+                  cost: { input: 0, output: 0 },
+                },
+              }),
+            ],
+            default: { openai: 'gpt-5' },
+          }),
+          setProvidersLoaded: vi.fn(),
+          setProviders: vi.fn(),
+          setProviderDefaults: vi.fn(),
+          getSelectedModel: () => ({ providerID: 'openai', modelID: 'gpt-5' }),
+          getActiveSessionId: () => 'session-1',
+          setSelectedModel,
+        },
+        vi.fn()
+      );
+
+      expect(setSelectedModel).not.toHaveBeenCalled();
+    } finally {
+      setState('hiddenModels', []);
+    }
   });
 
   it('initializes model visibility only for providers connected after the initial load', async () => {

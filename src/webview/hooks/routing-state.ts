@@ -1,6 +1,6 @@
 import type { SelectedModel } from '../lib/app-state-types';
 import { resolveSelectedModel } from '../lib/state';
-import type { Agent, MessageEntry, Provider } from '../types';
+import type { Agent, MessageEntry, Provider, Session } from '../types';
 
 type AgentSelectionUpdate = {
   value: string | null;
@@ -30,6 +30,15 @@ export function deriveSelectedModelFromMessages(messages: MessageEntry[]) {
   }
 
   return null;
+}
+
+export function deriveSelectedModelFromSession(session: Session | null | undefined) {
+  if (!session?.model) return null;
+  return {
+    providerID: session.model.providerID,
+    modelID: session.model.id,
+    variant: session.model.variant,
+  } satisfies SelectedModel;
 }
 
 export function deriveSelectedAgentFromMessages(messages: MessageEntry[]) {
@@ -97,11 +106,13 @@ export function reconcileLoadedProviders(args: {
   selectedModel: SelectedModel | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  allowHiddenSelectedModel?: boolean;
 }) {
   const effectiveModel = resolveSelectedModel(
     args.selectedModel,
     args.providers,
-    args.providerDefaults
+    args.providerDefaults,
+    { allowHidden: args.allowHiddenSelectedModel }
   );
 
   if (args.selectedModel && !effectiveModel) {

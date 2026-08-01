@@ -55,7 +55,7 @@ export function setSelectedModel(
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
 
-  if (model?.variant) {
+  if (persistGlobal && model?.variant) {
     const key = getModelVariantSelectionKey(model.providerID, model.modelID);
     if (state.modelVariantSelections[key] !== model.variant) {
       const nextSelections = { ...state.modelVariantSelections, [key]: model.variant };
@@ -294,7 +294,8 @@ export function resetModelVisibility() {
 export function resolveSelectedModel(
   selectedModel: SelectedModel | null,
   providers: Provider[],
-  _providerDefaults: Record<string, string>
+  _providerDefaults: Record<string, string>,
+  options?: { allowHidden?: boolean }
 ): SelectedModel | null {
   const candidate = selectedModel;
   if (!candidate) return null;
@@ -302,7 +303,8 @@ export function resolveSelectedModel(
   const provider = providers.find((item) => item.id === candidate.providerID);
   const model = provider?.models[candidate.modelID];
   if (!provider || !model) return null;
-  if (!isModelVisible(candidate.providerID, candidate.modelID)) return null;
+  if (!options?.allowHidden && !isModelVisible(candidate.providerID, candidate.modelID))
+    return null;
   if (candidate.variant && !model.variants?.[candidate.variant]) {
     return { providerID: candidate.providerID, modelID: candidate.modelID };
   }

@@ -45,6 +45,8 @@ export function ContextPopup(props: {
   onCompact: () => void;
 }) {
   const [subagentsExpanded, setSubagentsExpanded] = createSignal(false);
+  const contextUsageAvailable = () => props.usage.used > 0;
+  const sessionTokensAvailable = () => props.tokens.total > 0;
   const overallTotal = () => props.tokens.total + props.subagentTokens.total;
   let popupEl: HTMLDivElement | undefined;
 
@@ -71,7 +73,9 @@ export function ContextPopup(props: {
     <div ref={setRef} class="context-popup" onClick={(e) => e.stopPropagation()}>
       <div class="context-popup-header">
         <span class="context-popup-title">Context Window</span>
-        <span class="context-popup-pct">{Math.round(props.usage.percent)}%</span>
+        <span class={`context-popup-pct${contextUsageAvailable() ? '' : ' unavailable'}`}>
+          {contextUsageAvailable() ? `${Math.round(props.usage.percent)}%` : '--'}
+        </span>
       </div>
 
       <div class="context-popup-bar">
@@ -82,7 +86,9 @@ export function ContextPopup(props: {
       </div>
 
       <div class="context-popup-stat">
-        <span>{formatNumber(props.usage.used)}</span>
+        <span class={`context-popup-stat-value${contextUsageAvailable() ? '' : ' unavailable'}`}>
+          {contextUsageAvailable() ? formatNumber(props.usage.used) : '--'}
+        </span>
         <span class="context-popup-sep">/</span>
         <span>{formatNumber(props.usage.limit)}</span>
         <span class="context-popup-unit">tokens</span>
@@ -94,13 +100,19 @@ export function ContextPopup(props: {
           {(row) => (
             <div class="context-popup-row">
               <span class="context-popup-row-label">{row.label}</span>
-              <span class="context-popup-row-value">{formatNumber(row.value)}</span>
+              <span
+                class={`context-popup-row-value${sessionTokensAvailable() ? '' : ' unavailable'}`}
+              >
+                {sessionTokensAvailable() ? formatNumber(row.value) : '--'}
+              </span>
             </div>
           )}
         </For>
         <div class="context-popup-row context-popup-row-total">
           <span class="context-popup-row-label">Total</span>
-          <span class="context-popup-row-value">{formatNumber(props.tokens.total)}</span>
+          <span class={`context-popup-row-value${sessionTokensAvailable() ? '' : ' unavailable'}`}>
+            {sessionTokensAvailable() ? formatNumber(props.tokens.total) : '--'}
+          </span>
         </div>
       </div>
 
@@ -184,6 +196,7 @@ export function ContextPopup(props: {
 export function ContextUsageButton(props: {
   ref?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   percent: number;
+  available: boolean;
   title?: string;
   onClick: () => void;
 }) {
@@ -193,7 +206,7 @@ export function ContextUsageButton(props: {
       class={`chat-context-usage ${getContextUsageTone(props.percent)}`}
       onClick={props.onClick}
       title={props.title}
-      aria-label={formatContextUsageTitle(props.percent)}
+      aria-label={formatContextUsageTitle(props.percent, props.available)}
     >
       <svg class="circular-progress" viewBox="0 0 36 36">
         <circle class="progress-bg" cx="18" cy="18" r="14" />
@@ -216,8 +229,8 @@ export function getContextUsageTone(percent: number) {
   return '';
 }
 
-export function formatContextUsageTitle(percent: number) {
-  return `Context usage (${Math.round(percent)}%)`;
+export function formatContextUsageTitle(percent: number, available = true) {
+  return available ? `Context usage (${Math.round(percent)}%)` : 'Context usage unavailable';
 }
 
 function shouldShowContextCompact(percent: number) {

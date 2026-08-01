@@ -3,6 +3,7 @@ import type { Provider, Agent } from '../types';
 import {
   deriveSelectedAgentFromMessages,
   deriveSelectedModelFromMessages,
+  deriveSelectedModelFromSession,
   getActiveProviderSelection,
   getBuildAgentName,
   getDefaultPrimaryAgentName,
@@ -243,6 +244,24 @@ describe('routing-state helpers', () => {
       variant: 'high',
     });
     expect(deriveSelectedAgentFromMessages(messages)).toBe('build');
+  });
+
+  it('derives the selected model and reasoning variant from session metadata', () => {
+    expect(
+      deriveSelectedModelFromSession({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'External session',
+        version: '1',
+        model: { providerID: 'openai', id: 'gpt-5.6-luna', variant: 'max' },
+        time: { created: 0, updated: 1 },
+      })
+    ).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna',
+      variant: 'max',
+    });
   });
 
   it('resolves usage-limit context from session, message, or fallback model selection', () => {

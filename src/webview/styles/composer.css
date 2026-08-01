@@ -41,6 +41,12 @@
   color: var(--color-vscode-fg);
 }
 
+.context-popup-pct.unavailable,
+.context-popup-stat-value.unavailable,
+.context-popup-row-value.unavailable {
+  color: var(--color-vscode-muted);
+}
+
 .context-popup-bar {
   height: 4px;
   border-radius: var(--radius-xs);

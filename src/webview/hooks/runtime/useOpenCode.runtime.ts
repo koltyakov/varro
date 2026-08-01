@@ -1,6 +1,6 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
 import type { PermissionMode } from '../../../shared/protocol';
-import type { QueuedMessage } from '../../lib/app-state-types';
+import type { QueuedMessage, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
@@ -39,7 +39,7 @@ export async function applySessionMcps(names: string[], sessionId?: string | nul
   await getCurrentOpenCodeRuntime().applySessionMcps(names, sessionId);
 }
 
-export async function selectSession(id: string, options?: { markSeen?: boolean }) {
+export async function selectSession(id: string, options?: SessionSelectionOptions) {
   await getCurrentOpenCodeRuntime().selectSession(id, options);
 }
 

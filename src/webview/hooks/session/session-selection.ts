@@ -1,5 +1,5 @@
 import { batch } from 'solid-js';
-import type { SelectedModel } from '../../lib/app-state-types';
+import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import {
   latestAssistantFinished,
@@ -20,6 +20,8 @@ type SessionSelectionDeps = {
     fallbackAgent: string | null;
   };
   applySelectedAgent(agent: string, id: string): void;
+  getSession(id: string): Session | undefined;
+  resolveSessionModel(session: Session): SelectedModel | null;
   resolvePersistedModel(id: string): SelectedModel | null;
   resolveFallbackModel(): SelectedModel | null;
   applySelectedModel(model: SelectedModel, id: string): void;
@@ -62,10 +64,11 @@ export async function selectSessionWithDependencies(
   deps: SessionSelectionDeps,
   generationRef: { next(): number },
   id: string,
-  options?: { markSeen?: boolean }
+  options?: SessionSelectionOptions
 ) {
   const generation = generationRef.next();
   let persistedAgent: string | null = null;
+  let persistedModel: SelectedModel | null = null;
   batch(() => {
     deps.clearDraftCurrentDocumentState();
     deps.resetToolCallExpansionState();
@@ -80,9 +83,14 @@ export async function selectSessionWithDependencies(
       deps.applySelectedAgent(resolvedAgent.fallbackAgent, id);
     }
 
-    const persistedModel = deps.resolvePersistedModel(id);
-    if (persistedModel) {
-      deps.applySelectedModel(persistedModel, id);
+    persistedModel = deps.resolvePersistedModel(id);
+    const knownSession = deps.getSession(id);
+    const sessionModel =
+      persistedModel ??
+      options?.selectedModel ??
+      (knownSession ? deps.resolveSessionModel(knownSession) : null);
+    if (sessionModel) {
+      deps.applySelectedModel(sessionModel, id);
     } else {
       const fallbackModel = deps.resolveFallbackModel();
       if (fallbackModel) {
@@ -130,9 +138,14 @@ export async function selectSessionWithDependencies(
     }
   }
 
-  const inferredModel = deps.deriveSelectedModelFromMessages(messages);
-  if (inferredModel) {
-    deps.applySelectedModel(inferredModel, id);
+  const loadedModel = persistedModel ?? options?.selectedModel ?? deps.resolveSessionModel(session);
+  if (loadedModel) {
+    deps.applySelectedModel(loadedModel, id);
+  } else {
+    const inferredModel = deps.deriveSelectedModelFromMessages(messages);
+    if (inferredModel) {
+      deps.applySelectedModel(inferredModel, id);
+    }
   }
 
   await mcpSync;

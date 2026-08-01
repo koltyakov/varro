@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { editingMessage, resetMessageEditState, startEditingMessage } from './message-edit-state';
 import { startNewChatDraft } from './new-chat-draft';
-import { inputText, resetDefaultAppState, setInputText, setState, state } from './state';
+import {
+  getPersistedSelectedModel,
+  getSelectedModelForSession,
+  inputText,
+  resetDefaultAppState,
+  setInputText,
+  setSelectedModel,
+  setState,
+  state,
+} from './state';
 
 declare global {
   interface Window {
@@ -82,5 +91,38 @@ describe('startNewChatDraft', () => {
 
     expect(inputText()).toBe('Start a separate conversation');
     expect(editingMessage()).toBeNull();
+  });
+
+  it('restores global model and reasoning defaults for a new chat', () => {
+    const defaultModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      variant: 'medium',
+    };
+    const sessionModel = {
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      variant: 'high',
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Existing session',
+        version: '1',
+        time: { created: 1, updated: 2 },
+      },
+    ]);
+    setSelectedModel({ ...defaultModel });
+    setSelectedModel({ ...sessionModel }, { sessionId: 'session-1', persistGlobal: false });
+
+    startNewChatDraft();
+
+    expect(state.activeSessionId).toBeNull();
+    expect(state.selectedModel).toEqual(defaultModel);
+    expect(getPersistedSelectedModel()).toEqual(defaultModel);
+    expect(getSelectedModelForSession('session-1')).toEqual(sessionModel);
   });
 });

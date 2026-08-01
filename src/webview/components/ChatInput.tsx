@@ -545,7 +545,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const selected = resolveSelectedModel(
       state.selectedModel,
       state.providers,
-      state.providerDefaults
+      state.providerDefaults,
+      { allowHidden: true }
     );
     if (selected) {
       const provider = state.providers.find((item) => item.id === selected.providerID);
@@ -2188,9 +2189,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const currentProviderLimitBadges = createMemo(() =>
     showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
+  const mcpStatuses = createMemo(() => Object.values(state.mcpStatus));
   const connectedMcpCount = createMemo(
-    () => Object.values(state.mcpStatus).filter((status) => status.status === 'connected').length
+    () => mcpStatuses().filter((status) => status.status === 'connected').length
   );
+  const showMcpControl = createMemo(() => {
+    const statuses = mcpStatuses();
+    return (
+      connectedMcpCount() > 0 ||
+      (statuses.length > 0 && statuses.every((status) => status.status === 'disabled'))
+    );
+  });
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
       setShowProviderLimitPopup(false);
@@ -2283,7 +2292,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       variant: state.selectedModel?.variant,
     };
 
-    setSelectedModel(nextModel, { sessionId: composerSessionId() });
+    setSelectedModel(nextModel, { sessionId: composerSessionId(), persistGlobal: true });
     syncActiveRalphModel(nextModel);
 
     const usageLimit = activeUsageLimit();
@@ -2879,7 +2888,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
-          showMcpControl={Object.keys(state.mcpStatus).length > 0}
+          showMcpControl={showMcpControl()}
           connectedMcpCount={connectedMcpCount()}
           mcpButtonRef={(el) => {
             mcpPickerRef = el;

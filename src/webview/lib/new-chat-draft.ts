@@ -4,6 +4,7 @@ import {
   inputText,
   isSessionAwaitingInput,
   persistActiveSessionId,
+  restoreSelectedModelForComposer,
   setError,
   setInputText,
   setPersistentShowSessionPicker,
@@ -50,5 +51,6 @@ export function startNewChatDraft() {
     setShowModelPicker(false);
     stopLoading();
     setPersistentShowSessionPicker(false);
+    restoreSelectedModelForComposer(null);
   });
 }

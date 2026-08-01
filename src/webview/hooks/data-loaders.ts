@@ -527,6 +527,7 @@ export async function loadProvidersWithDependencies(
     setProviders(providers: Provider[], defaults?: Record<string, string>): void;
     setProviderDefaults(defaults: Record<string, string>): void;
     getSelectedModel(): SelectedModel | null;
+    getActiveSessionId?(): string | null;
     setSelectedModel(model: SelectedModel | null): void;
   },
   logError: Logger
@@ -561,6 +562,7 @@ export async function loadProvidersWithDependencies(
       selectedModel: deps.getSelectedModel(),
       providers,
       providerDefaults,
+      allowHiddenSelectedModel: !!deps.getActiveSessionId?.(),
     });
     if (routingState.nextSelectedModel !== undefined) {
       deps.setSelectedModel(routingState.nextSelectedModel);

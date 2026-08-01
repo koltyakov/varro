@@ -801,6 +801,68 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toBeNull();
   });
 
+  it('does not promote a temporary session model or reasoning to global defaults', async () => {
+    const stateModule = await loadState();
+    const defaultModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      variant: 'medium',
+    };
+    const sessionModel = {
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      variant: 'high',
+    };
+
+    stateModule.setSelectedModel({ ...defaultModel });
+    stateModule.setSelectedModel(
+      { ...sessionModel },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+      }
+    );
+
+    expect(stateModule.state.selectedModel).toEqual(sessionModel);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(sessionModel);
+    expect(stateModule.getPersistedSelectedModel()).toEqual(defaultModel);
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-5')).toBe('medium');
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+  });
+
+  it('switches between global defaults and active-session routing with the session picker', async () => {
+    const stateModule = await loadState();
+    const defaultModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      variant: 'medium',
+    };
+    const sessionModel = {
+      providerID: 'openai',
+      modelID: 'gpt-4o',
+      variant: 'high',
+    };
+
+    stateModule.setSelectedModel({ ...defaultModel });
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setSelectedModel(
+      { ...sessionModel },
+      {
+        sessionId: 'session-1',
+        persistGlobal: false,
+      }
+    );
+
+    stateModule.setPersistentShowSessionPicker(true);
+    expect(stateModule.state.selectedModel).toEqual(defaultModel);
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual(sessionModel);
+
+    stateModule.setPersistentShowSessionPicker(false);
+    expect(stateModule.state.selectedModel).toEqual(sessionModel);
+    expect(stateModule.getPersistedSelectedModel()).toEqual(defaultModel);
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+  });
+
   it('normalizes persisted routing state while preserving valid entries', async () => {
     window.localStorage.setItem('varro.hiddenProviders', JSON.stringify(['openai', 42, '', null]));
     window.localStorage.setItem('varro.hiddenModels', JSON.stringify(['openai:gpt-4o', false, '']));
@@ -964,6 +1026,14 @@ describe('state helpers', () => {
     stateModule.setModelVisible('anthropic', 'claude', false);
     expect(stateModule.state.hiddenModels).toContain('anthropic:claude');
     expect(stateModule.state.selectedModel).toBeNull();
+    expect(
+      stateModule.resolveSelectedModel(
+        { providerID: 'anthropic', modelID: 'claude' },
+        providers,
+        {},
+        { allowHidden: true }
+      )
+    ).toEqual({ providerID: 'anthropic', modelID: 'claude' });
 
     expect(stateModule.getVisibleProviders(providers).map((item) => item.id)).toEqual(['openai']);
     expect(

@@ -1,5 +1,6 @@
 import type { SelectedModel } from './app-state-types';
 import { setShowSessionPicker, state } from './app-state';
+import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import { readStoredSelectedModel, readStoredString } from './state-stored-values';
 
@@ -16,14 +17,22 @@ type LastOpenedViewInput =
 export function setPersistentShowSessionPicker(value: boolean) {
   setShowSessionPicker(value);
   if (value) {
+    restoreSelectedModelForComposer(null);
     persistLastOpenedView({ type: 'sessions-list' });
     return;
   }
+  restoreSelectedModelForComposer(state.activeSessionId);
   persistLastOpenedView(
     state.activeSessionId
       ? { type: 'session', sessionId: state.activeSessionId }
       : { type: 'new-session' }
   );
+}
+
+export function restoreSelectedModelForComposer(sessionId: string | null) {
+  const model =
+    (sessionId ? getSelectedModelForSession(sessionId) : null) ?? getPersistedSelectedModel();
+  setSelectedModel(model, { persistGlobal: false });
 }
 
 export function persistActiveSessionId(id: string | null) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Message, SessionStatus } from '../types';
+import type { Message, Session, SessionStatus } from '../types';
 import {
   selectSessionWithDependencies,
   syncSessionMessagesWithDependencies,
@@ -26,8 +26,17 @@ function assistantMessage(id: string): Message {
   };
 }
 
+function selectedModelFromSession(session: Session) {
+  if (!session.model) return null;
+  return {
+    providerID: session.model.providerID,
+    modelID: session.model.id,
+    variant: session.model.variant,
+  };
+}
+
 describe('session-selection helpers', () => {
-  it('selects a session, loads its messages, and updates loading state', async () => {
+  it('restores a locally redefined model while selecting and loading a session', async () => {
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
@@ -35,6 +44,31 @@ describe('session-selection helpers', () => {
     const persistActiveSessionId = vi.fn();
     const markSessionSeen = vi.fn();
     const syncSessionMcps = vi.fn(async () => {});
+    const applySelectedModel = vi.fn();
+    const resolvePersistedModel = vi.fn(() => ({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'high',
+    }));
+    const resolveFallbackModel = vi.fn(() => ({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'high',
+    }));
+    const deriveSelectedModelFromMessages = vi.fn(() => ({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+      variant: 'high',
+    }));
+    const externalSession: Session = {
+      id: 'session-1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'Session 1',
+      version: '1',
+      model: { providerID: 'openai', id: 'gpt-5.6-sol', variant: 'high' },
+      time: { created: 0, updated: 2 },
+    };
 
     await selectSessionWithDependencies(
       {
@@ -49,9 +83,11 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
-        resolvePersistedModel: () => null,
-        resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
-        applySelectedModel: vi.fn(),
+        getSession: () => externalSession,
+        resolveSessionModel: selectedModelFromSession,
+        resolvePersistedModel,
+        resolveFallbackModel,
+        applySelectedModel,
         getConnectedMcpNames: () => ['docs'],
         hasSelectedMcps: () => false,
         setSelectedMcpsForSession: vi.fn(),
@@ -59,14 +95,7 @@ describe('session-selection helpers', () => {
         resetTodoSync: vi.fn(),
         clearMessages,
         loadSession: vi.fn(async () => ({
-          session: {
-            id: 'session-1',
-            projectID: 'project-1',
-            directory: '/repo',
-            title: 'Session 1',
-            version: '1',
-            time: { created: 0, updated: 2 },
-          },
+          session: externalSession,
           messages: [{ info: assistantMessage('assistant-1'), parts: [] }],
         })),
         isCurrentSelectionGeneration: () => true,
@@ -75,7 +104,7 @@ describe('session-selection helpers', () => {
         syncFailedSessionsFromMessages: vi.fn(),
         requestMessageListScrollToBottom: vi.fn(),
         deriveSelectedAgentFromMessages: () => 'build',
-        deriveSelectedModelFromMessages: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
+        deriveSelectedModelFromMessages,
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'busy' as const } })),
@@ -86,7 +115,14 @@ describe('session-selection helpers', () => {
         setError: vi.fn(),
       },
       { next: () => 1 },
-      'session-1'
+      'session-1',
+      {
+        selectedModel: {
+          providerID: 'openai',
+          modelID: 'gpt-5.6-luna',
+          variant: 'max',
+        },
+      }
     );
 
     expect(activeSession.value).toBe('session-1');
@@ -95,6 +131,27 @@ describe('session-selection helpers', () => {
     );
     expect(persistActiveSessionId).toHaveBeenCalledWith('session-1');
     expect(markSessionSeen).toHaveBeenCalledWith('session-1');
+    expect(applySelectedModel).toHaveBeenNthCalledWith(
+      1,
+      {
+        providerID: 'openai',
+        modelID: 'gpt-5.6-sol',
+        variant: 'high',
+      },
+      'session-1'
+    );
+    expect(applySelectedModel).toHaveBeenNthCalledWith(
+      2,
+      {
+        providerID: 'openai',
+        modelID: 'gpt-5.6-sol',
+        variant: 'high',
+      },
+      'session-1'
+    );
+    expect(resolvePersistedModel).toHaveBeenCalledWith('session-1');
+    expect(resolveFallbackModel).not.toHaveBeenCalled();
+    expect(deriveSelectedModelFromMessages).not.toHaveBeenCalled();
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
   });
@@ -128,6 +185,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => null,
         applySelectedModel: vi.fn(),
@@ -196,6 +255,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => null,
         applySelectedModel: vi.fn(),
@@ -250,6 +311,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         applySelectedModel: vi.fn(),
@@ -304,6 +367,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => null,
         applySelectedModel: vi.fn(),
@@ -368,6 +433,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         applySelectedModel: vi.fn(),
@@ -532,6 +599,8 @@ describe('session-selection helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: selectedModelFromSession,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         applySelectedModel: vi.fn(),

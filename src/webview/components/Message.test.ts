@@ -56,6 +56,7 @@ afterEach(() => {
   retryMessageMock.mockReset();
   openProviderSetupMock.mockReset();
   resetToolCallExpansionState();
+  delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
 
 function textPart(id: string, text: string): Part {
@@ -486,6 +487,41 @@ describe('Message user prompt rendering', () => {
     expect(children[2]?.textContent).toContain('Please review this.');
     expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
     expect(children[3]?.textContent).toContain('diagram.png');
+  });
+
+  it('opens a terminal selection in a read-only editor tab', () => {
+    const send = vi.fn();
+    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-terminal-selection'),
+          parts: [
+            textPart(
+              'text-terminal-selection',
+              '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    const terminalChip = container?.querySelector<HTMLButtonElement>(
+      '.message-attachment-chip-clickable'
+    );
+    expect(terminalChip).toBeInstanceOf(HTMLButtonElement);
+    expect(terminalChip?.querySelector('.chip-detail')?.textContent).toBe('2 lines');
+
+    terminalChip?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'npm test\nfailed output',
+        title: 'zsh terminal selection',
+        language: 'shellscript',
+      },
+    });
   });
 
   it('renders inline file mentions as chips inside the user bubble text', () => {

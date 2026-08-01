@@ -24,16 +24,22 @@ test('stops retrying a usage-limited session', async ({ page }) => {
   await page.getByRole('button', { name: 'Stop retrying' }).click();
 
   const abortRequest = await page.evaluate(() => {
-    const value = (window as Window & {
-      __varroE2E?: { requests: Array<{ method: string; path: string }> };
-    }).__varroE2E;
-    return value?.requests.find((request) => request.method === 'POST' && request.path.endsWith('/abort')) || null;
+    const value = (
+      window as Window & {
+        __varroE2E?: { requests: Array<{ method: string; path: string }> };
+      }
+    ).__varroE2E;
+    return (
+      value?.requests.find(
+        (request) => request.method === 'POST' && request.path.endsWith('/abort')
+      ) || null
+    );
   });
 
   expect(abortRequest).toMatchObject({ method: 'POST' });
 });
 
-test('keeps the selected provider model visible until reload resets the scenario defaults', async ({ page }) => {
+test('keeps the manually selected provider model as the default after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
   await page.getByRole('button', { name: 'Switch provider' }).click();
@@ -42,7 +48,7 @@ test('keeps the selected provider model visible until reload resets the scenario
 
   await page.reload();
 
-  await expect(page.getByTitle('OpenAI / GPT-4.1')).toBeVisible();
+  await expect(page.getByTitle('OpenCode Go / Go Plan')).toBeVisible();
 });
 
 test('supports escape in the provider switcher', async ({ page }) => {

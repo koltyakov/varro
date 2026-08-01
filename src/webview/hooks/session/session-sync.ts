@@ -1,4 +1,4 @@
-import type { SelectedModel } from '../../lib/app-state-types';
+import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import { routingStore } from '../../lib/stores/routing-store';
 import type { MessageEntry, Session, SessionStatus } from '../../types';
@@ -22,6 +22,8 @@ export async function selectSessionWithStateDependencies(
       fallbackAgent: string | null;
     };
     applySelectedAgent(agent: string, id: string): void;
+    getSession(id: string): Session | undefined;
+    resolveSessionModel(session: Session): SelectedModel | null;
     resolvePersistedModel(id: string): SelectedModel | null;
     resolveFallbackModel(): SelectedModel | null;
     applySelectedModel(model: SelectedModel, id: string): void;
@@ -61,7 +63,7 @@ export async function selectSessionWithStateDependencies(
   },
   generationRef: { next(): number },
   id: string,
-  options?: { markSeen?: boolean }
+  options?: SessionSelectionOptions
 ) {
   await selectSessionWithDependencies(deps, generationRef, id, options);
 }
@@ -115,6 +117,8 @@ type SessionSyncDependencies = {
     fallbackAgent: string | null;
   };
   applySelectedAgent(agent: string, id: string): void;
+  getSession(id: string): Session | undefined;
+  resolveSessionModel(session: Session): SelectedModel | null;
   resolvePersistedModel(id: string): SelectedModel | null;
   resolveFallbackModel(): SelectedModel | null;
   applySelectedModel(model: SelectedModel, id: string): void;
@@ -170,7 +174,7 @@ export class SessionSyncOperations {
     private readonly generations: SessionSyncGenerations
   ) {}
 
-  readonly selectSession = async (id: string, options?: { markSeen?: boolean }) => {
+  readonly selectSession = async (id: string, options?: SessionSelectionOptions) => {
     await selectSessionWithStateDependencies(
       {
         getActiveSessionId: this.deps.getActiveSessionId,
@@ -182,6 +186,8 @@ export class SessionSyncOperations {
         resetToolCallExpansionState: this.deps.resetToolCallExpansionState,
         resolvePersistedAgent: this.deps.resolvePersistedAgent,
         applySelectedAgent: this.deps.applySelectedAgent,
+        getSession: this.deps.getSession,
+        resolveSessionModel: this.deps.resolveSessionModel,
         resolvePersistedModel: this.deps.resolvePersistedModel,
         resolveFallbackModel: this.deps.resolveFallbackModel,
         applySelectedModel: this.deps.applySelectedModel,

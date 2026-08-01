@@ -905,7 +905,18 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
 }
 
 function openAttachment(value: MessageAttachment) {
-  if (value.type === 'terminal-selection') return;
+  if (value.type === 'terminal-selection') {
+    if (!value.text) return;
+    postMessage({
+      type: 'vscode/open-text',
+      payload: {
+        content: value.text,
+        title: `${value.terminalName} terminal selection`,
+        language: 'shellscript',
+      },
+    });
+    return;
+  }
 
   const filePath = normalizePath(value.type === 'file-reference' ? value.path : value.filename);
   const workspacePath = state.editorContext.workspacePath;
@@ -932,6 +943,10 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
     attachment().type === 'file-reference' &&
     (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
   const isTerminal = () => attachment().type === 'terminal-selection';
+  const isOpenable = () => {
+    const value = attachment();
+    return value.type !== 'terminal-selection' || Boolean(value.text);
+  };
 
   const handleClick = () => openAttachment(attachment());
 
@@ -955,14 +970,19 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       return <span class="chip-detail">{formatContextLineRanges(value.lineRanges)}</span>;
     }
     if (value.type === 'terminal-selection') {
-      return <span class="chip-detail">terminal</span>;
+      const lineCount = value.text ? value.text.split('\n').length : null;
+      return (
+        <span class="chip-detail">
+          {lineCount === null ? 'terminal' : `${lineCount} ${lineCount === 1 ? 'line' : 'lines'}`}
+        </span>
+      );
     }
     return null;
   };
 
   return (
     <Show
-      when={isTerminal()}
+      when={!isOpenable()}
       fallback={
         <button
           class="message-attachment-chip message-attachment-chip-clickable"

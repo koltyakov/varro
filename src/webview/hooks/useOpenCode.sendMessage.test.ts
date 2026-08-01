@@ -29,6 +29,51 @@ describe('sendMessage', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
   });
 
+  it('does not promote temporary session routing to global defaults when sending', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('providers', [
+      provider('openai', {
+        'gpt-4o': {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+          variants: { high: {} },
+        },
+        'gpt-5': {
+          id: 'gpt-5',
+          name: 'GPT-5',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+          variants: { medium: {} },
+        },
+      }),
+    ]);
+    stateModule.setSelectedModel({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      variant: 'medium',
+    });
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Review this');
+
+    expect(stateModule.getPersistedSelectedModel()).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      variant: 'medium',
+    });
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+  });
+
   it('starts title fallback as soon as OpenCode accepts the prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
 
@@ -477,7 +522,7 @@ describe('sendMessage', () => {
     });
   });
 
-  it('reuses the most recently selected model for a new session', async () => {
+  it('uses global defaults instead of temporary session routing for a new session', async () => {
     const { stateModule, hookModule } = await loadModules();
 
     stateModule.setState('providers', [
@@ -498,6 +543,10 @@ describe('sendMessage', () => {
     ]);
     stateModule.setState('providerDefaults', { openai: 'gpt-4o' });
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-5' });
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-4o' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
 
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
 

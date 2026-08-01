@@ -59,6 +59,8 @@ describe('session sync helpers', () => {
         resetToolCallExpansionState: vi.fn(),
         resolvePersistedAgent: () => ({ persistedAgent: null, fallbackAgent: 'build' }),
         applySelectedAgent: vi.fn(),
+        getSession: () => undefined,
+        resolveSessionModel: () => null,
         resolvePersistedModel: () => null,
         resolveFallbackModel: () => ({ providerID: 'openai', modelID: 'gpt-4o' }),
         applySelectedModel: vi.fn(),

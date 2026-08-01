@@ -132,7 +132,8 @@ export function buildSessionSendBody(
   const effectiveModel = routingStore.resolveSelectedModel(
     composerState.selectedModel,
     composerState.providers,
-    composerState.providerDefaults
+    composerState.providerDefaults,
+    { allowHidden: true }
   );
   const includeClipboardImages = effectiveModel
     ? modelSupportsVision(
@@ -551,7 +552,7 @@ export class SessionSendOperations {
           startLoading: uiStore.startLoading,
           setError: uiStore.setError,
           applyEffectiveModel: (model, sessionId) =>
-            routingStore.setSelectedModel(model, { sessionId }),
+            routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
           resetTodoSync: this.deps.resetTodoSync,
           clearTodos: composerStore.clearTodos,
           clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,

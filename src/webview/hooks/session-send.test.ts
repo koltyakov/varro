@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
+import { setState } from '../lib/state';
 import {
   buildSessionSendBody,
   ensureSessionPermissionWithDependencies,
@@ -76,6 +77,7 @@ function createState(overrides?: {
 describe('session-send helpers', () => {
   afterEach(() => {
     vi.useRealTimers();
+    setState('hiddenModels', []);
   });
 
   it('builds payload with unique live selection and explicit same-file context', () => {
@@ -116,6 +118,20 @@ describe('session-send helpers', () => {
       },
       effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
     });
+  });
+
+  it('sends an explicitly selected hidden session model', () => {
+    setState('hiddenModels', ['openai:gpt-4o']);
+
+    const result = buildSessionSendBody(
+      createState({ editorContext: createEditorContext({ workspacePath: null }) }),
+      'session-1',
+      'Continue',
+      () => true
+    );
+
+    expect(result?.effectiveModel).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
+    expect(result?.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-4o' });
   });
 
   it('sends bounded unsaved editor text and explicitly attached diagnostics', () => {

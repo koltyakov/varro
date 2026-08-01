@@ -8,7 +8,7 @@ import type {
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
 import { client } from '../../lib/client';
-import type { QueuedMessage } from '../../lib/app-state-types';
+import type { QueuedMessage, SessionSelectionOptions } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -60,6 +60,7 @@ import { getSessionPermissionRulesForMode } from '../permission-rules';
 import {
   deriveSelectedAgentFromMessages,
   deriveSelectedModelFromMessages,
+  deriveSelectedModelFromSession,
   getActiveProviderSelection as getActiveProviderSelectionForState,
   getBuildAgentName,
   getDefaultPrimaryAgentName,
@@ -104,7 +105,7 @@ export interface OpenCodeRuntime {
   refreshRoutingState(): Promise<void>;
   continueInterruptedSession(sessionId: string): Promise<void>;
   applySessionMcps(names: string[], sessionId?: string | null): Promise<void>;
-  selectSession(id: string, options?: { markSeen?: boolean }): Promise<void>;
+  selectSession(id: string, options?: SessionSelectionOptions): Promise<void>;
   loadFullSessionHistory(sessionId: string): Promise<void>;
   loadOlderSessionHistoryPage(sessionId: string): Promise<boolean>;
   loadOlderSessionPrompts(sessionId: string): Promise<boolean>;
@@ -1057,18 +1058,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       }),
       applySelectedAgent: (agent, sessionId) =>
         routingStore.setSelectedAgent(agent, { sessionId, persistGlobal: false }),
-      resolvePersistedModel: (sessionId) =>
-        routingStore.resolveSelectedModel(
-          routingStore.getSelectedModelForSession(sessionId),
-          appStore.state.providers,
-          appStore.state.providerDefaults
-        ),
-      resolveFallbackModel: () =>
-        routingStore.resolveSelectedModel(
-          routingStore.getPersistedSelectedModel(),
-          appStore.state.providers,
-          appStore.state.providerDefaults
-        ),
+      getSession: (sessionId) =>
+        appStore.state.sessions.find((session) => session.id === sessionId),
+      resolveSessionModel: deriveSelectedModelFromSession,
+      resolvePersistedModel: routingStore.getSelectedModelForSession,
+      resolveFallbackModel: routingStore.getPersistedSelectedModel,
       applySelectedModel: (model, sessionId) =>
         routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
       getConnectedMcpNames: routingStore.getConnectedMcpNames,
@@ -1234,7 +1228,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     setSessionUsageLimit: sessionStore.setSessionUsageLimit,
     persistActiveSessionId: sessionStore.persistActiveSessionId,
     markSessionSeen: sessionStore.markSessionSeen,
-    getDefaultSelectedModel: () => appStore.state.selectedModel,
+    getDefaultSelectedModel: routingStore.getPersistedSelectedModel,
     setSelectedModel: routingStore.setSelectedModel,
     resolveDefaultAgent: () =>
       getBuildAgentNameFromState() ||
@@ -1267,7 +1261,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     emptyRecycleBin: () => client.varro.recycleBin.empty(),
   });
 
-  async function selectSession(id: string, options?: { markSeen?: boolean }) {
+  async function selectSession(id: string, options?: SessionSelectionOptions) {
     await sessionSyncOperations.selectSession(id, options);
     if (appStore.state.activeSessionId === id) {
       sessionStore.persistLastOpenedView({ type: 'session', sessionId: id });

@@ -489,6 +489,51 @@ describe('ChatInput', () => {
     }).not.toThrow();
   });
 
+  it('shows an active hidden session model without falling back to the first visible model', () => {
+    setState('providers', [
+      {
+        id: 'zai-coding-plan',
+        name: 'Z.AI Coding Plan',
+        source: 'api',
+        models: {
+          'glm-5.2': {
+            id: 'glm-5.2',
+            name: 'GLM-5.2',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.6-luna': {
+            id: 'gpt-5.6-luna',
+            name: 'GPT-5.6 Luna',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+            variants: { max: {} },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { 'zai-coding-plan': 'glm-5.2' });
+    setState('hiddenModels', ['openai:gpt-5.6-luna']);
+    setState('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna',
+      variant: 'max',
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
+    expect(modelButton?.textContent).toContain('GPT-5.6 Luna');
+    expect(modelButton?.textContent).not.toContain('GLM-5.2');
+  });
+
   it('uses the busy placeholder while a child session is still working', async () => {
     vi.useFakeTimers();
     setState('activeSessionId', 'session-1');
@@ -541,7 +586,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows the connected MCP count and toggles the MCP picker or closes it outside', () => {
+  it('shows connected MCPs or an all-disabled zero count and toggles the picker', () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -570,6 +615,14 @@ describe('ChatInput', () => {
 
     document.body.click();
     expect(container?.querySelector('.dropdown-menu')).toBeNull();
+
+    setState('mcpStatus', {
+      alpha: { status: 'failed' },
+      beta: { status: 'needs_auth' },
+      gamma: { status: 'failed' },
+      delta: { status: 'disabled' },
+    });
+    expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
 
     setState('mcpStatus', {
       alpha: { status: 'disabled' },
@@ -862,17 +915,20 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
-    expect(button?.getAttribute('title')).toBe('Context usage (0%)');
+    expect(button?.getAttribute('title')).toBe('Context usage unavailable');
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
-    expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('0/1,000tokens');
+    expect(container?.querySelector('.context-popup-pct')?.textContent).toBe('--');
+    expect(container?.querySelector('.context-popup-pct')?.classList).toContain('unavailable');
+    expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('--/1,000tokens');
 
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     await Promise.resolve();
 
     expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
+    expect(container?.querySelector('.context-popup-pct')?.textContent).toBe('50%');
     expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('500/1,000tokens');
   });
 
@@ -958,7 +1014,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows zero-valued root token details when only agents report usage', async () => {
+  it('shows unavailable root token details when only agents report usage', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('sessions', [
@@ -987,10 +1043,11 @@ describe('ChatInput', () => {
       'Agents (1)650',
     ]);
     expect(readContextRows(sections[0])).toEqual({
-      Input: '0',
-      Output: '0',
-      Total: '0',
+      Input: '--',
+      Output: '--',
+      Total: '--',
     });
+    expect(sections[0].nextElementSibling?.querySelectorAll('.unavailable')).toHaveLength(3);
   });
 
   it('uses the root session snapshot when older messages are not loaded', async () => {

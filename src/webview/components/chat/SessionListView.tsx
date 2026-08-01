@@ -1,5 +1,6 @@
 import {
   getSelectedAgentForSession,
+  getSelectedModelForSession,
   getSessionTreeIds,
   getSessionTreeRootId,
   hasActiveUsageLimit,
@@ -37,6 +38,7 @@ import {
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
+import type { SelectedModel } from '../../lib/app-state-types';
 import type { Part, Session } from '../../types';
 import { client } from '../../lib/client';
 import { getMessageFileChanges } from '../../lib/tool-file-change';
@@ -80,6 +82,38 @@ type SessionSummaryStats = {
   additions: number;
   deletions: number;
 };
+
+function getSessionDisplayModel(
+  session: Session,
+  diffSummary: SessionDiffSummary | null
+): SelectedModel | null {
+  const persistedModel = getSelectedModelForSession(session.id);
+  if (persistedModel) return persistedModel;
+
+  const summaryModel = diffSummary?.model;
+  if (summaryModel) {
+    return {
+      providerID: summaryModel.providerID,
+      modelID: summaryModel.modelID,
+      variant: summaryModel.variant,
+    };
+  }
+  if (!session.model) return null;
+  return {
+    providerID: session.model.providerID,
+    modelID: session.model.id,
+    variant: session.model.variant,
+  };
+}
+
+function openSessionWithDisplayedModel(session: Session, diffSummary: SessionDiffSummary | null) {
+  const selectedModel = getSessionDisplayModel(session, diffSummary);
+  if (selectedModel) {
+    void selectSession(session.id, { selectedModel });
+  } else {
+    void selectSession(session.id);
+  }
+}
 
 type SessionDiffSummaryCacheEntry = {
   status: 'loading' | 'ready' | 'error';
@@ -1179,7 +1213,11 @@ export function SessionListView(props: {
       e.preventDefault();
       const idx = focusedIndex();
       if (idx >= 0 && idx < sessions.length) {
-        selectSession(sessions[idx]!.id);
+        const session = sessions[idx]!;
+        openSessionWithDisplayedModel(
+          session,
+          sessionDiffSummaryCache()[session.id]?.stats ?? null
+        );
         if (!props.embedded) setShowSessionPicker(false);
       }
       return;
@@ -1479,14 +1517,14 @@ function SessionListItem(props: {
     return props.durationMs + activeDuration;
   };
   const modelDetails = createMemo(() => {
-    const summaryModel = props.diffSummary?.model;
-    const model = summaryModel
+    const selectedModel = getSessionDisplayModel(props.session, props.diffSummary);
+    const model = selectedModel
       ? {
-          providerID: summaryModel.providerID,
-          id: summaryModel.modelID,
-          variant: summaryModel.variant,
+          providerID: selectedModel.providerID,
+          id: selectedModel.modelID,
+          variant: selectedModel.variant,
         }
-      : props.session.model;
+      : null;
     if (!model) return null;
     const provider = state.providers.find((item) => item.id === model.providerID);
     const modelName = formatModelName(provider?.models[model.id]?.name || model.id);
@@ -1560,7 +1598,7 @@ function SessionListItem(props: {
   };
   const openSession = () => {
     if (isActive()) return;
-    selectSession(props.session.id);
+    openSessionWithDisplayedModel(props.session, props.diffSummary);
     if (!props.embedded) setShowSessionPicker(false);
   };
   const handleRowClick = (event: MouseEvent) => {

@@ -306,10 +306,11 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 <ContextUsageButton
                   ref={props.contextButtonRef}
                   percent={contextUsage().percent}
+                  available={contextUsage().used > 0}
                   title={
                     props.showContextPopup
                       ? undefined
-                      : formatContextUsageTitle(contextUsage().percent)
+                      : formatContextUsageTitle(contextUsage().percent, contextUsage().used > 0)
                   }
                   onClick={props.onToggleContextPopup}
                 />
