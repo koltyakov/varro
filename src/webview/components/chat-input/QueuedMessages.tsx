@@ -1,5 +1,6 @@
-import { For, Show, createSignal } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
 import type { QueuedMessage } from '../../lib/app-state-types';
+import { observeSettledResize } from '../../lib/settled-resize-observer';
 
 export const QUEUED_MESSAGE_DRAG_TYPE = 'application/x-varro-queued-message';
 
@@ -7,6 +8,25 @@ export type QueuedMessageItem = Pick<
   QueuedMessage,
   'id' | 'sessionId' | 'text' | 'droppedFiles' | 'clipboardImages' | 'terminalSelection'
 >;
+
+function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
+  const update = () => {
+    const maxScrollTop = element.scrollHeight - element.clientHeight;
+    element.classList.toggle('has-more-above', element.scrollTop > 1);
+    element.classList.toggle('has-more-below', element.scrollTop < maxScrollTop - 1);
+  };
+
+  element.addEventListener('scroll', update, { passive: true });
+  const stopObservingResize = observeSettledResize(element, update);
+  createEffect(() => {
+    trackItemCount();
+    queueMicrotask(update);
+  });
+  onCleanup(() => {
+    element.removeEventListener('scroll', update);
+    stopObservingResize();
+  });
+}
 
 export function QueuedMessages(props: {
   items: QueuedMessageItem[];
@@ -28,7 +48,12 @@ export function QueuedMessages(props: {
 
   return (
     <div class={`chat-queue-container${draggedItemId() ? ' is-reordering' : ''}`}>
-      <div class="chat-queue-list" role="list" aria-label="Queued messages">
+      <div
+        class="chat-queue-list"
+        role="list"
+        aria-label="Queued messages"
+        ref={(element) => bindQueueOverflowFade(element, () => props.items.length)}
+      >
         <For each={props.items}>
           {(item, index) => {
             const isDispatching = () => props.dispatchingItemId === item.id;

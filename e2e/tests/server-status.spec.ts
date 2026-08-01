@@ -74,7 +74,7 @@ test('recovers when the first startup connection attempt loses the race', async 
     .toEqual(
       expect.arrayContaining([
         'GET /global/health',
-        'GET /session',
+        'GET /session?limit=100',
         'GET /agent',
         'GET /config/providers',
       ])

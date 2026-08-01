@@ -48,7 +48,7 @@ test('narrow toolbar keeps provider limit and composer controls within their row
   await page.goto('/e2e/harness/index.html?scenario=usage-limit');
 
   await expect(page.locator('.toolbar-limit-chip')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Send (Enter)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
   await expect
     .poll(() =>
       page.locator('.chat-input-toolbars').evaluateAll((rows) =>

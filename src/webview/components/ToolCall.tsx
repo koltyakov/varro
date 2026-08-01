@@ -1396,7 +1396,7 @@ function GenericToolCall(props: {
               {(props.state as ToolStateError).error}
             </div>
           </Show>
-          <Show when={props.state.status === 'running'}>
+          <Show when={props.state.status === 'running' && !isBash()}>
             <Show when={isTask()} fallback={<div class="tool-invocation-running">Running…</div>}>
               <button
                 type="button"

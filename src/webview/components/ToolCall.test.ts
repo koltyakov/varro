@@ -452,6 +452,7 @@ describe('ToolCall', () => {
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
     expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
+    expect(container?.querySelector('.tool-invocation-running')).toBeNull();
   });
 
   it('keeps the $ row when there is no output, so the body is never empty', () => {

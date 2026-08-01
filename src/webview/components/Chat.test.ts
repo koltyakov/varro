@@ -31,6 +31,7 @@ import {
   shouldAutoDeleteEmptySession,
   shouldShowSessionHeaderBadge,
 } from './Chat';
+import { client } from '../lib/client';
 import { EMPTY_SESSION_PRUNE_GRACE_MS } from '../lib/empty-session';
 import {
   requestOpenAttentionSessions,
@@ -2068,7 +2069,9 @@ describe('header status badges', () => {
   });
 
   it('shows an empty state for a search with no matching sessions', async () => {
-    setState('sessions', [session('session-1', 500, { title: 'Alpha build' })]);
+    const sessions = [session('session-1', 500, { title: 'Alpha build' })];
+    vi.spyOn(client.session, 'list').mockResolvedValue({ items: sessions, hasMore: false });
+    setState('sessions', sessions);
     setShowSessionPicker(true);
 
     cleanup = render(() => Chat(), container!);
@@ -2078,11 +2081,12 @@ describe('header status badges', () => {
 
     input!.value = 'missing';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
-    await Promise.resolve();
 
-    expect(container?.querySelector('.session-empty')?.textContent?.trim()).toBe(
-      'No matching sessions'
-    );
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.session-empty')?.textContent?.trim()).toBe(
+        'No matching sessions'
+      );
+    });
   });
 
   it('keeps all group headers outside the expanded section scroll region', () => {

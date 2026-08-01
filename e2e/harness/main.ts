@@ -3542,6 +3542,13 @@ async function handleApiRequest(
   }
 
   if (method === 'GET' && path === '/session') {
+    const limit = Number(url.searchParams.get('limit'));
+    if (Number.isSafeInteger(limit) && limit > 0) {
+      return {
+        items: state.sessions.slice(0, limit),
+        hasMore: state.sessions.length > limit,
+      };
+    }
     return state.sessions;
   }
 

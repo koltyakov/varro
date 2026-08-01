@@ -1342,7 +1342,42 @@
 .chat-queue-list {
   display: flex;
   flex-direction: column;
+  max-height: min(126px, 30vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: var(--radius-control);
+  scrollbar-width: none;
+}
+
+.chat-queue-list::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-queue-list.has-more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent);
+}
+
+.chat-queue-list.has-more-above {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
+  mask-image: linear-gradient(to bottom, transparent, #000 14px);
+}
+
+.chat-queue-list.has-more-above.has-more-below {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent
+  );
 }
 
 .chat-queue-item {

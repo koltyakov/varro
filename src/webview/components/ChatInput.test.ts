@@ -1545,6 +1545,43 @@ describe('ChatInput', () => {
     expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(8);
   });
 
+  it('tracks hidden-scrollbar queue overflow at both edges', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState(
+      'queuedMessages',
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `q${index + 1}`,
+        sessionId: 'session-1',
+        text: `Queued follow-up ${index + 1}`,
+      }))
+    );
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const list = container?.querySelector<HTMLElement>('.chat-queue-list');
+    expect(list).not.toBeNull();
+    Object.defineProperties(list!, {
+      clientHeight: { configurable: true, value: 126 },
+      scrollHeight: { configurable: true, value: 168 },
+    });
+
+    list!.scrollTop = 0;
+    list!.dispatchEvent(new Event('scroll'));
+    expect(list?.classList.contains('has-more-above')).toBe(false);
+    expect(list?.classList.contains('has-more-below')).toBe(true);
+
+    list!.scrollTop = 21;
+    list!.dispatchEvent(new Event('scroll'));
+    expect(list?.classList.contains('has-more-above')).toBe(true);
+    expect(list?.classList.contains('has-more-below')).toBe(true);
+
+    list!.scrollTop = 42;
+    list!.dispatchEvent(new Event('scroll'));
+    expect(list?.classList.contains('has-more-above')).toBe(true);
+    expect(list?.classList.contains('has-more-below')).toBe(false);
+  });
+
   it('reorders queued rows by dragging the left handle without showing the file-drop overlay', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

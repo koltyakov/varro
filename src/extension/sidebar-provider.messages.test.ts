@@ -61,7 +61,9 @@ describe('SidebarProvider session message responses', () => {
     ];
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) =>
-        path === '/session?directory=%2Frepo' ? [{ id: 'session-1', directory: '/repo' }] : messages
+        path === '/session/session-1?directory=%2Frepo'
+          ? { id: 'session-1', directory: '/repo' }
+          : messages
       ),
     });
     const { provider } = await createSidebarProviderInstance({ server });
@@ -73,7 +75,7 @@ describe('SidebarProvider session message responses', () => {
     });
 
     expect(server.request.mock.calls).toEqual([
-      ['GET', '/session?directory=%2Frepo'],
+      ['GET', '/session/session-1?directory=%2Frepo'],
       ['GET', '/session/session-1/message', undefined],
     ]);
     expect(posted).toContainEqual({

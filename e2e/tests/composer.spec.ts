@@ -158,11 +158,9 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
   ]);
   await expect(queueList.locator('.chat-queue-item.is-editing')).toHaveCount(0);
 
-  await queueList
-    .getByRole('listitem')
-    .nth(1)
-    .getByRole('button', { name: 'Edit queued message' })
-    .click();
+  const editedRow = queueList.getByRole('listitem').nth(1);
+  await editedRow.hover();
+  await editedRow.getByRole('button', { name: 'Edit queued message' }).click();
   await composer.fill('Discard this edit');
   await queueList.getByRole('button', { name: 'Cancel queued message edit' }).click();
 
@@ -185,6 +183,7 @@ test('removes queued follow-up messages before sending them', async ({ page }) =
   const queueList = page.getByRole('list', { name: 'Queued messages' });
   await expect(queueList.getByRole('listitem')).toContainText('Queue this and then remove it');
 
+  await queueList.getByRole('listitem').hover();
   await page.getByRole('button', { name: 'Remove from queue' }).click();
   await expect(queueList.getByRole('listitem')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Send as Steer' })).toHaveCount(0);
