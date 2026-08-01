@@ -35,6 +35,22 @@ test('theme=high-contrast query renders the high-contrast VSCode variables', asy
   expect(values.contrastBorder).toBe('#ffffff');
 });
 
+test('high-contrast-light uses the contrast border for thinking and tool cards', async ({
+  page,
+}) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&theme=high-contrast-light'
+  );
+
+  const thinking = page.locator('.chat-thinking-box').first();
+  const tool = page.locator('.chat-tool-invocation-part').first();
+  await expect(thinking).toBeVisible();
+  await expect(tool).toBeVisible();
+
+  await expect(thinking).toHaveCSS('border-top-color', 'rgb(0, 0, 0)');
+  await expect(tool).toHaveCSS('border-top-color', 'rgb(0, 0, 0)');
+});
+
 test('theme/update message switches body to light theme', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
