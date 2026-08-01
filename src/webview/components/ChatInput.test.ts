@@ -1528,7 +1528,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
   });
 
-  it('keeps queue, todo, and file panels mounted while the model picker is open', () => {
+  it('keeps queue, todo, and file panels mounted while model and MCP pickers are open', () => {
     setupModelState();
     setShowChangedFiles(true);
     setState('activeSessionId', 'session-1');
@@ -1561,6 +1561,15 @@ describe('ChatInput', () => {
     expect(files).not.toBeNull();
 
     setShowModelPicker(true);
+
+    expect(inputPart?.classList.contains('model-picker-open')).toBe(true);
+    expect(container?.querySelector('.chat-queue-container')).toBe(queue);
+    expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
+    expect(container?.querySelector('.changed-files-block')).toBe(files);
+
+    setShowModelPicker(false);
+    setState('mcpStatus', { docs: { status: 'connected' } });
+    container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count')?.click();
 
     expect(inputPart?.classList.contains('model-picker-open')).toBe(true);
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);

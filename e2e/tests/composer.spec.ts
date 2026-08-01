@@ -98,7 +98,9 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
-test('keeps pre-input panel space reserved while the model picker is open', async ({ page }) => {
+test('keeps pre-input panel space reserved while model and MCP pickers are open', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
@@ -141,6 +143,30 @@ test('keeps pre-input panel space reserved while the model picker is open', asyn
   expect(after.inputTop).toBeCloseTo(before.inputTop, 2);
   expect(after.queueHeight).toBeCloseTo(before.queueHeight, 2);
   expect(after.todoHeight).toBeCloseTo(before.todoHeight, 2);
+  await expect(inputShell).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await composer.fill('/mcp');
+  await expect(page.getByText('Open the MCP picker for this session')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.dropdown-menu')).toBeVisible();
+  await expect(queue).toBeHidden();
+  await expect(todo).toBeHidden();
+  await expect(queue).toHaveCount(1);
+  await expect(todo).toHaveCount(1);
+
+  const mcpAfter = await page.evaluate(() => ({
+    inputTop: document.querySelector('.chat-input-shell')?.getBoundingClientRect().top ?? 0,
+    queueHeight:
+      document.querySelector('.chat-queue-container')?.getBoundingClientRect().height ?? 0,
+    todoHeight:
+      document.querySelector('.todo-block:not(.changed-files-block)')?.getBoundingClientRect()
+        .height ?? 0,
+  }));
+
+  expect(mcpAfter.inputTop).toBeCloseTo(before.inputTop, 2);
+  expect(mcpAfter.queueHeight).toBeCloseTo(before.queueHeight, 2);
+  expect(mcpAfter.todoHeight).toBeCloseTo(before.todoHeight, 2);
   await expect(inputShell).toBeVisible();
 });
 

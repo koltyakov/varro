@@ -13,6 +13,10 @@ test('opens the MCP picker and syncs connection requests', async ({ page }) => {
   await expect(page.getByText('chrome', { exact: true })).toBeVisible();
   await expect(page.getByText('needs auth', { exact: true })).toBeVisible();
   await expect(page.getByText('cli not authenticated', { exact: false })).toBeVisible();
+  await expect(page.locator('.model-picker-list .dropdown-item').first()).toHaveCSS(
+    'border-radius',
+    '0px'
+  );
 
   await page.getByRole('button', { name: /github/i }).click();
 

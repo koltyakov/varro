@@ -2661,7 +2661,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   return (
     <div
-      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''}`}
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() || showMcpPicker() ? 'model-picker-open' : ''}`}
     >
       <Show when={isDraggingOver()}>
         <DropOverlay />
