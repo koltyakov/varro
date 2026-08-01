@@ -98,6 +98,50 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
+test('keeps pre-input panel space reserved while the model picker is open', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('Keep this queued while choosing a model');
+  await page.getByTitle('Add to queue (Enter)').click();
+
+  const queue = page.locator('.chat-queue-container');
+  const todo = page.locator('.todo-block:not(.changed-files-block)');
+  const inputShell = page.locator('.chat-input-shell');
+  await expect(queue).toBeVisible();
+  await expect(todo).toBeVisible();
+
+  const before = await page.evaluate(() => ({
+    inputTop: document.querySelector('.chat-input-shell')?.getBoundingClientRect().top ?? 0,
+    queueHeight:
+      document.querySelector('.chat-queue-container')?.getBoundingClientRect().height ?? 0,
+    todoHeight:
+      document.querySelector('.todo-block:not(.changed-files-block)')?.getBoundingClientRect()
+        .height ?? 0,
+  }));
+
+  await page.locator('.model-picker-btn').click();
+  await expect(page.locator('.dropdown-menu')).toBeVisible();
+  await expect(queue).toBeHidden();
+  await expect(todo).toBeHidden();
+  await expect(queue).toHaveCount(1);
+  await expect(todo).toHaveCount(1);
+
+  const after = await page.evaluate(() => ({
+    inputTop: document.querySelector('.chat-input-shell')?.getBoundingClientRect().top ?? 0,
+    queueHeight:
+      document.querySelector('.chat-queue-container')?.getBoundingClientRect().height ?? 0,
+    todoHeight:
+      document.querySelector('.todo-block:not(.changed-files-block)')?.getBoundingClientRect()
+        .height ?? 0,
+  }));
+
+  expect(before.queueHeight).toBeGreaterThan(0);
+  expect(before.todoHeight).toBeGreaterThan(0);
+  expect(after).toEqual(before);
+  await expect(inputShell).toBeVisible();
+});
+
 test('reorders and edits queued follow-up messages in place', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 

@@ -225,6 +225,28 @@ describe('RalphIterationCard', () => {
     expect(clearIntervalSpy).toHaveBeenCalled();
   });
 
+  it('keeps the duration after the iteration note', () => {
+    cleanup = render(
+      () =>
+        RalphIterationCard({
+          iteration: iteration({
+            status: 'passed',
+            startedAt: 1_000,
+            endedAt: 59_000,
+            note: 'plan: PASS lint: SKIPPED',
+          }),
+        }),
+      container!
+    );
+
+    const note = container?.querySelector('.ralph-iter-note');
+    const duration = container?.querySelector('.ralph-iter-duration');
+
+    expect(note?.textContent).toBe('plan: PASS lint: SKIPPED');
+    expect(duration?.textContent).toBe('58s');
+    expect(note?.nextElementSibling).toBe(duration);
+  });
+
   it('prefers the active child-session issue over the saved note', () => {
     const childSession: Session = {
       id: 'child-session-1',

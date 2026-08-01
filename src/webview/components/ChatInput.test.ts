@@ -12,6 +12,7 @@ import {
   setIsLoading,
   setProviderLimitPollIntervalSeconds,
   setProviderLimitThresholdPercent,
+  setShowChangedFiles,
   setShowModelPicker,
   setState,
   setInputText,
@@ -145,6 +146,7 @@ afterEach(() => {
   setIsLoading(false);
   setProviderLimitPollIntervalSeconds(120);
   setProviderLimitThresholdPercent(40);
+  setShowChangedFiles(false);
   setShowModelPicker(false);
   setState('activeSessionId', null);
   setState('messages', []);
@@ -1468,6 +1470,46 @@ describe('ChatInput', () => {
       'showing-floating-popover'
     );
     expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
+  });
+
+  it('keeps queue, todo, and file panels mounted while the model picker is open', () => {
+    setupModelState();
+    setShowChangedFiles(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1_000, {
+        summary: {
+          additions: 1,
+          deletions: 0,
+          files: 1,
+          diffs: [{ file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 }],
+        },
+      }),
+    ]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('queuedMessages', [
+      { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
+    setState('todos', [
+      { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const inputPart = container?.querySelector('.interactive-input-part');
+    const queue = container?.querySelector('.chat-queue-container');
+    const todo = container?.querySelector('.todo-block:not(.changed-files-block)');
+    const files = container?.querySelector('.changed-files-block');
+    expect(queue).not.toBeNull();
+    expect(todo).not.toBeNull();
+    expect(files).not.toBeNull();
+
+    setShowModelPicker(true);
+
+    expect(inputPart?.classList.contains('model-picker-open')).toBe(true);
+    expect(container?.querySelector('.chat-queue-container')).toBe(queue);
+    expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
+    expect(container?.querySelector('.changed-files-block')).toBe(files);
   });
 
   it('queues busy composer attachments and clears them from the input', () => {

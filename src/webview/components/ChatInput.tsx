@@ -2478,7 +2478,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   return (
-    <div class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''}`}>
+    <div
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''}`}
+    >
       <Show when={isDraggingOver()}>
         <DropOverlay />
       </Show>
@@ -2510,21 +2512,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           !hasExpandedDiffOverlay() &&
           !props.newSession &&
           state.todos.length > 0 &&
-          !showModelPicker() &&
           !composerEditingMessage()
         }
       >
         <TodoList />
       </Show>
 
-      <Show
-        when={
-          !hasExpandedDiffOverlay() &&
-          !props.newSession &&
-          !showModelPicker() &&
-          !composerEditingMessage()
-        }
-      >
+      <Show when={!hasExpandedDiffOverlay() && !props.newSession && !composerEditingMessage()}>
         <ChangedFilesList />
       </Show>
 

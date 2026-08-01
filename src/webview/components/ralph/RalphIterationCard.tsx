@@ -98,11 +98,11 @@ export function RalphIterationCard(props: { iteration: RalphIteration }) {
           </For>
         </span>
       </span>
-      <Show when={!hidesDuration() && durationMs() !== null}>
-        <span class="ralph-iter-duration">{formatDuration(durationMs()!)}</span>
-      </Show>
       <Show when={showNote() && note()}>
         {(value) => <span class="ralph-iter-note">{value()}</span>}
+      </Show>
+      <Show when={!hidesDuration() && durationMs() !== null}>
+        <span class="ralph-iter-duration">{formatDuration(durationMs()!)}</span>
       </Show>
     </button>
   );

@@ -1038,6 +1038,10 @@
   overflow: hidden;
 }
 
+.interactive-input-part.model-picker-open > :is(.chat-queue-container, .todo-block) {
+  visibility: hidden;
+}
+
 .todo-block-header {
   display: flex;
   align-items: center;
