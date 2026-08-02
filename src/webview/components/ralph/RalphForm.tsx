@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Show, Suspense, createEffect, createMemo, createSignal, lazy, onCleanup } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
 import { logError } from '../../lib/log';
@@ -15,12 +15,15 @@ import { normalizeRalphWorkspaceDirectory } from '../../../shared/ralph';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
 import { buildAnchorMessage, getDefaultPromptTemplate } from '../../../shared/ralph-prompts';
-import { ModelPicker, getVariantsForModel } from '../ModelPicker';
 import { ModelPickerButton, VariantPicker } from '../chat-input/ToolbarPickers';
-import { getPreferredVariant } from '../../lib/model-variants';
+import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
 import { formatVariantLabel } from '../../lib/format';
 import { getLeafPathName } from '../../lib/path-display';
 import { trapModalFocus } from '../../lib/modal-focus';
+
+const LazyModelPicker = lazy(() =>
+  import('../ModelPicker').then((module) => ({ default: module.ModelPicker }))
+);
 
 const DEFAULT_ITERATIONS = 10;
 
@@ -414,31 +417,33 @@ export function RalphForm() {
                     />
                   </Show>
                   <Show when={showModelPicker()}>
-                    <ModelPicker
-                      currentSelection={model()}
-                      showManageModels={false}
-                      popupGap={6}
-                      onSelect={(sel) => {
-                        if (sel.providerID && sel.modelID) {
-                          const variants = getVariantsForModel(
-                            sel.providerID,
-                            sel.modelID,
-                            visibleProviders()
-                          );
-                          const prev = model();
-                          const keepVariant =
-                            prev?.variant && variants.includes(prev.variant)
-                              ? prev.variant
-                              : undefined;
-                          setModel({
-                            providerID: sel.providerID,
-                            modelID: sel.modelID,
-                            ...(keepVariant ? { variant: keepVariant } : {}),
-                          });
-                        }
-                      }}
-                      onClose={() => setShowModelPicker(false)}
-                    />
+                    <Suspense>
+                      <LazyModelPicker
+                        currentSelection={model()}
+                        showManageModels={false}
+                        popupGap={6}
+                        onSelect={(sel) => {
+                          if (sel.providerID && sel.modelID) {
+                            const variants = getVariantsForModel(
+                              sel.providerID,
+                              sel.modelID,
+                              visibleProviders()
+                            );
+                            const prev = model();
+                            const keepVariant =
+                              prev?.variant && variants.includes(prev.variant)
+                                ? prev.variant
+                                : undefined;
+                            setModel({
+                              providerID: sel.providerID,
+                              modelID: sel.modelID,
+                              ...(keepVariant ? { variant: keepVariant } : {}),
+                            });
+                          }
+                        }}
+                        onClose={() => setShowModelPicker(false)}
+                      />
+                    </Suspense>
                   </Show>
                 </div>
               </Field>

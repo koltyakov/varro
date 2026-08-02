@@ -417,7 +417,7 @@ describe('Message user prompt rendering', () => {
     expect(scrollContainer?.classList.contains('has-more-below')).toBe(false);
   });
 
-  it('renders fenced user prompt text as a scrollable code block', () => {
+  it('renders fenced user prompt text as a scrollable code block', async () => {
     cleanup = render(
       () =>
         Message({
@@ -445,9 +445,11 @@ describe('Message user prompt rendering', () => {
     expect(container?.querySelector('.user-message-code-block code.hljs')).toBeInstanceOf(
       HTMLElement
     );
-    expect(container?.querySelector('.user-message-code-block .hljs-keyword')?.textContent).toBe(
-      'const'
-    );
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.user-message-code-block .hljs-keyword')?.textContent).toBe(
+        'const'
+      );
+    });
   });
 
   it('does not render an attachments separator for attachment-only user prompts', () => {

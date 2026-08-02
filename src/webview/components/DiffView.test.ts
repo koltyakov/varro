@@ -138,7 +138,7 @@ describe('DiffView', () => {
     ]);
   });
 
-  it('shows line-by-line changes when inline rendering is enabled', () => {
+  it('shows line-by-line changes when inline rendering is enabled', async () => {
     cleanup = render(
       () =>
         DiffView({
@@ -182,9 +182,11 @@ describe('DiffView', () => {
     expect(container?.querySelector('.diff-view-line-addition')?.getAttribute('aria-label')).toBe(
       'Added line 10: const newValue = 2;'
     );
-    expect(container?.querySelector('.diff-view-line-content .hljs-keyword')?.textContent).toBe(
-      'const'
-    );
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.diff-view-line-content .hljs-keyword')?.textContent).toBe(
+        'const'
+      );
+    });
     expect(container?.querySelector('.diff-view-toggle')).toBeNull();
   });
 

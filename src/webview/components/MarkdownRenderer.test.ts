@@ -1,5 +1,5 @@
 import { createComponent, createSignal } from 'solid-js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import {
@@ -11,6 +11,7 @@ import {
   splitStreamingMarkdownContent,
 } from './MarkdownRenderer';
 import { setState } from '../lib/state';
+import { loadCodeHighlighter } from '../lib/code-highlighter';
 
 declare global {
   interface Window {
@@ -20,6 +21,8 @@ declare global {
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+
+beforeAll(() => loadCodeHighlighter());
 
 function assertInertWithSafeAnchor(root: ParentNode) {
   expect(root.querySelector('script')).toBeNull();

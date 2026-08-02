@@ -554,14 +554,7 @@ function UserMessageTextContent(props: {
     <For each={segments()}>
       {(segment) =>
         segment.type === 'code' ? (
-          <div
-            innerHTML={renderCodeBlockHtml({
-              text: segment.content,
-              lang: segment.language,
-              className: 'user-message-code-block',
-              showCopyButton: false,
-            })}
-          />
+          <UserMessageCodeBlock content={segment.content} language={segment.language} />
         ) : (
           <Show when={segment.content.length > 0}>
             <p class="user-message-text">
@@ -577,6 +570,18 @@ function UserMessageTextContent(props: {
       }
     </For>
   );
+}
+
+function UserMessageCodeBlock(props: { content: string; language?: string }) {
+  const html = createMemo(() =>
+    renderCodeBlockHtml({
+      text: props.content,
+      lang: props.language,
+      className: 'user-message-code-block',
+      showCopyButton: false,
+    })
+  );
+  return <div innerHTML={html()} />;
 }
 
 function InlineAttachmentText(props: {

@@ -87,7 +87,7 @@ export function renderWebviewHtml(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
+    content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
   <style>${LOADING_STYLES}</style>
   <link rel="stylesheet" href="${escapeHtmlAttribute(assets.cssUri)}" />
@@ -147,7 +147,7 @@ export function renderWebviewHtml(
       setState: function(state) { vscode.setState(state); },
     };
   </script>
-  <script nonce="${nonce}" src="${escapeHtmlAttribute(assets.scriptUri)}"></script>
+  <script type="module" nonce="${nonce}" src="${escapeHtmlAttribute(assets.scriptUri)}"></script>
 </body>
 </html>`;
 }

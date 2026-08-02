@@ -1,15 +1,19 @@
-import { ErrorBoundary, Show, onCleanup, onMount } from 'solid-js';
+import { ErrorBoundary, Show, Suspense, lazy, onCleanup, onMount } from 'solid-js';
 import { useOpenCode } from './hooks/useOpenCode';
 import { createOpenCodeRuntime, installOpenCodeRuntime } from './hooks/runtime/useOpenCode.runtime';
 import { connectionInitialized, defaultAppState } from './lib/state';
 import { Chat } from './components/Chat';
 import { ServerStatus } from './components/ServerStatus';
-import { RalphForm } from './components/ralph/RalphForm';
 import { SessionActionFeedback } from './components/chat/SessionActionFeedback';
 import { RestartBlocked } from './components/RestartBlocked';
 import { ralphRunner } from './components/ralph/ralph-runner';
 import { cleanupBridge } from './lib/bridge';
+import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
+
+const LazyRalphForm = lazy(() =>
+  import('./components/ralph/RalphForm').then((module) => ({ default: module.RalphForm }))
+);
 
 export function AppRoot() {
   return (
@@ -67,7 +71,11 @@ export function App() {
           <RestartBlocked />
         </Show>
       </Show>
-      <RalphForm />
+      <Show when={ralphStore.showRalphForm()}>
+        <Suspense>
+          <LazyRalphForm />
+        </Suspense>
+      </Show>
       <SessionActionFeedback
         error={defaultAppState.error}
         errorRetry={defaultAppState.errorRetry}

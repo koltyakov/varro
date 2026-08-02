@@ -222,8 +222,9 @@ describe('RalphForm', () => {
     document.body
       .querySelector<HTMLButtonElement>('.ralph-form-card .model-picker-btn')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushMicrotasks();
-    expect(document.body.querySelector('.ralph-form-card .dropdown-menu')).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector('.ralph-form-card .dropdown-menu')).not.toBeNull();
+    });
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
 

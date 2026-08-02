@@ -42,6 +42,7 @@ import {
   setState,
   state,
 } from './lib/state';
+import { ralphStore } from './lib/stores/ralph-store';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -54,6 +55,7 @@ describe('AppRoot', () => {
   beforeEach(() => {
     resetDefaultAppState();
     appMocks.ralphError.current = null;
+    ralphStore.setShowRalphForm(false);
     appMocks.cleanupBridge.mockReset();
     appMocks.useOpenCode.mockReset();
     container = document.createElement('div');
@@ -137,12 +139,15 @@ describe('AppRoot', () => {
     expect(container?.textContent).not.toContain('Error: initialization failed');
   });
 
-  it('keeps RalphForm failures inside the root boundary', () => {
+  it('keeps RalphForm failures inside the root boundary', async () => {
     appMocks.ralphError.current = new Error('ralph failed');
+    ralphStore.setShowRalphForm(true);
 
     expect(() => mountAppRoot()).not.toThrow();
-    expect(container?.textContent).toContain('Something went wrong');
-    expect(container?.textContent).toContain('ralph failed');
+    await vi.waitFor(() => {
+      expect(container?.textContent).toContain('Something went wrong');
+      expect(container?.textContent).toContain('ralph failed');
+    });
   });
 
   it('shows app errors in a toast and runs its retry action', () => {

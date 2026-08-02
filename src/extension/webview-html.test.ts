@@ -38,7 +38,9 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('<link rel="stylesheet" href="webview://assets/webview.css" />');
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).toContain('Loading workspace...');
-    expect(html).toContain('src="webview://assets/webview.js"');
+    expect(html).toContain(
+      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js"></script>'
+    );
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
       'window.__sendToExtension = function(msg) { vscode.postMessage(msg); };'
@@ -80,6 +82,16 @@ describe('renderWebviewHtml', () => {
     const imgSrc = html.match(/img-src ([^;]+);/)?.[1];
 
     expect(imgSrc).toBe('vscode-webview-resource: data:');
+  });
+
+  it('allows module chunks only from the webview resource source', () => {
+    const html = renderWebviewHtml('vscode-webview-resource:', initialState, {
+      scriptUri: 'webview.js',
+      cssUri: 'webview.css',
+    });
+    const scriptSrc = html.match(/script-src ([^;]+);/)?.[1];
+
+    expect(scriptSrc).toBe("'nonce-Zml4ZWQtbm9uY2U' vscode-webview-resource:");
   });
 
   it('reuses the same nonce in the CSP and both inline script tags', () => {

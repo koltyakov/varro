@@ -611,16 +611,18 @@ function DiffLinesContent(props: {
               <span class="diff-view-line-marker" aria-hidden="true">
                 {entry.line.kind === 'addition' ? '+' : entry.line.kind === 'deletion' ? '-' : ' '}
               </span>
-              <span
-                class="diff-view-line-content hljs"
-                innerHTML={renderHighlightedCodeHtml(entry.line.content, props.language)}
-              />
+              <HighlightedDiffLineContent content={entry.line.content} language={props.language} />
             </div>
           )
         }
       </For>
     </div>
   );
+}
+
+function HighlightedDiffLineContent(props: { content: string; language?: string }) {
+  const html = createMemo(() => renderHighlightedCodeHtml(props.content, props.language));
+  return <span class="diff-view-line-content hljs" innerHTML={html()} />;
 }
 
 export function DiffView(props: {

@@ -9,7 +9,7 @@ import {
   hasProviderLimitWindowWithinThreshold,
 } from '../../lib/format';
 import { getContextWindow } from '../../lib/message-metrics';
-import { getPreferredVariant } from '../../lib/model-variants';
+import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
 import { getProviderIcon } from '../../lib/provider-icons';
 import {
   getProviderLimit,
@@ -24,7 +24,6 @@ import {
   deriveSelectedModelFromMessages,
   deriveSelectedModelFromSession,
 } from '../../hooks/routing-state';
-import { getVariantsForModel } from '../ModelPicker';
 import {
   ContextPopup,
   ContextUsageButton,

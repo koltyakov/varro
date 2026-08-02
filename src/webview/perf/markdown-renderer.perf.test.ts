@@ -2,17 +2,20 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import hljs from 'highlight.js/lib/core';
 import { marked } from 'marked';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
   MarkdownRenderer,
 } from '../components/MarkdownRenderer';
 import { setState } from '../lib/state';
+import { loadCodeHighlighter } from '../lib/code-highlighter';
 import { expectCachedCallBudget } from './harness';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+
+beforeAll(() => loadCodeHighlighter());
 
 async function waitForAnimationFrame() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

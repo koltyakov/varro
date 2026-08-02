@@ -15,7 +15,7 @@ function getVariantKind(variantName: string): VariantKind | null {
   return null;
 }
 
-function getVariantsForModel(
+function getRawVariantsForModel(
   providerID: string | null | undefined,
   modelID: string | null | undefined,
   providers: Provider[]
@@ -25,6 +25,20 @@ function getVariantsForModel(
   const model = provider?.models[modelID];
   if (!model?.variants) return [];
   return Object.keys(model.variants);
+}
+
+export function getVariantsForModel(
+  providerID: string | null | undefined,
+  modelID: string | null | undefined,
+  providers: Provider[]
+): string[] {
+  return Array.from(
+    new Set(
+      getRawVariantsForModel(providerID, modelID, providers).map((variant) =>
+        normalizeModelVariant(modelID, variant)
+      )
+    )
+  ).filter((variant): variant is string => !!variant);
 }
 
 function isLowReasoningVariant(variantName: string) {
@@ -50,7 +64,7 @@ export function getMatchingVariant(
 ) {
   if (!source.variant) return null;
 
-  const targetVariants = getVariantsForModel(target.providerID, target.modelID, providers);
+  const targetVariants = getRawVariantsForModel(target.providerID, target.modelID, providers);
   if (targetVariants.length === 0) return null;
 
   if (shouldPreferLowReasoningByDefault(target.modelID)) {
@@ -70,7 +84,7 @@ export function getMatchingVariant(
     if (sameKindVariant) return normalizeModelVariant(target.modelID, sameKindVariant);
   }
 
-  const sourceVariants = getVariantsForModel(source.providerID, source.modelID, providers);
+  const sourceVariants = getRawVariantsForModel(source.providerID, source.modelID, providers);
   const sourceIndex = sourceVariants.indexOf(source.variant);
   if (sourceIndex >= 0) {
     if (sourceVariants.length === 1) {
@@ -90,7 +104,7 @@ export function getPreferredVariant(
   modelID: string | null | undefined,
   providers: Provider[]
 ) {
-  const variants = getVariantsForModel(providerID, modelID, providers).filter(
+  const variants = getRawVariantsForModel(providerID, modelID, providers).filter(
     (variant) => variant !== 'none'
   );
   if (variants.length === 0) return null;

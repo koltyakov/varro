@@ -1,5 +1,4 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { normalizeModelVariant } from '../../shared/model-variant';
 import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import {
   formatVariantLabel as formatThinkingLabel,
@@ -379,20 +378,6 @@ export function ModelPicker(props: {
       </div>
     </div>
   );
-}
-
-export function getVariantsForModel(
-  providerID: string | null,
-  modelID: string | null,
-  providers: { id: string; models: { [key: string]: { variants?: { [key: string]: unknown } } } }[]
-): string[] {
-  if (!providerID || !modelID) return [];
-  const provider = providers.find((p) => p.id === providerID);
-  const model = provider?.models[modelID];
-  if (!model?.variants) return [];
-  return Array.from(
-    new Set(Object.keys(model.variants).map((variant) => normalizeModelVariant(modelID, variant)))
-  ).filter((variant): variant is string => !!variant);
 }
 
 export { formatThinkingLabel, formatContextLimit };

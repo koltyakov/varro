@@ -12,22 +12,19 @@ export default defineConfig({
     entries: ['preview.html', 'e2e/harness/index.html'],
   },
   build: {
-    lib: {
-      entry: resolve(projectRoot, 'src/webview/index.tsx'),
-      name: 'varroWebview',
-      formats: ['iife'],
-      fileName: () => 'webview.js',
-    },
     outDir: resolve(projectRoot, 'dist/webview'),
     emptyOutDir: true,
     rollupOptions: {
+      input: resolve(projectRoot, 'src/webview/index.tsx'),
       output: {
-        inlineDynamicImports: true,
+        entryFileNames: 'webview.js',
+        chunkFileNames: 'chunks/[name]-[hash].js',
         assetFileNames: 'webview.[ext]',
       },
     },
-    minify: 'esbuild',
+    minify: 'oxc',
     sourcemap: false,
     target: 'es2022',
+    chunkSizeWarningLimit: 900,
   },
 });

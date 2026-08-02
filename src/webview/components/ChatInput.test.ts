@@ -326,6 +326,10 @@ async function flushAsyncWork(count = 16) {
   }
 }
 
+async function waitForDropdown() {
+  await vi.waitFor(() => expect(container?.querySelector('.dropdown-menu')).not.toBeNull());
+}
+
 function createDragDataTransfer() {
   const values = new Map<string, string>();
   const types: string[] = [];
@@ -700,7 +704,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows connected MCPs or an all-disabled zero count and toggles the picker', () => {
+  it('shows connected MCPs or an all-disabled zero count and toggles the picker', async () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -717,6 +721,7 @@ describe('ChatInput', () => {
     expect(mcpCount?.textContent).toContain('2');
 
     mcpCount?.click();
+    await waitForDropdown();
 
     expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('alpha');
     expect(container?.querySelector('.dropdown-menu')?.textContent).toContain('gamma');
@@ -725,7 +730,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.dropdown-menu')).toBeNull();
 
     mcpCount?.click();
-    expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
+    await waitForDropdown();
 
     document.body.click();
     expect(container?.querySelector('.dropdown-menu')).toBeNull();
@@ -1538,7 +1543,7 @@ describe('ChatInput', () => {
     expect(popup?.style.left).toBe('24px');
   });
 
-  it('marks the input shell as hosting a floating popover while the model picker is open', () => {
+  it('marks the input shell as hosting a floating popover while the model picker is open', async () => {
     setupModelState();
     setShowModelPicker(true);
 
@@ -1547,7 +1552,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-input-shell')?.className).toContain(
       'showing-floating-popover'
     );
-    expect(container?.querySelector('.dropdown-menu')).not.toBeNull();
+    await waitForDropdown();
   });
 
   it('keeps queue, todo, and file panels mounted while model and MCP pickers are open', () => {
@@ -3990,7 +3995,7 @@ describe('ChatInput', () => {
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const claudeOption = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
@@ -4076,7 +4081,7 @@ describe('ChatInput', () => {
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const claudeOption = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
@@ -4104,7 +4109,7 @@ describe('ChatInput', () => {
       container!.querySelectorAll<HTMLButtonElement>('button')
     ).find((button) => button.textContent === 'Switch provider');
     switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const claudeOption = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
@@ -4134,7 +4139,7 @@ describe('ChatInput', () => {
       container!.querySelectorAll<HTMLButtonElement>('button')
     ).find((button) => button.textContent === 'Switch provider');
     switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const claudeOption = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
@@ -4255,7 +4260,7 @@ describe('ChatInput', () => {
 
     const modelButton = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const gpt55Option = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []
@@ -4276,7 +4281,7 @@ describe('ChatInput', () => {
     });
 
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await Promise.resolve();
+    await waitForDropdown();
 
     const gpt54Option = Array.from(
       container?.querySelectorAll<HTMLButtonElement>('.dropdown-item') || []

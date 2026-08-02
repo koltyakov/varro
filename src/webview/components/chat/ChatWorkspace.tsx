@@ -1,17 +1,22 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, Suspense, createSignal, lazy } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { MessageList } from '../MessageList';
 import { ChatInput } from '../ChatInput';
-import { ModelsPanel } from '../ModelsPanel';
 import { ActiveChatHeader, SessionPickerHeader } from './ChatHeader';
 import { SessionListView } from './SessionListView';
 import type { SessionListFilter } from './SessionListView';
 import type { SlowApiRequest } from '../../lib/bridge';
-import { RalphDashboard } from '../ralph/RalphDashboard';
 import { inlineEditMount } from '../../lib/message-edit-state';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { state } from '../../lib/state';
 import { ManagedSubagentFooter } from './ManagedSubagentFooter';
+
+const LazyModelsPanel = lazy(() =>
+  import('../ModelsPanel').then((module) => ({ default: module.ModelsPanel }))
+);
+const LazyRalphDashboard = lazy(() =>
+  import('../ralph/RalphDashboard').then((module) => ({ default: module.RalphDashboard }))
+);
 
 function activeRalphSessionId() {
   const id = state.activeSessionId;
@@ -207,7 +212,11 @@ export function ChatWorkspace(props: {
             </>
           }
         >
-          {(sessionId) => <RalphDashboard sessionId={sessionId()} />}
+          {(sessionId) => (
+            <Suspense>
+              <LazyRalphDashboard sessionId={sessionId()} />
+            </Suspense>
+          )}
         </Show>
       </div>
     </div>
@@ -265,7 +274,9 @@ export function ChatWorkspace(props: {
       </Show>
 
       <Show when={props.showSettings}>
-        <ModelsPanel />
+        <Suspense fallback={<div class="settings-panel" />}>
+          <LazyModelsPanel />
+        </Suspense>
       </Show>
 
       <Show

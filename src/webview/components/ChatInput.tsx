@@ -1,9 +1,11 @@
 import {
   Show,
+  Suspense,
   batch,
   createEffect,
   createMemo,
   createSignal,
+  lazy,
   onCleanup,
   onMount,
   untrack,
@@ -85,8 +87,6 @@ import {
   setMessageEditDraftBackup,
   type MessageEditContext,
 } from '../lib/message-edit-state';
-import { ModelPicker, getVariantsForModel } from './ModelPicker';
-import { McpPicker } from './McpPicker';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { ralphRunner } from './ralph/ralph-runner';
 import type { RalphSelectedModel } from '../../shared/ralph';
@@ -99,7 +99,7 @@ import {
   getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
 } from '../lib/format';
-import { getPreferredVariant } from '../lib/model-variants';
+import { getPreferredVariant, getVariantsForModel } from '../lib/model-variants';
 import { getContextWindow } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
@@ -208,6 +208,13 @@ import {
   sendQueuedAsSteer,
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
+
+const LazyModelPicker = lazy(() =>
+  import('./ModelPicker').then((module) => ({ default: module.ModelPicker }))
+);
+const LazyMcpPicker = lazy(() =>
+  import('./McpPicker').then((module) => ({ default: module.McpPicker }))
+);
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 
@@ -2761,33 +2768,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         class={`chat-input-shell ${showFloatingInputPopover() ? 'showing-floating-popover' : ''}`}
       >
         <Show when={showModelPicker()}>
-          <ModelPicker
-            onSelect={(sel) => {
-              if (sel.providerID && sel.modelID) {
-                const matchedVariant =
-                  sel.variant ||
-                  getStoredVariantForModel(sel.providerID, sel.modelID) ||
-                  getPreferredVariant(sel.providerID, sel.modelID, state.providers) ||
-                  undefined;
-                void handleSelectedModelChange({
-                  providerID: sel.providerID,
-                  modelID: sel.modelID,
-                  variant: matchedVariant,
-                });
-              }
-            }}
-            onClose={() => setShowModelPicker(false)}
-            popoverRef={(el) => (modelPopoverRef = el)}
-          />
+          <Suspense>
+            <LazyModelPicker
+              onSelect={(sel) => {
+                if (sel.providerID && sel.modelID) {
+                  const matchedVariant =
+                    sel.variant ||
+                    getStoredVariantForModel(sel.providerID, sel.modelID) ||
+                    getPreferredVariant(sel.providerID, sel.modelID, state.providers) ||
+                    undefined;
+                  void handleSelectedModelChange({
+                    providerID: sel.providerID,
+                    modelID: sel.modelID,
+                    variant: matchedVariant,
+                  });
+                }
+              }}
+              onClose={() => setShowModelPicker(false)}
+              popoverRef={(el) => (modelPopoverRef = el)}
+            />
+          </Suspense>
         </Show>
 
         <Show when={showMcpPicker()}>
-          <McpPicker
-            sessionId={composerSessionId()}
-            onChange={(names) => void applySessionMcps(names, composerSessionId())}
-            onClose={() => setShowMcpPicker(false)}
-            popoverRef={(el) => (mcpPopoverRef = el)}
-          />
+          <Suspense>
+            <LazyMcpPicker
+              sessionId={composerSessionId()}
+              onChange={(names) => void applySessionMcps(names, composerSessionId())}
+              onClose={() => setShowMcpPicker(false)}
+              popoverRef={(el) => (mcpPopoverRef = el)}
+            />
+          </Suspense>
         </Show>
 
         <div
