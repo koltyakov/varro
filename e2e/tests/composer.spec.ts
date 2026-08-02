@@ -66,14 +66,14 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   expect(queueGeometry.rowHeight).toBeLessThan(queueGeometry.todoHeight);
 
   const queueControls = queueList.getByRole('listitem').locator('.chat-queue-control');
-  await expect(queueControls).toHaveCount(4);
+  await expect(queueControls).toHaveCount(5);
   const controlSizes = await queueControls.evaluateAll((controls) =>
     controls.map((control) => {
       const rect = control.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
     })
   );
-  expect(controlSizes).toEqual(Array.from({ length: 4 }, () => ({ width: 24, height: 24 })));
+  expect(controlSizes).toEqual(Array.from({ length: 5 }, () => ({ width: 24, height: 24 })));
   const iconSizes = await queueControls.locator('svg').evaluateAll((icons) =>
     icons.map((icon) => {
       const rect = icon.getBoundingClientRect();
@@ -82,6 +82,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
   expect(iconSizes).toEqual([
     { width: 10, height: 10 },
+    { width: 16, height: 16 },
     { width: 14, height: 14 },
     { width: 14, height: 14 },
     { width: 14, height: 14 },
