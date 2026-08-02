@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -36,6 +36,14 @@ import {
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
 import { SessionStateManager } from './session-state-manager';
+
+type SanitizedMessageResponse = {
+  id: number;
+  data: Array<{
+    info: { id: string };
+    parts: Array<{ id: string }>;
+  }>;
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -1133,7 +1141,7 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('reuses a completed diff summary for the same session revision', async () => {
-    const serverRequest = vi.fn(async () => []);
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
     const { proxy } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
@@ -1158,7 +1166,7 @@ describe('RestProxy handleRequest', () => {
   });
 
   it('refreshes an unversioned diff summary after the previous request settles', async () => {
-    const serverRequest = vi.fn(async () => []);
+    const serverRequest = vi.fn<RestProxyCallbacks['server']['request']>(async () => []);
     const { proxy } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
@@ -1616,11 +1624,12 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
     await proxy.handleRequest(makePayload(17, 'GET', '/session/s1/message'));
-    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
+      .calls[0]![1] as SanitizedMessageResponse;
     expect(response.id).toBe(17);
     expect(response.data).toHaveLength(1);
-    expect(response.data[0].info.id).toBe('m1');
-    expect(response.data[0].parts).toHaveLength(1);
+    expect(response.data[0]!.info.id).toBe('m1');
+    expect(response.data[0]!.parts).toHaveLength(1);
   });
 
   it('preserves pagination cursors while sanitizing session messages', async () => {
@@ -1672,9 +1681,10 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
     await proxy.handleRequest(makePayload(18, 'GET', '/session/s1/message'));
-    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    expect(response.data[0].parts).toHaveLength(1);
-    expect(response.data[0].parts[0].id).toBe('p1');
+    const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
+      .calls[0]![1] as SanitizedMessageResponse;
+    expect(response.data[0]!.parts).toHaveLength(1);
+    expect(response.data[0]!.parts[0]!.id).toBe('p1');
     expect(mocks.logger.warn).toHaveBeenCalled();
   });
 
@@ -1811,10 +1821,12 @@ describe('RestProxy handleRequest', () => {
       server: { ...createCallbacks().server, request: serverRequest } as never,
       sessionState: {
         ...createCallbacks().sessionState,
-        handleServerEvent: (event) => manager.handleServerEvent(event),
-        getSessionWorkspaceMatch: (sessionID, workspacePath) =>
+        handleServerEvent: (
+          event: Parameters<RestProxyCallbacks['sessionState']['handleServerEvent']>[0]
+        ) => manager.handleServerEvent(event),
+        getSessionWorkspaceMatch: (sessionID: string, workspacePath: string | null | undefined) =>
           manager.getSessionWorkspaceMatch(sessionID, workspacePath),
-        isSessionInWorkspace: (sessionID, workspacePath) =>
+        isSessionInWorkspace: (sessionID: string, workspacePath: string | null | undefined) =>
           manager.isSessionInWorkspace(sessionID, workspacePath),
       } as never,
     });

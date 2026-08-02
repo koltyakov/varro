@@ -9,13 +9,13 @@ const { registeredCommands, vscodeMock } = vi.hoisted(() => {
         commands.set(id, handler);
         return { dispose: vi.fn() };
       }),
-      executeCommand: vi.fn(() => Promise.resolve()),
+      executeCommand: vi.fn((_command: string, ..._args: unknown[]) => Promise.resolve()),
     },
     workspace: {
       fs: {
         createDirectory: vi.fn(() => Promise.resolve()),
-        stat: vi.fn(() => Promise.resolve({ type: 1 })),
-        writeFile: vi.fn(() => Promise.resolve()),
+        stat: vi.fn((_target: { fsPath: string }) => Promise.resolve({ type: 1 })),
+        writeFile: vi.fn((_target: { fsPath: string }, _content: Uint8Array) => Promise.resolve()),
       },
       openTextDocument: vi.fn((uri: unknown) => Promise.resolve({ uri })),
       getConfiguration: vi.fn(() => ({

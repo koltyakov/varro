@@ -166,7 +166,12 @@ describe('optimistic user message reconciliation', () => {
     upsertMessageInfo(userMessage('msg-newer'));
     upsertMessageInfo(userMessage('msg-older'));
 
-    expect(state.messages.map((entry) => [entry.info.id, entry.parts[0]?.url])).toEqual([
+    expect(
+      state.messages.map((entry) => {
+        const image = entry.parts[0];
+        return [entry.info.id, image?.type === 'file' ? image.url : undefined];
+      })
+    ).toEqual([
       ['msg-older', 'data:image/png;base64,OLDER'],
       ['msg-newer', 'data:image/png;base64,NEWER'],
     ]);

@@ -20,7 +20,7 @@ function makeNotice(sessionId: string): UsageLimitNotice {
     source: 'status',
     statusCode: 429,
     message: 'rate limit',
-    unit: 'day',
+    unit: 'requests',
     retryAt: null,
     attempt: null,
     sessionID: sessionId,

@@ -1,10 +1,20 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExtensionMessage, McpStatus } from '../../shared/protocol';
+import type { ExtensionMessage, McpStatus, ServerEventName } from '../../shared/protocol';
+import type { onMessage } from '../lib/bridge';
 import { getBridgeMocks, getClientMocks, loadModules, session } from './useOpenCode.test-support';
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
+type BridgeOnMessage = typeof onMessage;
+type ServerEventsOn = (
+  event: ServerEventName | '*',
+  handler: (data: unknown) => void
+) => () => void;
+const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+const serverEventsOn = vi.fn<ServerEventsOn>();
+Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
+Object.assign(clientMocks, { serverEventsOn });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,9 +41,7 @@ describe('useOpenCode mcp flows', () => {
 
     try {
       await Promise.resolve();
-      const handleMessage = bridgeMocks.onMessage.mock.calls[0]?.[0] as
-        | ((message: ExtensionMessage) => void)
-        | undefined;
+      const handleMessage = bridgeOnMessage.mock.calls[0]?.[0];
       if (!handleMessage) throw new Error('Expected the runtime bridge listener');
 
       const refreshMessage: ExtensionMessage = {
@@ -146,9 +154,11 @@ describe('useOpenCode mcp flows', () => {
 
   it('disconnects an MCP retained only by a background session after it becomes idle', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
-      return () => handlers.delete(event as string);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
+      return () => {
+        handlers.delete(event);
+      };
     });
     clientMocks.mcpStatus.mockResolvedValue({ alpha: { status: 'connected' } });
 

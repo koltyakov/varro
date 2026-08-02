@@ -690,13 +690,8 @@ describe('connection-bootstrap helpers', () => {
   it('starts connection initialization only once at a time', async () => {
     let nextAttempt = 0;
     let activeAttempt: number | null = null;
-    let resolveInit: (() => void) | null = null;
-    const initConnection = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveInit = resolve;
-        })
-    );
+    const init = deferred<void>();
+    const initConnection = vi.fn(() => init.promise);
 
     ensureConnectionInitializedWithDependencies({
       isInitialized: () => false,
@@ -726,7 +721,7 @@ describe('connection-bootstrap helpers', () => {
 
     expect(initConnection).toHaveBeenCalledTimes(1);
 
-    resolveInit?.();
+    init.resolve();
     await Promise.resolve();
     expect(activeAttempt).toBeNull();
   });

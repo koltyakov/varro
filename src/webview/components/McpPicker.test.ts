@@ -31,7 +31,8 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   resetDefaultAppState();
   vi.restoreAllMocks();
 });

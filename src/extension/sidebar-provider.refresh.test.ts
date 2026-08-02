@@ -47,10 +47,12 @@ describe('SidebarProvider provider refresh', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
-    const patterns = vscodeMock.workspace.createFileSystemWatcher.mock.calls.map(
-      ([pattern]: [{ pattern: string }]) => pattern.pattern
-    );
-    expect(patterns).toEqual(['config.json', 'opencode.json', 'opencode.jsonc', 'auth.json']);
+    expect(vscodeMock.workspace.createFileSystemWatcher.mock.calls).toEqual([
+      [expect.objectContaining({ pattern: 'config.json' })],
+      [expect.objectContaining({ pattern: 'opencode.json' })],
+      [expect.objectContaining({ pattern: 'opencode.jsonc' })],
+      [expect.objectContaining({ pattern: 'auth.json' })],
+    ]);
 
     posted.length = 0;
     providerFileSystem.stat.mockResolvedValue({
@@ -171,10 +173,12 @@ describe('SidebarProvider provider refresh', () => {
     (provider as unknown as ProviderRefreshAccess).setProviderWatchActive(true);
 
     expect(vscodeMock.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
-    const patterns = vscodeMock.workspace.createFileSystemWatcher.mock.calls.map(
-      ([pattern]: [{ pattern: string }]) => pattern.pattern
-    );
-    expect(patterns).toEqual(['config.json', 'opencode.json', 'opencode.jsonc', 'auth.json']);
+    expect(vscodeMock.workspace.createFileSystemWatcher.mock.calls).toEqual([
+      [expect.objectContaining({ pattern: 'config.json' })],
+      [expect.objectContaining({ pattern: 'opencode.json' })],
+      [expect.objectContaining({ pattern: 'opencode.jsonc' })],
+      [expect.objectContaining({ pattern: 'auth.json' })],
+    ]);
 
     for (const result of vscodeMock.workspace.createFileSystemWatcher.mock.results.slice(0, 3)) {
       const watcher = result.value as { onDidChange: ReturnType<typeof vi.fn> };

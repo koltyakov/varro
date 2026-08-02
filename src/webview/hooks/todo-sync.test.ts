@@ -83,9 +83,12 @@ function todoToolPart(todos: NormalizedTodo[]): Part {
     state: {
       status: 'completed',
       input: { todos },
+      output: '',
+      title: 'TodoWrite',
+      metadata: {},
       time: { start: 0, end: 1 },
     },
-  } as Part;
+  };
 }
 
 describe('todo-sync', () => {
@@ -138,9 +141,12 @@ describe('todo-sync', () => {
                     },
                   ],
                 },
+                output: '',
+                title: 'Parallel tools',
+                metadata: {},
                 time: { start: 0, end: 1 },
               },
-            } as Part,
+            },
           ],
         },
       ])
@@ -177,7 +183,7 @@ describe('todo-sync', () => {
                 metadata: {},
                 time: { start: 0, end: 1 },
               },
-            } as Part,
+            },
           ],
         },
       ])

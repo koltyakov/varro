@@ -10,7 +10,7 @@ import {
   removeMessagePart,
   upsertPart,
 } from '../lib/state';
-import type { AssistantMessage, FileDiff, NormalizedTodo, Part } from '../types';
+import type { AssistantMessage, FileDiff, NormalizedTodo, TextPart } from '../types';
 import { respondPermissionWithDependencies } from '../hooks/session/session-approvals';
 import { createPerfRoot, settlePerfEffects } from './harness';
 
@@ -35,7 +35,7 @@ function createAssistantMessage(id: string): AssistantMessage {
   };
 }
 
-function createTextPart(id: string, messageID: string, text: string): Part {
+function createTextPart(id: string, messageID: string, text: string): TextPart {
   return {
     id,
     sessionID: 'session-1',
@@ -184,7 +184,8 @@ describe('state perf guards', () => {
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
       createEffect(() => {
-        void state.messages[0]?.parts[0]?.text;
+        const part = state.messages[0]?.parts[0];
+        void (part?.type === 'text' ? part.text : undefined);
         void state.streamingPartId;
         void state.streamingText;
         flushCount += 1;
@@ -199,7 +200,8 @@ describe('state perf guards', () => {
       await settlePerfEffects();
 
       expect(flushCount).toBe(2);
-      expect(state.messages[0]?.parts[0]?.text).toBe('Final response');
+      const part = state.messages[0]?.parts[0];
+      expect(part?.type === 'text' ? part.text : undefined).toBe('Final response');
       expect(state.streamingPartId).toBeNull();
       expect(state.streamingText).toBe('');
     } finally {
@@ -256,8 +258,10 @@ describe('state perf guards', () => {
     let flushCount = 0;
     const dispose = createPerfRoot(() => {
       createEffect(() => {
-        void state.messages[0]?.info.modelID;
-        void state.messages[0]?.parts[0]?.text;
+        const info = state.messages[0]?.info;
+        const part = state.messages[0]?.parts[0];
+        void (info?.role === 'assistant' ? info.modelID : undefined);
+        void (part?.type === 'text' ? part.text : undefined);
         void state.streamingPartId;
         void state.streamingText;
         flushCount += 1;
@@ -280,8 +284,10 @@ describe('state perf guards', () => {
       await settlePerfEffects();
 
       expect(flushCount).toBe(2);
-      expect(state.messages[0]?.info.modelID).toBe('gpt-4.1');
-      expect(state.messages[0]?.parts[0]?.text).toBe('Final response');
+      const info = state.messages[0]?.info;
+      const part = state.messages[0]?.parts[0];
+      expect(info?.role === 'assistant' ? info.modelID : undefined).toBe('gpt-4.1');
+      expect(part?.type === 'text' ? part.text : undefined).toBe('Final response');
       expect(state.streamingPartId).toBeNull();
       expect(state.streamingText).toBe('');
     } finally {

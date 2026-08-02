@@ -1,5 +1,6 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { onMessage } from '../lib/bridge';
 import {
   assistantMessage,
   getBridgeMocks,
@@ -13,6 +14,9 @@ import {
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
+type BridgeOnMessage = typeof onMessage;
+const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 const OPEN_CODE_MESSAGE_ID = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 
 function deferred<T>() {
@@ -742,9 +746,9 @@ describe('sendMessage', () => {
   });
 
   it('detaches pending lazy creation when the production workspace resets', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -1004,9 +1008,9 @@ describe('sendMessage', () => {
   });
 
   it('requests opening attention sessions when the extension sends that command', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -1100,6 +1104,10 @@ describe('sendMessage', () => {
 
   it('continues the failed assistant turn with the interruption resume prompt', async () => {
     const { stateModule, hookModule } = await loadModules();
+    const failedAssistant = assistantMessage('assistant-1', 'user-1');
+    if (failedAssistant.role !== 'assistant') {
+      throw new Error('Expected an assistant message fixture');
+    }
 
     stateModule.setState('activeSessionId', 'session-1');
     stateModule.setState('messages', [
@@ -1126,7 +1134,7 @@ describe('sendMessage', () => {
       },
       {
         info: {
-          ...assistantMessage('assistant-1', 'user-1'),
+          ...failedAssistant,
           error: { name: 'server_error', data: { message: 'Request failed' } },
         },
         parts: [],

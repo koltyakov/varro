@@ -1,5 +1,7 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { ServerEventName } from '../../shared/protocol';
+import type { onMessage } from '../lib/bridge';
 import {
   assistantMessage,
   getBridgeMocks,
@@ -11,6 +13,15 @@ import {
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
+type BridgeOnMessage = typeof onMessage;
+type ServerEventsOn = (
+  event: ServerEventName | '*',
+  handler: (data: unknown) => void
+) => () => void;
+const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+const serverEventsOn = vi.fn<ServerEventsOn>();
+Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
+Object.assign(clientMocks, { serverEventsOn });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -22,9 +33,9 @@ function deferred<T>() {
 
 describe('useOpenCode session state flows', () => {
   it('keeps the chat connected when the event stream is degraded', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -64,10 +75,10 @@ describe('useOpenCode session state flows', () => {
 
   it('does not resync active session messages on idle when local messages already look settled', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -90,15 +101,17 @@ describe('useOpenCode session state flows', () => {
 
     try {
       await Promise.resolve();
+      const settledAssistant = assistantMessage('assistant-1', 'user-1');
+      if (settledAssistant.role !== 'assistant') {
+        throw new Error('Expected an assistant message fixture');
+      }
+      settledAssistant.time.completed = 1;
 
       stateModule.setState('activeSessionId', 'session-1');
       stateModule.setState('messages', [
         { info: userMessage('user-1'), parts: [] },
         {
-          info: {
-            ...assistantMessage('assistant-1', 'user-1'),
-            time: { created: 0, completed: 1 },
-          },
+          info: settledAssistant,
           parts: [],
         },
       ]);
@@ -117,10 +130,10 @@ describe('useOpenCode session state flows', () => {
 
   it('applies a fallback title when refetching the session fails', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -158,10 +171,10 @@ describe('useOpenCode session state flows', () => {
 
   it('keeps the active session marked seen when a later session update arrives', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -203,10 +216,10 @@ describe('useOpenCode session state flows', () => {
 
   it('keeps an active completion unread when session metadata updates with the list open', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 

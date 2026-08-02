@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { MessageEntry } from '../../types';
 import {
   getStickyUserMessagePreview,
   getNextVisibleUserMessageTopMap,
@@ -19,14 +20,50 @@ vi.mock('../Message', () => ({
   })),
 }));
 
-type TestMessage = { info: { id: string; role: 'user' | 'assistant' }; parts: { text?: string }[] };
-
-function user(id: string, text: string = 'hello'): TestMessage {
-  return { info: { id, role: 'user' }, parts: [{ text }] };
+function user(id: string, text: string = 'hello'): MessageEntry {
+  return {
+    info: {
+      id,
+      sessionID: 'session-1',
+      role: 'user',
+      time: { created: 0 },
+      agent: 'build',
+      model: { providerID: 'openai', modelID: 'gpt-5' },
+    },
+    parts: [
+      {
+        id: `${id}-text`,
+        sessionID: 'session-1',
+        messageID: id,
+        type: 'text',
+        text,
+      },
+    ],
+  };
 }
 
-function assistant(id: string): TestMessage {
-  return { info: { id, role: 'assistant' }, parts: [] };
+function assistant(id: string): MessageEntry {
+  return {
+    info: {
+      id,
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 0 },
+      parentID: 'user-1',
+      modelID: 'gpt-5',
+      providerID: 'openai',
+      mode: 'default',
+      path: { cwd: '/workspace', root: '/workspace' },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [],
+  };
 }
 
 describe('getStickyUserMessagePreview', () => {
@@ -79,9 +116,9 @@ describe('getStickyUserMessagePreview', () => {
   });
 
   it('skips user messages with (no content) preview', () => {
-    const messages: TestMessage[] = [
+    const messages: MessageEntry[] = [
       user('u1', 'visible'),
-      { info: { id: 'u2', role: 'user' }, parts: [{}] }, // no text → '(no content)'
+      { ...user('u2'), parts: [] },
       assistant('a1'),
     ];
     const result = getStickyUserMessagePreview(messages, 2);
@@ -114,10 +151,7 @@ describe('getStickyUserMessagePreview', () => {
 
 describe('getNextVisibleUserMessageTopMap', () => {
   it('returns null for all entries when no user messages are visible', () => {
-    const messages = [
-      { info: { id: 'a1', role: 'assistant' as const } },
-      { info: { id: 'u1', role: 'user' as const } },
-    ];
+    const messages = [assistant('a1'), user('u1')];
     const bounds = new Map<string, { top: number; bottom: number }>();
     const result = getNextVisibleUserMessageTopMap(messages, bounds);
     expect(result.get('a1')).toBeNull();
@@ -125,11 +159,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
   });
 
   it('propagates visible user message top backward', () => {
-    const messages = [
-      { info: { id: 'a1', role: 'assistant' as const } },
-      { info: { id: 'u1', role: 'user' as const } },
-      { info: { id: 'a2', role: 'assistant' as const } },
-    ];
+    const messages = [assistant('a1'), user('u1'), assistant('a2')];
     const bounds = new Map<string, { top: number; bottom: number }>([
       ['u1', { top: 100, bottom: 200 }],
     ]);
@@ -140,10 +170,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
   });
 
   it('updates nextVisibleUserMessageTop for each visible user message', () => {
-    const messages = [
-      { info: { id: 'u1', role: 'user' as const } },
-      { info: { id: 'u2', role: 'user' as const } },
-    ];
+    const messages = [user('u1'), user('u2')];
     const bounds = new Map<string, { top: number; bottom: number }>([
       ['u1', { top: 10, bottom: 50 }],
       ['u2', { top: 60, bottom: 100 }],
@@ -155,10 +182,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
   });
 
   it('skips user messages not in bounds', () => {
-    const messages = [
-      { info: { id: 'u1', role: 'user' as const } },
-      { info: { id: 'u2', role: 'user' as const } },
-    ];
+    const messages = [user('u1'), user('u2')];
     const bounds = new Map<string, { top: number; bottom: number }>([
       ['u2', { top: 60, bottom: 100 }],
     ]);
@@ -168,10 +192,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
   });
 
   it('skips user messages with bottom <= 0', () => {
-    const messages = [
-      { info: { id: 'u1', role: 'user' as const } },
-      { info: { id: 'u2', role: 'user' as const } },
-    ];
+    const messages = [user('u1'), user('u2')];
     const bounds = new Map<string, { top: number; bottom: number }>([
       ['u2', { top: 0, bottom: 0 }],
     ]);

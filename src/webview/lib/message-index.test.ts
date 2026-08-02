@@ -112,7 +112,7 @@ describe('createMessageIndex', () => {
     const msgs = [entry('m1', ['p1', 'p2', 'p3'])];
     idx.findPartLocation(msgs, 'p1');
 
-    msgs[0].parts.splice(1, 1);
+    msgs[0]!.parts.splice(1, 1);
     idx.removePart(msgs, 'p2', { msgIdx: 0, partIdx: 1 });
 
     expect(idx.getIndexedPartLocation('p2')).toBeNull();

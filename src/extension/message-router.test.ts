@@ -15,9 +15,11 @@ import { MessageRouter } from './message-router';
 function createCallbacks(): MessageRouterCallbacks {
   return {
     ready: vi.fn(() => Promise.resolve()),
+    updateCommandState: vi.fn(),
     setWebviewFocus: vi.fn(),
     setProviderWatchActive: vi.fn(),
     requestContext: vi.fn(),
+    selectWorkspace: vi.fn(() => Promise.resolve()),
     refreshProviders: vi.fn(() => Promise.resolve()),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
@@ -40,6 +42,8 @@ function createCallbacks(): MessageRouterCallbacks {
     openExternal: vi.fn(() => Promise.resolve()),
     updateConfig: vi.fn(() => Promise.resolve()),
     handleApiRequest: vi.fn(() => Promise.resolve()),
+    handleRalphMessage: vi.fn(),
+    updateQueuedMessages: vi.fn(() => Promise.resolve()),
     log: vi.fn(),
   };
 }

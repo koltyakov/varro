@@ -425,7 +425,8 @@ describe('usage limit helpers', () => {
       retryAt: null,
       attempt: null,
     });
-    expect(limit?.windows[0]).toMatchObject({
+    if (limit?.status !== 'available') throw new Error('Expected an available provider limit');
+    expect(limit.windows[0]).toMatchObject({
       id: 'limit',
       label: 'Limit',
       unit: 'unknown',
@@ -441,7 +442,8 @@ describe('usage limit helpers', () => {
       retryAt: null,
       attempt: null,
     });
-    expect(limit?.windows[0]).toMatchObject({
+    if (limit?.status !== 'available') throw new Error('Expected an available provider limit');
+    expect(limit.windows[0]).toMatchObject({
       id: 'tokens',
       label: 'Tokens',
     });
@@ -456,7 +458,8 @@ describe('usage limit helpers', () => {
       retryAt: null,
       attempt: null,
     });
-    expect(limit?.windows[0]).toMatchObject({
+    if (limit?.status !== 'available') throw new Error('Expected an available provider limit');
+    expect(limit.windows[0]).toMatchObject({
       id: 'credits',
       label: 'Credits',
     });
@@ -471,7 +474,8 @@ describe('usage limit helpers', () => {
       retryAt: null,
       attempt: null,
     });
-    expect(limit?.windows[0]).toMatchObject({
+    if (limit?.status !== 'available') throw new Error('Expected an available provider limit');
+    expect(limit.windows[0]).toMatchObject({
       id: 'requests',
       label: 'Requests',
     });

@@ -11,6 +11,11 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 import { HiddenSessionManager } from './hidden-session-manager';
 import { SessionTitleFallback } from './session-title-fallback';
 
+type HiddenSessionActions = Pick<
+  HiddenSessionManager,
+  'registerPendingTitle' | 'forgetPendingTitle' | 'hide' | 'unhide' | 'retainUntilDeleted'
+>;
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((resolvePromise) => {
@@ -20,13 +25,14 @@ function deferred<T>() {
 }
 
 function createHiddenSessions() {
-  return {
-    registerPendingTitle: vi.fn(),
-    forgetPendingTitle: vi.fn(),
-    hide: vi.fn(),
-    unhide: vi.fn(),
-    retainUntilDeleted: vi.fn(),
-  };
+  const actions = {
+    registerPendingTitle: vi.fn<HiddenSessionActions['registerPendingTitle']>(),
+    forgetPendingTitle: vi.fn<HiddenSessionActions['forgetPendingTitle']>(),
+    hide: vi.fn<HiddenSessionActions['hide']>(),
+    unhide: vi.fn<HiddenSessionActions['unhide']>(),
+    retainUntilDeleted: vi.fn<HiddenSessionActions['retainUntilDeleted']>(),
+  } satisfies HiddenSessionActions;
+  return Object.assign(new HiddenSessionManager(), actions);
 }
 
 function resolveToolAction(rules: PermissionRule[], tool: string) {

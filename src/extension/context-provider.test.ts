@@ -73,14 +73,14 @@ const vscodeMock = vi.hoisted(() => ({
     openTextDocument: vi.fn(),
   },
   commands: {
-    executeCommand: vi.fn((command: string) => {
+    executeCommand: vi.fn((command: string): Promise<void> => {
       if (
         command === 'workbench.action.terminal.copySelection' &&
         clipboardState.terminalSelection !== null
       ) {
         clipboardState.current = clipboardState.terminalSelection;
       }
-      return Promise.resolve(undefined);
+      return Promise.resolve();
     }),
   },
   extensions: {
@@ -153,7 +153,7 @@ describe('ContextProvider', () => {
     vscodeMock.workspace.asRelativePath.mockReset();
     vscodeMock.window.showTextDocument.mockReset();
     vscodeMock.extensions.getExtension.mockReset();
-    vscodeMock.commands.executeCommand.mockImplementation((command: string) => {
+    vscodeMock.commands.executeCommand.mockImplementation((command: string): Promise<void> => {
       const deferred = clipboardState.deferCopy;
       if (command === 'workbench.action.terminal.copySelection' && deferred) {
         clipboardState.deferCopy = null;
@@ -168,7 +168,7 @@ describe('ContextProvider', () => {
       ) {
         clipboardState.current = clipboardState.terminalSelection;
       }
-      return Promise.resolve(undefined);
+      return Promise.resolve();
     });
     vscodeMock.languages.getDiagnostics.mockReset();
     vscodeMock.languages.getDiagnostics.mockReturnValue([]);

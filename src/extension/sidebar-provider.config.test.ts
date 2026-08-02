@@ -277,6 +277,7 @@ describe('SidebarProvider local config routing', () => {
         selection: null,
         diagnostics: [],
       },
+      getOpenWorkspaceRoot: vi.fn(() => '/repo'),
       readFile: vi.fn(),
       resolvePath: vi.fn(),
       terminalSelection: null,

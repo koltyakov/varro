@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import { HostRalphStore, RalphHost } from './ralph-host';
+import type { OpenCodeServer } from './server';
 
 const RALPH_RUNS_KEY = 'varro.ralph.runs';
 
@@ -61,6 +62,14 @@ function createMemoryPersistence() {
     },
   };
   return { persistence, storage };
+}
+
+function createStaticPersistence(value: unknown): Persistence {
+  return {
+    get: <T>() => value as T | undefined,
+    set: () => undefined,
+    remove: () => undefined,
+  };
 }
 
 function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
@@ -161,7 +170,7 @@ function createHost(options?: {
   const broadcasts: RalphStatePayload[] = [];
   const ensureServerStarted = vi.fn(options?.ensureServerStarted ?? (async () => {}));
   const host = new RalphHost({
-    server,
+    server: server as unknown as Pick<OpenCodeServer, 'request' | 'on' | 'off'>,
     contextProvider: {
       readFile: options?.readFile ?? (async () => '# Plan\n- [x] all done'),
       getOpenWorkspaceRoot: options?.getOpenWorkspaceRoot ?? ((path) => path),
@@ -279,11 +288,7 @@ describe('HostRalphStore', () => {
   });
 
   it('ignores malformed persisted run containers', () => {
-    const persistence: Persistence = {
-      get: () => [],
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence([]);
 
     const store = new HostRalphStore(persistence, vi.fn());
 
@@ -304,23 +309,19 @@ describe('HostRalphStore', () => {
     stored[config.managerSessionId] = validRun;
     stored.broken = { ...validRun, iterations: null };
     stored.mismatched = validRun;
-    stored.constructor = {
+    stored['constructor'] = {
       ...validRun,
       config: { ...config, managerSessionId: 'constructor' },
     };
-    stored.__proto__ = {
+    stored['__proto__'] = {
       ...validRun,
       config: { ...config, managerSessionId: '__proto__' },
     };
-    stored.toString = {
+    stored['toString'] = {
       ...validRun,
       config: { ...config, managerSessionId: 'toString' },
     };
-    const persistence: Persistence = {
-      get: () => stored,
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence(stored);
 
     const store = new HostRalphStore(persistence, vi.fn());
 
@@ -332,32 +333,28 @@ describe('HostRalphStore', () => {
 
   it('normalizes empty persisted run and iteration notes as absent', () => {
     const config = createConfig();
-    const persistence: Persistence = {
-      get: () => ({
-        [config.managerSessionId]: {
-          config,
-          status: 'failed',
-          stopReason: 'iteration_error',
-          note: '',
-          currentIteration: 1,
-          iterations: [
-            {
-              index: 1,
-              childSessionId: null,
-              status: 'failed',
-              startedAt: null,
-              endedAt: 1,
-              filesChanged: [],
-              verification: {},
-              note: '',
-            },
-          ],
-          updatedAt: 1,
-        },
-      }),
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence({
+      [config.managerSessionId]: {
+        config,
+        status: 'failed',
+        stopReason: 'iteration_error',
+        note: '',
+        currentIteration: 1,
+        iterations: [
+          {
+            index: 1,
+            childSessionId: null,
+            status: 'failed',
+            startedAt: null,
+            endedAt: 1,
+            filesChanged: [],
+            verification: {},
+            note: '',
+          },
+        ],
+        updatedAt: 1,
+      },
+    });
 
     const store = new HostRalphStore(persistence, vi.fn());
     const run = store.getRun(config.managerSessionId);
@@ -471,11 +468,7 @@ describe('HostRalphStore', () => {
       iterations: [],
       updatedAt: 101,
     };
-    const persistence: Persistence = {
-      get: () => stored,
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence(stored);
 
     const store = new HostRalphStore(persistence, vi.fn());
 
@@ -529,19 +522,15 @@ describe('HostRalphStore', () => {
 
 describe('RalphHost', () => {
   it('does not reattach malformed persisted running runs', () => {
-    const persistence: Persistence = {
-      get: () => ({
-        broken: {
-          config: { managerSessionId: 'broken' },
-          status: 'running',
-          currentIteration: 0,
-          iterations: null,
-          updatedAt: 1,
-        },
-      }),
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence({
+      broken: {
+        config: { managerSessionId: 'broken' },
+        status: 'running',
+        currentIteration: 0,
+        iterations: null,
+        updatedAt: 1,
+      },
+    });
 
     const { host, ensureServerStarted } = createHost({ persistence });
 
@@ -552,19 +541,15 @@ describe('RalphHost', () => {
   it('does not reattach a legacy running run without a workspace identity', () => {
     const config = createConfig();
     const { workspaceDirectory: _workspaceDirectory, ...legacyConfig } = config;
-    const persistence: Persistence = {
-      get: () => ({
-        [config.managerSessionId]: {
-          config: legacyConfig,
-          status: 'running',
-          currentIteration: 0,
-          iterations: [],
-          updatedAt: 1,
-        },
-      }),
-      set: () => undefined,
-      remove: () => undefined,
-    };
+    const persistence = createStaticPersistence({
+      [config.managerSessionId]: {
+        config: legacyConfig,
+        status: 'running',
+        currentIteration: 0,
+        iterations: [],
+        updatedAt: 1,
+      },
+    });
 
     const { host, ensureServerStarted } = createHost({ persistence });
 
@@ -1042,6 +1027,7 @@ describe('RalphHost', () => {
     const config = createConfig({ workspaceDirectory: '/workspace-a' });
     let promptCount = 0;
     let completeFirstPrompt: (() => void) | null = null;
+    const getFirstPromptCompletion = (): (() => void) | null => completeFirstPrompt;
     server.request.mockImplementation(async (method: string, path: string, body?: unknown) => {
       const pathname = requestPath(path);
       if (method === 'POST' && pathname === '/session') return { id: 'child-envelope' };
@@ -1104,7 +1090,10 @@ describe('RalphHost', () => {
     host.handleMessage({ type: 'ralph/start', payload: { config } });
     await vi.waitFor(() => expect(promptCount).toBe(1));
     expect(promptCount).toBe(1);
-    completeFirstPrompt?.();
+    const firstPromptCompletion = getFirstPromptCompletion();
+    expect(firstPromptCompletion).toBeTypeOf('function');
+    if (!firstPromptCompletion) throw new Error('First prompt completion was not captured');
+    firstPromptCompletion();
 
     await vi.waitFor(() =>
       expect(host.getStatePayload().runs[config.managerSessionId]?.status).toBe('done')

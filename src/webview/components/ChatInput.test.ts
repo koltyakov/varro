@@ -49,7 +49,7 @@ const {
   showSessionActionFeedbackMock: vi.fn(),
   undoSessionMock: vi.fn(async () => {}),
   runSlashCommandByNameMock: vi.fn(async () => true),
-  sendMessageMock: vi.fn(async () => true),
+  sendMessageMock: vi.fn<typeof UseOpenCodeModule.sendMessage>(async () => true),
   serverEventHandlers: new Map<
     string,
     Set<(event: { type: string; properties?: Record<string, unknown> }) => void>
@@ -126,11 +126,11 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class ResizeObserver {
-    observe() {}
-    unobserve() {}
+  globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
+    observe(_target: Element, _options?: ResizeObserverOptions) {}
+    unobserve(_target: Element) {}
     disconnect() {}
-  } as typeof ResizeObserver;
+  };
   setConnectionInitialized(true);
 });
 
@@ -140,7 +140,8 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  globalThis.ResizeObserver = originalResizeObserver;
+  if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
+  else Reflect.deleteProperty(globalThis, 'ResizeObserver');
   setInputText('');
   setConnectionInitialized(false);
   setIsLoading(false);
@@ -222,7 +223,7 @@ function setupModelState() {
           name: 'GPT-4o',
           capabilities: { toolcall: true },
           cost: { input: 0, output: 0 },
-          limit: { context: 1000 },
+          limit: { context: 1000, output: 1000 },
         },
       },
     },
@@ -247,7 +248,7 @@ function setupRetryingProviderSwitchState() {
           name: 'Claude',
           capabilities: { toolcall: true },
           cost: { input: 0, output: 0 },
-          limit: { context: 1000 },
+          limit: { context: 1000, output: 1000 },
         },
       },
     },
@@ -492,7 +493,7 @@ describe('ChatInput', () => {
 
   it('sends at most 20 dropped content files in individual messages', async () => {
     const originalFileReader = globalThis.FileReader;
-    const bridgeWindow = window as typeof window & {
+    const bridgeWindow = window as unknown as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -541,7 +542,7 @@ describe('ChatInput', () => {
 
   it('rejects per-file and aggregate dropped content limits before FileReader work', async () => {
     const originalFileReader = globalThis.FileReader;
-    const bridgeWindow = window as typeof window & {
+    const bridgeWindow = window as unknown as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -1170,12 +1171,14 @@ describe('ChatInput', () => {
       'Session Tokens',
       'Agents (1)650',
     ]);
-    expect(readContextRows(sections[0])).toEqual({
+    const sessionSection = sections[0];
+    if (!sessionSection) throw new Error('Expected session token section');
+    expect(readContextRows(sessionSection)).toEqual({
       Input: '--',
       Output: '--',
       Total: '--',
     });
-    expect(sections[0].nextElementSibling?.querySelectorAll('.unavailable')).toHaveLength(3);
+    expect(sessionSection.nextElementSibling?.querySelectorAll('.unavailable')).toHaveLength(3);
   });
 
   it('uses the root session snapshot when older messages are not loaded', async () => {
@@ -1442,7 +1445,11 @@ describe('ChatInput', () => {
   it('right-aligns the provider limit popup when no context is shown', async () => {
     setProviderLimitThresholdPercent(40);
     setupModelState();
-    setState('providers', 0, 'models', 'gpt-4o', 'limit', 'context', undefined);
+    const model = state.providers[0]?.models['gpt-4o'];
+    if (!model) throw new Error('Expected GPT-4o fixture');
+    const modelWithoutLimit = { ...model };
+    delete modelWithoutLimit.limit;
+    setState('providers', 0, 'models', 'gpt-4o', modelWithoutLimit);
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit(),
     });
@@ -3921,7 +3928,7 @@ describe('ChatInput', () => {
             name: 'GPT-4o',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },
@@ -3935,7 +3942,7 @@ describe('ChatInput', () => {
             name: 'Claude',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },
@@ -4025,7 +4032,7 @@ describe('ChatInput', () => {
             name: 'GPT-4o',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },
@@ -4039,7 +4046,7 @@ describe('ChatInput', () => {
             name: 'Claude',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },
@@ -4298,7 +4305,7 @@ describe('ChatInput', () => {
             name: 'GPT-5 mini',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },
@@ -4312,7 +4319,7 @@ describe('ChatInput', () => {
             name: 'GPT-4.1',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
           },
         },
       },

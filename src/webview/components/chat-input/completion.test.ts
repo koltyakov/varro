@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Agent } from '../../types';
 import {
   getActiveCompletion,
   getCompletionSelection,
@@ -11,7 +12,7 @@ import {
 } from './completion';
 
 describe('getMentionCompletionItems', () => {
-  const agents = [
+  const agents: Agent[] = [
     {
       name: 'helper',
       description: 'Helpful agent',

@@ -1136,9 +1136,11 @@ describe('ToolCall', () => {
       id: 'tool-2',
       callID: 'call-2',
       state: {
-        ...part.state,
+        status: 'running',
         input: { description: 'Research auth flow', prompt: 'Do something else' },
         title: 'Research auth flow',
+        metadata: {},
+        time: { start: 0 },
       },
     };
     setState('sessions', [

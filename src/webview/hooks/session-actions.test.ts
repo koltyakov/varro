@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Message } from '../types';
+import type { Message, MessageEntry } from '../types';
 import {
   implementPlanWithDependencies,
   INIT_PROMPT,
@@ -101,7 +101,12 @@ describe('session-actions helpers', () => {
         getActiveSessionId: () => 'session-1',
         createSession: vi.fn(async () => 'session-2'),
         startLoading,
-        runSessionCommand: vi.fn(async () => ({
+        runSessionCommand: vi.fn<
+          (
+            sessionId: string,
+            input: { command: string; arguments: string }
+          ) => Promise<MessageEntry>
+        >(async () => ({
           info: userMessage('user-2'),
           parts: [
             {

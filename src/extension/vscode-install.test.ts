@@ -1,6 +1,36 @@
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import packageJson from '../../package.json';
-import { createVscodeInstallPlan, selectStaleVsixFiles } from '../../scripts/vscode-install.mjs';
+
+type InstallCommand = {
+  command: string;
+  args: string[];
+  env: Record<string, string | undefined>;
+  shell: false;
+};
+
+type VscodeInstallModule = {
+  createVscodeInstallPlan(options: {
+    projectRoot: string;
+    packageName: string;
+    packageVersion: string;
+    platform: string;
+    nodePath: string;
+    npmExecPath: string;
+    env: Record<string, string | undefined>;
+  }): {
+    vsixPath: string;
+    packageCommand: InstallCommand;
+    installCommand: InstallCommand;
+  };
+  selectStaleVsixFiles(entries: string[], packageName: string): string[];
+};
+
+const vscodeInstallModuleUrl = pathToFileURL(resolve('scripts/vscode-install.mjs'));
+const { createVscodeInstallPlan, selectStaleVsixFiles } = (await import(
+  vscodeInstallModuleUrl.href
+)) as VscodeInstallModule;
 
 describe('VS Code install helper', () => {
   it('uses the pinned cross-spawn Windows command resolver', () => {

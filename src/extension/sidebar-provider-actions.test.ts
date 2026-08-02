@@ -39,6 +39,22 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 import type { SidebarProviderActionDeps } from './sidebar-provider-actions';
 import { createSidebarProviderActions } from './sidebar-provider-actions';
 
+type SessionDiffProvider = Pick<SidebarProviderActionDeps['sessionDiffProvider'], 'open'>;
+type ToolOutputProvider = Pick<SidebarProviderActionDeps['toolOutputProvider'], 'open'>;
+type SidebarProviderActionFixtureDeps = Omit<
+  SidebarProviderActionDeps,
+  'sessionDiffProvider' | 'toolOutputProvider'
+> & {
+  sessionDiffProvider: SessionDiffProvider;
+  toolOutputProvider: ToolOutputProvider;
+};
+type CreateSidebarProviderActionsForTest = (
+  deps: SidebarProviderActionFixtureDeps
+) => ReturnType<typeof createSidebarProviderActions>;
+
+const createSidebarProviderActionsForTest =
+  createSidebarProviderActions as CreateSidebarProviderActionsForTest;
+
 function createActionFixture() {
   const contextProvider = {
     terminalSelection: { text: 'npm test', terminalName: 'Terminal 1' } as {
@@ -55,6 +71,7 @@ function createActionFixture() {
 
   const webviewSession = {
     setFocus: vi.fn(),
+    updateCommandState: vi.fn(),
   };
   const contextFilesState = {
     notifyContextFilesChanged: vi.fn(),
@@ -65,6 +82,12 @@ function createActionFixture() {
   const restProxy = {
     handleRequest: vi.fn(() => Promise.resolve()),
   };
+  const sessionDiffProvider = {
+    open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve(false)),
+  } satisfies SessionDiffProvider;
+  const toolOutputProvider = {
+    open: vi.fn<ToolOutputProvider['open']>(() => Promise.resolve(false)),
+  } satisfies ToolOutputProvider;
   const server = {
     readRestartBlockers: vi.fn(() =>
       Promise.resolve({
@@ -74,7 +97,7 @@ function createActionFixture() {
     ),
   };
 
-  const deps: SidebarProviderActionDeps = {
+  const deps = {
     contextProvider: contextProvider as unknown as SidebarProviderActionDeps['contextProvider'],
     extensionId: 'koltyakov.varro',
     webviewSession,
@@ -83,6 +106,8 @@ function createActionFixture() {
     sessionExportService:
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
+    sessionDiffProvider,
+    toolOutputProvider,
     server: server as unknown as SidebarProviderActionDeps['server'],
     post: vi.fn(),
     setProviderWatchActive: vi.fn(),
@@ -98,10 +123,14 @@ function createActionFixture() {
     pickFiles: vi.fn(() => Promise.resolve()),
     searchFiles: vi.fn(),
     runInTerminal: vi.fn(),
-  };
+    handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
+    updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
+      Promise.resolve()
+    ),
+  } satisfies SidebarProviderActionFixtureDeps;
 
   return {
-    actions: createSidebarProviderActions(deps),
+    actions: createSidebarProviderActionsForTest(deps),
     contextFilesState,
     contextProvider,
     deps,

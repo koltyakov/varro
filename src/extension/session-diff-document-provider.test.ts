@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type ExecuteCommandMock = (
+  command: string,
+  beforeUri: unknown,
+  afterUri: unknown,
+  title: string,
+  options: { preview: boolean }
+) => Promise<unknown>;
+
 const vscodeMock = vi.hoisted(() => ({
   provider: undefined as { provideTextDocumentContent(uri: unknown): string } | undefined,
   workspace: {
@@ -12,7 +20,7 @@ const vscodeMock = vi.hoisted(() => ({
     onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
-    executeCommand: vi.fn(() => Promise.resolve(undefined)),
+    executeCommand: vi.fn<ExecuteCommandMock>(() => Promise.resolve(undefined)),
   },
   Uri: {
     from: vi.fn((value: { scheme: string; path: string }) => ({

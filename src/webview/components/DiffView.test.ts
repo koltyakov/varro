@@ -189,21 +189,31 @@ describe('DiffView', () => {
   });
 
   it('starts at the first change and expands and collapses multi-hunk previews', async () => {
-    vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-scroll-anchor') ? 57 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 80 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 320 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 300 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-scroll-anchor') ? 57 : 0;
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 80 : 0;
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 320 : 0;
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 300 : 0;
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 600 : 0;
+      }
+    );
 
     cleanup = render(
       () =>
@@ -468,16 +478,20 @@ describe('DiffView', () => {
       }
     );
     let clientWidthReads = 0;
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
-      if (this.classList.contains('diff-view-lines')) {
-        clientWidthReads += 1;
-        return 300;
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('diff-view-lines')) {
+          clientWidthReads += 1;
+          return 300;
+        }
+        return 0;
       }
-      return 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 600 : 0;
+      }
+    );
 
     cleanup = render(
       () =>
@@ -520,12 +534,16 @@ describe('DiffView', () => {
   });
 
   it('shows horizontal scrolling when the preview already contains every line', async () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 300 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function () {
-      return this.classList.contains('diff-view-lines') ? 600 : 0;
-    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 300 : 0;
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('diff-view-lines') ? 600 : 0;
+      }
+    );
 
     cleanup = render(
       () =>

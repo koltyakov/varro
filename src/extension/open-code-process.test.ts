@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import {
   mkdir,
@@ -293,8 +294,8 @@ describe('OpenCodeProcess Windows termination', () => {
     });
 
     await (
-      manager as unknown as { terminateManagedProcess(proc: typeof proc): Promise<void> }
-    ).terminateManagedProcess(proc);
+      manager as unknown as { terminateManagedProcess(proc: ChildProcess): Promise<void> }
+    ).terminateManagedProcess(proc as unknown as ChildProcess);
 
     expect(kill).toHaveBeenCalledWith('SIGTERM');
     expect(spawnMock).toHaveBeenCalledWith(
@@ -353,7 +354,7 @@ describe('OpenCodeProcess Windows termination', () => {
 
     wrapper.exitCode = 0;
     wrapper.emit('exit', 0, null);
-    await manager.releaseExitedProcess(wrapper);
+    await manager.releaseExitedProcess(wrapper as unknown as ChildProcess);
 
     expect(spawnMock).toHaveBeenCalledWith(
       'taskkill.exe',
@@ -453,7 +454,7 @@ describe('OpenCodeProcess startup termination', () => {
 
     child.exitCode = 0;
     child.emit('exit', 0, null);
-    const cleanup = manager.releaseExitedProcess(child);
+    const cleanup = manager.releaseExitedProcess(child as unknown as ChildProcess);
     await vi.advanceTimersByTimeAsync(5_100);
     await cleanup;
 
@@ -496,11 +497,14 @@ describe('OpenCodeProcess startup termination', () => {
         terminateManagedProcess: typeof terminateManagedProcess;
       }
     ).terminateManagedProcess = terminateManagedProcess;
+    const childProcess = child as unknown as ChildProcess;
 
-    await expect(manager.terminateLaunchAttempt(child)).rejects.toThrow('process tree survived');
+    await expect(manager.terminateLaunchAttempt(childProcess)).rejects.toThrow(
+      'process tree survived'
+    );
     expect(manager.process).toBe(child);
 
-    await expect(manager.terminateLaunchAttempt(child)).resolves.toBeUndefined();
+    await expect(manager.terminateLaunchAttempt(childProcess)).resolves.toBeUndefined();
     expect(manager.process).toBeNull();
     expect(terminateManagedProcess).toHaveBeenCalledTimes(2);
   });
@@ -1725,7 +1729,7 @@ describe('OpenCodeProcess config ownership', () => {
     ).terminateManagedProcess = vi.fn().mockResolvedValue(undefined);
 
     first.emit('exit', 1, null);
-    await manager.releaseExitedProcess(first);
+    await manager.releaseExitedProcess(first as unknown as ChildProcess);
 
     expect(firstPath).not.toBe(secondPath);
     expect(JSON.parse(await readFile(secondPath, 'utf-8'))).toEqual({
@@ -1831,7 +1835,7 @@ describe('OpenCodeProcess config ownership', () => {
     ).terminateManagedProcess = vi.fn().mockResolvedValue(undefined);
 
     child.emit('exit', 0, null);
-    await manager.releaseExitedProcess(child);
+    await manager.releaseExitedProcess(child as unknown as ChildProcess);
 
     await expect(stat(configPath)).rejects.toThrow();
   });

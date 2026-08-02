@@ -5,6 +5,8 @@
     "moduleResolution": "bundler",
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vscode", "vitest/globals"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
@@ -14,15 +16,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "declaration": false,
-    "outDir": "dist",
-    "rootDir": "src"
+    "noEmit": true
   },
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.extension.json" },
-    { "path": "./tsconfig.webview.json" },
-    { "path": "./tsconfig.e2e.json" },
-    { "path": "./tsconfig.contract-tests.json" }
-  ]
+  "include": ["src/**/*", "e2e/**/*", "scripts/**/*.d.mts", "*.ts", "*.mts"]
 }

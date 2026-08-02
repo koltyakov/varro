@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { Metafile } from 'esbuild';
 import { verifyExtensionBundleMetafile } from '../../scripts/verify-extension-bundle.mjs';
 
-function metafile(imports: Array<{ path: string; kind: string; external?: boolean }>) {
+function metafile(imports: Metafile['outputs'][string]['imports']): Metafile {
   return {
     inputs: {},
     outputs: {
@@ -44,9 +45,12 @@ describe('extension bundle verification', () => {
   });
 
   it.each([
-    [{ path: 'left-pad', kind: 'require-call', external: true }, 'left-pad'],
-    [{ path: './lazy-plugin.js', kind: 'dynamic-import', external: true }, 'dynamic import'],
-    [{ path: './extension-chunk.js', kind: 'import-statement' }, 'separate output'],
+    [{ path: 'left-pad', kind: 'require-call' as const, external: true }, 'left-pad'],
+    [
+      { path: './lazy-plugin.js', kind: 'dynamic-import' as const, external: true },
+      'dynamic import',
+    ],
+    [{ path: './extension-chunk.js', kind: 'import-statement' as const }, 'separate output'],
   ])('rejects runtime dependency %j', (imported, message) => {
     expect(() => verifyExtensionBundleMetafile(metafile([imported]))).toThrow(message);
   });

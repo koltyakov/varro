@@ -30,8 +30,8 @@ vi.mock('../lib/provider-setup', () => ({
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
-let resizeObserverObserveMock: ReturnType<typeof vi.fn>;
-let resizeObserverDisconnectMock: ReturnType<typeof vi.fn>;
+let resizeObserverObserveMock: (target: Element, options?: ResizeObserverOptions) => void;
+let resizeObserverDisconnectMock: () => void;
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -39,11 +39,15 @@ beforeEach(() => {
   originalResizeObserver = globalThis.ResizeObserver;
   resizeObserverObserveMock = vi.fn();
   resizeObserverDisconnectMock = vi.fn();
-  globalThis.ResizeObserver = class ResizeObserver {
-    observe = resizeObserverObserveMock;
-    unobserve() {}
-    disconnect = resizeObserverDisconnectMock;
-  } as typeof ResizeObserver;
+  globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
+    observe(target: Element, options?: ResizeObserverOptions) {
+      resizeObserverObserveMock(target, options);
+    }
+    unobserve(_target: Element) {}
+    disconnect() {
+      resizeObserverDisconnectMock();
+    }
+  };
 });
 
 afterEach(() => {
@@ -51,7 +55,8 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  globalThis.ResizeObserver = originalResizeObserver;
+  if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
+  else Reflect.deleteProperty(globalThis, 'ResizeObserver');
   document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
   openProviderSetupMock.mockReset();

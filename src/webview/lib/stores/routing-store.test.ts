@@ -79,7 +79,7 @@ describe('routingStore', () => {
     };
 
     routingStore.setAllAgents(agents);
-    routingStore.setPrimaryAgents([agents[0]]);
+    routingStore.setPrimaryAgents([agents[0]!]);
     routingStore.setProvidersLoaded(true);
     routingStore.setProviders([createProvider('provider-1')]);
     routingStore.setProviderDefaults({ 'provider-1': 'model-1' });
@@ -122,12 +122,12 @@ describe('routingStore', () => {
   it('hides superseded models when a provider is first connected', () => {
     const connected = createProvider('provider-1');
     connected.models['model-1'] = {
-      ...connected.models['model-1'],
+      ...connected.models['model-1']!,
       family: 'model',
       release_date: '2025-01-01',
     };
     connected.models['model-2'] = {
-      ...connected.models['model-2'],
+      ...connected.models['model-2']!,
       family: 'model',
       release_date: '2026-01-01',
     };
@@ -146,12 +146,12 @@ describe('routingStore', () => {
   it('keeps the provider default enabled on first connection', () => {
     const connected = createProvider('provider-1');
     connected.models['model-1'] = {
-      ...connected.models['model-1'],
+      ...connected.models['model-1']!,
       family: 'model',
       release_date: '2025-01-01',
     };
     connected.models['model-2'] = {
-      ...connected.models['model-2'],
+      ...connected.models['model-2']!,
       family: 'model',
       release_date: '2026-01-01',
     };
@@ -164,12 +164,12 @@ describe('routingStore', () => {
   it('does not change checkbox choices when newer models appear', () => {
     const connected = createProvider('provider-1');
     connected.models['model-1'] = {
-      ...connected.models['model-1'],
+      ...connected.models['model-1']!,
       family: 'model',
       release_date: '2025-01-01',
     };
     connected.models['model-2'] = {
-      ...connected.models['model-2'],
+      ...connected.models['model-2']!,
       family: 'model',
       release_date: '2026-01-01',
     };
@@ -181,7 +181,7 @@ describe('routingStore', () => {
     refreshed.models = {
       ...connected.models,
       'model-3': {
-        ...connected.models['model-2'],
+        ...connected.models['model-2']!,
         id: 'model-3',
         name: 'Model 3',
         release_date: '2027-01-01',

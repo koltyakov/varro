@@ -4,7 +4,7 @@ import { resolveTaskSessionId } from './task-session';
 
 describe('task session resolution', () => {
   it('does not attribute a child created after the next user turn', () => {
-    const tool: ToolPart = {
+    const tool = {
       id: 'tool-1',
       sessionID: 'session-1',
       messageID: 'assistant-1',
@@ -19,7 +19,7 @@ describe('task session resolution', () => {
         metadata: {},
         time: { start: 1_100, end: 1_500 },
       },
-    };
+    } satisfies ToolPart;
     const parent = {
       id: 'assistant-1',
       sessionID: 'session-1',

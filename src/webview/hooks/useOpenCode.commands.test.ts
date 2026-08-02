@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { client } from '../lib/client';
 import {
   getClientMocks,
   loadModules,
@@ -8,6 +9,9 @@ import {
 } from './useOpenCode.test-support';
 
 const clientMocks = getClientMocks();
+type SessionSendAsync = typeof client.session.sendAsync;
+const sessionSendAsync = vi.fn<SessionSendAsync>();
+Object.assign(clientMocks, { sessionSendAsync });
 
 describe('command helpers', () => {
   it('runs custom slash commands against the session command API', async () => {
@@ -62,17 +66,21 @@ describe('command helpers', () => {
     ]);
     stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
     stateModule.setState('messages', []);
-    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
     clientMocks.sessionMessages.mockResolvedValue([]);
 
     await hookModule.initSession();
 
     expect(clientMocks.sessionInit).not.toHaveBeenCalled();
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1);
-    const [calledSessionId, calledBody] = clientMocks.sessionSendAsync.mock.calls[0];
+    expect(sessionSendAsync).toHaveBeenCalledTimes(1);
+    const call = sessionSendAsync.mock.calls[0];
+    if (!call) throw new Error('Expected sessionSendAsync to be called');
+    const [calledSessionId, calledBody] = call;
+    const firstPart = calledBody.parts[0];
+    if (!firstPart) throw new Error('Expected init prompt part');
     expect(calledSessionId).toBe('session-1');
-    expect(calledBody.parts[0].text).toContain('AGENTS.md');
+    expect(firstPart.text).toContain('AGENTS.md');
   });
 
   it('creates a new session before initializing when none is active', async () => {
@@ -104,7 +112,7 @@ describe('command helpers', () => {
     stateModule.setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
     stateModule.setState('messages', []);
     clientMocks.sessionCreate.mockResolvedValue(session('session-2'));
-    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    sessionSendAsync.mockResolvedValue(undefined);
     clientMocks.sessionGet.mockResolvedValue(session('session-2'));
     clientMocks.sessionMessages.mockResolvedValue([]);
 
@@ -112,8 +120,10 @@ describe('command helpers', () => {
 
     expect(clientMocks.sessionCreate).toHaveBeenCalled();
     expect(clientMocks.sessionInit).not.toHaveBeenCalled();
-    expect(clientMocks.sessionSendAsync).toHaveBeenCalledTimes(1);
-    expect(clientMocks.sessionSendAsync.mock.calls[0][0]).toBe('session-2');
+    expect(sessionSendAsync).toHaveBeenCalledTimes(1);
+    const call = sessionSendAsync.mock.calls[0];
+    if (!call) throw new Error('Expected sessionSendAsync to be called');
+    expect(call[0]).toBe('session-2');
   });
 
   it('does not initialize sessions that already contain messages', async () => {

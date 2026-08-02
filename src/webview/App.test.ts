@@ -92,7 +92,10 @@ describe('AppRoot', () => {
     expect(state.serverStatus.state).toBe('error');
     expect(state.activeSessionId).toBe('session-1');
 
-    cleanup();
+    const dispose = cleanup;
+    if (!dispose) throw new Error('Expected AppRoot to be mounted');
+    dispose();
+    cleanup = undefined;
     mountAppRoot();
 
     expect(state.serverStatus).toEqual({ state: 'error', message: 'boom' });

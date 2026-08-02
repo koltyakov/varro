@@ -99,6 +99,8 @@ describe('MessageRows perf guards', () => {
           previousTrailingFileEventSignatureMap: new Map(),
           fileEditStackGroupMap: new Map(),
           assistantDialogSummaryMap: new Map(),
+          promptNumberMap: new Map(),
+          showPromptNumbers: false,
           hasBuildAgent: false,
           latestPlanImplementationMessageId: null,
           isPlanningAssistantMessage: () => false,

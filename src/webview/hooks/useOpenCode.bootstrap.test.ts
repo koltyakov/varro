@@ -1,5 +1,6 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { onMessage } from '../lib/bridge';
 import {
   getBridgeMocks,
   getClientMocks,
@@ -11,12 +12,15 @@ import {
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
+type BridgeOnMessage = typeof onMessage;
+const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 
 describe('useOpenCode initialization', () => {
   it('defaults the extension toolbar agent to build on startup', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -71,9 +75,9 @@ describe('useOpenCode initialization', () => {
   });
 
   it('hydrates 429 retry status for listed sessions before any session is opened', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -132,9 +136,9 @@ describe('useOpenCode initialization', () => {
   });
 
   it('retries startup after an initial connection failure', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -183,9 +187,9 @@ describe('useOpenCode initialization', () => {
   });
 
   it('continues sessions that were interrupted by extension reload', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };

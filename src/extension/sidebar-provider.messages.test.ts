@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   attachTestView,
   createServer,
@@ -166,11 +166,14 @@ describe('SidebarProvider terminal commands', () => {
       await runInTerminal(provider, 'npm install -g opencode-ai@latest', 'OpenCode Update');
 
       const terminal = getVscodeMock().window.createTerminal.mock.results[0]?.value;
-      const closeListener = getVscodeMock().window.onDidCloseTerminal.mock.calls[0]?.[0];
+      const onDidCloseTerminal = getVscodeMock().window.onDidCloseTerminal as Mock<
+        (listener: (terminal: object) => void) => { dispose(): void }
+      >;
+      const closeListener = onDidCloseTerminal.mock.calls[0]?.[0];
       expect(closeListener).toBeTypeOf('function');
       expect(server.finishWindowsCliUpgrade).not.toHaveBeenCalled();
 
-      closeListener?.(terminal);
+      if (terminal) closeListener?.(terminal);
 
       expect(server.finishWindowsCliUpgrade).toHaveBeenCalledOnce();
     } finally {

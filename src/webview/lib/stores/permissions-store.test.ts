@@ -74,7 +74,7 @@ describe('permissionsStore', () => {
       ...firstQuestion,
       questions: [
         {
-          ...firstQuestion.questions[0],
+          ...firstQuestion.questions[0]!,
           question: 'Retry?',
         },
       ],
@@ -94,7 +94,7 @@ describe('permissionsStore', () => {
     permissionsStore.addPermission(secondPermission);
 
     expect(state.permissions).toHaveLength(1);
-    expect(permissionsStore.getPermissionGroupMembers(state.permissions[0])).toEqual([
+    expect(permissionsStore.getPermissionGroupMembers(state.permissions[0]!)).toEqual([
       {
         id: 'permission-1',
         sessionID: 'session-1',

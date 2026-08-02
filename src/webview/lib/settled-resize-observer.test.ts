@@ -6,6 +6,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function resizeObserverEntry(target: Element): ResizeObserverEntry {
+  return {
+    target,
+    borderBoxSize: [],
+    contentBoxSize: [],
+    contentRect: target.getBoundingClientRect(),
+    devicePixelContentBoxSize: [],
+  };
+}
+
 describe('observeSettledResize', () => {
   it('coalesces resize deliveries for each observed element', async () => {
     vi.useFakeTimers();
@@ -30,7 +40,7 @@ describe('observeSettledResize', () => {
     const secondCallback = vi.fn();
     const disposeFirst = observeSettledResize(first, firstCallback);
     const disposeSecond = observeSettledResize(second, secondCallback);
-    const entries = [{ target: first }, { target: second }] as ResizeObserverEntry[];
+    const entries = [resizeObserverEntry(first), resizeObserverEntry(second)];
 
     for (let index = 0; index < 20; index += 1) {
       notifyResize?.(entries, {} as ResizeObserver);
@@ -70,12 +80,9 @@ describe('observeSettledResize', () => {
     const disposeFirst = observeSettledResize(first, firstCallback);
     const disposeSecond = observeSettledResize(second, secondCallback);
 
-    notifyResize?.(
-      [{ target: first }, { target: second }] as ResizeObserverEntry[],
-      {} as ResizeObserver
-    );
+    notifyResize?.([resizeObserverEntry(first), resizeObserverEntry(second)], {} as ResizeObserver);
     await vi.advanceTimersByTimeAsync(50);
-    notifyResize?.([{ target: first }] as ResizeObserverEntry[], {} as ResizeObserver);
+    notifyResize?.([resizeObserverEntry(first)], {} as ResizeObserver);
     await vi.advanceTimersByTimeAsync(50);
 
     expect(firstCallback).not.toHaveBeenCalled();
@@ -110,10 +117,7 @@ describe('observeSettledResize', () => {
     const disposeFirst = observeSettledResize(first, firstCallback);
     const disposeSecond = observeSettledResize(second, secondCallback);
 
-    notifyResize?.(
-      [{ target: first }, { target: second }] as ResizeObserverEntry[],
-      {} as ResizeObserver
-    );
+    notifyResize?.([resizeObserverEntry(first), resizeObserverEntry(second)], {} as ResizeObserver);
     disposeFirst();
     await vi.advanceTimersByTimeAsync(100);
 
@@ -121,7 +125,7 @@ describe('observeSettledResize', () => {
     expect(secondCallback).toHaveBeenCalledOnce();
     expect(disconnect).not.toHaveBeenCalled();
 
-    notifyResize?.([{ target: second }] as ResizeObserverEntry[], {} as ResizeObserver);
+    notifyResize?.([resizeObserverEntry(second)], {} as ResizeObserver);
     disposeSecond();
     await vi.advanceTimersByTimeAsync(100);
 

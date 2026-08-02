@@ -198,7 +198,9 @@ describe('MessageList perf guards', () => {
     expect(messageRowPassCounts.get('message-3')).toBe(1);
 
     for (let index = 0; index < 10; index += 1) {
-      setState('messages', 0, 'parts', 0, 'text', (text) => `${text}${index}`);
+      setState('messages', 0, 'parts', 0, (part) =>
+        part.type === 'text' ? { ...part, text: `${part.text}${index}` } : part
+      );
     }
 
     await settlePerfEffects();

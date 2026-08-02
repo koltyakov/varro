@@ -48,8 +48,7 @@
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "test:e2e": "playwright test",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit -p tsconfig.extension.json && tsc --noEmit -p tsconfig.webview.json && tsc --noEmit -p tsconfig.e2e.json && tsc -p tsconfig.contract-tests.json",
-    "typecheck:unit": "tsc -p tsconfig.unit-tests.json",
+    "typecheck": "tsc -p tsconfig.json",
     "package:vsix": "node scripts/package-vsix.mjs",
     "package": "npm run build && npm run package:vsix",
     "vscode:install": "node scripts/vscode-install.mjs"

@@ -1660,6 +1660,7 @@ describe('state helpers', () => {
       state: {
         status: 'running',
         input: { todos: [{ content: 'Keep me', status: 'pending', priority: 'medium' }] },
+        time: { start: 1 },
       },
     });
 

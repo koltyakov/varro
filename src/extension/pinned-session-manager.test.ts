@@ -1,14 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Persistence } from '../shared/persistence';
 import { PinnedSessionManager } from './pinned-session-manager';
 
 const stored = { value: undefined as unknown };
 const persistence = {
-  get: vi.fn(() => stored.value),
+  get<T>(_key: string): T | undefined {
+    return stored.value as T | undefined;
+  },
   set: vi.fn(async (_key: string, value: unknown) => {
     stored.value = value;
   }),
-  remove: vi.fn(),
-};
+  remove: vi.fn((_key: string) => undefined),
+} satisfies Persistence;
 
 describe('PinnedSessionManager', () => {
   beforeEach(() => {

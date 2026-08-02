@@ -19,6 +19,8 @@ import { startNewChatDraft } from '../lib/new-chat-draft';
 import { replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import { SessionSendOperations } from './session/session-send';
 
+type SendAsync = ConstructorParameters<typeof SessionSendOperations>[0]['sendAsync'];
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => {
@@ -27,7 +29,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function createOperations(sendAsync: (sessionId: string, body: unknown) => Promise<unknown>) {
+function createOperations(sendAsync: SendAsync) {
   return new SessionSendOperations({
     createSession: vi.fn(async () => 'session-2'),
     clearPendingAbort: vi.fn(),
@@ -65,7 +67,12 @@ describe('SessionSendOperations', () => {
     });
     appStore.setState('terminalSelection', { text: 'npm test', terminalName: 'zsh' });
     appStore.setState('droppedFiles', [
-      { path: '/repo/src/file.ts', type: 'file', attachmentSequence: 1 },
+      {
+        path: '/repo/src/file.ts',
+        relativePath: 'src/file.ts',
+        type: 'file',
+        attachmentSequence: 1,
+      },
     ]);
     appStore.setState('clipboardImages', [
       {
@@ -81,7 +88,7 @@ describe('SessionSendOperations', () => {
       { id: 'todo-1', content: 'Keep visible', status: 'completed', priority: 'high' },
     ]);
 
-    const sendAsync = vi.fn(async () => {
+    const sendAsync = vi.fn<SendAsync>(async () => {
       appStore.setState('messages', [
         {
           info: {
@@ -155,7 +162,7 @@ describe('SessionSendOperations', () => {
       if (sessionId) appStore.setState('activeSessionId', sessionId);
       return sessionId;
     });
-    const sendAsync = vi.fn(async () => {});
+    const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = new SessionSendOperations({
       createSession,
       clearPendingAbort: vi.fn(),
@@ -198,7 +205,7 @@ describe('SessionSendOperations', () => {
       .fn<() => Promise<string | null>>()
       .mockReturnValueOnce(firstCreation.promise)
       .mockReturnValueOnce(secondCreation.promise);
-    const sendAsync = vi.fn(async () => {});
+    const sendAsync = vi.fn<SendAsync>(async () => {});
     const operations = new SessionSendOperations({
       createSession,
       clearPendingAbort: vi.fn(),

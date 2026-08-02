@@ -59,6 +59,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { SessionExportService } from './session-export-service';
+import type { OpenCodeServer } from './server';
 
 type CloseHandler = (code: number | null, signal: NodeJS.Signals | null) => void;
 type ErrorHandler = (error: Error) => void;
@@ -66,7 +67,10 @@ type ErrorHandler = (error: Error) => void;
 function createServer() {
   return {
     getWorkspaceCwd: vi.fn(() => '/repo'),
-    request: vi.fn(async () => ({ id: 'session-1', directory: '/repo' })),
+    request: vi.fn<OpenCodeServer['request']>(async () => ({
+      id: 'session-1',
+      directory: '/repo',
+    })),
     resolveCommand: vi.fn(() => 'opencode'),
   };
 }

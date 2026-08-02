@@ -647,7 +647,10 @@ describe('OpenCodeTransport requests', () => {
   });
 
   it('only sends JSON content type when forwarding a request body', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '{}' }));
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => ({
+      ok: true,
+      text: async () => '{}',
+    }));
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
     const transport = createTransport();
 

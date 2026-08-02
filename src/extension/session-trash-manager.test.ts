@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SESSION_TRASH_RETENTION_MS, SessionTrashManager } from './session-trash-manager';
+import {
+  SESSION_TRASH_RETENTION_MS,
+  SessionTrashManager,
+  type SessionDeleteTarget,
+} from './session-trash-manager';
 
 type StoredEntry = Awaited<ReturnType<SessionTrashManager['list']>>[number];
 
@@ -130,7 +134,7 @@ describe('SessionTrashManager', () => {
   it('deletes a child-first tree once after replacing it with its ancestor', async () => {
     const manager = new SessionTrashManager(workspaceState as never);
     const sessions = [session('root', 3_000), session('child', 2_000, { parentID: 'root' })];
-    const deleteSession = vi.fn(async () => undefined);
+    const deleteSession = vi.fn(async (_target: SessionDeleteTarget) => undefined);
 
     await manager.moveToTrash('child', sessions, 4_000);
     await manager.moveToTrash('root', sessions, 5_000);
@@ -206,7 +210,7 @@ describe('SessionTrashManager', () => {
       [session('other-root', 2_000, { directory: '/other' })],
       6_000
     );
-    const deleteSession = vi.fn(async () => undefined);
+    const deleteSession = vi.fn(async (_target: SessionDeleteTarget) => undefined);
 
     expect(manager.list('/repo').map(({ rootID }) => rootID)).toEqual(['repo-root']);
     expect(manager.list('/other').map(({ rootID }) => rootID)).toEqual(['other-root']);
@@ -233,7 +237,7 @@ describe('SessionTrashManager', () => {
       [session('other-root', 2_000, { directory: '/other' })],
       6_000
     );
-    const deleteSession = vi.fn(async () => undefined);
+    const deleteSession = vi.fn(async (_target: SessionDeleteTarget) => undefined);
 
     const removed = await manager.cleanupExpired(
       deleteSession,
@@ -332,7 +336,7 @@ describe('SessionTrashManager', () => {
       },
     ];
     const manager = new SessionTrashManager(workspaceState as never);
-    const deleteSession = vi.fn(async () => undefined);
+    const deleteSession = vi.fn(async (_target: SessionDeleteTarget) => undefined);
 
     await manager.empty(deleteSession);
 

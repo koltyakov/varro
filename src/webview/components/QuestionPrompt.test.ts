@@ -174,12 +174,19 @@ function multiQuestionRequest(): QuestionRequest {
         question: 'Which languages?',
         header: 'Languages',
         multiple: true,
-        options: [{ label: 'TypeScript' }, { label: 'Rust' }, { label: 'Go' }],
+        options: [
+          { label: 'TypeScript', description: '' },
+          { label: 'Rust', description: '' },
+          { label: 'Go', description: '' },
+        ],
       },
       {
         question: 'Which runtime?',
         header: 'Runtime',
-        options: [{ label: 'Node' }, { label: 'Bun' }],
+        options: [
+          { label: 'Node', description: '' },
+          { label: 'Bun', description: '' },
+        ],
       },
     ],
   };
@@ -363,7 +370,7 @@ describe('QuestionPrompt custom answers', () => {
           question: 'Pick one',
           header: 'Choice',
           custom: false,
-          options: [{ label: 'Only' }],
+          options: [{ label: 'Only', description: '' }],
         },
       ],
     });

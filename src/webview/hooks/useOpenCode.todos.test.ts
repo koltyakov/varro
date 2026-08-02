@@ -1,5 +1,6 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { ServerEventName } from '../../shared/protocol';
 import {
   assistantMessage,
   getClientMocks,
@@ -10,6 +11,12 @@ import {
 } from './useOpenCode.test-support';
 
 const clientMocks = getClientMocks();
+type ServerEventsOn = (
+  event: ServerEventName | '*',
+  handler: (data: unknown) => void
+) => () => void;
+const serverEventsOn = vi.fn<ServerEventsOn>();
+Object.assign(clientMocks, { serverEventsOn });
 
 describe('useOpenCode todo synchronization', () => {
   it('loads persisted todos from the native session todo endpoint', async () => {
@@ -52,10 +59,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('rebuilds todos from refreshed messages after stale todo events', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -133,10 +140,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('rebuilds todos from messages when the active assistant message completes', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -211,10 +218,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('clears stale event todos when the refreshed messages still have no todo parts', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -292,10 +299,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('keeps visible todos during active progress when a newer assistant update has no todo parts yet', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -357,10 +364,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('ignores todo.updated payload contents while the active assistant reply is still running', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -425,10 +432,10 @@ describe('useOpenCode todo synchronization', () => {
 
   it('ignores stale todo events after the active assistant message completes', async () => {
     const handlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(event as string, handler as (data: unknown) => void);
+    serverEventsOn.mockImplementation((event, handler) => {
+      handlers.set(event, handler);
       return () => {
-        handlers.delete(event as string);
+        handlers.delete(event);
       };
     });
 
@@ -446,15 +453,17 @@ describe('useOpenCode todo synchronization', () => {
 
     try {
       await Promise.resolve();
+      const completedAssistant = assistantMessage('assistant-1', 'user-1');
+      if (completedAssistant.role !== 'assistant') {
+        throw new Error('Expected an assistant message fixture');
+      }
+      completedAssistant.time.completed = 1;
 
       stateModule.setState('activeSessionId', 'session-1');
       stateModule.setState('messages', [
         { info: userMessage('user-1'), parts: [] },
         {
-          info: {
-            ...assistantMessage('assistant-1', 'user-1'),
-            time: { created: 0, completed: 1 },
-          },
+          info: completedAssistant,
           parts: [todoPart('todo-part-1', 'assistant-1', 'Summarize findings', 'completed')],
         },
       ]);

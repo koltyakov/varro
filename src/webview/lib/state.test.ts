@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { AssistantMessage, Part, Permission } from '../types';
+import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
 import {
   applyMessagePartDelta,
   addClipboardImage,
@@ -73,7 +73,7 @@ function textPart(id: string, text: string): Part {
   };
 }
 
-function toolPart(id: string): Part {
+function toolPart(id: string): ToolPart {
   return {
     id,
     sessionID: 'session-1',
@@ -361,7 +361,9 @@ describe('state streaming deltas', () => {
     const withoutCompletion = assistantMessage();
     setMessagesIncremental([{ info: withoutCompletion, parts: [textPart('text-1', 'Done')] }]);
 
-    expect(state.messages[0]?.info.time.completed).toBe(5000);
+    const synced = state.messages[0]?.info;
+    if (synced?.role !== 'assistant') throw new Error('Expected an assistant message');
+    expect(synced.time.completed).toBe(5000);
   });
 
   it('preserves error state when an incremental sync lacks it', () => {
@@ -374,7 +376,9 @@ describe('state streaming deltas', () => {
 
     setMessagesIncremental([{ info: assistantMessage(), parts: [textPart('text-1', 'Partial')] }]);
 
-    expect(state.messages[0]?.info.error).toEqual({ name: 'rate_limit' });
+    const synced = state.messages[0]?.info;
+    if (synced?.role !== 'assistant') throw new Error('Expected an assistant message');
+    expect(synced.error).toEqual({ name: 'rate_limit' });
   });
 
   it('keeps active streaming text across incremental message refreshes', async () => {

@@ -3,28 +3,47 @@ import { render } from 'solid-js/web';
 import { RalphForm, shouldDeletePreviousBlankSession } from './RalphForm';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
+import type { Agent, MessageEntry, Provider } from '../../types';
+import type { EditorContext } from '../../../shared/protocol';
+import type { RalphSelectedModel } from '../../../shared/ralph';
 
 const openCodeMocks = vi.hoisted(() => ({
   deleteSession: vi.fn(),
   selectSession: vi.fn(),
 }));
 
-const stateMock = vi.hoisted(() => ({
-  activeSessionId: null,
-  selectedModel: null,
-  selectedAgent: null,
-  providers: [],
-  providerDefaults: {},
-  allAgents: [],
-  messages: [],
-  queuedMessages: [],
-  sessionStatus: {},
-  desktopSessionPaneSide: 'left' as 'left' | 'right',
-  editorContext: {
-    workspacePath: null,
-    activeFile: null,
-  },
-}));
+type RalphFormStateMock = {
+  activeSessionId: string | null;
+  selectedModel: RalphSelectedModel | null;
+  selectedAgent: string | null;
+  providers: Provider[];
+  providerDefaults: Record<string, string>;
+  allAgents: Agent[];
+  messages: MessageEntry[];
+  queuedMessages: Array<{ sessionId: string }>;
+  sessionStatus: Record<string, { type?: string }>;
+  desktopSessionPaneSide: 'left' | 'right';
+  editorContext: Pick<EditorContext, 'workspacePath' | 'activeFile'>;
+};
+
+const stateMock = vi.hoisted(
+  (): RalphFormStateMock => ({
+    activeSessionId: null,
+    selectedModel: null,
+    selectedAgent: null,
+    providers: [],
+    providerDefaults: {},
+    allAgents: [],
+    messages: [],
+    queuedMessages: [],
+    sessionStatus: {},
+    desktopSessionPaneSide: 'left',
+    editorContext: {
+      workspacePath: null,
+      activeFile: null,
+    },
+  })
+);
 
 const clientMocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -49,7 +68,7 @@ vi.mock('../../lib/client', () => ({
 vi.mock('../../lib/state', () => ({
   desktopSessionPaneSide: () => stateMock.desktopSessionPaneSide,
   getStoredVariantForModel: vi.fn(() => null),
-  getVisibleProviders: vi.fn((providers) => providers),
+  getVisibleProviders: vi.fn((providers: Provider[]) => providers),
   isSessionAwaitingInput: vi.fn(() => false),
   state: stateMock,
 }));
@@ -309,10 +328,13 @@ describe('RalphForm', () => {
       {
         id: 'openai',
         name: 'OpenAI',
+        source: 'api',
         models: {
           'gpt-5.5': {
             id: 'gpt-5.5',
             name: 'GPT 5.5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
             variants: { low: {}, medium: {}, high: {} },
           },
         },

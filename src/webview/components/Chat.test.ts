@@ -79,11 +79,11 @@ beforeEach(() => {
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   desktopMediaQueryMatches = false;
   desktopMediaQueryListeners = new Set();
-  globalThis.ResizeObserver = class ResizeObserver {
-    observe() {}
-    unobserve() {}
+  globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
+    observe(_target: Element, _options?: ResizeObserverOptions) {}
+    unobserve(_target: Element) {}
     disconnect() {}
-  } as typeof ResizeObserver;
+  };
   globalThis.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: query === '(min-width: 1400px)' ? desktopMediaQueryMatches : false,
     media: query,
@@ -142,9 +142,12 @@ afterEach(() => {
   for (const run of ralphStore.getAllRuns()) {
     ralphStore.removeRun(run.config.managerSessionId);
   }
-  globalThis.ResizeObserver = originalResizeObserver;
-  globalThis.matchMedia = originalMatchMedia;
-  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
+  else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  if (originalMatchMedia) globalThis.matchMedia = originalMatchMedia;
+  else Reflect.deleteProperty(globalThis, 'matchMedia');
+  if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   vi.restoreAllMocks();
 });
 
@@ -1334,7 +1337,7 @@ describe('header status badges', () => {
             name: 'GPT-5.6 Sol',
             capabilities: { toolcall: true },
             cost: { input: 0, output: 0 },
-            limit: { context: 1000 },
+            limit: { context: 1000, output: 1000 },
             variants: { medium: {}, high: {} },
           },
         },

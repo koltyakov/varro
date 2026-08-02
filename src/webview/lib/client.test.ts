@@ -38,7 +38,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function emitMessage(message: ExtensionMessage) {
+function emitMessage(message: unknown) {
   for (const handler of bridgeMocks.messageHandlers) handler(message);
 }
 
@@ -749,9 +749,11 @@ describe('client', () => {
     const result = await client.varro.recycleBin.list();
 
     expect(result).toHaveLength(1);
-    expect(result[0].root.parentID).toBe('parent-1');
-    expect(result[0].root.summary).toEqual({ additions: 10, deletions: 5, files: 3 });
-    expect(result[0].root.time.compacting).toBe(300);
+    const entry = result[0];
+    if (!entry) throw new Error('Expected one recycle bin entry');
+    expect(entry.root.parentID).toBe('parent-1');
+    expect(entry.root.summary).toEqual({ additions: 10, deletions: 5, files: 3 });
+    expect(entry.root.time.compacting).toBe(300);
   });
 
   it('normalizes recycle bin entries without optional fields', async () => {
@@ -777,9 +779,11 @@ describe('client', () => {
     const result = await client.varro.recycleBin.list();
 
     expect(result).toHaveLength(1);
-    expect(result[0].root.parentID).toBeUndefined();
-    expect(result[0].root.summary).toBeUndefined();
-    expect(result[0].root.time.compacting).toBeUndefined();
+    const entry = result[0];
+    if (!entry) throw new Error('Expected one recycle bin entry');
+    expect(entry.root.parentID).toBeUndefined();
+    expect(entry.root.summary).toBeUndefined();
+    expect(entry.root.time.compacting).toBeUndefined();
   });
 
   it('returns null for recycle bin entries with missing required fields', async () => {

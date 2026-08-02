@@ -1,11 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
-import type { Message, Part, SessionStatus } from '../types';
+import type {
+  AssistantMessage,
+  Message,
+  MessageEntry,
+  Part,
+  SessionStatus,
+  UserMessage,
+} from '../types';
 import {
   markSessionUnshared,
   resetSessionShareOverridesForTests,
 } from '../lib/session-share-overrides';
+
+type MockState = Pick<
+  StateModule.AppState,
+  | 'activeSessionId'
+  | 'completedSessionResponses'
+  | 'failedSessionIds'
+  | 'lastSeenSessions'
+  | 'messages'
+  | 'permissions'
+  | 'questions'
+  | 'sessions'
+  | 'sessionStatus'
+  | 'sessionUsageLimits'
+>;
 
 const {
   serverEventsOn,
@@ -32,31 +53,8 @@ const {
   setState,
   getPermissionModeForSession,
   state,
-} = vi.hoisted(() => ({
-  serverEventsOn: vi.fn(),
-  addPermission: vi.fn(),
-  clearStreamingState: vi.fn(),
-  finishMessageStreaming: vi.fn(),
-  markSessionSeen: vi.fn(),
-  markSessionResponseCompleted: vi.fn(),
-  removePermission: vi.fn(),
-  removeMessagePart: vi.fn(),
-  removeQuestion: vi.fn(),
-  replaceMessages: vi.fn(),
-  setSessionCompactingStore: vi.fn(),
-  setSessionFailed: vi.fn(),
-  setSessionUsageLimit: vi.fn(),
-  startLoading: vi.fn(),
-  stopLoading: vi.fn(),
-  loadingStartedAt: vi.fn(() => null as number | null),
-  upsertMessageInfo: vi.fn(),
-  upsertPart: vi.fn(),
-  upsertQuestion: vi.fn(),
-  applyMessagePartDelta: vi.fn(),
-  markLoadingActivity: vi.fn(),
-  setState: vi.fn(),
-  getPermissionModeForSession: vi.fn(),
-  state: {
+} = vi.hoisted(() => {
+  const mockState: MockState = {
     activeSessionId: null,
     completedSessionResponses: {},
     failedSessionIds: [],
@@ -67,8 +65,35 @@ const {
     sessions: [],
     sessionStatus: {},
     sessionUsageLimits: {},
-  },
-}));
+  };
+
+  return {
+    serverEventsOn: vi.fn(),
+    addPermission: vi.fn(),
+    clearStreamingState: vi.fn(),
+    finishMessageStreaming: vi.fn(),
+    markSessionSeen: vi.fn(),
+    markSessionResponseCompleted: vi.fn(),
+    removePermission: vi.fn(),
+    removeMessagePart: vi.fn(),
+    removeQuestion: vi.fn(),
+    replaceMessages: vi.fn(),
+    setSessionCompactingStore: vi.fn(),
+    setSessionFailed: vi.fn(),
+    setSessionUsageLimit: vi.fn(),
+    startLoading: vi.fn(),
+    stopLoading: vi.fn(),
+    loadingStartedAt: vi.fn((): number | null => null),
+    upsertMessageInfo: vi.fn(),
+    upsertPart: vi.fn(),
+    upsertQuestion: vi.fn(),
+    applyMessagePartDelta: vi.fn(),
+    markLoadingActivity: vi.fn(),
+    setState: vi.fn(),
+    getPermissionModeForSession: vi.fn(),
+    state: mockState,
+  };
+});
 
 vi.mock('../lib/client', () => ({
   serverEvents: {
@@ -216,7 +241,9 @@ function createDefaultDeps(
   };
 }
 
-function createAssistantEntry(overrides: Record<string, unknown> = {}) {
+function createAssistantEntry(
+  overrides: Partial<AssistantMessage> = {}
+): MessageEntry<AssistantMessage> {
   return {
     info: {
       id: 'assistant-1',
@@ -241,7 +268,7 @@ function createAssistantEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createUserEntry(overrides: Record<string, unknown> = {}) {
+function createUserEntry(overrides: Partial<UserMessage> = {}): MessageEntry<UserMessage> {
   return {
     info: {
       id: 'user-1',
@@ -259,11 +286,8 @@ function createUserEntry(overrides: Record<string, unknown> = {}) {
 function createCompletedAssistantEntry(
   created: number,
   completed: number
-): { info: Message; parts: Part[] } {
-  return createAssistantEntry({ time: { created, completed } }) as {
-    info: Message;
-    parts: Part[];
-  };
+): MessageEntry<AssistantMessage> {
+  return createAssistantEntry({ time: { created, completed } });
 }
 
 describe('registerSessionEventHandlers', () => {
@@ -342,6 +366,7 @@ describe('registerSessionEventHandlers', () => {
       .mockRejectedValue(new Error('Permission backend unavailable'));
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => null,
       getMessages: () => [],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -400,6 +425,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => null,
       getMessages: () => [],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -455,6 +481,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => null,
       getMessages: () => [],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -686,6 +713,7 @@ describe('registerSessionEventHandlers', () => {
       sessionStatusOperations: {
         shouldIgnorePendingAbortStatus: () => false,
         hasPendingAbort: () => false,
+        markPendingAbort: vi.fn(),
         clearPendingAbort: vi.fn(),
         setSessionStatusEntry,
         clearUsageLimitOnResumedProgress: vi.fn(),
@@ -699,6 +727,8 @@ describe('registerSessionEventHandlers', () => {
       sessionApprovalOperations: {
         respondPermission,
       },
+      abortRemoteSession: vi.fn().mockResolvedValue(true),
+      logError: vi.fn(),
     });
 
     operations.registerSessionEventHandlers();
@@ -745,6 +775,7 @@ describe('registerSessionEventHandlers', () => {
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getMessages: () => [],
       handoffTodosToMessages,
@@ -810,6 +841,7 @@ describe('registerSessionEventHandlers', () => {
     });
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getMessages: () => [],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -886,7 +918,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+        getMessages: () => [createAssistantEntry()],
         setSessionStatusEntry,
       })
     );
@@ -928,6 +960,7 @@ describe('registerSessionEventHandlers', () => {
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getMessages: () => [],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -968,13 +1001,8 @@ describe('registerSessionEventHandlers', () => {
 
   it('resyncs before applying complete part updates when the parent message is missing', async () => {
     const handlers = installHandlers();
-    const assistantEntry = createAssistantEntry({ id: 'assistant-2' }) as {
-      info: Message;
-      parts: Part[];
-    };
-    let messages: Array<{ info: Message; parts: Part[] }> = [
-      createUserEntry({ id: 'user-2' }) as { info: Message; parts: Part[] },
-    ];
+    const assistantEntry = createAssistantEntry({ id: 'assistant-2' });
+    let messages: MessageEntry[] = [createUserEntry({ id: 'user-2' })];
     const syncSessionMessages = vi.fn(async () => {
       messages = [...messages, assistantEntry];
     });
@@ -1013,7 +1041,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('uses tool execution event timestamps when applying completed tool parts', () => {
     const handlers = installHandlers();
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -1077,7 +1105,7 @@ describe('registerSessionEventHandlers', () => {
         time: { start: 10_000, end: 10_005 },
       },
     };
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
     assistantEntry.parts = [toolPart];
 
     registerSessionEventHandlers(
@@ -1119,6 +1147,7 @@ describe('registerSessionEventHandlers', () => {
     const handoffTodosToMessages = vi.fn().mockReturnValue(true);
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
@@ -1401,14 +1430,12 @@ describe('registerSessionEventHandlers', () => {
     const syncTodosFromMessages = vi.fn();
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
       getMessages: () => [
-        createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }) as {
-          info: Message;
-          parts: Part[];
-        },
+        createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }),
       ],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
       upsertSession: vi.fn(),
@@ -1474,13 +1501,23 @@ describe('registerSessionEventHandlers', () => {
     });
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-parent',
       isSessionInActiveTree: (sessionId) =>
         sessionId === 'session-parent' || sessionId === 'session-child',
       getMessages: () => [
         {
           info: createAssistantEntry({ id: 'assistant-child-1', sessionID: 'session-child' }).info,
-          parts: [{ id: 'reasoning-1' }],
+          parts: [
+            {
+              id: 'reasoning-1',
+              sessionID: 'session-child',
+              messageID: 'assistant-child-1',
+              type: 'reasoning',
+              text: '',
+              time: { start: 1 },
+            },
+          ],
         },
       ],
       handoffTodosToMessages: vi.fn().mockReturnValue(true),
@@ -1585,7 +1622,15 @@ describe('registerSessionEventHandlers', () => {
             messages = [
               {
                 ...createAssistantEntry(),
-                parts: [{ id: 'part-1', type: 'text', text: snapshot } as Part],
+                parts: [
+                  {
+                    id: 'part-1',
+                    sessionID: 'session-1',
+                    messageID: 'assistant-1',
+                    type: 'text',
+                    text: snapshot,
+                  },
+                ],
               },
             ];
             resolve();
@@ -1598,7 +1643,15 @@ describe('registerSessionEventHandlers', () => {
             messages = [
               {
                 ...createAssistantEntry(),
-                parts: [{ id: 'part-1', type: 'text', text: serverText } as Part],
+                parts: [
+                  {
+                    id: 'part-1',
+                    sessionID: 'session-1',
+                    messageID: 'assistant-1',
+                    type: 'text',
+                    text: serverText,
+                  },
+                ],
               },
             ];
             resolve();
@@ -1818,7 +1871,7 @@ describe('registerSessionEventHandlers', () => {
   it('clears stale failures and marks progress without resyncing active messages', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
     const setSessionStatusEntry = vi.fn();
     const clearUsageLimitOnResumedProgress = vi.fn();
 
@@ -1858,7 +1911,7 @@ describe('registerSessionEventHandlers', () => {
     const assistantEntry = createAssistantEntry({
       id: 'assistant-child-1',
       sessionID: 'session-child',
-    }) as { info: Message; parts: Part[] };
+    });
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -1889,7 +1942,7 @@ describe('registerSessionEventHandlers', () => {
   it('skips the defensive active-message resync for in-order v2 progress events (seq present)', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2012,7 +2065,7 @@ describe('registerSessionEventHandlers', () => {
     const handlers = installHandlers();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2433,7 +2486,7 @@ describe('registerSessionEventHandlers', () => {
   it('advances one session sequence across message and v2 progress events', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2462,7 +2515,7 @@ describe('registerSessionEventHandlers', () => {
   it('advances the sequence for durable session events without dedicated handlers', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2491,7 +2544,7 @@ describe('registerSessionEventHandlers', () => {
   it('advances the shared sequence through reasoning events', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2524,7 +2577,7 @@ describe('registerSessionEventHandlers', () => {
   it('recovers a sequence gap on message.part.updated', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2629,7 +2682,7 @@ describe('registerSessionEventHandlers', () => {
   it('projects v2 text deltas without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2673,7 +2726,7 @@ describe('registerSessionEventHandlers', () => {
   it('projects v2 tool calls without defensive message resync when the assistant exists', () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    const assistantEntry = createAssistantEntry();
 
     registerSessionEventHandlers(
       createDefaultDeps({
@@ -2832,7 +2885,7 @@ describe('registerSessionEventHandlers', () => {
   it('keeps an already-working session busy when a completed assistant step is followed by busy status', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
-    let messages = [createAssistantEntry() as { info: Message; parts: Part[] }];
+    let messages: MessageEntry[] = [createAssistantEntry()];
 
     loadingStartedAt.mockReturnValue(1);
     startLoading.mockClear();
@@ -2871,8 +2924,8 @@ describe('registerSessionEventHandlers', () => {
       const handlers = installHandlers();
       const setSessionStatusEntry = vi.fn();
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
-      let assistantEntry = {
-        ...(createAssistantEntry() as { info: Message; parts: Part[] }),
+      let assistantEntry: MessageEntry = {
+        ...createAssistantEntry(),
         parts: [
           {
             id: 'text-1',
@@ -2881,7 +2934,7 @@ describe('registerSessionEventHandlers', () => {
             type: 'text',
             text: 'Hello there',
           },
-        ] as Part[],
+        ],
       };
 
       upsertMessageInfo.mockClear();
@@ -2934,8 +2987,8 @@ describe('registerSessionEventHandlers', () => {
     try {
       const handlers = installHandlers();
       const recheckSessionStatus = vi.fn().mockResolvedValue(undefined);
-      const assistantEntry = {
-        ...(createAssistantEntry() as { info: Message; parts: Part[] }),
+      const assistantEntry: MessageEntry = {
+        ...createAssistantEntry(),
         parts: [
           {
             id: 'text-1',
@@ -2944,7 +2997,7 @@ describe('registerSessionEventHandlers', () => {
             type: 'text',
             text: 'Working on it',
           },
-        ] as Part[],
+        ],
       };
 
       finishMessageStreaming.mockClear();
@@ -2981,7 +3034,7 @@ describe('registerSessionEventHandlers', () => {
     const clearPendingAbort = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
     upsertMessageInfo.mockImplementation((info: Message) => {
@@ -3052,7 +3105,7 @@ describe('registerSessionEventHandlers', () => {
     const clearPendingAbort = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
     upsertMessageInfo.mockImplementation((info: Message) => {
@@ -3123,7 +3176,7 @@ describe('registerSessionEventHandlers', () => {
   it('keeps tool-call step-finish parts in progress', () => {
     const handlers = installHandlers();
     const setSessionStatusEntry = vi.fn();
-    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
     upsertMessageInfo.mockImplementation((info: Message) => {
@@ -3172,7 +3225,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('ignores replayed v2 parts after a terminal step completes the assistant message', () => {
     const handlers = installHandlers();
-    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
     upsertMessageInfo.mockImplementation((info: Message) => {
@@ -3258,7 +3311,7 @@ describe('registerSessionEventHandlers', () => {
     const clearPendingAbort = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
-    let assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let assistantEntry: MessageEntry = createAssistantEntry();
 
     upsertMessageInfo.mockClear();
     upsertMessageInfo.mockImplementation((info: Message) => {
@@ -3312,10 +3365,8 @@ describe('registerSessionEventHandlers', () => {
     const updateUsageLimitState = vi.fn();
     const clearPendingAbort = vi.fn();
     const syncSession = vi.fn().mockResolvedValue(undefined);
-    let messages: Array<{ info: Message; parts: Part[] }> = [
-      createUserEntry() as { info: Message; parts: Part[] },
-    ];
-    const assistantEntry = createAssistantEntry() as { info: Message; parts: Part[] };
+    let messages: MessageEntry[] = [createUserEntry()];
+    const assistantEntry = createAssistantEntry();
     const syncSessionMessages = vi.fn(async () => {
       messages = [assistantEntry];
     });
@@ -3379,10 +3430,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [
-          createAssistantEntry() as { info: Message; parts: Part[] },
-          createUserEntry({ id: 'user-2' }) as { info: Message; parts: Part[] },
-        ],
+        getMessages: () => [createAssistantEntry(), createUserEntry({ id: 'user-2' })],
         setSessionStatusEntry,
         syncSessionMessages,
       })
@@ -3466,6 +3514,7 @@ describe('registerSessionEventHandlers', () => {
     const syncTodosFromMessages = vi.fn();
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getSessionStatus: () => undefined,
       isSessionTreeStatusWorking: () => false,
@@ -3541,6 +3590,7 @@ describe('registerSessionEventHandlers', () => {
     markSessionSeen.mockClear();
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getSessionStatus: () => undefined,
       isSessionTreeStatusWorking: () => false,
@@ -3622,7 +3672,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [createAssistantEntry() as { info: Message; parts: Part[] }],
+        getMessages: () => [createAssistantEntry()],
       })
     );
 
@@ -3646,10 +3696,7 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-1',
-        getMessages: () => [
-          createAssistantEntry() as { info: Message; parts: Part[] },
-          createUserEntry() as { info: Message; parts: Part[] },
-        ],
+        getMessages: () => [createAssistantEntry(), createUserEntry()],
       })
     );
 
@@ -3698,6 +3745,7 @@ describe('registerSessionEventHandlers', () => {
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getSessionStatus: () => undefined,
       isSessionTreeStatusWorking: () => false,
@@ -3782,6 +3830,7 @@ describe('registerSessionEventHandlers', () => {
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);
 
     registerSessionEventHandlers({
+      ...createDefaultDeps(),
       getActiveSessionId: () => 'session-1',
       getSessionStatus: () => undefined,
       isSessionTreeStatusWorking: () => false,

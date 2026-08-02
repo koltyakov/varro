@@ -4,8 +4,7 @@
 - Build: `npm run build` (`build:extension` + `build:webview`).
 - Dev/watch: `npm run dev`; preview only: `npm run preview:webview`.
 - Lint fix: `npm run lint`; lint check: `npm run lint:check`; format: `npm run fmt`.
-- Standard typecheck: `npm run typecheck`.
-- Unit-test typing debt report: `npm run typecheck:unit` (currently expected to fail; not standard validation).
+- Standard typecheck: `npm run typecheck` (all TypeScript source, test, E2E, and tooling files).
 - Unit tests: `npm run test`; coverage: `npm run test:coverage`.
 - Run one Vitest file: `npm run test -- src/webview/components/ChatInput.test.ts`.
 - Run one Vitest case: `npm run test -- src/webview/components/ChatInput.test.ts -t "detects slash commands only at the start of the input"`.

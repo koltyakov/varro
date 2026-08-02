@@ -299,7 +299,6 @@ describe('SessionStateManager notifications', () => {
       manager.handleServerEvent({
         type: 'message.updated',
         properties: {
-          sessionID: 'session-1',
           info: {
             sessionID: 'session-1',
             role: 'assistant',
@@ -366,7 +365,7 @@ describe('SessionStateManager notifications', () => {
           sessionID: 'session-1',
           role: 'assistant',
           mode: 'subagent',
-          time: { completed: Date.now() },
+          time: { created: 1, completed: Date.now() },
         },
       },
     });
@@ -392,7 +391,7 @@ describe('SessionStateManager notifications', () => {
           info: {
             sessionID: 'session-1',
             role: 'assistant',
-            time: { completed: now - 60_000 },
+            time: { created: now - 120_000, completed: now - 60_000 },
           },
         },
       });
@@ -423,7 +422,7 @@ describe('SessionStateManager notifications', () => {
           sessionID: 'session-1',
           role: 'assistant',
           agent: 'plan',
-          time: { completed: 2 },
+          time: { created: 1, completed: 2 },
         },
       },
     });
@@ -462,7 +461,7 @@ describe('SessionStateManager notifications', () => {
                   role: 'assistant',
                   agent: 'plan',
                   finish: 'stop',
-                  time: { completed: 2 },
+                  time: { created: 1, completed: 2 },
                 },
               },
             }
@@ -499,7 +498,6 @@ describe('SessionStateManager notifications', () => {
     manager.handleServerEvent({
       type: 'message.updated',
       properties: {
-        sessionID: 'session-1',
         info: {
           sessionID: 'session-1',
           role: 'assistant',
@@ -546,7 +544,7 @@ describe('SessionStateManager notifications', () => {
         info: {
           sessionID: 'session-1',
           role: 'assistant',
-          time: { completed: 2 },
+          time: { created: 1, completed: 2 },
         },
       },
     });
@@ -1373,7 +1371,7 @@ describe('SessionStateManager notifications', () => {
 
       manager.handleServerEvent({
         type: 'session.deleted',
-        properties: { sessionID: 'session-deleted' },
+        properties: { info: { id: 'session-deleted' } },
       });
       manager.reconcilePendingAttention(
         kind,
@@ -1404,7 +1402,7 @@ describe('SessionStateManager notifications', () => {
     }
     manager.handleServerEvent({
       type: 'session.deleted',
-      properties: { sessionID: 'session-deleted' },
+      properties: { info: { id: 'session-deleted' } },
     });
     manager.reconcilePendingAttention('permission', [], second);
     manager.reconcilePendingAttention('permission', [], first);
@@ -1584,7 +1582,7 @@ describe('SessionStateManager notifications', () => {
     const recovery = manager.consumeRecoverySnapshot();
     manager.handleServerEvent({
       type: 'session.deleted',
-      properties: { sessionID: 'session-deleted' },
+      properties: { info: { id: 'session-deleted' } },
     });
 
     await expect(recovery).resolves.toMatchObject({

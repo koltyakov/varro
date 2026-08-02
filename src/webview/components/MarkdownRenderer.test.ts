@@ -301,7 +301,7 @@ describe('MarkdownRenderer', () => {
   });
 
   it('sanitizes copied code payloads before writing to the clipboard', async () => {
-    const writeText = vi.fn(() => Promise.resolve());
+    const writeText = vi.fn((_text: string) => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
       configurable: true,
@@ -316,7 +316,8 @@ describe('MarkdownRenderer', () => {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(writeText).toHaveBeenCalledTimes(1);
-    const copied = writeText.mock.calls[0]?.[0] as string;
+    const copied = writeText.mock.calls[0]?.[0];
+    if (copied === undefined) throw new Error('Expected clipboard text');
     expect(copied).toBe(`line 1\nline 2${'A'.repeat(19_987)}`);
     expect(copied).toHaveLength(20_000);
     expect(copied.includes('\u0000')).toBe(false);

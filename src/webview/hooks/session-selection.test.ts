@@ -5,7 +5,7 @@ import {
   syncSessionMessagesWithDependencies,
 } from './session/session-selection';
 
-function assistantMessage(id: string): Message {
+function assistantMessage(id: string): Extract<Message, { role: 'assistant' }> {
   return {
     id,
     sessionID: 'session-1',
@@ -197,9 +197,12 @@ describe('session-selection helpers', () => {
     );
 
     expect(activeSession.value).toBe('session-1');
-    expect(clearMessages.mock.invocationCallOrder[0]).toBeLessThan(
-      syncSessionMcps.mock.invocationCallOrder[0]
-    );
+    const clearMessagesCallOrder = clearMessages.mock.invocationCallOrder[0];
+    const syncSessionMcpsCallOrder = syncSessionMcps.mock.invocationCallOrder[0];
+    if (clearMessagesCallOrder === undefined || syncSessionMcpsCallOrder === undefined) {
+      throw new Error('Expected clearMessages and syncSessionMcps to be called');
+    }
+    expect(clearMessagesCallOrder).toBeLessThan(syncSessionMcpsCallOrder);
     expect(persistActiveSessionId).toHaveBeenCalledWith('session-1');
     expect(markSessionSeen).toHaveBeenCalledWith('session-1');
     expect(applySelectedModel).toHaveBeenNthCalledWith(
@@ -306,9 +309,12 @@ describe('session-selection helpers', () => {
     await selection;
 
     expect(setMessagesLoading.mock.lastCall).toEqual([false]);
-    expect(setMessagesLoading.mock.invocationCallOrder[1]).toBeGreaterThan(
-      setMessagesIncremental.mock.invocationCallOrder[0]
-    );
+    const loadingCompleteCallOrder = setMessagesLoading.mock.invocationCallOrder[1];
+    const messagesAppliedCallOrder = setMessagesIncremental.mock.invocationCallOrder[0];
+    if (loadingCompleteCallOrder === undefined || messagesAppliedCallOrder === undefined) {
+      throw new Error('Expected messages to be applied before loading completed');
+    }
+    expect(loadingCompleteCallOrder).toBeGreaterThan(messagesAppliedCallOrder);
   });
 
   it('clears the loading flag and reports an error when the session load fails', async () => {
@@ -783,7 +789,14 @@ describe('session-selection helpers', () => {
         deriveSelectedModelFromMessages: () => null,
         syncTodosForSession: vi.fn(async () => {}),
         loadQuestions: vi.fn(async () => {}),
-        loadSessionStatuses: vi.fn(async () => ({ 'session-1': { type: 'retry' as const } })),
+        loadSessionStatuses: vi.fn(async () => ({
+          'session-1': {
+            type: 'retry' as const,
+            attempt: 1,
+            message: 'Retrying',
+            next: 2,
+          },
+        })),
         mergeSessionStatuses: vi.fn(),
         updateUsageLimitState: vi.fn(),
         startLoading,

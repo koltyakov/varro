@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssistantMessage, Part } from '../types';
+import type { AssistantMessage, ToolPart } from '../types';
 import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './message-entry-sync';
 
 function assistantMessage(id: string, createdAt = 0): AssistantMessage {
@@ -23,7 +23,7 @@ function assistantMessage(id: string, createdAt = 0): AssistantMessage {
   };
 }
 
-function toolPart(status: 'running' | 'completed', metadata?: Record<string, unknown>): Part {
+function toolPart(status: 'running' | 'completed', metadata?: Record<string, unknown>): ToolPart {
   return {
     id: 'tool-1',
     sessionID: 'session-1',
@@ -32,13 +32,22 @@ function toolPart(status: 'running' | 'completed', metadata?: Record<string, unk
     callID: 'call-1',
     tool: 'bash',
     metadata,
-    state: {
-      status,
-      input: { command: 'pwd' },
-      title: 'Run pwd',
-      time: { start: 1, end: status === 'completed' ? 2 : undefined },
-      output: status === 'completed' ? '/repo' : undefined,
-    },
+    state:
+      status === 'completed'
+        ? {
+            status,
+            input: { command: 'pwd' },
+            title: 'Run pwd',
+            time: { start: 1, end: 2 },
+            output: '/repo',
+            metadata: {},
+          }
+        : {
+            status,
+            input: { command: 'pwd' },
+            title: 'Run pwd',
+            time: { start: 1 },
+          },
   };
 }
 

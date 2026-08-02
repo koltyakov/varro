@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
+import type { ClipboardImage } from '../lib/app-state-types';
 import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
 import {
@@ -21,6 +22,34 @@ function provider(id: string, models: Provider['models']): Provider {
   };
 }
 
+function providerAuthFailureMessage(id: string): MessageEntry {
+  return {
+    info: {
+      id,
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1 },
+      error: {
+        name: 'ProviderAuthError',
+        data: { providerID: 'openai', message: 'Token expired' },
+      },
+      parentID: 'user-1',
+      modelID: 'gpt-4o',
+      providerID: 'openai',
+      mode: 'default',
+      path: { cwd: '/repo', root: '/repo' },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [],
+  };
+}
+
 function createEditorContext(overrides?: Partial<EditorContext>): EditorContext {
   return {
     workspacePath: '/repo',
@@ -39,13 +68,7 @@ function createState(overrides?: {
   editorContext?: EditorContext;
   terminalSelection?: { text: string; terminalName: string } | null;
   droppedFiles?: DroppedFile[];
-  clipboardImages?: Array<{
-    id: string;
-    url: string;
-    mime: string;
-    filename: string;
-    size: number;
-  }>;
+  clipboardImages?: ClipboardImage[];
   attachedDiagnostics?: {
     total: number;
     diagnostics: EditorContext['diagnostics'];
@@ -408,9 +431,12 @@ describe('session-send helpers', () => {
       terminalSelection,
     });
 
-    droppedFiles[0].relativePath = 'src/changed.ts';
-    droppedFiles[0].lineRanges?.push({ startLine: 8, endLine: 9 });
-    clipboardImages[0].filename = 'changed.png';
+    const droppedFile = droppedFiles[0];
+    const clipboardImage = clipboardImages[0];
+    if (!droppedFile || !clipboardImage) throw new Error('Expected attachment fixtures');
+    droppedFile.relativePath = 'src/changed.ts';
+    droppedFile.lineRanges?.push({ startLine: 8, endLine: 9 });
+    clipboardImage.filename = 'changed.png';
     terminalSelection.text = 'npm run build';
 
     expect(snapshot).toEqual({
@@ -477,6 +503,7 @@ describe('session-send helpers', () => {
         recheckSessionStatus: vi.fn(async () => {}),
         setSessionStatusEntry,
         stopLoading: vi.fn(),
+        shouldClearComposerAfterSend: () => true,
       },
       'hello'
     );
@@ -499,15 +526,13 @@ describe('session-send helpers', () => {
   it('shows the sent user message before the remote send finishes', async () => {
     let resolveSend: (() => void) | undefined;
     let messageCount = 0;
-    let optimisticEntry: { info: Message; parts: Part[] } | null = null;
     const sendAsync = vi.fn(
       () =>
         new Promise<void>((resolve) => {
           resolveSend = resolve;
         })
     );
-    const appendOptimisticMessage = vi.fn((entry: { info: Message; parts: Part[] }) => {
-      optimisticEntry = entry;
+    const appendOptimisticMessage = vi.fn((_entry: { info: Message; parts: Part[] }) => {
       messageCount += 1;
     });
 
@@ -556,22 +581,25 @@ describe('session-send helpers', () => {
     );
     await Promise.resolve();
 
+    const optimisticEntry = appendOptimisticMessage.mock.calls[0]?.[0];
+    if (!optimisticEntry) throw new Error('Expected an optimistic message');
+
     expect(appendOptimisticMessage.mock.invocationCallOrder[0]).toBeLessThan(
       sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
-    expect(optimisticEntry?.info).toMatchObject({
+    expect(optimisticEntry.info).toMatchObject({
       id: expect.stringMatching(/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/),
       sessionID: 'session-1',
       role: 'user',
       agent: 'build',
       model: { providerID: 'openai', modelID: 'gpt-4o' },
     });
-    expect(optimisticEntry?.parts).toMatchObject([
+    expect(optimisticEntry.parts).toMatchObject([
       { type: 'text', text: 'hello' },
       { type: 'text', text: '[Working directory: /repo]' },
     ]);
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
-      messageID: optimisticEntry?.info.id,
+      messageID: optimisticEntry.info.id,
       parts: [
         { type: 'text', text: 'hello' },
         { type: 'text', text: '[Working directory: /repo]' },
@@ -1050,18 +1078,7 @@ describe('session-send helpers', () => {
 
   it('retries the latest active provider-auth failure after credentials refresh', () => {
     const retryMessage = vi.fn(async () => {});
-    const messages = [
-      {
-        info: {
-          id: 'assistant-1',
-          sessionID: 'session-1',
-          role: 'assistant',
-          time: { created: 1 },
-          error: { name: 'ProviderAuthError', data: { message: 'Token expired' } },
-        },
-        parts: [],
-      },
-    ] as MessageEntry[];
+    const messages = [providerAuthFailureMessage('assistant-1')];
 
     expect(
       revalidateProviderAuthWithDependencies({
@@ -1076,17 +1093,8 @@ describe('session-send helpers', () => {
 
   it('does not replay a provider-auth failure while working or after a newer turn', () => {
     const retryMessage = vi.fn(async () => {});
-    const authFailure = {
-      info: {
-        id: 'assistant-1',
-        sessionID: 'session-1',
-        role: 'assistant',
-        time: { created: 1 },
-        error: { name: 'ProviderAuthError', data: { message: 'Token expired' } },
-      },
-      parts: [],
-    } as MessageEntry;
-    const newerUserMessage = {
+    const authFailure = providerAuthFailureMessage('assistant-1');
+    const newerUserMessage: MessageEntry = {
       info: {
         id: 'user-2',
         sessionID: 'session-1',
@@ -1096,7 +1104,7 @@ describe('session-send helpers', () => {
         model: { providerID: 'openai', modelID: 'gpt-5' },
       },
       parts: [],
-    } as MessageEntry;
+    };
 
     expect(
       revalidateProviderAuthWithDependencies({

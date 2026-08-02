@@ -27,10 +27,19 @@ vi.mock('vscode', () => vscodeMock);
 vi.mock('./logger', () => ({ logger: loggerMock }));
 
 import type { InitialWebviewState, ServerStatus } from '../shared/protocol';
-import type { BlockingRequestSnapshot, RecoverySnapshot } from './session-state-manager';
+import type {
+  BlockingRequestSnapshot,
+  RecoverySnapshot,
+  SessionStateManager,
+} from './session-state-manager';
 import { WebviewSession } from './webview-session';
 
 const RUNNING_STATUS: ServerStatus = { state: 'running', url: 'http://127.0.0.1:4096' };
+
+type WebviewSessionState = Pick<
+  SessionStateManager,
+  'clearCompleted' | 'consumeRecoverySnapshot' | 'isSessionInWorkspace' | 'replayBlockingRequests'
+>;
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -100,16 +109,16 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
   };
 
   const sessionState = {
-    clearCompleted: vi.fn(),
-    consumeRecoverySnapshot: vi.fn(() =>
+    clearCompleted: vi.fn<WebviewSessionState['clearCompleted']>(),
+    consumeRecoverySnapshot: vi.fn<WebviewSessionState['consumeRecoverySnapshot']>(() =>
       Promise.resolve({
         interruptedSessions: [],
         blockingRequests: [],
       } satisfies RecoverySnapshot)
     ),
-    isSessionInWorkspace: vi.fn(() => true),
-    replayBlockingRequests: vi.fn(),
-  };
+    isSessionInWorkspace: vi.fn<WebviewSessionState['isSessionInWorkspace']>(() => true),
+    replayBlockingRequests: vi.fn<WebviewSessionState['replayBlockingRequests']>(),
+  } satisfies WebviewSessionState;
 
   const sessionTrash = {
     hiddenSessionIds: vi.fn(() => new Set<string>()),
@@ -159,13 +168,13 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     postThemeUpdate: vi.fn(),
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
-    queuedMessages: vi.fn(() => undefined),
+    queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
     flushPendingServerEvents: vi.fn(),
   };
 
   const session = new WebviewSession(
     bridge as never,
-    sessionState as never,
+    sessionState,
     sessionTrash as never,
     pinnedSessions,
     hiddenSessions as never,

@@ -34,7 +34,7 @@ npm run typecheck
 npm run test
 ```
 
-`npm run typecheck` covers the extension, webview, E2E harness, and shared contract tests. `npm run typecheck:unit` is an opt-in debt report for all Vitest sources; it currently reports legacy fixture and mock typing errors and is not part of standard or CI validation.
+`npm run typecheck` checks every TypeScript source, test, E2E harness, and root tooling configuration file using the repository's single TypeScript configuration.
 
 While iterating, run the narrowest relevant command for the area you changed. Useful targeted commands include:
 
@@ -395,7 +395,6 @@ docs/
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:coverage` | Run tests with coverage output |
-| `npm run typecheck` | Check extension, webview, shared contract-test, and e2e code |
-| `npm run typecheck:unit` | Diagnostic all-unit-test typecheck; currently expected to report legacy test debt |
+| `npm run typecheck` | Check all TypeScript source, test, E2E, and tooling code |
 | `npm run package` | Build and create a VSIX package |
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |

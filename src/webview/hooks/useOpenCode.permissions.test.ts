@@ -1,5 +1,7 @@
 import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
+import type { ServerEventName } from '../../shared/protocol';
+import type { onMessage } from '../lib/bridge';
 import type { Permission } from '../types';
 import {
   getBridgeMocks,
@@ -11,6 +13,23 @@ import {
 
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
+type BridgeOnMessage = typeof onMessage;
+type ServerEventsOn = (
+  event: ServerEventName | '*',
+  handler: (data: unknown) => void
+) => () => void;
+const bridgeOnMessage = vi.fn<BridgeOnMessage>();
+const serverEventsOn = vi.fn<ServerEventsOn>();
+Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
+Object.assign(clientMocks, { serverEventsOn });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 function permission(id = 'perm-1'): Permission {
   return {
@@ -41,12 +60,12 @@ function permissionListItem(id = 'perm-1') {
 
 function captureServerEventHandlers() {
   const handlers = new Map<string, (data: unknown) => void>();
-  clientMocks.serverEventsOn.mockImplementation(
-    (event: string, handler: (data: unknown) => void) => {
-      handlers.set(event, handler);
-      return () => handlers.delete(event);
-    }
-  );
+  serverEventsOn.mockImplementation((event, handler) => {
+    handlers.set(event, handler);
+    return () => {
+      handlers.delete(event);
+    };
+  });
   return handlers;
 }
 
@@ -210,14 +229,8 @@ describe('useOpenCode permission and config flows', () => {
   it('does not re-add a permission answered while its list request is in flight', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
-    let resolvePermissionList: ((items: ReturnType<typeof permissionListItem>[]) => void) | null =
-      null;
-    clientMocks.permissionList.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePermissionList = resolve;
-        })
-    );
+    const permissionList = deferred<ReturnType<typeof permissionListItem>[]>();
+    clientMocks.permissionList.mockReturnValue(permissionList.promise);
     clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
 
     const { stateModule, hookModule } = await loadModules();
@@ -232,7 +245,7 @@ describe('useOpenCode permission and config flows', () => {
       await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(1));
 
       await hookModule.respondPermission('session-1', 'perm-answered', 'once');
-      resolvePermissionList?.([
+      permissionList.resolve([
         permissionListItem('perm-answered'),
         permissionListItem('perm-current'),
       ]);
@@ -248,9 +261,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('applies desktop session pane side from config updates', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -293,9 +306,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('applies disabled provider-limit polling from config updates', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -334,9 +347,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('still accepts legacy disabled provider-limit polling config updates', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -375,9 +388,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('re-enables provider-limit polling from poll interval config updates', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -427,9 +440,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('restores pending permission prompts from initial webview state after reload', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -504,9 +517,9 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('restores pending permission prompts that use permissionID after reload', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
@@ -581,23 +594,21 @@ describe('useOpenCode permission and config flows', () => {
   });
 
   it('normalizes live permission events with nested tool metadata', async () => {
-    let bridgeHandler: ((message: { type: string; payload?: unknown }) => void) | undefined;
-    bridgeMocks.onMessage.mockImplementation((handler) => {
-      bridgeHandler = handler as typeof bridgeHandler;
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
       return () => {
         bridgeHandler = undefined;
       };
     });
 
     const serverEventHandlers = new Map<string, (data: unknown) => void>();
-    clientMocks.serverEventsOn.mockImplementation(
-      (event: string, handler: (data: unknown) => void) => {
-        serverEventHandlers.set(event, handler);
-        return () => {
-          serverEventHandlers.delete(event);
-        };
-      }
-    );
+    serverEventsOn.mockImplementation((event, handler) => {
+      serverEventHandlers.set(event, handler);
+      return () => {
+        serverEventHandlers.delete(event);
+      };
+    });
 
     clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
     clientMocks.sessionList.mockResolvedValue([session('session-1')]);

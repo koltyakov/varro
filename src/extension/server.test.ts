@@ -279,9 +279,10 @@ function stopEventStream(server: OpenCodeServer) {
   (server as unknown as { stopEventStream: () => void }).stopEventStream();
 }
 
-function setRestartTimer(server: OpenCodeServer, timer: ReturnType<typeof setTimeout> | null) {
-  (server as unknown as { restartTimer: ReturnType<typeof setTimeout> | null }).restartTimer =
-    timer;
+type TestTimer = ReturnType<typeof setTimeout> | number;
+
+function setRestartTimer(server: OpenCodeServer, timer: TestTimer | null) {
+  (server as unknown as { restartTimer: TestTimer | null }).restartTimer = timer;
 }
 
 function runMaintenanceTick(server: OpenCodeServer) {
