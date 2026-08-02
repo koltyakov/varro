@@ -480,6 +480,7 @@ export type QueuedMessageSnapshot = {
   id: string;
   sessionId: string;
   text: string;
+  paused?: boolean;
   droppedFiles: DroppedFile[];
   clipboardImages: Array<{
     id: string;

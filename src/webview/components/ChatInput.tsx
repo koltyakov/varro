@@ -38,6 +38,7 @@ import {
   removeContextFile,
   enqueueMessage,
   reorderQueuedMessage,
+  setQueuedMessagePaused,
   replaceQueuedMessage,
   removeQueuedMessage,
   setQueuedMessageDispatchingId as setDispatchingQueuedMessageId,
@@ -1396,10 +1397,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ) {
       requestMessageListScrollToBottom();
       const sessionId = composerSessionId()!;
+      const queuedMessagePaused =
+        queuedEdit && state.queuedMessages.find((item) => item.id === queuedEdit.id)?.paused;
       const message = {
         id: createAttachmentID(),
         sessionId,
         text: sendableText,
+        ...(queuedMessagePaused ? { paused: true } : {}),
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         terminalSelection: queuedAttachments.terminalSelection,
@@ -1474,6 +1478,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
     if (dispatchingQueuedMessageId()) return;
+    if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
     if (failedQueuedMessageIds().has(item.id) && !retry) return;
     setQueuedMessageFailed(item.id, false);
     setDispatchingQueuedMessageId(item.id);
@@ -1516,7 +1521,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
     const next = state.queuedMessages.find(
       (item) =>
-        item.sessionId === sessionId && !steeringIds.has(item.id) && !failedSteerIds.has(item.id)
+        item.sessionId === sessionId &&
+        !item.paused &&
+        !steeringIds.has(item.id) &&
+        !failedSteerIds.has(item.id)
     );
     if (queueDispatchTimer) {
       clearTimeout(queueDispatchTimer);
@@ -1559,6 +1567,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const nextQueued = state.queuedMessages.find(
         (item) =>
           item.sessionId === sid &&
+          !item.paused &&
           !currentSteeringIds.has(item.id) &&
           !currentFailedSteerIds.has(item.id)
       );
@@ -2689,6 +2698,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           canEdit={canEditQueuedMessage()}
           onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
           onSendAsSteer={sendQueuedAsSteer}
+          onSetPaused={(item, paused, allRows) => setQueuedMessagePaused(item.id, paused, allRows)}
           onReorder={reorderQueuedMessage}
           onEdit={editQueuedMessage}
           onCancelEdit={cancelQueuedMessageEdit}

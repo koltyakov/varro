@@ -1676,7 +1676,51 @@ describe('ChatInput', () => {
     expect(meta?.closest('.chat-queue-actions')).toBeNull();
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
     expect(container?.querySelector('[aria-label="Send as Steer"]')?.textContent).toBe('');
-    expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(8);
+    expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(10);
+  });
+
+  it('pauses queued rows individually and toggles all session rows with Alt-click', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'other', sessionId: 'session-2', text: 'other session' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Pause queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(state.queuedMessages.find((item) => item.id === 'q1')?.paused).toBe(true);
+    expect(state.queuedMessages.find((item) => item.id === 'q2')?.paused).toBeUndefined();
+    expect(state.queuedMessages.find((item) => item.id === 'other')?.paused).toBeUndefined();
+    expect(container?.querySelectorAll('.chat-queue-item.is-paused')).toHaveLength(1);
+    expect(container?.querySelector('.chat-queue-paused-label')?.textContent).toBe('Paused');
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Pause queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(
+      state.queuedMessages
+        .filter((item) => item.sessionId === 'session-1')
+        .every((item) => item.paused)
+    ).toBe(true);
+    expect(state.queuedMessages.find((item) => item.id === 'other')?.paused).toBeUndefined();
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Play queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(
+      state.queuedMessages
+        .filter((item) => item.sessionId === 'session-1')
+        .every((item) => item.paused === undefined)
+    ).toBe(true);
+    expect(container?.querySelector('.chat-queue-item.is-paused')).toBeNull();
   });
 
   it('tracks hidden-scrollbar queue overflow at both edges', () => {
@@ -1740,6 +1784,8 @@ describe('ChatInput', () => {
     expect(rows[0]?.classList.contains('is-dragging')).toBe(true);
     expect(rows[1]?.classList.contains('is-drag-over')).toBe(true);
     expect(container?.querySelector('.chat-queue-container.is-reordering')).not.toBeNull();
+    expect([...handles].map((handle) => handle.textContent?.trim())).toEqual(['1', '2', '3']);
+    expect([...handles].every((handle) => handle.querySelector('svg') === null)).toBe(true);
     expect(document.querySelector('.chat-drop-overlay')).toBeNull();
 
     dispatchDragEvent(rows[1]!, 'drop', dataTransfer);
@@ -1750,6 +1796,12 @@ describe('ChatInput', () => {
       [...container!.querySelectorAll('.chat-queue-label')].map((item) => item.textContent)
     ).toEqual(['second', 'first', 'third']);
     expect(container?.querySelector('.chat-queue-container.is-reordering')).toBeNull();
+    expect(container?.querySelector('.chat-queue-position')).toBeNull();
+    expect(
+      [...container!.querySelectorAll('[aria-label^="Reorder queued message:"]')].every(
+        (handle) => handle.querySelector('svg') !== null
+      )
+    ).toBe(true);
   });
 
   it('keeps an edited queue row visible and cancels editing from the row', () => {
@@ -1834,7 +1886,7 @@ describe('ChatInput', () => {
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
       { id: 'q1', sessionId: 'session-1', text: 'first' },
-      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q2', sessionId: 'session-1', text: 'second', paused: true },
       { id: 'q3', sessionId: 'session-1', text: 'third' },
     ]);
 
@@ -1860,6 +1912,7 @@ describe('ChatInput', () => {
       'third',
     ]);
     expect(state.queuedMessages[0]?.id).toBe('q1');
+    expect(state.queuedMessages[1]?.paused).toBe(true);
     expect(state.queuedMessages[2]?.id).toBe('q3');
   });
 
@@ -1942,6 +1995,40 @@ describe('ChatInput', () => {
       },
       preserveComposer: true,
     });
+  });
+
+  it('skips paused rows and dispatches them after they are played', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'paused first', paused: true },
+      { id: 'q2', sessionId: 'session-1', text: 'active second' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual(['active second']);
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Play queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock.mock.calls.map(([text]) => text)).toEqual([
+      'active second',
+      'paused first',
+    ]);
+    expect(state.queuedMessages).toEqual([]);
   });
 
   it('retains a failed automatic queue item and its attachments until an explicit retry', async () => {

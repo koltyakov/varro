@@ -12,6 +12,7 @@ export interface QueuedMessage {
   id: string;
   sessionId: string;
   text: string;
+  paused?: boolean;
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];
   terminalSelection?: { text: string; terminalName: string } | null;

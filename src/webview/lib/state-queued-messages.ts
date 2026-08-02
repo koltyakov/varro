@@ -27,6 +27,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       id,
       sessionId,
       text,
+      paused,
       droppedFiles = [],
       clipboardImages = [],
       terminalSelection = null,
@@ -35,6 +36,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       id,
       sessionId,
       text,
+      ...(paused ? { paused: true } : {}),
       droppedFiles,
       clipboardImages,
       terminalSelection,
@@ -79,6 +81,19 @@ export function replaceQueuedMessage(id: string, message: QueuedMessage) {
 export function removeQueuedMessage(id: string) {
   const next = state.queuedMessages.filter((item) => item.id !== id);
   if (next.length === state.queuedMessages.length) return;
+  commitQueuedMessages(next);
+}
+
+export function setQueuedMessagePaused(id: string, paused: boolean, allForSession = false) {
+  const message = state.queuedMessages.find((item) => item.id === id);
+  if (!message) return;
+  const next = state.queuedMessages.map((item) => {
+    if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return item;
+    if ((item.paused === true) === paused) return item;
+    if (paused) return { ...item, paused: true };
+    const { paused: _paused, ...unpaused } = item;
+    return unpaused;
+  });
   commitQueuedMessages(next);
 }
 

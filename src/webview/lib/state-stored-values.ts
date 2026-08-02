@@ -229,6 +229,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     id,
     sessionId,
     text: record.text,
+    ...(record.paused === true ? { paused: true } : {}),
     droppedFiles,
     clipboardImages,
     terminalSelection,

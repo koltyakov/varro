@@ -133,6 +133,40 @@ describe('state helpers', () => {
     );
   });
 
+  it('pauses queued messages individually or across one session', async () => {
+    const stateModule = await loadState();
+
+    stateModule.enqueueMessage({ id: 'q1', sessionId: 'session-1', text: 'first' });
+    stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
+    stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+
+    stateModule.setQueuedMessagePaused('q1', true);
+    expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
+      true,
+      undefined,
+      undefined,
+    ]);
+
+    stateModule.setQueuedMessagePaused('q2', true, true);
+    expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
+      true,
+      undefined,
+      true,
+    ]);
+    expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toMatchObject([
+      { id: 'q1', paused: true },
+      { id: 'other' },
+      { id: 'q2', paused: true },
+    ]);
+
+    stateModule.setQueuedMessagePaused('q1', false, true);
+    expect(stateModule.state.queuedMessages.map((item) => item.paused)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('persists queued messages and restores their session-aware order', async () => {
     let stateModule = await loadState();
 
@@ -206,6 +240,7 @@ describe('state helpers', () => {
           id: 'host',
           sessionId: 'session-1',
           text: 'host snapshot',
+          paused: true,
           droppedFiles: [],
           clipboardImages: [
             {
@@ -225,6 +260,7 @@ describe('state helpers', () => {
       const stateModule = await loadState();
 
       expect(stateModule.state.queuedMessages.map((message) => message.id)).toEqual(['host']);
+      expect(stateModule.state.queuedMessages[0]?.paused).toBe(true);
       expect(stateModule.state.queuedMessages[0]?.clipboardImages).toEqual([
         {
           id: 'image-1',

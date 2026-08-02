@@ -1431,7 +1431,20 @@
   background: var(--chat-queue-row-surface);
 }
 
-.chat-queue-item:hover:not(.is-editing):not(.is-drag-over) {
+.chat-queue-item.is-paused .chat-queue-label {
+  color: var(--color-vscode-muted);
+}
+
+.chat-queue-item.is-paused:not(.is-editing):not(.is-drag-over) {
+  --chat-queue-row-surface: color-mix(
+    in srgb,
+    var(--color-vscode-muted) 8%,
+    var(--color-vscode-surface-soft)
+  );
+  background: var(--chat-queue-row-surface);
+}
+
+.chat-queue-item:hover:not(.is-editing):not(.is-drag-over):not(.is-paused) {
   --chat-queue-row-surface: color-mix(
     in srgb,
     var(--color-vscode-fg) 5%,
@@ -1505,6 +1518,12 @@
   cursor: default;
 }
 
+.chat-queue-position {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 .chat-queue-label {
   flex: 1;
   min-width: 0;
@@ -1532,6 +1551,17 @@
   flex-shrink: 0;
   color: var(--color-vscode-accent);
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chat-queue-paused-label {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-vscode-muted) 14%, transparent);
+  color: var(--color-vscode-fg-muted);
+  font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }

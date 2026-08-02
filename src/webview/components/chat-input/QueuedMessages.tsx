@@ -6,7 +6,7 @@ export const QUEUED_MESSAGE_DRAG_TYPE = 'application/x-varro-queued-message';
 
 export type QueuedMessageItem = Pick<
   QueuedMessage,
-  'id' | 'sessionId' | 'text' | 'droppedFiles' | 'clipboardImages' | 'terminalSelection'
+  'id' | 'sessionId' | 'text' | 'paused' | 'droppedFiles' | 'clipboardImages' | 'terminalSelection'
 >;
 
 function bindQueueOverflowFade(element: HTMLElement, trackItemCount: () => number) {
@@ -38,6 +38,7 @@ export function QueuedMessages(props: {
   canEdit: boolean;
   onRetryDispatch: (item: QueuedMessageItem) => void;
   onSendAsSteer: (item: QueuedMessageItem) => void;
+  onSetPaused: (item: QueuedMessageItem, paused: boolean, allRows: boolean) => void;
   onReorder: (id: string, targetId: string) => void;
   onEdit: (item: QueuedMessageItem) => void;
   onCancelEdit: () => void;
@@ -112,7 +113,7 @@ export function QueuedMessages(props: {
             };
             return (
               <div
-                class={`chat-queue-item${draggedItemId() === item.id ? ' is-dragging' : ''}${dragOverItemId() === item.id ? ' is-drag-over' : ''}${isEditing() ? ' is-editing' : ''}`}
+                class={`chat-queue-item${item.paused ? ' is-paused' : ''}${draggedItemId() === item.id ? ' is-dragging' : ''}${dragOverItemId() === item.id ? ' is-drag-over' : ''}${isEditing() ? ' is-editing' : ''}`}
                 role="listitem"
                 title={item.text || label}
                 onDragEnter={dragOverItem}
@@ -139,16 +140,28 @@ export function QueuedMessages(props: {
                     aria-label={`Reorder queued message: ${label}`}
                     aria-grabbed={draggedItemId() === item.id}
                   >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <circle cx="5" cy="3" r="1" />
-                      <circle cx="11" cy="3" r="1" />
-                      <circle cx="5" cy="8" r="1" />
-                      <circle cx="11" cy="8" r="1" />
-                      <circle cx="5" cy="13" r="1" />
-                      <circle cx="11" cy="13" r="1" />
-                    </svg>
+                    <Show
+                      when={draggedItemId()}
+                      fallback={
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                          <circle cx="5" cy="3" r="1" />
+                          <circle cx="11" cy="3" r="1" />
+                          <circle cx="5" cy="8" r="1" />
+                          <circle cx="11" cy="8" r="1" />
+                          <circle cx="5" cy="13" r="1" />
+                          <circle cx="11" cy="13" r="1" />
+                        </svg>
+                      }
+                    >
+                      <span class="chat-queue-position" aria-hidden="true">
+                        {index() + 1}
+                      </span>
+                    </Show>
                   </button>
                   <span class="chat-queue-label">{label}</span>
+                  <Show when={item.paused}>
+                    <span class="chat-queue-paused-label">Paused</span>
+                  </Show>
                   <Show when={isEditing()}>
                     <span class="chat-queue-editing-label">Editing</span>
                   </Show>
@@ -176,6 +189,47 @@ export function QueuedMessages(props: {
                   </span>
                 </Show>
                 <div class="chat-queue-actions">
+                  <button
+                    class={`chat-queue-control chat-queue-icon-action${item.paused ? ' is-active' : ''}`}
+                    onClick={(event) => props.onSetPaused(item, !item.paused, event.altKey)}
+                    disabled={isLocked()}
+                    hidden={isLocked()}
+                    title={`${item.paused ? 'Play' : 'Pause'} queued message (Option/Alt-click for all)`}
+                    aria-label={`${item.paused ? 'Play' : 'Pause'} queued message`}
+                    aria-pressed={item.paused === true}
+                  >
+                    <Show
+                      when={item.paused}
+                      fallback={
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          aria-hidden="true"
+                        >
+                          <path d="M6 18.4V5.6C6 5.26863 6.26863 5 6.6 5H9.4C9.73137 5 10 5.26863 10 5.6V18.4C10 18.7314 9.73137 19 9.4 19H6.6C6.26863 19 6 18.7314 6 18.4Z" />
+                          <path d="M14 18.4V5.6C14 5.26863 14.2686 5 14.6 5H17.4C17.7314 5 18 5.26863 18 5.6V18.4C18 18.7314 17.7314 19 17.4 19H14.6C14.2686 19 14 18.7314 14 18.4Z" />
+                        </svg>
+                      }
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z" />
+                      </svg>
+                    </Show>
+                  </button>
                   <button
                     class={`chat-queue-control chat-queue-action${isInFlight() ? ' is-pending' : ''}${didDispatchFail() || didSteerFail() ? ' is-error' : ''}`}
                     onClick={() =>
