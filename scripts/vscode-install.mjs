@@ -1,5 +1,5 @@
 import { access, readFile, readdir, rm } from 'node:fs/promises';
-import { dirname, join, resolve, win32 } from 'node:path';
+import { dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import spawn from 'cross-spawn';
 
@@ -16,7 +16,7 @@ export function createVscodeInstallPlan(options) {
     throw new Error('npm_execpath is unavailable; run this helper with npm run vscode:install');
   }
 
-  const pathJoin = options.platform === 'win32' ? win32.join : join;
+  const pathJoin = options.platform === 'win32' ? win32.join : posix.join;
   const vsixPath = pathJoin(
     options.projectRoot,
     `${options.packageName}-${options.packageVersion}.vsix`
