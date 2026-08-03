@@ -55,7 +55,7 @@ export function buildVirtualMetrics(args: {
     const previousIds = args.previous.itemIds;
     const previousPrefix = args.previous.metrics.prefix;
     const upper = Math.min(previousIds.length, itemCount);
-    let commonLen = 0;
+    let commonLen = previousIds === args.itemIds ? upper : 0;
     while (commonLen < upper && previousIds[commonLen] === args.itemIds[commonLen]) {
       commonLen += 1;
     }

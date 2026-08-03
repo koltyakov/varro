@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Message, Part } from '../types';
 import {
+  advanceSessionHistoryCursor,
+  advanceSessionHistoryPromptCursor,
   cacheSessionHistoryPage,
   clearSessionMessageWindowState,
   getPrefetchedSessionHistory,
@@ -106,6 +108,18 @@ describe('history window state', () => {
     setSessionHistoryCursor('session-1');
     expect(getSessionHistoryCursor('session-1')).toBeUndefined();
     expect(isSessionHistoryTruncated('session-1')).toBe(false);
+  });
+
+  it('terminates opaque history and prompt cursor cycles across separate advances', () => {
+    setSessionHistoryCursor('session-1', 'cursor-a');
+    setSessionHistoryPromptCursor('session-1', 'prompt-a');
+
+    expect(advanceSessionHistoryCursor('session-1', 'cursor-a', 'cursor-b')).toBe('cursor-b');
+    expect(advanceSessionHistoryPromptCursor('session-1', 'prompt-a', 'prompt-b')).toBe('prompt-b');
+    expect(advanceSessionHistoryCursor('session-1', 'cursor-b', 'cursor-a')).toBeUndefined();
+    expect(advanceSessionHistoryPromptCursor('session-1', 'prompt-b', 'prompt-a')).toBeUndefined();
+    expect(getSessionHistoryCursor('session-1')).toBeUndefined();
+    expect(getSessionHistoryPromptCursor('session-1')).toBeUndefined();
   });
 
   it('tracks user prompts fetched from behind the visible history boundary', () => {

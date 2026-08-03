@@ -364,6 +364,11 @@ export function MessageList() {
       ownershipEpoch: number;
     }
   >();
+  let pendingStructuralScrollAnchor: {
+    anchor: { messageId: string; top: number; topPad: number };
+    sessionId: string | null;
+    ownershipEpoch: number;
+  } | null = null;
   let pointerScrollOwnershipActive = false;
   let diffFocusPauseActive = false;
   let resumeAutoScrollAfterDiffFocus = false;
@@ -386,6 +391,7 @@ export function MessageList() {
   const [viewportHeight, setViewportHeight] = createSignal(0);
   const [appendBottomReserve, setAppendBottomReserve] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
+  const [trackLayoutVersion, setTrackLayoutVersion] = createSignal(0);
   const [hasBootstrappedVirtualization, setHasBootstrappedVirtualization] = createSignal(false);
   const [stickyPreviewGeometryVersion, setStickyPreviewGeometryVersion] = createSignal(0);
   const [stickyUserMessagePreview, setStickyUserMessagePreview] =
@@ -432,9 +438,34 @@ export function MessageList() {
   });
   const observedVisibleMessageBounds = new Map<string, { top: number; bottom: number }>();
   const mountedMessageRows = new Map<string, HTMLDivElement>();
+  let previousVisibleStructureSessionId: string | null = null;
+  let previousVisibleStructureMessageIds: readonly string[] | null = null;
   const messages = createMemo(() => {
     messageStructureVersion();
-    return untrack(() => getVisibleThreadMessages(state.messages, state.activeSessionId));
+    const sessionId = state.activeSessionId;
+    const canCaptureAnchor =
+      previousVisibleStructureMessageIds !== null &&
+      previousVisibleStructureSessionId === sessionId &&
+      untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
+    const anchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
+    const visibleMessages = getVisibleThreadMessages(state.messages, sessionId, state.sessions);
+    const currentIds = visibleMessages.map((entry) => entry.info.id);
+    const previousIds = previousVisibleStructureMessageIds;
+    const structureChanged =
+      previousIds !== null &&
+      (previousIds.length !== currentIds.length ||
+        previousIds.some((id, index) => id !== currentIds[index]));
+    const pureAppend =
+      previousIds !== null &&
+      currentIds.length >= previousIds.length &&
+      previousIds.every((id, index) => currentIds[index] === id);
+    previousVisibleStructureSessionId = sessionId;
+    previousVisibleStructureMessageIds = currentIds;
+
+    if (structureChanged && !pureAppend && anchor && !pendingStructuralScrollAnchor) {
+      scheduleStructuralScrollAnchorRestore(anchor, sessionId);
+    }
+    return visibleMessages;
   });
   const latestPlanImplementationMessageId = createMemo(() => {
     messageInfoVersion();
@@ -1032,20 +1063,6 @@ export function MessageList() {
   const visibleRange = createMemo<VisibleRange>(
     () => {
       const msgs = messages();
-      const editing = editingMessage();
-      if (editing) {
-        const editedIndex = msgs.findIndex((entry) => entry.info.id === editing.messageId);
-        if (editedIndex >= 0) {
-          return {
-            start: 0,
-            end: msgs.length,
-            topPad: 0,
-            bottomPad: 0,
-            coreStart: 0,
-            coreEnd: msgs.length,
-          };
-        }
-      }
       if (!shouldVirtualize() || msgs.length === 0) {
         return {
           start: 0,
@@ -1467,6 +1484,64 @@ export function MessageList() {
     return null;
   }
 
+  function captureMountedVisibleScrollAnchor() {
+    if (!containerRef) return null;
+    const containerRect = containerRef.getBoundingClientRect();
+    for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
+      const messageId = row.dataset.msgId;
+      if (!messageId) continue;
+      return { messageId, top: rect.top - containerRect.top, topPad: 0 };
+    }
+    return null;
+  }
+
+  function genericStructuralAnchorCanOwnScroll(sessionId: string | null) {
+    return !(
+      disposed ||
+      !containerRef ||
+      autoScroll() ||
+      followModeLocked ||
+      pendingScrollToBottomRequest ||
+      appendScrollRafId !== 0 ||
+      stickyNavigationOwnsScroll() ||
+      editingMessage() ||
+      pendingExpansionScrollAnchor ||
+      diffFocusPauseActive ||
+      pointerScrollOwnershipActive ||
+      userScrollRecentlyActive() ||
+      (sessionId && pendingOlderHistoryAnchors.has(sessionId))
+    );
+  }
+
+  function scheduleStructuralScrollAnchorRestore(
+    anchor: { messageId: string; top: number; topPad: number },
+    sessionId: string | null
+  ) {
+    const pending = {
+      anchor,
+      sessionId,
+      ownershipEpoch: userScrollOwnershipEpoch,
+    };
+    pendingStructuralScrollAnchor = pending;
+    queueMicrotask(() => {
+      if (pendingStructuralScrollAnchor !== pending) return;
+      try {
+        if (
+          state.activeSessionId !== sessionId ||
+          userScrollOwnershipEpoch !== pending.ownershipEpoch ||
+          !genericStructuralAnchorCanOwnScroll(sessionId)
+        ) {
+          return;
+        }
+        restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true });
+      } finally {
+        if (pendingStructuralScrollAnchor === pending) pendingStructuralScrollAnchor = null;
+      }
+    });
+  }
+
   function captureMessageScrollAnchor(messageId: string) {
     if (!containerRef) return null;
     const row =
@@ -1550,7 +1625,7 @@ export function MessageList() {
       return;
     }
 
-    if (diffFocusPauseActive) {
+    if (diffFocusPauseActive || pendingStructuralScrollAnchor) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -2563,6 +2638,9 @@ export function MessageList() {
       if (containerHeightDelta > 0.5) reserveLostBottomSpace();
       else if (containerHeightDelta < -0.5) consumeBottomReserve(-containerHeightDelta);
       if (trackChanged) reconcileAppendBottomReserve();
+      if (trackChanged && shouldMeasureRows() && !autoScroll()) {
+        setTrackLayoutVersion((version) => version + 1);
+      }
       const currentContainerFontSize = containerChanged
         ? parseFloat(getComputedStyle(containerRef).fontSize) || 0
         : lastContainerFontSize;
@@ -3045,6 +3123,7 @@ export function MessageList() {
     scrollTop();
     viewportHeight();
     measurementVersion();
+    trackLayoutVersion();
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
 
@@ -3102,8 +3181,8 @@ export function MessageList() {
   function alignMountedMessage(preview: StickyUserMessagePreview): boolean {
     const row = mountedMessageRows.get(preview.id);
     if (!row) return false;
-    if (shouldMeasureRows() && containerRef) {
-      const target = getStickyUserMessageSourceElement(preview.id) ?? row;
+    const target = row.querySelector<HTMLElement>('.user-message-card');
+    if (containerRef && target) {
       const containerRect = containerRef.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
       const offset = targetRect.top - containerRect.top - getMessageJumpTopInset();

@@ -31,6 +31,32 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function userEntry(id: string, sessionId = 'session-1') {
+  const info = userMessage(id);
+  info.sessionID = sessionId;
+  return { info, parts: [] };
+}
+
+function installServerEventHandlers() {
+  const handlers = new Map<ServerEventName | '*', (data: unknown) => void>();
+  serverEventsOn.mockImplementation((event, handler) => {
+    handlers.set(event, handler);
+    return () => {
+      handlers.delete(event);
+    };
+  });
+  return handlers;
+}
+
+function mockRuntimeBootstrap() {
+  clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+  clientMocks.sessionList.mockResolvedValue([]);
+  clientMocks.agentList.mockResolvedValue([]);
+  clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+  clientMocks.questionList.mockResolvedValue([]);
+  clientMocks.sessionStatus.mockResolvedValue({});
+}
+
 describe('useOpenCode session state flows', () => {
   it('keeps the chat connected when the event stream is degraded', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
@@ -538,5 +564,356 @@ describe('useOpenCode session state flows', () => {
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
       ).toEqual(['user-0', 'user-1']);
     });
+  });
+
+  it('[VIRT-06] preserves append and removal events that beat a stale latest response', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const canonical = [userEntry('message-1'), userEntry('message-3')];
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages
+      .mockReturnValueOnce(staleLatest.promise)
+      .mockResolvedValueOnce(canonical);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [userEntry('message-1'), userEntry('message-2')]);
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+
+      handlers.get('message.updated')?.({ properties: { info: userMessage('message-3') } });
+      handlers.get('message.removed')?.({
+        properties: { sessionID: 'session-1', messageID: 'message-2' },
+      });
+      staleLatest.resolve([userEntry('message-1'), userEntry('message-2')]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'message-1',
+        'message-3',
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('[VIRT-06] preserves an append without relying on a later removal invalidation', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [userEntry('message-1'), userEntry('message-2')]);
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      handlers.get('message.updated')?.({ properties: { info: userMessage('message-3') } });
+
+      staleLatest.resolve([userEntry('message-1'), userEntry('message-2')]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'message-1',
+        'message-2',
+        'message-3',
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('[VIRT-06] does not reintroduce a removed message from an in-flight older page', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    let latestLoads = 0;
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (options?.before) return stalePage.promise;
+      latestLoads += 1;
+      return latestLoads === 1
+        ? [userEntry('message-2'), userEntry('message-3')]
+        : [userEntry('message-3')];
+    });
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('message.removed')).toBe(true));
+      await hookModule.selectSession('session-1');
+      messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+
+      const pageLoad = hookModule.loadOlderSessionHistoryPage('session-1');
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-older',
+        });
+      });
+      handlers.get('message.removed')?.({
+        properties: { sessionID: 'session-1', messageID: 'message-2' },
+      });
+      stalePage.resolve([userEntry('message-1'), userEntry('message-2')]);
+
+      await pageLoad;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-3']);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('[VIRT-07] keeps a newer selection load when an inactive sync resolves late', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const staleBackground = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const freshSelection = [userEntry('session-b-fresh', 'session-b')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    freshSelection.nextCursor = 'cursor-fresh';
+    const staleMessages = [
+      userEntry('session-b-stale-1', 'session-b'),
+      userEntry('session-b-stale-2', 'session-b'),
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    staleMessages.nextCursor = 'cursor-stale';
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages
+      .mockReturnValueOnce(staleBackground.promise)
+      .mockResolvedValueOnce(freshSelection);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      stateModule.setState('sessions', [session('session-a'), session('session-b')]);
+      stateModule.setState('activeSessionId', 'session-a');
+      stateModule.setState('messages', [userEntry('session-a-message', 'session-a')]);
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-b', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+
+      await hookModule.selectSession('session-b');
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['session-b-fresh']);
+      staleBackground.resolve(staleMessages);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['session-b-fresh']);
+      expect(stateModule.state.sessionMessageCounts['session-b']).toBe(1);
+      expect(messageWindow.getSessionHistoryCursor('session-b')).toBe('cursor-fresh');
+    } finally {
+      dispose();
+    }
+  });
+
+  it('[VIRT-08] clears every old history store after empty and disjoint resyncs', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages
+      .mockResolvedValueOnce([userEntry('message-old')])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([userEntry('message-new')]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+    const seedOldHistory = (suffix: string) => {
+      messageWindow.setSessionHistoryCursor('session-1', `history-${suffix}`);
+      messageWindow.setSessionHistoryPromptCursor('session-1', `prompt-${suffix}`);
+      messageWindow.setSessionHistoryPrompts('session-1', [userEntry(`old-prompt-${suffix}`)]);
+      messageWindow.cacheSessionHistoryPage('session-1', `page-${suffix}`, [
+        userEntry(`old-page-${suffix}`),
+      ]);
+    };
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      await hookModule.selectSession('session-1');
+      seedOldHistory('empty');
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(stateModule.state.messages).toEqual([]));
+      expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+      expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
+      expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
+      expect(messageWindow.takeCachedSessionHistoryPage('session-1', 'page-empty')).toBeUndefined();
+
+      stateModule.setState('messages', [userEntry('message-old-again')]);
+      seedOldHistory('disjoint');
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-new']);
+      });
+      expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+      expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
+      expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
+      expect(
+        messageWindow.takeCachedSessionHistoryPage('session-1', 'page-disjoint')
+      ).toBeUndefined();
+    } finally {
+      dispose();
+    }
+  });
+
+  it('[VIRT-09] continues full-history loading through an empty continuation page', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const emptyPage = [] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    emptyPage.nextCursor = 'cursor-b';
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (options?.before === 'cursor-a') return emptyPage;
+      if (options?.before === 'cursor-b') return [userEntry('message-1')];
+      throw new Error(`Unexpected cursor ${options?.before}`);
+    });
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [userEntry('message-3')]);
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-a');
+
+    await hookModule.loadFullSessionHistory('session-1');
+
+    expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+      limit: 50,
+      before: 'cursor-b',
+    });
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'message-1',
+      'message-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+  });
+
+  it('[VIRT-09] terminates a cursor cycle across separate one-page history loads', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const pageA = [userEntry('message-2')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    pageA.nextCursor = 'cursor-b';
+    const pageB = [userEntry('message-1')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    pageB.nextCursor = 'cursor-a';
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (options?.before === 'cursor-a') return pageA;
+      if (options?.before === 'cursor-b') return pageB;
+      throw new Error(`Unexpected cursor ${options?.before}`);
+    });
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [userEntry('message-3')]);
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-a');
+
+    await hookModule.loadOlderSessionHistoryPage('session-1');
+    await hookModule.loadOlderSessionHistoryPage('session-1');
+
+    expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+    expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('[VIRT-09] terminates a prompt cursor cycle across separate history requests', async () => {
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const pageA = [userEntry('prompt-a')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    pageA.nextCursor = 'cursor-b';
+    const pageB = [userEntry('prompt-b')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    pageB.nextCursor = 'cursor-a';
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (options?.before === 'cursor-a') return pageA;
+      if (options?.before === 'cursor-b') return pageB;
+      throw new Error(`Unexpected cursor ${options?.before}`);
+    });
+    messageWindow.setSessionHistoryPromptCursor('session-1', 'cursor-a');
+
+    await hookModule.loadOlderSessionPrompts('session-1');
+    await hookModule.loadOlderSessionPrompts('session-1');
+
+    expect(messageWindow.getSessionHistoryPromptCursor('session-1')).toBeUndefined();
+    expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('[VIRT-10] canonically resyncs and resets history after a committed revert', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('message-kept')]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.next.revert.committed')).toBe(true));
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [userEntry('message-kept'), userEntry('message-reverted')]);
+      messageWindow.setSessionHistoryCursor('session-1', 'cursor-old');
+      messageWindow.setSessionHistoryPrompts('session-1', [userEntry('prompt-old')]);
+      messageWindow.cacheSessionHistoryPage('session-1', 'page-old', [
+        userEntry('message-reverted'),
+      ]);
+
+      handlers.get('session.next.revert.committed')?.({
+        properties: { sessionID: 'session-1', messageID: 'message-reverted' },
+      });
+
+      await vi.waitFor(() => {
+        expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual(['message-kept']);
+      });
+      expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
+      expect(messageWindow.getSessionHistoryPrompts('session-1')).toEqual([]);
+      expect(messageWindow.takeCachedSessionHistoryPage('session-1', 'page-old')).toBeUndefined();
+    } finally {
+      dispose();
+    }
   });
 });

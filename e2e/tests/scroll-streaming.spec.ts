@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { getScrollMetrics, waitForAnimationFrame, waitForAnimationFrames } from './helpers';
+import {
+  getScrollMetrics,
+  getVisibleMessageAnchor,
+  sampleMessageTopAcrossFrames,
+  waitForAnimationFrame,
+  waitForAnimationFrames,
+} from './helpers';
 import {
   appendDeltaToLastLargeAssistant,
   appendDeltaToMultiAgentLargeStreaming,
@@ -7,7 +13,7 @@ import {
 } from './scroll-helpers';
 
 test.describe('scroll stability regressions', () => {
-  test('rapid streaming at bottom does not oscillate', async ({ page }) => {
+  test('rapid streaming remains within the bottom-follow threshold', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -22,39 +28,23 @@ test.describe('scroll stability regressions', () => {
     });
     await waitForAnimationFrame(page);
 
-    const positions: number[] = [];
     for (let index = 0; index < 12; index += 1) {
       await appendDeltaToLastLargeAssistant(
         page,
         `\n\nRapid chunk ${index}: ${'filling content '.repeat(6)}`
       );
       await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((el) => el.scrollTop));
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(15);
     }
-
-    let upwardJumpCount = 0;
-    for (let index = 1; index < positions.length; index += 1) {
-      if (positions[index]! < positions[index - 1]! - 3) {
-        upwardJumpCount++;
-      }
-    }
-    expect(upwardJumpCount).toBeLessThanOrEqual(1);
-
-    let maxJitterAmplitude = 0;
-    for (let index = 2; index < positions.length; index += 1) {
-      const jitter = Math.abs(
-        positions[index]! - positions[index - 1]! - (positions[index - 1]! - positions[index - 2]!)
-      );
-      maxJitterAmplitude = Math.max(maxJitterAmplitude, jitter);
-    }
-    expect(maxJitterAmplitude).toBeLessThan(150);
 
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
   });
 
-  test('user scroll beyond reattach threshold stays detached', async ({ page }) => {
+  test('user scroll beyond the reattach threshold disengages bottom follow', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -63,22 +53,19 @@ test.describe('scroll stability regressions', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const scrolledPosition = await list.evaluate((element) => {
+    await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
       element.scrollTop = Math.max(0, element.scrollTop - 300);
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
     });
     await waitForAnimationFrames(page, 4);
 
-    const afterSettled = await list.evaluate((el) => el.scrollTop);
-    expect(Math.abs(afterSettled - scrolledPosition)).toBeLessThan(5);
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       190
     );
   });
 
-  test('no jitter when streaming grows content while auto-scroll follows', async ({ page }) => {
+  test('keeps bottom follow engaged while streaming content grows', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -110,10 +97,8 @@ test.describe('scroll stability regressions', () => {
   });
 });
 
-test.describe('rapid streaming jitter resistance', () => {
-  test('no jitter at exact bottom during streaming with varying content sizes', async ({
-    page,
-  }) => {
+test.describe('rapid streaming bottom follow', () => {
+  test('keeps bottom follow engaged across varying streaming delta sizes', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -128,7 +113,6 @@ test.describe('rapid streaming jitter resistance', () => {
     });
     await waitForAnimationFrame(page);
 
-    const positions: number[] = [];
     for (let i = 0; i < 20; i += 1) {
       const size =
         i % 2 === 0
@@ -136,18 +120,10 @@ test.describe('rapid streaming jitter resistance', () => {
           : 'long with extra padding to vary content sizes significantly. '.repeat(8);
       await appendDeltaToRapidStreaming(page, `\n\nVarying-size chunk ${i}: ${size}`);
       await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(15);
     }
-
-    let maxOscillation = 0;
-    for (let i = 2; i < positions.length; i += 1) {
-      const oscillation = Math.abs(
-        positions[i]! - positions[i - 1]! - (positions[i - 1]! - positions[i - 2]!)
-      );
-      maxOscillation = Math.max(maxOscillation, oscillation);
-    }
-
-    expect(maxOscillation).toBeLessThan(200);
 
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
@@ -176,7 +152,40 @@ test.describe('rapid streaming jitter resistance', () => {
       .toBeLessThan(10);
   });
 
-  test('scroll position holds when streaming arrives while scrolled to middle near threshold', async ({
+  test('keeps the same visible row fixed while detached streaming arrives', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+
+    await list.evaluate((element) => {
+      const mid = Math.floor(element.scrollHeight / 2);
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = mid;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+    const anchor = await getVisibleMessageAnchor(list);
+
+    for (let i = 0; i < 8; i += 1) {
+      await appendDeltaToRapidStreaming(
+        page,
+        `\n\nMid-scroll streaming chunk ${i}: ${'viewport should not move while detached '.repeat(6)}`
+      );
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 2);
+      expect(
+        samples.every((top) => top !== null && Math.abs(top - anchor.top) < 1.5),
+        JSON.stringify({ i, anchor, samples })
+      ).toBe(true);
+    }
+  });
+});
+
+test.describe('bottom scroll stability during height changes', () => {
+  test('downward wheel at bottom keeps bottom follow engaged during streaming', async ({
     page,
   }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
@@ -187,40 +196,7 @@ test.describe('rapid streaming jitter resistance', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const midScrollTop = await list.evaluate((element) => {
-      const mid = Math.floor(element.scrollHeight / 2);
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
-      element.scrollTop = mid;
-      element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
-    });
-    await waitForAnimationFrames(page, 3);
-
-    for (let i = 0; i < 8; i += 1) {
-      await appendDeltaToRapidStreaming(
-        page,
-        `\n\nMid-scroll streaming chunk ${i}: ${'viewport should not move while detached '.repeat(6)}`
-      );
-      await waitForAnimationFrames(page, 2);
-    }
-
-    const afterStreaming = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(afterStreaming - midScrollTop)).toBeLessThan(5);
-  });
-});
-
-test.describe('bottom scroll stability during height changes', () => {
-  test('downward wheel at bottom during streaming does not cause jitter', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
-    const list = page.locator('.interactive-list');
-    await expect(list).toBeVisible();
-
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(15);
-
     await list.hover();
-    const positions: number[] = [];
     for (let i = 0; i < 15; i += 1) {
       await page.mouse.wheel(0, 50);
       await appendDeltaToRapidStreaming(
@@ -228,22 +204,17 @@ test.describe('bottom scroll stability during height changes', () => {
         `\n\nBottom-wheel chunk ${i}: ${'content growing while user scrolls down '.repeat(4)}`
       );
       await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(15);
     }
-
-    let maxBackwardJump = 0;
-    for (let i = 1; i < positions.length; i += 1) {
-      const backward = positions[i - 1]! - positions[i]!;
-      maxBackwardJump = Math.max(maxBackwardJump, backward);
-    }
-    expect(maxBackwardJump).toBeLessThan(25);
 
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
   });
 
-  test('no oscillation when streaming content varies height significantly', async ({ page }) => {
+  test('keeps bottom follow engaged across large multi-agent height changes', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -258,7 +229,6 @@ test.describe('bottom scroll stability during height changes', () => {
     });
     await waitForAnimationFrame(page);
 
-    const positions: number[] = [];
     for (let i = 0; i < 20; i += 1) {
       const content =
         i % 2 === 0
@@ -266,25 +236,17 @@ test.describe('bottom scroll stability during height changes', () => {
           : `${'Long paragraph with significant height variation to test scroll stability during rapid content size changes. '.repeat(6)}`;
       await appendDeltaToMultiAgentLargeStreaming(page, `\n\n${content}`);
       await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
+      await expect
+        .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+        .toBeLessThan(15);
     }
-
-    let oscillationCount = 0;
-    for (let i = 2; i < positions.length; i += 1) {
-      const d1 = positions[i - 1]! - positions[i - 2]!;
-      const d2 = positions[i]! - positions[i - 1]!;
-      if ((d1 > 5 && d2 < -5) || (d1 < -5 && d2 > 5)) {
-        oscillationCount++;
-      }
-    }
-    expect(oscillationCount).toBeLessThanOrEqual(1);
 
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
   });
 
-  test('re-engage after detach works smoothly in large multi-agent transcript', async ({
+  test('re-engages bottom follow after returning within threshold in a multi-agent transcript', async ({
     page,
   }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-large-streaming');

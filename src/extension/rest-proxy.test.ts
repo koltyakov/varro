@@ -39,10 +39,12 @@ import { SessionStateManager } from './session-state-manager';
 
 type SanitizedMessageResponse = {
   id: number;
-  data: Array<{
-    info: { id: string };
-    parts: Array<{ id: string }>;
-  }>;
+  data: SanitizedMessageEntry[];
+};
+
+type SanitizedMessageEntry = {
+  info: { id: string };
+  parts: Array<{ id: string }>;
 };
 
 function deferred<T>() {
@@ -145,6 +147,31 @@ function createProxy(overrides: Partial<RestProxyCallbacks> = {}) {
 
 function makePayload(id: number, method: string, path: string, body?: unknown) {
   return { id, method, path, body };
+}
+
+function makeSessionMessage(messageID: string, partID: string, sessionID = 's1') {
+  return {
+    info: {
+      id: messageID,
+      sessionID,
+      role: 'user',
+      time: { created: 1234567890 },
+    },
+    parts: [{ id: partID, messageID, sessionID, type: 'text', text: messageID }],
+  };
+}
+
+async function requestSanitizedMessagePage(messages: unknown[]) {
+  const serverRequest = vi.fn(() => Promise.resolve({ data: messages }));
+  const { proxy, callbacks } = createProxy({
+    server: { ...createCallbacks().server, request: serverRequest } as never,
+  });
+
+  await proxy.handleRequest(makePayload(118, 'GET', '/session/s1/message?limit=50'));
+
+  const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
+    .calls[0]![1] as { id: number; data: { items: SanitizedMessageEntry[] } };
+  return response.data.items;
 }
 
 describe('scopeOpenCodeRequest', () => {
@@ -1686,6 +1713,47 @@ describe('RestProxy handleRequest', () => {
     expect(response.data[0]!.parts).toHaveLength(1);
     expect(response.data[0]!.parts[0]!.id).toBe('p1');
     expect(mocks.logger.warn).toHaveBeenCalled();
+  });
+
+  it('filters messages belonging to a different session', async () => {
+    const items = await requestSanitizedMessagePage([
+      makeSessionMessage('foreign-message', 'foreign-part', 'other-session'),
+    ]);
+
+    expect(items).toEqual([]);
+  });
+
+  it('filters parts whose session or message identity does not match their owner', async () => {
+    const message = makeSessionMessage('m1', 'valid-part');
+    message.parts.push(
+      { ...message.parts[0]!, id: 'foreign-session-part', sessionID: 'other-session' },
+      { ...message.parts[0]!, id: 'foreign-message-part', messageID: 'other-message' }
+    );
+
+    const items = await requestSanitizedMessagePage([message]);
+
+    expect(items[0]!.parts.map((part) => part.id)).toEqual(['valid-part']);
+  });
+
+  it('filters later messages with a duplicate message ID', async () => {
+    const first = makeSessionMessage('duplicate-message', 'first-part');
+    const duplicate = makeSessionMessage('duplicate-message', 'duplicate-part');
+
+    const items = await requestSanitizedMessagePage([first, duplicate]);
+
+    expect(items).toEqual([first]);
+  });
+
+  it('filters later parts with a duplicate part ID', async () => {
+    const first = makeSessionMessage('m1', 'duplicate-part');
+    const second = makeSessionMessage('m2', 'duplicate-part');
+
+    const items = await requestSanitizedMessagePage([first, second]);
+
+    expect(items.map((item) => item.parts.map((part) => part.id))).toEqual([
+      ['duplicate-part'],
+      [],
+    ]);
   });
 
   it('catches thrown errors and posts error response', async () => {

@@ -245,6 +245,31 @@ describe('optimistic user message reconciliation', () => {
   });
 });
 
+describe('history prepend reconciliation', () => {
+  it('[VIRT-11] preserves existing entry identity when equivalent history is prepended', () => {
+    const current = {
+      info: userMessage('msg-current'),
+      parts: [imagePart('image-1', 'msg-current'), imagePart('image-2', 'msg-current')],
+    };
+    setMessagesIncremental([current]);
+    const mountedEntry = state.messages[0]!;
+
+    setMessagesIncremental([
+      {
+        info: userMessage('msg-older'),
+        parts: [textPart('part-older', 'msg-older', 'older prompt')],
+      },
+      {
+        info: { ...current.info },
+        parts: current.parts.map((part) => ({ ...part })),
+      },
+    ]);
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-current']);
+    expect(state.messages[1]).toBe(mountedEntry);
+  });
+});
+
 describe('optimistic image parts carried onto the server message', () => {
   it('rebases optimistic image parts when only the message info arrives', () => {
     upsertMessage(

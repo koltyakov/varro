@@ -7,6 +7,10 @@ import {
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
+import {
+  invalidateSessionMessageWindowRequests,
+  resetSessionMessageWindowForRefetch,
+} from '../../lib/message-window';
 import { hasStreamedFinalResponse } from './session-watchdog';
 import { parseUsageLimitNotice, type UsageLimitNotice } from '../../lib/usage-limit';
 import { validateFileDiffs } from '../../lib/validate-diffs';
@@ -117,6 +121,7 @@ type EventHandlerDependencies = {
   judgePermission?(permission: Permission): Promise<void>;
   syncPendingPermissions?(): Promise<void>;
   reconcileServerState?(): Promise<void>;
+  invalidateMessageSync?(sessionId: string): void;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -157,6 +162,7 @@ type EventHandlerOperationDependencies = {
   >;
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   reconcileServerState?: EventHandlerDependencies['reconcileServerState'];
+  invalidateMessageSync?: EventHandlerDependencies['invalidateMessageSync'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   logError: EventHandlerDependencies['logError'];
 };
@@ -207,6 +213,7 @@ export class SessionEventHandlerOperations {
       judgePermission: this.deps.sessionApprovalOperations.judgePermission,
       syncPendingPermissions: this.deps.syncPendingPermissions,
       reconcileServerState: this.deps.reconcileServerState,
+      invalidateMessageSync: this.deps.invalidateMessageSync,
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
@@ -289,6 +296,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (!sessionId) return false;
     if (deps.isSessionInActiveTree) return deps.isSessionInActiveTree(sessionId);
     return sessionId === deps.getActiveSessionId();
+  };
+  const invalidateMessageLoads = (sessionId: string, resetHistory = false) => {
+    deps.invalidateMessageSync?.(sessionId);
+    if (resetHistory) resetSessionMessageWindowForRefetch(sessionId);
+    else invalidateSessionMessageWindowRequests(sessionId);
   };
   const isActiveTreeWorking = () => {
     const activeSessionId = deps.getActiveSessionId();
@@ -1082,6 +1094,16 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!assistantFinished) markSessionProgress(sessionID);
         uiStore.markLoadingActivity();
         if (message) {
+          if (
+            !deps
+              .getMessages()
+              .some(
+                (entry) =>
+                  entry.info.id === message.id && entry.info.sessionID === message.sessionID
+              )
+          ) {
+            invalidateMessageLoads(sessionID);
+          }
           sessionStore.upsertMessageInfo(message);
         } else {
           scheduleMessageSync(sessionID);
@@ -1271,7 +1293,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if (isSessionInActiveTree(p.sessionID as string | undefined)) {
+      const sessionId = p.sessionID as string | undefined;
+      if (!sessionId) return;
+      invalidateMessageLoads(sessionId, true);
+      if (isSessionInActiveTree(sessionId)) {
         uiStore.markLoadingActivity();
         sessionStore.clearStreamingState();
         const nextMessages = deps
@@ -1279,7 +1304,17 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           .filter((m) => m.info.id !== (p.messageID as string));
         sessionStore.replaceMessages(nextMessages);
         deps.syncTodosFromMessages(nextMessages);
+        scheduleMessageSync(sessionId, true);
       }
+    })
+  );
+
+  cleanups.push(
+    serverEvents.on('session.next.revert.committed', (data) => {
+      const sessionId = data.properties?.sessionID as string | undefined;
+      if (!sessionId) return;
+      invalidateMessageLoads(sessionId, true);
+      if (isSessionInActiveTree(sessionId)) scheduleMessageSync(sessionId, true);
     })
   );
 

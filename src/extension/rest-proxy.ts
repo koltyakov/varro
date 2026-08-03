@@ -940,6 +940,10 @@ export class RestProxy {
   }
 
   private sanitizeSessionMessages(pathname: string, data: unknown[]) {
+    const sessionMatch = pathname.match(/^\/session\/([^/]+)\/message$/);
+    const requestedSessionID = sessionMatch ? decodeURIComponent(sessionMatch[1]!) : null;
+    const seenMessageIDs = new Set<string>();
+    const seenPartIDs = new Set<string>();
     let droppedEntries = 0;
     let droppedParts = 0;
     const normalized: Array<{ info: Record<string, unknown>; parts: Record<string, unknown>[] }> =
@@ -955,12 +959,15 @@ export class RestProxy {
         !info.id ||
         typeof info.sessionID !== 'string' ||
         !info.sessionID ||
+        info.sessionID !== requestedSessionID ||
+        seenMessageIDs.has(info.id) ||
         (info.role !== 'user' && info.role !== 'assistant') ||
         typeof time?.created !== 'number'
       ) {
         droppedEntries += 1;
         continue;
       }
+      seenMessageIDs.add(info.id);
 
       const parts: Record<string, unknown>[] = [];
       if (Array.isArray(record?.parts)) {
@@ -972,14 +979,18 @@ export class RestProxy {
             !partRecord.id ||
             typeof partRecord.messageID !== 'string' ||
             !partRecord.messageID ||
+            partRecord.messageID !== info.id ||
             typeof partRecord.sessionID !== 'string' ||
             !partRecord.sessionID ||
+            partRecord.sessionID !== info.sessionID ||
+            seenPartIDs.has(partRecord.id) ||
             typeof partRecord.type !== 'string' ||
             !partRecord.type
           ) {
             droppedParts += 1;
             continue;
           }
+          seenPartIDs.add(partRecord.id);
           parts.push(partRecord);
         }
       } else if (record?.parts !== undefined) {

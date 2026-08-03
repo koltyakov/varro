@@ -82,6 +82,7 @@ const SCENARIO_NAMES = [
   'large-transcript',
   'diff-preview-large-transcript',
   'assistant-heavy-history',
+  'incident-delayed-image-history',
   'mixed-small-transcript',
   'heterogeneous-large-transcript',
   'huge-content-transcript',
@@ -101,6 +102,7 @@ type WorkspaceFile = {
   type: 'file' | 'directory';
 };
 type ScenarioState = {
+  scenarioName: ScenarioName;
   workspacePath: string;
   sessions: Session[];
   sessionStatuses: Record<string, SessionStatus>;
@@ -119,7 +121,13 @@ type ScenarioState = {
   externalUrls: string[];
   planOpenRequests: string[];
   workspaceFiles: WorkspaceFile[];
-  mcpStatus: Record<string, { status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration'; error?: string }>;
+  mcpStatus: Record<
+    string,
+    {
+      status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
+      error?: string;
+    }
+  >;
   storedState: {
     sessionSelectedAgents?: Record<string, string>;
     sessionSelectedMcps?: Record<string, string[]>;
@@ -132,6 +140,9 @@ type ScenarioState = {
     ralphRuns?: Record<string, unknown>;
   };
   postReadyMessages: unknown[];
+  messageCursorTargets: Map<string, { sessionId: string; end: number }>;
+  messageCursorTokensByBoundary: Map<string, string>;
+  nextMessageCursorSequence: number;
   readyStatus?: ServerStatus;
   nextSequence: number;
   healthFailuresRemaining: number;
@@ -158,6 +169,7 @@ type HarnessWindow = Window & {
     releaseHistoryRequests?: () => void;
     releaseNextHistoryRequest?: () => boolean;
     pendingHistoryRequestCount?: () => number;
+    getSessionMessages?: (sessionId: string) => MessageEntry[];
   };
 };
 
@@ -166,6 +178,7 @@ const TMP_WORKSPACE_PATH = '/workspace/varro/tmp/e2e-workspace';
 const BASE_TIME = Date.now();
 const THEME = getThemeKind();
 const deferredHistoryRequestResolves: Array<() => void> = [];
+const PERSISTED_MESSAGE_STATE_KEY = 'varro.e2ePersistedMessageState';
 
 function getThemeKind(): WebviewThemeKind {
   const value = new URLSearchParams(window.location.search).get('theme');
@@ -711,7 +724,10 @@ function createDenseMcpStatus() {
   };
 }
 
-function persistRecentSessionView(state: ScenarioState, sessionId = state.persistedActiveSessionId) {
+function persistRecentSessionView(
+  state: ScenarioState,
+  sessionId = state.persistedActiveSessionId
+) {
   if (!sessionId) return;
   state.storedState.lastOpenedView = {
     type: 'session',
@@ -729,6 +745,7 @@ function persistRecentSessionsListView(state: ScenarioState) {
 
 function createScenarioState(name: ScenarioName): ScenarioState {
   const state: ScenarioState = {
+    scenarioName: name,
     workspacePath: name === 'file-search' ? TMP_WORKSPACE_PATH : WORKSPACE_PATH,
     sessions: [],
     sessionStatuses: {},
@@ -749,6 +766,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     mcpStatus: {},
     storedState: {},
     postReadyMessages: [],
+    messageCursorTargets: new Map(),
+    messageCursorTokensByBoundary: new Map(),
+    nextMessageCursorSequence: 0,
     readyStatus: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
     nextSequence: 0,
     healthFailuresRemaining: 0,
@@ -821,7 +841,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   }
 
   if (name === 'dispose-during-start') {
-    const session = makeSession('session-dispose-during-start', 'Startup handoff', BASE_TIME - 2_000);
+    const session = makeSession(
+      'session-dispose-during-start',
+      'Startup handoff',
+      BASE_TIME - 2_000
+    );
     const user = makeUserMessage(
       session.id,
       'message-dispose-start-user',
@@ -1090,8 +1114,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       (_, index) =>
         `Response section ${index + 1}: verifying that the sticky preview remains readable without colliding with the next prompt.`
     ).join('\n\n');
-    const followupPrompt = 'Follow-up prompt that should hide the sticky preview before any overlap occurs.';
-    const user1 = makeUserMessage(session.id, 'message-sticky-user-1', [longPrompt], BASE_TIME - 20_000);
+    const followupPrompt =
+      'Follow-up prompt that should hide the sticky preview before any overlap occurs.';
+    const user1 = makeUserMessage(
+      session.id,
+      'message-sticky-user-1',
+      [longPrompt],
+      BASE_TIME - 20_000
+    );
     const assistant1 = makeAssistantMessage(
       session.id,
       'message-sticky-assistant-1',
@@ -1487,8 +1517,16 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     const running = makeSession('session-running', 'Running lint repair', BASE_TIME - 5_000);
     const failed = makeSession('session-failed', 'Failing provider sync', BASE_TIME - 4_000);
     const attention = makeSession('session-attention', 'Waiting on permission', BASE_TIME - 3_000);
-    const planReady = makeSession('session-plan-filter', 'Plan awaiting implementation', BASE_TIME - 2_000);
-    const completed = makeSession('session-completed', 'Completed sticky cleanup', BASE_TIME - 1_000);
+    const planReady = makeSession(
+      'session-plan-filter',
+      'Plan awaiting implementation',
+      BASE_TIME - 2_000
+    );
+    const completed = makeSession(
+      'session-completed',
+      'Completed sticky cleanup',
+      BASE_TIME - 1_000
+    );
     const failedUser = makeUserMessage(
       failed.id,
       'message-failed-user',
@@ -2164,7 +2202,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         tool: 'edit',
         state: {
           status: 'completed',
-          input: { file_path: '/workspace/varro/src/index.ts', old_string: 'value = 1', new_string: 'value = 2' },
+          input: {
+            file_path: '/workspace/varro/src/index.ts',
+            old_string: 'value = 1',
+            new_string: 'value = 2',
+          },
           output: 'Updated /workspace/varro/src/index.ts',
           title: 'Edit file',
           metadata: { additions: 1, deletions: 1 },
@@ -2436,7 +2478,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   }
 
   if (name === 'grouped-permissions') {
-    const session = makeSession('session-grouped-permissions', 'Grouped permissions', BASE_TIME - 500);
+    const session = makeSession(
+      'session-grouped-permissions',
+      'Grouped permissions',
+      BASE_TIME - 500
+    );
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = [];
@@ -2527,7 +2573,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   }
 
   if (name === 'message-rendering') {
-    const session = makeSession('session-message-rendering', 'Rendered message actions', BASE_TIME - 500);
+    const session = makeSession(
+      'session-message-rendering',
+      'Rendered message actions',
+      BASE_TIME - 500
+    );
     const user = makeUserMessage(
       session.id,
       'message-rendering-user',
@@ -2596,7 +2646,14 @@ function createScenarioState(name: ScenarioName): ScenarioState {
               endedAt: BASE_TIME - 1_200,
               filesChanged: ['src/a.ts'],
               verification: { lint: 'pass', typecheck: 'pass', test: 'pass' },
-              tokens: { input: 1000, output: 500, reasoning: 200, cacheRead: 0, cacheWrite: 0, total: 1700 },
+              tokens: {
+                input: 1000,
+                output: 500,
+                reasoning: 200,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 1700,
+              },
             },
             {
               index: 2,
@@ -2773,6 +2830,80 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         makeAssistantMessage(
           session.id,
           `message-assistant-heavy-after-${index}`,
+          targetUser.info.id,
+          `Implementation step ${index}. ${detail}`,
+          BASE_TIME - (79_000 - index)
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    return state;
+  }
+
+  if (name === 'incident-delayed-image-history') {
+    const session = makeSession(
+      'session-incident-delayed-image-history',
+      'Scrubbed delayed-image pagination incident',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    const firstUser = makeUserMessage(
+      session.id,
+      'message-incident-history-user-0',
+      ['Investigate the original paginated viewport report.'],
+      BASE_TIME - 100_000
+    );
+    messages.push(firstUser);
+    for (let index = 0; index < 49; index += 1) {
+      const detail = 'Scrubbed variable-height history detail. '.repeat((index % 5) * 3);
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-incident-history-before-${index}`,
+          firstUser.info.id,
+          `Historical response step ${index}. ${detail}`,
+          BASE_TIME - (99_000 - index)
+        )
+      );
+    }
+
+    const targetUser = makeUserMessage(
+      session.id,
+      'message-incident-history-target',
+      ['Apply the scrubbed pagination and image-layout corrections.'],
+      BASE_TIME - 80_000
+    );
+    messages.push(targetUser);
+    for (let index = 0; index < 78; index += 1) {
+      if (index === 73) {
+        const imageUser = makeUserMessage(
+          session.id,
+          'message-incident-delayed-image-user',
+          ['Verify the delayed image while its virtual row remounts.'],
+          BASE_TIME - (79_000 - index)
+        );
+        imageUser.parts.push({
+          id: 'message-incident-delayed-image-file',
+          sessionID: session.id,
+          messageID: imageUser.info.id,
+          type: 'file',
+          mime: 'image/svg+xml',
+          filename: 'scrubbed-incident-image.svg',
+          url: '/e2e/harness/incident-delayed-image.svg',
+        });
+        messages.push(imageUser);
+        continue;
+      }
+
+      const detail = 'Scrubbed variable-height implementation detail. '.repeat((index % 7) * 2);
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-incident-history-after-${index}`,
           targetUser.info.id,
           `Implementation step ${index}. ${detail}`,
           BASE_TIME - (79_000 - index)
@@ -3439,10 +3570,88 @@ function getSessionTodos(state: ScenarioState, id: string): Todo[] {
   return [];
 }
 
+function persistHarnessMessageState(state: ScenarioState) {
+  window.sessionStorage.setItem(
+    PERSISTED_MESSAGE_STATE_KEY,
+    JSON.stringify({
+      scenarioName: state.scenarioName,
+      messagesBySessionId: state.messagesBySessionId,
+      nextSequence: state.nextSequence,
+    })
+  );
+}
+
+function restoreHarnessMessageState(state: ScenarioState) {
+  const serialized = window.sessionStorage.getItem(PERSISTED_MESSAGE_STATE_KEY);
+  if (!serialized) return;
+
+  try {
+    const persisted = asRecord(JSON.parse(serialized));
+    if (persisted.scenarioName !== state.scenarioName) return;
+    if (
+      !persisted.messagesBySessionId ||
+      typeof persisted.messagesBySessionId !== 'object' ||
+      Array.isArray(persisted.messagesBySessionId)
+    ) {
+      return;
+    }
+    state.messagesBySessionId = persisted.messagesBySessionId as Record<string, MessageEntry[]>;
+    if (
+      typeof persisted.nextSequence === 'number' &&
+      Number.isSafeInteger(persisted.nextSequence)
+    ) {
+      state.nextSequence = persisted.nextSequence;
+    }
+  } catch {
+    window.sessionStorage.removeItem(PERSISTED_MESSAGE_STATE_KEY);
+  }
+}
+
+function normalizeMockPromptParts(
+  rawParts: unknown[],
+  sessionId: string,
+  messageId: string,
+  sequence: number
+): Part[] {
+  const parts: Part[] = [];
+  for (const rawPart of rawParts) {
+    const part = asRecord(rawPart);
+    const id = `part-server-${sequence}-${parts.length + 1}`;
+    if (part.type === 'text' && typeof part.text === 'string') {
+      parts.push({
+        id,
+        sessionID: sessionId,
+        messageID: messageId,
+        type: 'text',
+        text: part.text,
+      });
+      continue;
+    }
+    if (
+      part.type === 'file' &&
+      typeof part.mime === 'string' &&
+      part.mime.length > 0 &&
+      typeof part.url === 'string' &&
+      part.url.length > 0
+    ) {
+      parts.push({
+        id,
+        sessionID: sessionId,
+        messageID: messageId,
+        type: 'file',
+        mime: part.mime,
+        ...(typeof part.filename === 'string' ? { filename: part.filename } : {}),
+        url: part.url,
+      });
+    }
+  }
+  return parts;
+}
+
 function appendMockPromptMessages(
   state: ScenarioState,
   sessionId: string,
-  textParts: string[],
+  rawParts: unknown[],
   options: {
     providerID?: string;
     modelID?: string;
@@ -3451,14 +3660,18 @@ function appendMockPromptMessages(
     messageID?: string;
   } = {}
 ) {
-  const promptText =
-    textParts.find((text) => !text.startsWith('[Working directory:')) || 'Untitled request';
   const providerID = options.providerID || DEFAULT_PROVIDER_ID;
   const modelID = options.modelID || DEFAULT_MODEL_ID;
   const agent = options.agent || 'build';
   const createdAt = nextTimestamp(state);
   const userId = options.messageID || `message-user-${state.nextSequence}`;
   const assistantId = `message-assistant-${state.nextSequence}`;
+  const parts = normalizeMockPromptParts(rawParts, sessionId, userId, state.nextSequence);
+  const promptText =
+    parts.find(
+      (part): part is Extract<Part, { type: 'text' }> =>
+        part.type === 'text' && !part.text.startsWith('[Working directory:')
+    )?.text || 'Untitled request';
   const userMessage: MessageEntry = {
     info: {
       id: userId,
@@ -3468,15 +3681,7 @@ function appendMockPromptMessages(
       agent,
       model: { providerID, modelID, ...(options.variant ? { variant: options.variant } : {}) },
     },
-    parts: textParts.map((text, index) => ({
-      id: options.messageID
-        ? `part-server-${state.nextSequence}-${index + 1}`
-        : `${userId}-part-${index + 1}`,
-      sessionID: sessionId,
-      messageID: userId,
-      type: 'text',
-      text,
-    })),
+    parts,
   };
   const assistantMessage = makeAssistantMessage(
     sessionId,
@@ -3651,6 +3856,29 @@ function mutateRalphRun(managerSessionId: string, mutate: (run: HarnessRalphRun)
     writeRalphRuns(runs);
   }
   broadcastRalphState();
+}
+
+function getMessageCursor(state: ScenarioState, sessionId: string, end: number) {
+  const boundaryKey = `${sessionId}\u0000${end}`;
+  const existing = state.messageCursorTokensByBoundary.get(boundaryKey);
+  if (existing) return existing;
+
+  state.nextMessageCursorSequence += 1;
+  const token = `msg_cursor_${state.nextMessageCursorSequence.toString(36).padStart(4, '0')}`;
+  state.messageCursorTokensByBoundary.set(boundaryKey, token);
+  state.messageCursorTargets.set(token, { sessionId, end });
+  return token;
+}
+
+function resolveMessageCursor(state: ScenarioState, sessionId: string, token: string) {
+  const target = state.messageCursorTargets.get(token);
+  if (!target) throw new Error(`Unknown message cursor "${token}"`);
+  if (target.sessionId !== sessionId) {
+    throw new Error(
+      `Message cursor "${token}" belongs to session "${target.sessionId}", not "${sessionId}"`
+    );
+  }
+  return target.end;
 }
 
 async function handleApiRequest(
@@ -3883,36 +4111,42 @@ async function handleApiRequest(
   if (messageMatch && method === 'GET') {
     const sessionId = decodeURIComponent(messageMatch[1]!);
     const stalePromptSnapshot = state.stalePromptMessageSnapshotBySessionId[sessionId];
+    let messages = state.messagesBySessionId[sessionId] || [];
     if (stalePromptSnapshot) {
       delete state.stalePromptMessageSnapshotBySessionId[sessionId];
-      return stalePromptSnapshot;
+      messages = stalePromptSnapshot;
     }
-    const messages = state.messagesBySessionId[sessionId] || [];
-    const windowed =
-      new URLSearchParams(window.location.search).get('windowed') === '1' &&
-      (sessionId === 'session-sticky-preview-first-image' ||
-        sessionId === 'session-sticky-preview-terminal' ||
-        sessionId === 'session-diff-preview-large-transcript' ||
-        sessionId === 'session-assistant-heavy-history');
+    const windowed = new URLSearchParams(window.location.search).get('windowed') === '1';
     if (!windowed) return messages;
 
     const limit = Math.max(1, Number(url.searchParams.get('limit')) || 50);
     const before = url.searchParams.get('before');
+    const requestedEnd =
+      before === null ? messages.length : resolveMessageCursor(state, sessionId, before);
     if (
       before !== null &&
       new URLSearchParams(window.location.search).get('deferHistory') === '1'
     ) {
       await new Promise<void>((resolve) => deferredHistoryRequestResolves.push(resolve));
     }
-    const requestedEnd = before === null ? messages.length : Number(before);
-    const end = Number.isFinite(requestedEnd)
-      ? Math.max(0, Math.min(messages.length, requestedEnd))
-      : messages.length;
+    const end = Math.max(0, Math.min(messages.length, requestedEnd));
     const start = Math.max(0, end - limit);
     return {
       items: messages.slice(start, end),
-      ...(start > 0 ? { nextCursor: String(start) } : {}),
+      ...(start > 0 ? { nextCursor: getMessageCursor(state, sessionId, start) } : {}),
     };
+  }
+
+  const deleteMessageMatch = path.match(/^\/session\/([^/]+)\/message\/([^/]+)$/);
+  if (deleteMessageMatch && method === 'DELETE') {
+    const sessionId = decodeURIComponent(deleteMessageMatch[1]!);
+    const messageId = decodeURIComponent(deleteMessageMatch[2]!);
+    const messages = state.messagesBySessionId[sessionId] || [];
+    const nextMessages = messages.filter((message) => message.info.id !== messageId);
+    if (nextMessages.length === messages.length) return false;
+    state.messagesBySessionId[sessionId] = nextMessages;
+    persistHarnessMessageState(state);
+    return true;
   }
 
   const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/);
@@ -3931,7 +4165,11 @@ async function handleApiRequest(
     const payload = asRecord(body);
     const prompt = asRecord(payload.prompt);
     const promptText = typeof prompt.text === 'string' ? prompt.text : 'Untitled request';
-    const { createdAt } = appendMockPromptMessages(state, sessionId, promptText.split('\n'));
+    const { createdAt } = appendMockPromptMessages(
+      state,
+      sessionId,
+      promptText.split('\n').map((text) => ({ type: 'text', text }))
+    );
     const session = getSession(state, sessionId);
     session.time.updated = createdAt + 1;
     if (!session.title.trim()) {
@@ -3942,6 +4180,7 @@ async function handleApiRequest(
     } else {
       state.sessionStatuses[sessionId] = { type: 'idle' };
     }
+    persistHarnessMessageState(state);
     return null;
   }
 
@@ -3956,8 +4195,8 @@ async function handleApiRequest(
         ...(state.messagesBySessionId[sessionId] || []),
       ];
     }
-    const parts = Array.isArray(payload.parts) ? payload.parts : [];
-    const textParts = parts
+    const rawParts = Array.isArray(payload.parts) ? payload.parts : [];
+    const textParts = rawParts
       .map((part) => asRecord(part))
       .filter((part) => part.type === 'text')
       .map((part) => String(part.text || ''));
@@ -3975,7 +4214,7 @@ async function handleApiRequest(
     const { userMessage, assistantMessage, createdAt } = appendMockPromptMessages(
       state,
       sessionId,
-      textParts,
+      rawParts,
       {
         providerID,
         modelID,
@@ -4081,6 +4320,7 @@ async function handleApiRequest(
     } else {
       state.sessionStatuses[sessionId] = { type: 'idle' };
     }
+    persistHarnessMessageState(state);
     if (simulateStalePromptSync) {
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
@@ -4348,6 +4588,7 @@ function setUpHarness() {
   const shouldResetStorage = previousScenarioName !== scenarioName;
 
   if (shouldResetStorage) {
+    window.sessionStorage.removeItem(PERSISTED_MESSAGE_STATE_KEY);
     window.localStorage.clear();
     if (scenarioState.persistedActiveSessionId && !scenarioState.storedState.lastOpenedView) {
       persistRecentSessionView(scenarioState);
@@ -4394,6 +4635,8 @@ function setUpHarness() {
         JSON.stringify(scenarioState.storedState.ralphRuns)
       );
     }
+  } else {
+    restoreHarnessMessageState(scenarioState);
   }
   window.sessionStorage.setItem('varro.e2eScenario', scenarioName);
   harnessWindow.__initialTheme = THEME;
@@ -4420,6 +4663,8 @@ function setUpHarness() {
       return !!resolve;
     },
     pendingHistoryRequestCount: () => deferredHistoryRequestResolves.length,
+    getSessionMessages: (sessionId) =>
+      structuredClone(scenarioState.messagesBySessionId[sessionId] || []),
     updateMessagePart: (part) => {
       const messages = scenarioState.messagesBySessionId[part.sessionID];
       const message = messages?.find((entry) => entry.info.id === part.messageID);

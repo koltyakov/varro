@@ -76,7 +76,7 @@ export async function syncSessionMessagesWithStateDependencies(
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
     loadingStartedAt(): number | null;
-    loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
+    loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
@@ -165,7 +165,7 @@ type SessionSyncDependencies = {
   setError(message: string): void;
   getSessionStatus(sessionId: string): SessionStatus | null | undefined;
   loadingStartedAt(): number | null;
-  loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
+  loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
   handoffTodosToMessages(messages: MessageEntry[]): void;
   loadSessionMetadata(sessionId: string): Promise<Session>;
 };

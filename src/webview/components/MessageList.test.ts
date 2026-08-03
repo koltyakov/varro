@@ -4,6 +4,7 @@ import { reconcile } from 'solid-js/store';
 import {
   replaceMessages,
   requestMessageListScrollToBottom,
+  setMessagesIncremental,
   state,
   setSessions,
   setShowModelPicker,
@@ -1198,6 +1199,42 @@ describe('MessageList history pagination', () => {
     animationFrames.restore();
   });
 
+  it('[VIRT-11] preserves image carousel selection through a history prepend', async () => {
+    const currentMessageId = 'current-image-user';
+    const current = {
+      info: userMessage(currentMessageId),
+      parts: [
+        { ...filePart('image-1', 'Image 1'), messageID: currentMessageId },
+        { ...filePart('image-2', 'Image 2'), messageID: currentMessageId },
+      ],
+    };
+    setState('activeSessionId', 'session-1');
+    setMessagesIncremental([current]);
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const currentRow = () =>
+      container?.querySelector<HTMLElement>(`[data-msg-id="${currentMessageId}"]`);
+    expect(currentRow()?.textContent).toContain('1 / 2');
+    currentRow()?.querySelector<HTMLButtonElement>('[aria-label="Next image"]')?.click();
+    await Promise.resolve();
+    expect(currentRow()?.textContent).toContain('2 / 2');
+
+    setMessagesIncremental([
+      {
+        info: userMessage('older-user'),
+        parts: [textPart('older-text', 'Older prompt')],
+      },
+      {
+        info: { ...current.info },
+        parts: current.parts.map((part) => ({ ...part })),
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(currentRow()?.textContent).toContain('2 / 2');
+  });
+
   it.each([
     { interaction: 'without later user interaction', userScrollTop: null, expectedScrollTop: 220 },
     {
@@ -1898,8 +1935,12 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
   it('loads and scrolls to a sticky prompt behind a truncated history boundary', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    const boundaryRowDocumentTop = 500;
+    const boundaryCardDocumentTop = 520;
     const scrollIntoView = vi.fn(() => {
-      list.scrollTop = 120;
+      scrollTopValue = boundaryRowDocumentTop;
     });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -1921,21 +1962,40 @@ describe('shouldShowStickyUserMessagePreview', () => {
       },
     ]);
 
-    const rectMap = new Map<Element, DOMRect>();
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
-        return rectMap.get(this) || new DOMRect(0, 20, 500, 320);
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 500);
+        }
+        const row = this.classList.contains('interactive-item-container')
+          ? this
+          : this.closest<HTMLElement>('[data-msg-id]');
+        if (row?.dataset.msgId === 'boundary-user') {
+          const documentTop = this.classList.contains('user-message-card')
+            ? boundaryCardDocumentTop
+            : boundaryRowDocumentTop;
+          return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
+        }
+        if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, 20, 500, 320);
       }
     );
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
-    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
-    rectMap.set(list, new DOMRect(0, 0, 500, 500));
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    track.style.setProperty('--latest-user-message-sticky-gap', '13px');
     list.dispatchEvent(new Event('scroll'));
     animationFrames.flush();
     await Promise.resolve();
@@ -1972,12 +2032,26 @@ describe('shouldShowStickyUserMessagePreview', () => {
       limit: 50,
       before: 'cursor-1',
     });
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
-    expect(list.scrollTop).toBe(120);
+    const boundaryCard = container?.querySelector<HTMLElement>(
+      '[data-msg-id="boundary-user"] .user-message-card'
+    );
+    expect(boundaryCard).toBeInstanceOf(HTMLDivElement);
+    const computedStickyGap = Number.parseFloat(
+      getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+    );
+    expect(
+      Math.abs(
+        boundaryCard!.getBoundingClientRect().top -
+          list.getBoundingClientRect().top -
+          computedStickyGap
+      )
+    ).toBeLessThanOrEqual(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
     animationFrames.restore();
   });
 
-  it('waits for active history anchoring before scrolling to a sticky prompt', async () => {
+  it('keeps sticky navigation pending while history anchoring owns scroll', async () => {
+    // This verifies scroll-owner ordering; destination geometry is covered by the alignment cases.
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -2064,8 +2138,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
       await Promise.resolve();
       await Promise.resolve();
     }
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(scrollIntoView).not.toHaveBeenCalled();
     animationFrames.restore();
   });
 
@@ -2193,6 +2266,45 @@ describe('MessageList empty state', () => {
 });
 
 describe('MessageList session scoping', () => {
+  it('reacts synchronously when only the active session changes', async () => {
+    setSessions([session('session-1'), session('session-2')]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: userMessage('session-1-message'),
+        parts: [
+          {
+            ...textPart('session-1-text', 'Session one'),
+            messageID: 'session-1-message',
+          },
+        ],
+      },
+      {
+        info: { ...userMessage('session-2-message'), sessionID: 'session-2' },
+        parts: [
+          {
+            ...textPart('session-2-text', 'Session two'),
+            sessionID: 'session-2',
+            messageID: 'session-2-message',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(
+      [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => row.dataset.msgId)
+    ).toEqual(['session-1-message']);
+
+    setState('activeSessionId', 'session-2');
+
+    expect(
+      [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => row.dataset.msgId)
+    ).toEqual(['session-2-message']);
+  });
+
   it('hides child-session user prompts in the parent thread before subagent output arrives', () => {
     setSessions([
       {
@@ -4513,7 +4625,113 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('scrolls to the sticky prompt instead of editing while the active session is running', async () => {
+  it.each([
+    {
+      kind: 'text',
+      parts: [textPart('text-3', 'Prompt 2')],
+    },
+    {
+      kind: 'image-only',
+      parts: [filePart('image-2', 'Image 2')],
+    },
+  ])(
+    'aligns a small-transcript $kind sticky jump to the real card without scrolling its parent',
+    async ({ parts }) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      let list: HTMLDivElement | null = null;
+      let scrollTopValue = 1200;
+      let outerScrollTop = 75;
+      const rowDocumentTop = 1120;
+      const cardDocumentTop = 1140;
+      const stickyGap = 14;
+      const scrollIntoView = vi.fn(() => {
+        scrollTopValue = rowDocumentTop;
+        outerScrollTop = 0;
+      });
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: scrollIntoView,
+      });
+
+      setState('activeSessionId', 'session-1');
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+        { info: userMessage('user-2'), parts },
+        { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+      ]);
+
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: HTMLElement) {
+          if (this === list || this.classList.contains('interactive-list')) {
+            return new DOMRect(0, 100, 500, 500);
+          }
+          const row = this.classList.contains('interactive-item-container')
+            ? this
+            : this.closest<HTMLElement>('[data-msg-id]');
+          if (row?.dataset.msgId === 'user-2') {
+            const documentTop = this.classList.contains('user-message-card')
+              ? cardDocumentTop
+              : rowDocumentTop;
+            return new DOMRect(0, 100 + documentTop - scrollTopValue, 500, 52);
+          }
+          if (row?.dataset.msgId === 'assistant-2') {
+            return new DOMRect(0, 120, 500, 320);
+          }
+          return new DOMRect(0, -600, 500, 40);
+        }
+      );
+
+      cleanup = render(() => MessageList(), container!);
+      await Promise.resolve();
+
+      list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+      const card = container?.querySelector(
+        '[data-msg-id="user-2"] .user-message-card'
+      ) as HTMLDivElement;
+      Object.defineProperty(container!, 'scrollTop', {
+        configurable: true,
+        get: () => outerScrollTop,
+        set: (value: number) => {
+          outerScrollTop = value;
+        },
+      });
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+      track.style.setProperty('--latest-user-message-sticky-gap', `${stickyGap}px`);
+
+      list.dispatchEvent(new Event('scroll'));
+      animationFrames.flush();
+      await Promise.resolve();
+
+      const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+      expect(sticky).toBeInstanceOf(HTMLDivElement);
+      sticky?.click();
+
+      const computedStickyGap = Number.parseFloat(
+        getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+      );
+      expect(
+        Math.abs(
+          card.getBoundingClientRect().top - list.getBoundingClientRect().top - computedStickyGap
+        )
+      ).toBeLessThanOrEqual(1);
+      expect(outerScrollTop).toBe(75);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      animationFrames.restore();
+    }
+  );
+
+  it('does not enter edit mode from a sticky click while the active session is running', async () => {
+    // This verifies click ownership, not destination alignment.
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -4565,7 +4783,7 @@ describe('MessageList sticky prompt preview', () => {
 
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(editingMessage()).toBeNull();
 
     animationFrames.restore();
@@ -4581,11 +4799,12 @@ describe('MessageList sticky prompt preview', () => {
     });
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
+    let outerScrollTop = 60;
     let targetLayoutShift = 0;
     let jumpStarted = false;
     const targetIndex = 40;
     const targetScrollTop = targetIndex * 120;
-    const stickyTopInset = 8;
+    const stickyTopInset = 13;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
         if (this === list) return new DOMRect(0, 0, 500, 500);
@@ -4634,6 +4853,14 @@ describe('MessageList sticky prompt preview', () => {
 
     cleanup = render(() => MessageList(), container!);
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    Object.defineProperty(container!, 'scrollTop', {
+      configurable: true,
+      get: () => outerScrollTop,
+      set: (value: number) => {
+        outerScrollTop = value;
+      },
+    });
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
     Object.defineProperty(list, 'scrollTop', {
@@ -4647,6 +4874,7 @@ describe('MessageList sticky prompt preview', () => {
         }
       },
     });
+    track.style.setProperty('--latest-user-message-sticky-gap', `${stickyTopInset}px`);
 
     await Promise.resolve();
     await Promise.resolve();
@@ -4665,6 +4893,9 @@ describe('MessageList sticky prompt preview', () => {
     expect(sticky?.textContent).toContain('Terminal: zsh (2 lines)');
     sticky?.click();
 
+    const computedStickyGap = Number.parseFloat(
+      getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+    );
     expect(scrollTopValue).toBe(targetScrollTop - stickyTopInset);
     expect(
       container
@@ -4673,11 +4904,18 @@ describe('MessageList sticky prompt preview', () => {
     ).toBe(stickyTopInset - 100);
     animationFrames.flush();
     await Promise.resolve();
+    const targetCard = container?.querySelector<HTMLElement>(
+      `[data-msg-id="message-${targetIndex}"] .user-message-card`
+    );
+    expect(targetCard).toBeInstanceOf(HTMLDivElement);
     expect(
-      container
-        ?.querySelector<HTMLElement>(`[data-msg-id="message-${targetIndex}"] .user-message-card`)
-        ?.getBoundingClientRect().top
-    ).toBe(stickyTopInset);
+      Math.abs(
+        targetCard!.getBoundingClientRect().top -
+          list.getBoundingClientRect().top -
+          computedStickyGap
+      )
+    ).toBeLessThanOrEqual(1);
+    expect(outerScrollTop).toBe(60);
 
     const originalCard = container?.querySelector<HTMLElement>(
       `[data-msg-id="message-${targetIndex}"] .user-message-card`
@@ -4695,7 +4933,8 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('restores image attachments when editing the message reached from the sticky prompt preview', async () => {
+  it('restores image attachments when editing a message selected through its sticky preview', async () => {
+    // Sticky destination geometry is covered separately; this case owns edit-state restoration.
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -4756,7 +4995,7 @@ describe('MessageList sticky prompt preview', () => {
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(editingMessage()).toBeNull();
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -4782,7 +5021,8 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
-  it('scrolls to and edits image-only messages from the reached message bubble', async () => {
+  it('edits an image-only message after selecting it through the sticky preview', async () => {
+    // Sticky destination geometry is covered separately; this case owns image-only edit state.
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -4841,7 +5081,7 @@ describe('MessageList sticky prompt preview', () => {
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(editingMessage()).toBeNull();
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     user2Card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -5427,6 +5667,123 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it.each(['insertion', 'removal'] as const)(
+    'preserves a detached visible row across a generic structural %s',
+    async (mutation) => {
+      const animationFrames = installQueuedAnimationFrameMocks();
+      const baseMessages = Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      });
+      const heightById = new Map(
+        baseMessages.map((message, index) => [message.info.id, 70 + (index % 4) * 25])
+      );
+      let layoutIds = baseMessages.map((message) => message.info.id);
+      let list: HTMLDivElement | null = null;
+      let scrollTopValue = 0;
+      const rowTop = (messageId: string) => {
+        const index = layoutIds.indexOf(messageId);
+        return layoutIds
+          .slice(0, Math.max(0, index))
+          .reduce((total, id) => total + (heightById.get(id) ?? 0), 0);
+      };
+      const totalHeight = () =>
+        layoutIds.reduce((total, id) => total + (heightById.get(id) ?? 0), 0);
+
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: HTMLElement) {
+          if (this === list || this.classList.contains('interactive-list')) {
+            return new DOMRect(0, 0, 500, 400);
+          }
+          if (this.classList.contains('interactive-list-track')) {
+            return new DOMRect(0, 0, 500, totalHeight());
+          }
+          const messageId = this.dataset.msgId;
+          if (messageId && heightById.has(messageId)) {
+            return new DOMRect(
+              0,
+              rowTop(messageId) - scrollTopValue,
+              500,
+              heightById.get(messageId)
+            );
+          }
+          return new DOMRect(0, 0, 500, 40);
+        }
+      );
+
+      setState('activeSessionId', 'session-1');
+      replaceMessages(baseMessages);
+      cleanup = render(() => MessageList(), container!);
+      list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(list, 'scrollHeight', {
+        configurable: true,
+        get: totalHeight,
+      });
+      Object.defineProperty(list, 'scrollTop', {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      for (let frame = 0; frame < 4; frame += 1) {
+        await Promise.resolve();
+        animationFrames.flush();
+      }
+      const anchorId = 'assistant-25';
+      list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+      scrollTopValue = rowTop(anchorId) + 20;
+      list.dispatchEvent(new Event('scroll'));
+      await Promise.resolve();
+      animationFrames.flush();
+      await Promise.resolve();
+      vi.advanceTimersByTime(300);
+
+      const anchorBefore = container?.querySelector(
+        `[data-msg-id="${anchorId}"]`
+      ) as HTMLDivElement;
+      expect(anchorBefore).toBeInstanceOf(HTMLDivElement);
+      const anchorTopBefore = anchorBefore.getBoundingClientRect().top;
+
+      const nextMessages = state.messages.map((message) => ({
+        info: message.info,
+        parts: message.parts,
+      }));
+      if (mutation === 'removal') {
+        nextMessages.splice(4, 1);
+      } else {
+        const insertedId = 'assistant-inserted';
+        heightById.set(insertedId, 135);
+        nextMessages.splice(4, 0, {
+          info: assistantMessage(insertedId),
+          parts: [
+            {
+              ...textPart('text-inserted', 'Inserted response'),
+              messageID: insertedId,
+            },
+          ],
+        });
+      }
+      replaceMessages(nextMessages);
+      layoutIds = nextMessages.map((message) => message.info.id);
+      await Promise.resolve();
+      animationFrames.flush();
+      await Promise.resolve();
+
+      const anchorAfter = container?.querySelector(`[data-msg-id="${anchorId}"]`) as HTMLDivElement;
+      expect(anchorAfter).toBeInstanceOf(HTMLDivElement);
+      expect(
+        Math.abs(anchorAfter.getBoundingClientRect().top - anchorTopBefore)
+      ).toBeLessThanOrEqual(0.5);
+      animationFrames.restore();
+    }
+  );
+
   it('preserves the visible row for one mixed resize batch above, at, and below it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{
@@ -5823,6 +6180,95 @@ describe('MessageList auto-scroll', () => {
 
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeInstanceOf(HTMLDivElement);
     mutationObserver.disconnect();
+    animationFrames.restore();
+  });
+
+  it('remounts an offscreen cached zero-height row after the same text part becomes visible', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const zeroRowHasContent = !!state.messages
+          .find((message) => message.info.id === 'assistant-30')
+          ?.parts.find((part) => part.id === 'text-30' && part.type === 'text' && part.text.trim());
+        const trackHeight = zeroRowHasContent ? 5000 : 4900;
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, trackHeight);
+        }
+        if (this.dataset.msgId) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          const height = index === 30 && !zeroRowHasContent ? 0 : 100;
+          const documentTop =
+            index <= 30 ? index * 100 : index * 100 - (zeroRowHasContent ? 0 : 100);
+          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`text-${index}`, index === 30 ? '' : `Response ${index}`),
+              messageID: messageId,
+            },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () =>
+        state.messages
+          .find((message) => message.info.id === 'assistant-30')
+          ?.parts.find((part) => part.id === 'text-30' && part.type === 'text' && part.text.trim())
+          ? 5000
+          : 4900,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    scrollTopValue = 4450;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
+
+    upsertPart({
+      ...textPart('text-30', 'The existing part is now visible'),
+      messageID: 'assistant-30',
+    });
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const remountedRow = container?.querySelector('[data-msg-id="assistant-30"]');
+    expect(remountedRow).toBeInstanceOf(HTMLDivElement);
+    expect(remountedRow?.textContent).toContain('The existing part is now visible');
     animationFrames.restore();
   });
 
@@ -7224,6 +7670,113 @@ describe('MessageList auto-scroll', () => {
     expect(assignedScrollTops).toHaveLength(assignmentCountAfterNearBottomScroll + 1);
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(800);
+    animationFrames.restore();
+  });
+
+  it('reacts to trailing permission growth when jump-to-latest crosses its threshold', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let trailingHeight = 0;
+    const messageHeight = 100;
+    const messageTrackHeight = 50 * messageHeight;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, messageTrackHeight + trailingHeight);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * messageHeight - scrollTopValue, 500, messageHeight);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => messageTrackHeight + trailingHeight,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    scrollTopValue = messageTrackHeight - list.clientHeight - 220;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
+
+    trailingHeight = 100;
+    setState('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(list!) && observer.targets.has(track)
+    );
+    expect(layoutObserver).toBeDefined();
+    layoutObserver!.callback(
+      [{ target: track } as unknown as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
+    await Promise.resolve();
+
+    expect(container?.querySelector('.jump-to-latest-button')).toBeInstanceOf(HTMLButtonElement);
     animationFrames.restore();
   });
 

@@ -364,7 +364,8 @@ test.describe('viewport content coverage', () => {
     }
   });
 
-  test('scroll position stable after scrolling to top and back to bottom', async ({ page }) => {
+  test('top-to-bottom range traversal restores bottom viewport coverage', async ({ page }) => {
+    // This checks scrollbar boundaries and rendered coverage, not intermediate jump geometry.
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();

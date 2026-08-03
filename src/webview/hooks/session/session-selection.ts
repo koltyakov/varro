@@ -196,7 +196,7 @@ export async function syncSessionMessagesWithDependencies(
     getActiveSessionId(): string | null;
     getSessionStatus(sessionId: string): SessionStatus | null | undefined;
     loadingStartedAt(): number | null;
-    loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
+    loadSessionMessages(sessionId: string, isCurrent?: () => boolean): Promise<MessageEntry[]>;
     updateUsageLimitState(
       sessionId: string,
       status: SessionStatus | null | undefined,
@@ -215,7 +215,9 @@ export async function syncSessionMessagesWithDependencies(
   sessionId: string
 ) {
   const generation = generationRef.next();
-  const messages = await deps.loadSessionMessages(sessionId);
+  const messages = await deps.loadSessionMessages(sessionId, () =>
+    generationRef.isCurrent(generation)
+  );
   if (!generationRef.isCurrent(generation)) return;
 
   const status = deps.getSessionStatus(sessionId);

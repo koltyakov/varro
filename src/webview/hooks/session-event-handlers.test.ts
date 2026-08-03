@@ -13,6 +13,13 @@ import {
   markSessionUnshared,
   resetSessionShareOverridesForTests,
 } from '../lib/session-share-overrides';
+import {
+  cacheSessionHistoryPage,
+  getSessionHistoryPrompts,
+  resetMessageWindowState,
+  setSessionHistoryPrompts,
+  takeCachedSessionHistoryPage,
+} from '../lib/message-window';
 
 type MockState = Pick<
   StateModule.AppState,
@@ -4358,6 +4365,32 @@ describe('registerSessionEventHandlers', () => {
     expect(replaceMessages).toHaveBeenCalledWith([remainingMessage]);
     expect(syncTodosFromMessages).toHaveBeenCalledTimes(2);
     expect(syncTodosFromMessages).toHaveBeenLastCalledWith([remainingMessage]);
+  });
+
+  it('[VIRT-10] removes a deleted message from cached pages and prompt history', () => {
+    const handlers = installHandlers();
+    const removedMessage = createUserEntry({ id: 'remove-message' });
+    resetMessageWindowState();
+    cacheSessionHistoryPage('session-1', 'page-cursor', [removedMessage]);
+    setSessionHistoryPrompts('session-1', [removedMessage]);
+
+    try {
+      registerSessionEventHandlers(
+        createDefaultDeps({
+          getActiveSessionId: () => 'session-1',
+          getMessages: () => [removedMessage],
+        })
+      );
+
+      handlers.get('message.removed')?.({
+        properties: { sessionID: 'session-1', messageID: 'remove-message' },
+      });
+
+      expect(takeCachedSessionHistoryPage('session-1', 'page-cursor')).toBeUndefined();
+      expect(getSessionHistoryPrompts('session-1')).toEqual([]);
+    } finally {
+      resetMessageWindowState();
+    }
   });
 
   it('normalizes fallback permission ids and tracks question lifecycle updates', () => {

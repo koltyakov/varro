@@ -1,6 +1,14 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { getScrollMetrics, waitForAnimationFrame, waitForAnimationFrames } from './helpers';
+import {
+  getScrollMetrics,
+  getStickyMessageAlignment,
+  getVisibleMessageAnchor,
+  installOuterScrollSentinel,
+  sampleMessageTopAcrossFrames,
+  waitForAnimationFrame,
+  waitForAnimationFrames,
+} from './helpers';
 
 async function updateDiffPreview(page: Page, messageId: string, fileCount: number) {
   const patchText = [
@@ -197,49 +205,35 @@ test.describe('diff preview anchoring', () => {
     );
     await waitForAnimationFrames(page, 4);
 
-    const afterMountedResize = await list.evaluate((element) => {
-      const containerRect = element.getBoundingClientRect();
-      const firstVisible = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-        (row) => {
-          const rect = row.getBoundingClientRect();
-          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-        }
-      );
-      return {
-        anchorId: firstVisible?.dataset.msgId ?? '',
-        anchorTop: firstVisible ? firstVisible.getBoundingClientRect().top - containerRect.top : 0,
-      };
-    });
+    const mountedResizeSamples = await sampleMessageTopAcrossFrames(list, before.anchorId, 4);
+    expect(
+      mountedResizeSamples.every((top) => top !== null && Math.abs(top - before.anchorTop) < 1.5),
+      JSON.stringify({ before, mountedResizeSamples })
+    ).toBe(true);
 
-    expect(afterMountedResize.anchorId).toBe(before.anchorId);
-    expect(Math.abs(afterMountedResize.anchorTop - before.anchorTop)).toBeLessThan(3);
-
-    const beforeOffscreenUpdate = afterMountedResize;
+    const beforeOffscreenUpdate = {
+      id: before.anchorId,
+      top: mountedResizeSamples.at(-1)!,
+    };
     await expect(page.locator('[data-msg-id="message-diff-preview-assistant-0"]')).toHaveCount(0);
     await list.dispatchEvent('wheel', { deltaY: -1 });
     await updateDiffPreview(page, 'message-diff-preview-assistant-0', 24);
     await waitForAnimationFrames(page, 4);
 
-    const afterOffscreenUpdate = await list.evaluate((element) => {
-      const containerRect = element.getBoundingClientRect();
-      const firstVisible = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-        (row) => {
-          const rect = row.getBoundingClientRect();
-          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-        }
-      );
-      return {
-        anchorId: firstVisible?.dataset.msgId ?? '',
-        anchorTop: firstVisible ? firstVisible.getBoundingClientRect().top - containerRect.top : 0,
-        maxRenderedMessageRows: Number(element.dataset.maxRenderedMessageRows ?? 0),
-      };
-    });
-
-    expect(afterOffscreenUpdate.anchorId).toBe(beforeOffscreenUpdate.anchorId);
-    expect(Math.abs(afterOffscreenUpdate.anchorTop - beforeOffscreenUpdate.anchorTop)).toBeLessThan(
-      3
+    const offscreenUpdateSamples = await sampleMessageTopAcrossFrames(
+      list,
+      beforeOffscreenUpdate.id,
+      4
     );
-    expect(afterOffscreenUpdate.maxRenderedMessageRows).toBeLessThan(50);
+    expect(
+      offscreenUpdateSamples.every(
+        (top) => top !== null && Math.abs(top - beforeOffscreenUpdate.top!) < 1.5
+      ),
+      JSON.stringify({ beforeOffscreenUpdate, offscreenUpdateSamples })
+    ).toBe(true);
+    expect(
+      await list.evaluate((element) => Number(element.dataset.maxRenderedMessageRows ?? 0))
+    ).toBeLessThan(50);
   });
 
   test('aligns the first changed diff row with the top of the preview', async ({ page }) => {
@@ -370,16 +364,25 @@ test.describe('diff preview anchoring', () => {
       element.dispatchEvent(new Event('scroll'));
     });
     await waitForAnimationFrames(page, 3);
-    const scrollTopAfterExpansion = await list.evaluate((element) => element.scrollTop);
+    const expandedOverlayAnchor = await getVisibleMessageAnchor(list);
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       200
     );
 
     await updateDiffPreviewWithPatch(page, messageId, makeWideDiffPatch(30));
-    await waitForAnimationFrames(page, 4);
+    const expandedOverlaySamples = await sampleMessageTopAcrossFrames(
+      list,
+      expandedOverlayAnchor.id,
+      4
+    );
 
     const expandedMetrics = await getScrollMetrics(page, '.interactive-list');
-    expect(Math.abs(expandedMetrics.scrollTop - scrollTopAfterExpansion)).toBeLessThan(2);
+    expect(
+      expandedOverlaySamples.every(
+        (top) => top !== null && Math.abs(top - expandedOverlayAnchor.top) < 1.5
+      ),
+      JSON.stringify({ expandedOverlayAnchor, expandedOverlaySamples })
+    ).toBe(true);
     expect(expandedMetrics.distanceFromBottom).toBeGreaterThan(200);
     await expect(page.locator('.jump-to-latest-button')).toHaveCount(0);
 
@@ -399,13 +402,16 @@ test.describe('diff preview anchoring', () => {
     );
     await focusPreview.focus();
     await expect(focusPreview).toBeFocused();
-    const scrollTopBeforeGrowth = await list.evaluate((element) => element.scrollTop);
+    const focusedAnchor = await getVisibleMessageAnchor(list);
 
     await updateDiffPreview(page, messageId, 12);
-    await waitForAnimationFrames(page, 4);
+    const focusedSamples = await sampleMessageTopAcrossFrames(list, focusedAnchor.id, 4);
 
     const focusedMetrics = await getScrollMetrics(page, '.interactive-list');
-    expect(Math.abs(focusedMetrics.scrollTop - scrollTopBeforeGrowth)).toBeLessThan(2);
+    expect(
+      focusedSamples.every((top) => top !== null && Math.abs(top - focusedAnchor.top) < 1.5),
+      JSON.stringify({ focusedAnchor, focusedSamples })
+    ).toBe(true);
     expect(focusedMetrics.distanceFromBottom).toBeGreaterThan(200);
 
     await page.locator('[contenteditable="true"]').focus();
@@ -416,7 +422,9 @@ test.describe('diff preview anchoring', () => {
       .toBeLessThan(3);
   });
 
-  test('keeps a focused diff anchored when it is expanded after scrolling', async ({ page }) => {
+  test('keeps a focused diff header fixed when it is expanded after scrolling', async ({
+    page,
+  }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -509,12 +517,15 @@ test.describe('diff preview anchoring', () => {
     expect(Math.max(...collapseDistances)).toBeLessThan(3);
 
     await page.waitForTimeout(300);
-    const scrollTopAfterCollapse = await list.evaluate((element) => element.scrollTop);
+    const detachedAnchor = await getVisibleMessageAnchor(list);
     await updateDiffPreview(page, messageId, 12);
-    await waitForAnimationFrames(page, 4);
+    const detachedSamples = await sampleMessageTopAcrossFrames(list, detachedAnchor.id, 4);
 
     const detachedMetrics = await getScrollMetrics(page, '.interactive-list');
-    expect(Math.abs(detachedMetrics.scrollTop - scrollTopAfterCollapse)).toBeLessThan(2);
+    expect(
+      detachedSamples.every((top) => top !== null && Math.abs(top - detachedAnchor.top) < 1.5),
+      JSON.stringify({ detachedAnchor, detachedSamples })
+    ).toBe(true);
     expect(detachedMetrics.distanceFromBottom).toBeGreaterThan(200);
   });
 
@@ -594,10 +605,23 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('keeps the visible message anchored when older diff history loads', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&deferHistory=1'
+    );
     const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
     await expect(list).toBeVisible();
     await expect(page.locator('[data-msg-id="message-diff-preview-user-0"]')).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
 
     for (let index = 36; index < 45; index += 1) {
       await updateDiffPreview(page, `message-diff-preview-assistant-${index}`, 12);
@@ -616,6 +640,23 @@ test.describe('diff preview anchoring', () => {
       element.scrollTop = 0;
       element.dispatchEvent(new Event('scroll'));
     });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+    const anchor = await getVisibleMessageAnchor(list);
+    expect(anchor.id).toBe('message-diff-preview-user-35');
+
+    const released = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+      };
+      return harness.__varroE2E?.releaseNextHistoryRequest?.() ?? false;
+    });
+    expect(released).toBe(true);
+
+    const anchorSamples = await sampleMessageTopAcrossFrames(list, anchor.id, 8);
+    expect(
+      anchorSamples.every((top) => top !== null && Math.abs(top - anchor.top) < 1.5),
+      JSON.stringify({ anchor, anchorSamples })
+    ).toBe(true);
 
     await expect
       .poll(() =>
@@ -633,11 +674,6 @@ test.describe('diff preview anchoring', () => {
 
     const boundary = page.locator('[data-msg-id="message-diff-preview-user-35"]');
     await expect(boundary).toBeAttached();
-    const anchorTop = await boundary.evaluate((row) => {
-      const scrollList = row.closest<HTMLElement>('.interactive-list')!;
-      return row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
-    });
-    expect(Math.abs(anchorTop)).toBeLessThan(80);
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       100
     );
@@ -650,10 +686,11 @@ test.describe('diff preview anchoring', () => {
       '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&boundarySticky=1'
     );
     const list = page.locator('.interactive-list');
-    const target = page.locator('[data-msg-id="message-diff-preview-user-35"]');
+    const targetRow = page.locator('[data-msg-id="message-diff-preview-user-35"]');
+    const targetCard = targetRow.locator('.user-message-card');
     const sticky = page.locator('.latest-user-message-sticky');
     await expect(list).toBeVisible();
-    await expect(target).toHaveCount(0);
+    await expect(targetRow).toHaveCount(0);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
@@ -669,6 +706,7 @@ test.describe('diff preview anchoring', () => {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
     });
+    const outerScrollTop = await installOuterScrollSentinel(page);
     const sawLoading = await sticky.evaluate((card) => {
       (card as HTMLElement).click();
       const loading = card.querySelector<HTMLElement>('.latest-user-message-sticky-loading');
@@ -684,24 +722,23 @@ test.describe('diff preview anchoring', () => {
     });
     expect(sawLoading).toBe(true);
 
-    await expect(target).toBeAttached();
+    await expect(targetCard).toBeAttached();
     await expect
       .poll(() =>
-        target.evaluate((row) => {
-          const scrollList = row.closest<HTMLElement>('.interactive-list')!;
-          return Math.abs(row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top);
-        })
+        getStickyMessageAlignment(targetCard).then((geometry) => Math.abs(geometry.delta))
       )
-      .toBeLessThan(80);
+      .toBeLessThanOrEqual(1);
+    expect(await page.locator('#root').evaluate((root) => root.scrollTop)).toBe(outerScrollTop);
   });
 
   test('navigates after loading assistant-heavy paginated history', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1');
     const list = page.locator('.interactive-list');
     const sticky = page.locator('.latest-user-message-sticky');
-    const target = page.locator('[data-msg-id="message-assistant-heavy-target"]');
+    const targetRow = page.locator('[data-msg-id="message-assistant-heavy-target"]');
+    const targetCard = targetRow.locator('.user-message-card');
     await expect(list).toBeVisible();
-    await expect(target).toHaveCount(0);
+    await expect(targetRow).toHaveCount(0);
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
@@ -709,16 +746,18 @@ test.describe('diff preview anchoring', () => {
       element.dispatchEvent(new Event('scroll'));
     });
     await expect(sticky).toContainText('Apply the needed fixes/improvements');
-    await sticky.click();
+    const outerScrollTop = await installOuterScrollSentinel(page);
+    await sticky.evaluate((card) => (card as HTMLElement).click());
 
-    await expect(target).toBeAttached();
+    await expect(targetCard).toBeAttached();
     await page.waitForTimeout(500);
-    await expect(target).toBeAttached();
-    const targetTop = await target.evaluate((row) => {
-      const scrollList = row.closest<HTMLElement>('.interactive-list')!;
-      return Math.abs(row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top);
-    });
-    expect(targetTop).toBeLessThan(80);
+    await expect(targetCard).toBeAttached();
+    await expect
+      .poll(() =>
+        getStickyMessageAlignment(targetCard).then((geometry) => Math.abs(geometry.delta))
+      )
+      .toBeLessThanOrEqual(1);
+    expect(await page.locator('#root').evaluate((root) => root.scrollTop)).toBe(outerScrollTop);
   });
 });
 

@@ -1,46 +1,12 @@
 import { expect, test } from '@playwright/test';
-import type { Locator } from '@playwright/test';
-import { getScrollMetrics, waitForAnimationFrame, waitForAnimationFrames } from './helpers';
+import {
+  getScrollMetrics,
+  getVisibleMessageAnchor,
+  sampleMessageTopAcrossFrames,
+  waitForAnimationFrame,
+  waitForAnimationFrames,
+} from './helpers';
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
-
-async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 6) {
-  return list.evaluate(async (element, frames) => {
-    const samples: Array<{ id: string; top: number; scrollTop: number }> = [];
-    for (let index = 0; index < frames; index += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const containerRect = element.getBoundingClientRect();
-      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-      });
-      samples.push({
-        id: row?.dataset.msgId ?? '',
-        top: row ? row.getBoundingClientRect().top - containerRect.top : Number.NaN,
-        scrollTop: element.scrollTop,
-      });
-    }
-    return samples;
-  }, frameCount);
-}
-
-async function sampleMessageTopAcrossFrames(list: Locator, messageId: string, frameCount = 8) {
-  return list.evaluate(
-    async (element, args) => {
-      const samples: Array<number | null> = [];
-      for (let frame = 0; frame < args.frameCount; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-          (candidate) => candidate.dataset.msgId === args.messageId
-        );
-        samples.push(
-          row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null
-        );
-      }
-      return samples;
-    },
-    { messageId, frameCount }
-  );
-}
 
 test.describe('auto-scroll', () => {
   test('starts at the bottom of the conversation', async ({ page }) => {
@@ -281,17 +247,28 @@ test.describe('auto-scroll', () => {
     );
     expect(Math.abs(thirdReserveHeight - firstReserveHeight)).toBeLessThanOrEqual(1);
 
-    const detachedScrollTop = await list.evaluate((element) => {
+    const detachedAnchor = await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
       element.scrollTop = Math.max(0, element.scrollTop - 300);
+      const containerRect = element.getBoundingClientRect();
+      const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+      if (!row?.dataset.msgId) throw new Error('Detached todo anchor is missing');
+      const anchor = {
+        id: row.dataset.msgId,
+        top: row.getBoundingClientRect().top - containerRect.top,
+      };
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
+      return anchor;
     });
     await expect(reserve).toHaveCount(0);
-    await waitForAnimationFrames(page, 3);
+    const detachedSamples = await sampleMessageTopAcrossFrames(list, detachedAnchor.id, 3);
     expect(
-      Math.abs((await list.evaluate((element) => element.scrollTop)) - detachedScrollTop)
-    ).toBe(0);
+      detachedSamples.every((top) => top !== null && Math.abs(top - detachedAnchor.top) <= 1),
+      JSON.stringify({ detachedAnchor, detachedSamples })
+    ).toBe(true);
   });
 
   test('manual scroll up disengages auto-scroll', async ({ page }) => {
@@ -321,22 +298,23 @@ test.describe('auto-scroll', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const originalScrollTop = await list.evaluate((element) => element.scrollTop);
+    const anchor = await getVisibleMessageAnchor(list);
 
-    const detachedScrollTop = await list.evaluate((element) => {
+    await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -48, bubbles: true }));
       element.scrollTop = Math.max(0, element.scrollTop - 48);
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
     });
 
-    expect(detachedScrollTop).toBeLessThan(originalScrollTop - 30);
-
     await page.waitForTimeout(260);
-    await waitForAnimationFrames(page, 3);
-
-    const afterSettled = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(afterSettled - detachedScrollTop)).toBeLessThan(3);
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 3);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - anchor.top - 48) < 3),
+      JSON.stringify({ anchor, samples })
+    ).toBe(true);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      30
+    );
   });
 
   test('scrolls upward through a large transcript without virtualized content jumps', async ({
@@ -350,32 +328,26 @@ test.describe('auto-scroll', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const samples: Array<{ target: number; actual: number; visibleRows: number }> = [];
-    for (let index = 0; index < 24; index += 1) {
-      const sample = await list.evaluate((element) => {
-        const target = Math.max(0, element.scrollTop - 700);
-        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -700, bubbles: true }));
+    for (let index = 0; index < 60; index += 1) {
+      const anchor = await getVisibleMessageAnchor(list);
+      if (anchor.scrollTop < 180) break;
+
+      await list.evaluate((element) => {
+        const target = Math.max(0, element.scrollTop - 180);
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -180, bubbles: true }));
         element.scrollTop = target;
         element.dispatchEvent(new Event('scroll'));
-        return { target, actual: element.scrollTop, visibleRows: 0 };
       });
-      await waitForAnimationFrames(page, 2);
-      const settled = await list.evaluate((element, target) => {
-        const containerRect = element.getBoundingClientRect();
-        const visibleRows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].filter(
-          (row) => {
-            const rect = row.getBoundingClientRect();
-            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-          }
-        ).length;
-        return { target, actual: element.scrollTop, visibleRows };
-      }, sample.target);
-      samples.push(settled);
-    }
-
-    for (const sample of samples) {
-      expect(sample.visibleRows).toBeGreaterThan(0);
-      expect(Math.abs(sample.actual - sample.target)).toBeLessThan(90);
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 3);
+      expect(
+        samples.every((top) => top !== null),
+        JSON.stringify({ index, anchor, samples })
+      ).toBe(true);
+      const settledTop = samples.at(-1)!;
+      expect(Math.abs(settledTop! - anchor.top - 180), `wheel step ${index}`).toBeLessThan(4);
+      for (const top of samples.slice(1)) {
+        expect(Math.abs(top! - settledTop!), `settling step ${index}`).toBeLessThan(1.5);
+      }
     }
   });
 
@@ -394,25 +366,21 @@ test.describe('auto-scroll', () => {
     expect(box).not.toBeNull();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
-    const positions: number[] = [await list.evaluate((element) => element.scrollTop)];
     for (let index = 0; index < 18; index += 1) {
+      const anchor = await getVisibleMessageAnchor(list);
+      if (anchor.scrollTop < 180) break;
       await page.mouse.wheel(0, -180);
-      await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 3);
+      expect(
+        samples.every((top) => top !== null),
+        JSON.stringify({ index, anchor, samples })
+      ).toBe(true);
+      const settledTop = samples.at(-1)!;
+      expect(Math.abs(settledTop! - anchor.top - 180), `wheel step ${index}`).toBeLessThan(4);
+      for (const top of samples.slice(1)) {
+        expect(Math.abs(top! - settledTop!), `settling step ${index}`).toBeLessThan(1.5);
+      }
     }
-
-    for (let index = 1; index < positions.length; index += 1) {
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
-    }
-
-    const visibleRows = await list.evaluate((element) => {
-      const containerRect = element.getBoundingClientRect();
-      return [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].filter((row) => {
-        const rect = row.getBoundingClientRect();
-        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-      }).length;
-    });
-    expect(visibleRows).toBeGreaterThan(0);
   });
 
   test('heterogeneous long chat scrolls upward without screen-sized jumps', async ({ page }) => {
@@ -429,8 +397,8 @@ test.describe('auto-scroll', () => {
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
     for (let index = 0; index < 35; index += 1) {
-      const before = (await sampleVisibleAnchorAcrossFrames(list, 2)).at(-1)!;
-      expect(before.id).not.toBe('');
+      await waitForAnimationFrames(page, 2);
+      const before = await getVisibleMessageAnchor(list);
       if (before.scrollTop < 180) break;
 
       await page.mouse.wheel(0, -180);
@@ -447,7 +415,7 @@ test.describe('auto-scroll', () => {
     }
   });
 
-  test('keeps compact tool rows anchored while virtualized scrolling settles', async ({ page }) => {
+  test('restores the same compact tool row after measured reflow settles', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
@@ -462,7 +430,8 @@ test.describe('auto-scroll', () => {
       element.dispatchEvent(new Event('scroll'));
     });
 
-    const beforeReflow = (await sampleVisibleAnchorAcrossFrames(list, 2)).at(-1)!;
+    await waitForAnimationFrames(page, 2);
+    const beforeReflow = await getVisibleMessageAnchor(list);
     await page.addStyleTag({
       content: `
         .tool-invocation-header,
@@ -473,28 +442,29 @@ test.describe('auto-scroll', () => {
         }
       `,
     });
-    const reflowSamples = await sampleVisibleAnchorAcrossFrames(list, 8);
-    for (const sample of reflowSamples.slice(1)) {
-      expect(sample.id).toBe(beforeReflow.id);
-      expect(Math.abs(sample.top - beforeReflow.top)).toBeLessThan(1.5);
+    const reflowSamples = await sampleMessageTopAcrossFrames(list, beforeReflow.id, 8);
+    expect(
+      reflowSamples.every((top) => top !== null),
+      JSON.stringify(reflowSamples)
+    ).toBe(true);
+    // The first RAF callback can precede the coalesced measurement correction in the same
+    // pre-paint turn; the settled frames must restore the original visible position.
+    for (const top of reflowSamples.slice(1)) {
+      expect(Math.abs(top! - beforeReflow.top)).toBeLessThan(1.5);
     }
 
     for (let step = 0; step < 20; step += 1) {
-      const target = await list.evaluate((element) => {
+      await list.evaluate((element) => {
         element.dispatchEvent(new WheelEvent('wheel', { deltaY: -180, bubbles: true }));
         element.scrollTop = Math.max(0, element.scrollTop - 180);
         element.dispatchEvent(new Event('scroll'));
-        return element.scrollTop;
       });
-      const samples = await sampleVisibleAnchorAcrossFrames(list);
-      const first = samples[0]!;
-      expect(first.id).not.toBe('');
-      for (const sample of samples.slice(1)) {
-        expect(sample.id).toBe(first.id);
-        expect(Math.abs(sample.top - first.top)).toBeLessThan(1.5);
+      const anchor = await getVisibleMessageAnchor(list);
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 6);
+      for (const top of samples) {
+        expect(top).not.toBeNull();
+        expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
       }
-      const settledScrollTop = await list.evaluate((element) => element.scrollTop);
-      expect(Math.abs(settledScrollTop - target)).toBeLessThan(1.5);
     }
   });
 
@@ -508,6 +478,7 @@ test.describe('auto-scroll', () => {
       element.scrollTop = 20;
       element.dispatchEvent(new Event('scroll'));
     });
+    // Setup only: a prepend legitimately raises scrollTop. The wheel loop below owns the jump oracle.
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
     await waitForAnimationFrames(page, 4);
 
@@ -631,9 +602,171 @@ test.describe('auto-scroll', () => {
     });
     expect(historyRequests).toEqual([
       { before: null, limit: '50' },
-      { before: '79', limit: '50' },
-      { before: '29', limit: '50' },
+      { before: 'msg_cursor_0001', limit: '50' },
+      { before: 'msg_cursor_0002', limit: '50' },
     ]);
+  });
+
+  test('keeps the incident-equivalent paginated image row stable across delayed loading', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+
+    let markImageRequestStarted!: () => void;
+    const imageRequestStarted = new Promise<void>((resolve) => {
+      markImageRequestStarted = resolve;
+    });
+    let releaseImageRequest!: () => void;
+    const imageRequestRelease = new Promise<void>((resolve) => {
+      releaseImageRequest = resolve;
+    });
+    let imageRequestCount = 0;
+    await page.route('**/e2e/harness/incident-delayed-image.svg', async (route) => {
+      imageRequestCount += 1;
+      markImageRequestStarted();
+      await imageRequestRelease;
+      await route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#3b82f6"/><circle cx="320" cy="240" r="96" fill="#dbeafe"/></svg>',
+      });
+    });
+
+    await page.goto(
+      '/e2e/harness/index.html?scenario=incident-delayed-image-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    const imageRow = page.locator('[data-msg-id="message-incident-delayed-image-user"]');
+    const imageFrame = imageRow.locator('.chat-image-preview-trigger');
+    const pendingHistoryRequestCount = () =>
+      page.evaluate(() => {
+        const harness = window as Window & {
+          __varroE2E?: { pendingHistoryRequestCount?: () => number };
+        };
+        return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+      });
+
+    const fixtureMessageCount = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { getSessionMessages?: (sessionId: string) => unknown[] };
+      };
+      return (
+        harness.__varroE2E?.getSessionMessages?.('session-incident-delayed-image-history').length ??
+        0
+      );
+    });
+    expect(fixtureMessageCount).toBe(129);
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(imageRow).toBeAttached({ timeout: 5_000 });
+    await imageRequestStarted;
+    const frameHeightBeforeRelease = await imageFrame.evaluate(
+      (element) => element.getBoundingClientRect().height
+    );
+    expect(frameHeightBeforeRelease).toBe(224);
+    expect(
+      await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
+    ).toBe(0);
+    await expect.poll(pendingHistoryRequestCount).toBe(1);
+
+    const loadDeferredHistoryPage = async () => {
+      await list.evaluate((element) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        element.scrollTop = 0;
+        element.dispatchEvent(new Event('scroll'));
+      });
+      await expect(historyBanner).toHaveClass(/is-loading/);
+      const anchor = await list.evaluate((element) => {
+        const containerRect = element.getBoundingClientRect();
+        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+          }
+        );
+        if (!row?.dataset.msgId) throw new Error('Incident history anchor is missing');
+        return {
+          id: row.dataset.msgId,
+          top: row.getBoundingClientRect().top - containerRect.top,
+        };
+      });
+      const released = await page.evaluate(() => {
+        const harness = window as Window & {
+          __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+        };
+        return harness.__varroE2E?.releaseNextHistoryRequest?.() ?? false;
+      });
+      expect(released).toBe(true);
+
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id);
+      for (const top of samples) {
+        expect(top).not.toBeNull();
+        expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+      }
+      expect(await list.locator('[data-msg-id]').count()).toBeLessThan(80);
+    };
+
+    await loadDeferredHistoryPage();
+    await expect(imageRow).toHaveCount(0);
+    await expect.poll(pendingHistoryRequestCount).toBe(1);
+    await loadDeferredHistoryPage();
+    await expect(historyBanner).toHaveCount(0);
+    await expect(imageRow).toHaveCount(0);
+
+    const historyRequests = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { requests?: Array<{ path: string }> };
+      };
+      return (harness.__varroE2E?.requests ?? [])
+        .filter((request) =>
+          request.path.includes('/session/session-incident-delayed-image-history/message')
+        )
+        .map((request) => {
+          const params = new URL(request.path, 'https://example.test').searchParams;
+          return { before: params.get('before'), limit: params.get('limit') };
+        });
+    });
+    expect(historyRequests).toEqual([
+      { before: null, limit: '50' },
+      { before: 'msg_cursor_0001', limit: '50' },
+      { before: 'msg_cursor_0002', limit: '50' },
+    ]);
+
+    const imageResponse = page.waitForResponse((response) =>
+      response.url().endsWith('/e2e/harness/incident-delayed-image.svg')
+    );
+    releaseImageRequest();
+    await imageResponse;
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: 2_000, bubbles: true }));
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(imageRow).toBeAttached();
+    await waitForAnimationFrames(page, 4);
+    const imageRowTop = await imageRow.evaluate((element) => {
+      const scrollList = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
+    });
+    await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.decode());
+    const frameHeightAfterRelease = await imageFrame.evaluate(
+      (element) => element.getBoundingClientRect().height
+    );
+    expect(frameHeightAfterRelease).toBe(224);
+    expect(
+      await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
+    ).toBe(640);
+    expect(imageRequestCount).toBeGreaterThan(0);
+
+    const remountSamples = await sampleMessageTopAcrossFrames(
+      list,
+      'message-incident-delayed-image-user'
+    );
+    for (const top of remountSamples) {
+      expect(top).not.toBeNull();
+      expect(Math.abs(top! - imageRowTop)).toBeLessThan(1.5);
+    }
+    expect(await list.locator('[data-msg-id]').count()).toBeLessThan(80);
   });
 
   test('transfers deferred history ownership after native PageDown movement', async ({ page }) => {
@@ -663,6 +796,7 @@ test.describe('auto-scroll', () => {
     });
     await expect(historyBanner).toHaveClass(/is-loading/);
     await page.keyboard.press('PageDown');
+    // Setup only: prove PageDown moved before capturing the user-owned visible anchor.
     await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
     await list.evaluate(async (element) => {
       let previousTop = element.scrollTop;
@@ -787,6 +921,7 @@ test.describe('auto-scroll', () => {
         scrollTop: element.scrollTop,
       };
     });
+    // Boundary precondition only; post-load stability is asserted from the same row below.
     expect(anchor.scrollTop).toBe(0);
 
     await page.evaluate(() => {
@@ -822,18 +957,20 @@ test.describe('auto-scroll', () => {
     expect(box).not.toBeNull();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
-    const positions: number[] = [await list.evaluate((element) => element.scrollTop)];
     for (let index = 0; index < 18; index += 1) {
+      const anchor = await getVisibleMessageAnchor(list);
+      if (anchor.scrollTop < 160) break;
       await page.mouse.wheel(0, -160);
-      await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
-    }
-
-    const viewportHeight = await list.evaluate((element) => element.clientHeight);
-    for (let index = 1; index < positions.length; index += 1) {
-      const upwardDelta = positions[index - 1]! - positions[index]!;
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
-      expect(upwardDelta).toBeLessThan(viewportHeight * 0.75);
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 3);
+      expect(
+        samples.every((top) => top !== null),
+        JSON.stringify({ index, anchor, samples })
+      ).toBe(true);
+      const settledTop = samples.at(-1)!;
+      expect(Math.abs(settledTop! - anchor.top - 160), `wheel step ${index}`).toBeLessThan(4);
+      for (const top of samples.slice(1)) {
+        expect(Math.abs(top! - settledTop!), `settling step ${index}`).toBeLessThan(1.5);
+      }
     }
   });
 
@@ -928,22 +1065,24 @@ test.describe('auto-scroll', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const detachedScrollTop = await list.evaluate((element) => {
+    await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -160, bubbles: true }));
       element.scrollTop = Math.max(0, element.scrollTop - 800);
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
     });
     await waitForAnimationFrames(page, 2);
+    const detachedAnchor = await getVisibleMessageAnchor(list);
 
     await appendDeltaToLastLargeAssistant(
       page,
       `\n\nDetached streaming chunk: ${'do not steal scroll position '.repeat(18)}`
     );
-    await waitForAnimationFrames(page, 3);
+    const detachedSamples = await sampleMessageTopAcrossFrames(list, detachedAnchor.id, 3);
 
-    const afterDetachedDelta = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(afterDetachedDelta - detachedScrollTop)).toBeLessThan(3);
+    expect(
+      detachedSamples.every((top) => top !== null && Math.abs(top - detachedAnchor.top) < 1.5),
+      JSON.stringify({ detachedAnchor, detachedSamples })
+    ).toBe(true);
     expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
       200
     );
@@ -1020,24 +1159,25 @@ test.describe('auto-scroll re-engage', () => {
       await waitForAnimationFrames(page, 2);
     }
 
-    const detachedScrollTop = await list.evaluate((element) => {
+    await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
       element.scrollTop = Math.max(0, element.scrollTop - 200);
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
     });
     await waitForAnimationFrames(page, 3);
+    const detachedAnchor = await getVisibleMessageAnchor(list);
 
     for (let i = 0; i < 3; i += 1) {
       await appendDeltaToRapidStreaming(
         page,
         `\n\nPost-wheel chunk ${i}: ${'content after wheel should not snap back '.repeat(10)}`
       );
-      await waitForAnimationFrames(page, 2);
+      const samples = await sampleMessageTopAcrossFrames(list, detachedAnchor.id, 2);
+      expect(
+        samples.every((top) => top !== null && Math.abs(top - detachedAnchor.top) < 1.5),
+        JSON.stringify({ i, detachedAnchor, samples })
+      ).toBe(true);
     }
-
-    const afterStreaming = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(afterStreaming - detachedScrollTop)).toBeLessThan(5);
   });
 
   test('scrolling to bottom during streaming re-engages follow', async ({ page }) => {

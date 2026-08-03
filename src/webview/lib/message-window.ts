@@ -15,6 +15,12 @@ const [historyLoadFailedSessionIds, setHistoryLoadFailedSessionIds] = createSign
 >(new Set<string>());
 const historyCursors = new Map<string, string>();
 const historyPromptCursors = new Map<string, string>();
+const consumedHistoryCursors = new Map<string, Set<string>>();
+const consumedHistoryPromptCursors = new Map<string, Set<string>>();
+// Latest, page, and prompt reads capture this revision before crossing the API boundary.
+const messageWindowRevisions = new Map<string, number>();
+const pendingMessageWindowResets = new Set<string>();
+let nextMessageWindowRevision = 0;
 const prefetchedHistoryPages = new Map<string, Map<string, HistoryPage>>();
 const historySessionRecency = new Map<string, true>();
 const historyPageRecency = new Map<string, { sessionId: string; beforeCursor: string }>();
@@ -42,6 +48,25 @@ export function getSessionHistoryPromptCursor(sessionId: string): string | undef
 }
 
 export function setSessionHistoryPromptCursor(sessionId: string, cursor?: string) {
+  consumedHistoryPromptCursors.delete(sessionId);
+  updateSessionHistoryPromptCursor(sessionId, cursor);
+}
+
+export function advanceSessionHistoryPromptCursor(
+  sessionId: string,
+  consumedCursor: string,
+  nextCursor?: string
+): string | undefined {
+  const consumed = consumedHistoryPromptCursors.get(sessionId) ?? new Set<string>();
+  consumed.add(consumedCursor);
+  const cursor = nextCursor && !consumed.has(nextCursor) ? nextCursor : undefined;
+  if (cursor) consumedHistoryPromptCursors.set(sessionId, consumed);
+  else consumedHistoryPromptCursors.delete(sessionId);
+  updateSessionHistoryPromptCursor(sessionId, cursor);
+  return cursor;
+}
+
+function updateSessionHistoryPromptCursor(sessionId: string, cursor?: string) {
   if (cursor) {
     historyPromptCursors.set(sessionId, cursor);
     touchHistorySession(sessionId);
@@ -133,6 +158,25 @@ export function getSessionHistoryCursor(sessionId: string): string | undefined {
 }
 
 export function setSessionHistoryCursor(sessionId: string, cursor?: string) {
+  consumedHistoryCursors.delete(sessionId);
+  updateSessionHistoryCursor(sessionId, cursor);
+}
+
+export function advanceSessionHistoryCursor(
+  sessionId: string,
+  consumedCursor: string,
+  nextCursor?: string
+): string | undefined {
+  const consumed = consumedHistoryCursors.get(sessionId) ?? new Set<string>();
+  consumed.add(consumedCursor);
+  const cursor = nextCursor && !consumed.has(nextCursor) ? nextCursor : undefined;
+  if (cursor) consumedHistoryCursors.set(sessionId, consumed);
+  else consumedHistoryCursors.delete(sessionId);
+  updateSessionHistoryCursor(sessionId, cursor);
+  return cursor;
+}
+
+function updateSessionHistoryCursor(sessionId: string, cursor?: string) {
   if (cursor) {
     historyCursors.set(sessionId, cursor);
     touchHistorySession(sessionId);
@@ -144,9 +188,33 @@ export function clearSessionMessageWindowState(sessionId: string) {
   batch(() => clearSessionMessageWindowStateInternal(sessionId));
 }
 
+export function resetSessionMessageWindowForRefetch(sessionId: string) {
+  batch(() => {
+    clearSessionMessageWindowStateInternal(sessionId);
+    pendingMessageWindowResets.add(sessionId);
+  });
+}
+
+export function isSessionMessageWindowResetPending(sessionId: string): boolean {
+  return pendingMessageWindowResets.has(sessionId);
+}
+
+export function getSessionMessageWindowRevision(sessionId: string): number {
+  return messageWindowRevisions.get(sessionId) ?? 0;
+}
+
+export function invalidateSessionMessageWindowRequests(sessionId: string) {
+  messageWindowRevisions.set(sessionId, ++nextMessageWindowRevision);
+}
+
 export function resetMessageWindowState() {
   historyCursors.clear();
   historyPromptCursors.clear();
+  consumedHistoryCursors.clear();
+  consumedHistoryPromptCursors.clear();
+  messageWindowRevisions.clear();
+  pendingMessageWindowResets.clear();
+  nextMessageWindowRevision = 0;
   prefetchedHistoryPages.clear();
   historySessionRecency.clear();
   historyPageRecency.clear();
@@ -199,8 +267,12 @@ function pruneHistoryPageCache() {
 }
 
 function clearSessionMessageWindowStateInternal(sessionId: string) {
+  invalidateSessionMessageWindowRequests(sessionId);
   historyCursors.delete(sessionId);
   historyPromptCursors.delete(sessionId);
+  consumedHistoryCursors.delete(sessionId);
+  consumedHistoryPromptCursors.delete(sessionId);
+  pendingMessageWindowResets.delete(sessionId);
   historySessionRecency.delete(sessionId);
   const removedPages = prefetchedHistoryPages.delete(sessionId);
   clearHistoryPageRecency(sessionId);

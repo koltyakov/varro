@@ -142,7 +142,8 @@ export function upsertPart(part: Part) {
           msgs[idx]!.parts[location.partIdx] = mergedPart;
           if (
             getAssistantDialogPartSignature(currentPart) !==
-            getAssistantDialogPartSignature(mergedPart)
+              getAssistantDialogPartSignature(mergedPart) ||
+            isPartRenderVisibilityChanged(currentPart, mergedPart)
           ) {
             messageIndex.notifyPartContentChange();
           }
@@ -160,6 +161,43 @@ export function upsertPart(part: Part) {
       setState('streamingText', '');
     }
   });
+}
+
+function isPartRenderVisibilityChanged(previous: Part | undefined, current: Part) {
+  return isPartPotentiallyVisible(previous) !== isPartPotentiallyVisible(current);
+}
+
+function isPartPotentiallyVisible(part: Part | undefined) {
+  if (!part) return false;
+  if (part.type === 'text') return part.text.trim().length > 0;
+  if (part.type === 'reasoning') {
+    return part.text.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0;
+  }
+  if (part.type === 'tool') {
+    const toolName = part.tool.trim().toLowerCase();
+    if (
+      toolName.includes('todo') ||
+      toolName === 'update_plan' ||
+      toolName === 'updateplan' ||
+      toolName === 'todowrite'
+    ) {
+      return false;
+    }
+    const title = 'title' in part.state ? part.state.title : undefined;
+    const normalizedTitle = title?.trim().toLowerCase() ?? '';
+    return (
+      !normalizedTitle.includes('todo') &&
+      normalizedTitle !== 'update plan' &&
+      normalizedTitle !== 'updating plan'
+    );
+  }
+  return (
+    part.type === 'agent' ||
+    part.type === 'retry' ||
+    part.type === 'compaction' ||
+    part.type === 'subtask' ||
+    part.type === 'file'
+  );
 }
 
 function getAssistantDialogPartSignature(part: Part | undefined): string | null {
@@ -411,6 +449,13 @@ export function setMessagesIncremental(
     return;
   }
 
+  const historyPrependCount = getHistoryPrependCount(current, incoming);
+  if (historyPrependCount > 0) {
+    reconcileHistoryPrepend(incoming, historyPrependCount, options, streamingSnapshot);
+    recordSettledAssistantMarkers(incoming);
+    return;
+  }
+
   const sharedPrefixLength = getSharedMessagePrefixLength(current, incoming);
 
   if (sharedPrefixLength === 0) {
@@ -472,6 +517,61 @@ export function setMessagesIncremental(
     );
   });
   recordSettledAssistantMarkers(incoming);
+}
+
+function getHistoryPrependCount(current: MessageEntry[], incoming: MessageEntry[]) {
+  const prependCount = incoming.length - current.length;
+  if (prependCount <= 0) return 0;
+
+  for (let index = 0; index < current.length; index += 1) {
+    const currentInfo = current[index]!.info;
+    const incomingInfo = incoming[prependCount + index]?.info;
+    if (
+      !incomingInfo ||
+      incomingInfo.id !== currentInfo.id ||
+      incomingInfo.sessionID !== currentInfo.sessionID
+    ) {
+      return 0;
+    }
+  }
+  return prependCount;
+}
+
+function reconcileHistoryPrepend(
+  incoming: MessageEntry[],
+  prependCount: number,
+  options: { preserveExtraParts?: boolean } | undefined,
+  streamingSnapshot: StreamingTextSnapshot
+) {
+  streamingDeltaQueue.reset();
+  batch(() => {
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
+
+    setState(
+      'messages',
+      produce((msgs) => {
+        const prepended = incoming
+          .slice(0, prependCount)
+          .map((entry) => mergeMessageEntry(undefined, entry, options, streamingSnapshot));
+        msgs.splice(0, 0, ...prepended);
+
+        for (let index = prependCount; index < incoming.length; index += 1) {
+          const currentEntry = msgs[index]!;
+          const next = incoming[index]!;
+          if (
+            areMessageEntriesEquivalent(currentEntry, next) &&
+            !hasExtraMessagePartsToPreserve(currentEntry, next, options) &&
+            !hasStreamingTextToMaterialize(currentEntry, next, options, streamingSnapshot)
+          ) {
+            continue;
+          }
+          msgs[index] = mergeMessageEntry(currentEntry, next, options, streamingSnapshot);
+        }
+        messageIndex.invalidate();
+      })
+    );
+  });
 }
 
 function preserveMissingOptimisticUserMessages(current: MessageEntry[], incoming: MessageEntry[]) {

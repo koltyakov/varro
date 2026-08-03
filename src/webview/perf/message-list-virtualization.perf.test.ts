@@ -35,9 +35,39 @@ vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
 });
 
 import { MessageList } from '../components/MessageList';
+import { buildVirtualMetrics } from '../components/message-list/virtualization';
+import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { replaceMessages, resetDefaultAppState, setState, upsertMessageInfo } from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
 import { settlePerfEffects } from './harness';
+
+describe('Virtual metrics perf guards', () => {
+  it('does not scan same-reference IDs for a late height-only rebuild', () => {
+    const rawIds = Array.from({ length: 20_000 }, (_, index) => `message-${index}`);
+    let numericReads = 0;
+    const itemIds = new Proxy(rawIds, {
+      get(target, property, receiver) {
+        if (typeof property === 'string' && /^\d+$/.test(property)) numericReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const measuredHeights = new Map(rawIds.map((id) => [id, 40]));
+    const previous = buildVirtualMetrics({ itemIds, measuredHeights });
+
+    measuredHeights.set(rawIds.at(-1)!, 80);
+    numericReads = 0;
+    const rebuilt = buildVirtualMetrics({
+      itemIds,
+      measuredHeights,
+      previous: { metrics: previous, itemIds },
+      dirtyFromIndex: rawIds.length - 1,
+    });
+
+    expect(rebuilt.prefix.at(-2)).toBe((rawIds.length - 1) * 40);
+    expect(rebuilt.totalHeight).toBe(rawIds.length * 40 + 40);
+    expect(numericReads).toBeLessThan(10);
+  });
+});
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -206,6 +236,7 @@ describe('MessageList virtualization perf guards', () => {
     });
 
     resetDefaultAppState();
+    resetMessageEditState();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -239,6 +270,40 @@ describe('MessageList virtualization perf guards', () => {
 
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.interactive-item-off-core')).toBeTruthy();
+    expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
+  });
+
+  it('[VIRT-12] keeps the rendered row window bounded while inline editing', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-item-container')) {
+          return new DOMRect(0, 0, 500, 120);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 120_000);
+        }
+        return new DOMRect(0, 0, 500, 500);
+      }
+    );
+
+    replaceMessages(
+      Array.from({ length: 1_000 }, (_, index) => {
+        const id = `message-${index}`;
+        const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
+      })
+    );
+    setState('activeSessionId', 'session-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await settlePerfEffects();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
+
+    startEditingMessage('message-0', 'session-1', 'Message 0');
+    await settlePerfEffects();
+
+    expect(container?.querySelector('.inline-edit-composer-slot')).toBeTruthy();
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
   });
 

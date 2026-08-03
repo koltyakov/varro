@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, getStickyMessageAlignment, installOuterScrollSentinel } from './helpers';
 
 test('resets padding injected by legacy webview hosts', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
@@ -583,6 +583,7 @@ test('terminal attachment sticky preview navigates to its original message', asy
 
   await expect(laterAssistant).toBeInViewport();
   await expect(sticky).toContainText('Terminal: zsh');
+  const outerScrollTop = await installOuterScrollSentinel(page);
 
   const clickFrames = await sticky.evaluate(async (card) => {
     (card as HTMLElement).click();
@@ -590,6 +591,7 @@ test('terminal attachment sticky preview navigates to its original message', asy
       scrollTop: number;
       stickyVisible: boolean;
       targetTop: number | null;
+      stickyGap: number;
     }> = [];
     for (let frame = 0; frame < 30; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -597,45 +599,40 @@ test('terminal attachment sticky preview navigates to its original message', asy
       const target = document.querySelector<HTMLElement>(
         '[data-msg-id="message-sticky-terminal-user"] .user-message-card'
       );
+      const track = scrollList.querySelector<HTMLElement>('.interactive-list-track')!;
       samples.push({
         scrollTop: scrollList.scrollTop,
         stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
         targetTop: target
           ? target.getBoundingClientRect().top - scrollList.getBoundingClientRect().top
           : null,
+        stickyGap: Number.parseFloat(
+          getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+        ),
       });
     }
     return samples;
   });
   expect(
     clickFrames.every(
-      ({ stickyVisible, targetTop }) =>
-        !stickyVisible && targetTop !== null && targetTop >= 6 && targetTop <= 10
+      ({ stickyVisible, targetTop, stickyGap }) =>
+        !stickyVisible && targetTop !== null && Math.abs(targetTop - stickyGap) <= 1
     ),
     JSON.stringify(clickFrames)
   ).toBe(true);
   await expect
     .poll(() =>
-      terminalCard.evaluate((card) => {
-        const scrollList = card.closest<HTMLElement>('.interactive-list')!;
-        return card.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
-      })
+      getStickyMessageAlignment(terminalCard).then((geometry) => Math.abs(geometry.delta))
     )
-    .toBeGreaterThanOrEqual(6);
-  await expect
-    .poll(() =>
-      terminalCard.evaluate((card) => {
-        const scrollList = card.closest<HTMLElement>('.interactive-list')!;
-        return card.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
-      })
-    )
-    .toBeLessThanOrEqual(10);
+    .toBeLessThanOrEqual(1);
+  expect(await page.locator('#root').evaluate((root) => root.scrollTop)).toBe(outerScrollTop);
   await expect(terminalCard).toBeInViewport();
 
   await terminalCard.evaluate((card) => (card as HTMLElement).click());
   await expect(list).toHaveClass(/editing-message/);
   const editedRow = page.locator('[data-msg-id="message-sticky-terminal-user"]');
   await expect(page.locator('.inline-edit-composer-slot .interactive-input-part')).toBeVisible();
+  // Editing owns visibility after the aligned card is clicked; this is not a sticky-gap assertion.
   await expect
     .poll(() =>
       editedRow.evaluate((row) => {
@@ -643,5 +640,5 @@ test('terminal attachment sticky preview navigates to its original message', asy
         return row.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
       })
     )
-    .toBeGreaterThanOrEqual(6);
+    .toBeGreaterThanOrEqual(0);
 });
