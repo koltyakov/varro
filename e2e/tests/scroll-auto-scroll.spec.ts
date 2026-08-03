@@ -183,8 +183,22 @@ test.describe('auto-scroll', () => {
       );
     });
 
+    const todoBlock = page.locator('.todo-block:not(.changed-files-block)');
     const todoToggle = page.getByRole('button', { name: /Todos/i });
+    const getTodoListGeometry = () =>
+      todoBlock.evaluate((block) => {
+        const todoList = block.querySelector<HTMLElement>('.todo-block-list');
+        if (!todoList) throw new Error('Expanded todo list is missing');
+        return {
+          rightInset: block.getBoundingClientRect().right - todoList.getBoundingClientRect().right,
+          clientHeight: todoList.clientHeight,
+          scrollHeight: todoList.scrollHeight,
+        };
+      });
     await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    const initialTodoGeometry = await getTodoListGeometry();
+    expect(initialTodoGeometry.scrollHeight).toBeGreaterThan(initialTodoGeometry.clientHeight);
+    expect(initialTodoGeometry.rightInset).toBeCloseTo(2, 1);
     await expect
       .poll(() =>
         getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
@@ -213,6 +227,9 @@ test.describe('auto-scroll', () => {
 
     await todoToggle.click();
     await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    const reopenedTodoGeometry = await getTodoListGeometry();
+    expect(reopenedTodoGeometry.scrollHeight).toBeGreaterThan(reopenedTodoGeometry.clientHeight);
+    expect(reopenedTodoGeometry.rightInset).toBeCloseTo(2, 1);
     const expansionSamples = await sampleMessageTopAcrossFrames(
       list,
       'message-large-assistant-239',

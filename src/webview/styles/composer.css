@@ -1147,7 +1147,9 @@
 }
 
 .todo-block-list {
-  margin: 8px 0 0;
+  /* Match the sticky preview's 2px scrollbar inset. The extra left bleed
+     compensates for the matching gutter without moving row content. */
+  margin: 8px -9px 0 -11px;
   padding: 8px 0 0;
   list-style: none;
   border-top: 1px solid color-mix(in srgb, var(--color-vscode-border) 16%, transparent);
@@ -1157,6 +1159,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
   scrollbar-color: transparent transparent;
 }
 
@@ -1221,23 +1224,6 @@
 .changed-files-list {
   /* Show at most ~5 rows, then scroll. */
   max-height: 128px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  /* Bleed through the block's horizontal padding (11px) so the scrollbar hugs
-     the right edge. `scrollbar-gutter: both-edges` reserves matching space on
-     the left, keeping the hover background symmetric whether or not the
-     scrollbar is visible. */
-  margin-left: -11px;
-  margin-right: -11px;
-  padding-left: 0;
-  padding-right: 0;
-  scrollbar-width: thin;
-  scrollbar-gutter: stable both-edges;
-  scrollbar-color: transparent transparent;
-}
-
-.changed-files-list:hover {
-  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent) transparent;
 }
 
 .changed-files-item {
