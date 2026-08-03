@@ -55,6 +55,10 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
       return;
     }
 
+    // Loaded message parts are already available, so hydrate the panel before the
+    // native request completes without clearing newer state when no part is present.
+    advanceTodosFromMessages(messages);
+
     try {
       const todos = extractTodos(await deps.loadSessionTodos(sessionId)) ?? [];
       nativeTodosEnabled = true;
@@ -68,7 +72,9 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
       }
     } catch {
       nativeTodosEnabled = false;
-      syncTodosFromMessagesWithState(messages);
+      if (appStore.state.activeSessionId === sessionId) {
+        syncTodosFromMessagesWithState(messages);
+      }
     }
   };
 

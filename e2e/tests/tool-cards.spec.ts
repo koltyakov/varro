@@ -39,6 +39,19 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
   expect(iconSizes).toEqual(Array.from({ length: 4 }, () => ({ width: 12, height: 12 })));
 });
 
+test('prevents selection from starting on expandable tool headers', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+
+  const expandableHeaders = page.locator(
+    '.file-change-card-header.is-expandable, .tool-invocation-header:not(:disabled)'
+  );
+  await expect(expandableHeaders).not.toHaveCount(0);
+
+  for (const header of await expandableHeaders.all()) {
+    await expect(header).toHaveCSS('user-select', 'none');
+  }
+});
+
 test('renders search tool details in the same framed card as other tool details', async ({
   page,
 }) => {

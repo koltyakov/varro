@@ -1274,7 +1274,7 @@ describe('ToolCall', () => {
       payload: {
         content: error,
         title: 'browser-bridge_browser_investigate (error)',
-        language: 'text',
+        language: 'plaintext',
       },
     });
   });
@@ -2149,6 +2149,13 @@ describe('FileChangeCard', () => {
     expect(container?.querySelector('.file-edit-icon')?.getAttribute('role')).toBe('status');
     expect(container?.querySelector('.file-edit-action-label')?.textContent).toBe('Edit:');
     expect(container?.querySelector('.file-edit-error-label')?.textContent).toBe('failed');
+    const errorToggle = container?.querySelector<HTMLButtonElement>('.file-edit-error-toggle');
+    expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
+
+    container?.querySelector<HTMLElement>('.file-change-card-header')?.click();
+
+    expect(errorToggle?.getAttribute('aria-expanded')).toBe('true');
     const errorDetail = container?.querySelector('.file-edit-error-detail');
     expect(errorDetail?.getAttribute('role')).toBe('alert');
     expect(errorDetail?.textContent).toContain(
@@ -2157,6 +2164,11 @@ describe('FileChangeCard', () => {
     expect(errorDetail?.querySelector('script')).toBeNull();
     expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
     expect(container?.textContent).not.toContain('Edited');
+
+    container?.querySelector<HTMLElement>('.file-change-card-header')?.click();
+
+    expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
   });
 
   it('clamps long file edit errors and opens the full error in an editor tab', () => {
@@ -2187,6 +2199,8 @@ describe('FileChangeCard', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
+    container?.querySelector<HTMLButtonElement>('.file-edit-error-toggle')?.click();
+
     const errorDetail = container?.querySelector<HTMLPreElement>('.file-edit-error-detail');
     expect(errorDetail?.classList).toContain('is-truncated');
     expect(errorDetail?.textContent).toContain('failure line 5');
@@ -2199,7 +2213,7 @@ describe('FileChangeCard', () => {
       payload: {
         content: error,
         title: 'Edit error',
-        language: 'text',
+        language: 'plaintext',
       },
     });
   });

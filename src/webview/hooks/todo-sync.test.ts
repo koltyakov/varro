@@ -221,6 +221,36 @@ describe('todo-sync', () => {
     ]);
   });
 
+  it('hydrates message todos before the native session request completes', async () => {
+    let resolveNativeTodos!: (todos: unknown[]) => void;
+    const nativeTodos = new Promise<unknown[]>((resolve) => {
+      resolveNativeTodos = resolve;
+    });
+    const operations = createTodoSyncOperations({
+      loadSessionTodos: vi.fn(() => nativeTodos),
+    });
+    const messages = [
+      { info: userMessage('user-1'), parts: [] },
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [
+          todoToolPart([
+            { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+          ]),
+        ],
+      },
+    ];
+
+    const sync = operations.syncTodosForSession('session-1', messages);
+
+    expect(setState).toHaveBeenCalledWith('todos', [
+      { id: 'todo-1', content: 'sync', status: 'completed', priority: 'medium' },
+    ]);
+
+    resolveNativeTodos([]);
+    await sync;
+  });
+
   it('uses native todo events after the native endpoint is available', async () => {
     const messages = [
       { info: userMessage('user-1'), parts: [] },

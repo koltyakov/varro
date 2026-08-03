@@ -515,6 +515,7 @@ describe('session-selection helpers', () => {
       resolveMcpSync = resolve;
     });
     const setMessagesIncremental = vi.fn();
+    const syncTodosForSession = vi.fn(async () => {});
     const selection = selectSessionWithDependencies(
       {
         getActiveSessionId: () => 'session-1',
@@ -555,7 +556,7 @@ describe('session-selection helpers', () => {
         requestMessageListScrollToBottom: vi.fn(),
         deriveSelectedAgentFromMessages: () => null,
         deriveSelectedModelFromMessages: () => null,
-        syncTodosForSession: vi.fn(async () => {}),
+        syncTodosForSession,
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
         mergeSessionStatuses: vi.fn(),
@@ -569,6 +570,9 @@ describe('session-selection helpers', () => {
     );
 
     await vi.waitFor(() => expect(setMessagesIncremental).toHaveBeenCalledTimes(1));
+    expect(syncTodosForSession).toHaveBeenCalledWith('session-1', [
+      { info: assistantMessage('assistant-1'), parts: [] },
+    ]);
     resolveMcpSync();
     await selection;
   });

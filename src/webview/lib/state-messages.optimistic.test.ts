@@ -291,18 +291,33 @@ describe('optimistic image part de-duplication', () => {
     expect(partIds()).toEqual([['server-image']]);
   });
 
-  it('keeps both parts when the server rewrites the image url', () => {
+  it('replaces the optimistic image when the server rewrites its url', () => {
     seedServerMessageWithOptimisticImage();
     upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));
 
-    expect(partIds()).toEqual([['msg-1-optimistic-file-0', 'server-image']]);
+    expect(partIds()).toEqual([['server-image']]);
   });
 
-  it('keeps both parts when the server rewrites the filename', () => {
+  it('replaces the optimistic image when the server rewrites its filename', () => {
     seedServerMessageWithOptimisticImage();
     upsertPart(imagePart('server-image', 'msg-1', { filename: 'renamed.png' }));
 
-    expect(partIds()).toEqual([['msg-1-optimistic-file-0', 'server-image']]);
+    expect(partIds()).toEqual([['server-image']]);
+  });
+
+  it('removes the optimistic twin when an existing server part is updated', () => {
+    seedServerMessageWithOptimisticImage();
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        imagePart('msg-1-optimistic-file-0', 'msg-1'),
+        imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }),
+      ],
+    });
+
+    upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));
+
+    expect(partIds()).toEqual([['server-image']]);
   });
 
   it('does not remove an optimistic image for a non-image file part', () => {
@@ -347,17 +362,87 @@ describe('optimistic image parts across an incremental refresh', () => {
 
   it('does not duplicate the image once the server payload includes a match', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
-    setMessagesIncremental([currentEntry([imagePart('server-image', 'msg-1')])]);
+    setMessagesIncremental([currentEntry([imagePart('server-image', 'msg-1')])], {
+      preserveExtraParts: true,
+    });
 
     expect(partIds()).toEqual([['server-image']]);
   });
 
-  it('still preserves the optimistic image when the server sends a different image', () => {
+  it('does not duplicate an image when the server rewrites its metadata', () => {
+    upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
+    setMessagesIncremental(
+      [
+        currentEntry([
+          imagePart('server-image', 'msg-1', {
+            filename: 'normalized.png',
+            url: 'https://cdn/img.png',
+          }),
+        ]),
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(partIds()).toEqual([['server-image']]);
+  });
+
+  it('preserves only images not yet present in a partial server snapshot', () => {
+    upsertMessage(
+      currentEntry([
+        imagePart(optimisticImageId, 'msg-1'),
+        imagePart('msg-1-optimistic-file-1', 'msg-1', {
+          filename: 'pasted-2.png',
+          url: 'data:image/png;base64,BBBB',
+        }),
+      ])
+    );
+    setMessagesIncremental(
+      [
+        currentEntry([
+          imagePart('server-image-1', 'msg-1', {
+            filename: 'normalized.png',
+            url: 'https://cdn/img.png',
+          }),
+        ]),
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(partIds()).toEqual([['server-image-1', 'msg-1-optimistic-file-1']]);
+  });
+
+  it('does not add a phantom image beside multiple acknowledged images', () => {
+    upsertMessage(
+      currentEntry([
+        imagePart(optimisticImageId, 'msg-1'),
+        imagePart('msg-1-optimistic-file-1', 'msg-1', {
+          filename: 'pasted-2.png',
+          url: 'data:image/png;base64,BBBB',
+        }),
+      ])
+    );
+    setMessagesIncremental(
+      [
+        currentEntry([
+          imagePart('server-image-1', 'msg-1'),
+          imagePart('server-image-2', 'msg-1', {
+            filename: 'pasted-2.png',
+            url: 'data:image/png;base64,BBBB',
+          }),
+        ]),
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(partIds()).toEqual([['server-image-1', 'server-image-2']]);
+  });
+
+  it('treats a different server image as the canonical optimistic image', () => {
     upsertMessage(currentEntry([imagePart(optimisticImageId, 'msg-1')]));
     setMessagesIncremental([
       currentEntry([imagePart('server-image', 'msg-1', { url: 'data:image/png;base64,BBBB' })]),
     ]);
 
-    expect(partIds()).toEqual([['server-image', optimisticImageId]]);
+    expect(partIds()).toEqual([['server-image']]);
   });
 });

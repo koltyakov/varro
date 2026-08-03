@@ -134,6 +134,7 @@ export function upsertPart(part: Part) {
           );
           messageIndex.invalidate();
         }
+        removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
           const currentPart = msgs[idx]!.parts[location.partIdx];
@@ -147,8 +148,6 @@ export function upsertPart(part: Part) {
           }
           return;
         }
-
-        removeMatchingOptimisticImageFilePart(msgs[idx]!, nextPart);
         msgs[idx]!.parts.push(nextPart);
         messageIndex.appendPart(msgs, nextPart.id, {
           msgIdx: idx,
@@ -571,6 +570,7 @@ function mergeMessageEntry(
 
   const incomingPartIds = new Set(next.parts.map((part) => part.id));
   for (const part of current.parts) {
+    if (isOptimisticImageFilePart(part)) continue;
     if (!incomingPartIds.has(part.id)) {
       next.parts.push(cloneValue(part));
     }
@@ -582,18 +582,54 @@ function mergeMessageEntry(
 
 function preserveOptimisticImageFileParts(current: MessageEntry | undefined, next: MessageEntry) {
   if (!current || current.info.role !== 'user' || next.info.role !== 'user') return;
-  for (const part of current.parts) {
-    if (!isOptimisticImageFilePart(part)) continue;
-    if (next.parts.some((nextPart) => areMatchingImageFileParts(part, nextPart))) continue;
+
+  const optimisticParts = current.parts.filter(
+    (part) =>
+      isOptimisticImageFilePart(part) && !next.parts.some((nextPart) => nextPart.id === part.id)
+  );
+  const canonicalParts = next.parts.filter(
+    (part) => isImageFilePart(part) && !isOptimisticImageFilePart(part)
+  );
+  const matchedCanonicalIndexes = new Set<number>();
+  const unmatchedOptimisticParts: Part[] = [];
+
+  for (const part of optimisticParts) {
+    const matchIndex = canonicalParts.findIndex(
+      (canonical, index) =>
+        !matchedCanonicalIndexes.has(index) && areMatchingImageFileParts(part, canonical)
+    );
+    if (matchIndex === -1) {
+      unmatchedOptimisticParts.push(part);
+    } else {
+      matchedCanonicalIndexes.add(matchIndex);
+    }
+  }
+
+  let remainingCanonicalCount = canonicalParts.length - matchedCanonicalIndexes.size;
+  for (const part of unmatchedOptimisticParts) {
+    if (remainingCanonicalCount > 0) {
+      remainingCanonicalCount -= 1;
+      continue;
+    }
     next.parts.push(cloneValue(part));
   }
 }
 
-function removeMatchingOptimisticImageFilePart(entry: MessageEntry, incoming: Part) {
-  if (entry.info.role !== 'user' || !isImageFilePart(incoming)) return;
-  const index = entry.parts.findIndex(
+function removeAcknowledgedOptimisticImageFilePart(entry: MessageEntry, incoming: Part) {
+  if (
+    entry.info.role !== 'user' ||
+    !isImageFilePart(incoming) ||
+    isOptimisticImageFilePart(incoming)
+  ) {
+    return;
+  }
+  const matchingIndex = entry.parts.findIndex(
     (part) => isOptimisticImageFilePart(part) && areMatchingImageFileParts(part, incoming)
   );
+  const index =
+    matchingIndex !== -1
+      ? matchingIndex
+      : entry.parts.findIndex((part) => isOptimisticImageFilePart(part));
   if (index === -1) return;
   entry.parts.splice(index, 1);
   messageIndex.invalidate();

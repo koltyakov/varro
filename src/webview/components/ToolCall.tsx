@@ -525,6 +525,8 @@ export function ToolCall(props: {
           toolState={state()}
           changes={fileChanges()}
           previewStateKey={expansionKey()}
+          expanded={expanded()}
+          toggleExpand={toggleExpand}
         />
       );
     }
@@ -717,6 +719,8 @@ function FileChangeCard(props: {
   toolState: ToolPart['state'];
   changes: FileChange[];
   previewStateKey: string;
+  expanded: boolean;
+  toggleExpand: () => void;
 }) {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
@@ -867,12 +871,17 @@ function FileChangeCard(props: {
     const message = (s() as ToolStateError).error.trim();
     return message || null;
   };
+  const errorBodyId = createUniqueId();
+  const isErrorExpanded = () => Boolean(errorMessage()) && props.expanded;
 
   return (
     <>
       <Show when={showCompactCard()}>
         <div class="chat-tool-invocation-part file-change-card">
-          <div class="file-change-card-header">
+          <div
+            class={`file-change-card-header${errorMessage() ? ' is-expandable' : ''}`}
+            onClick={errorMessage() ? props.toggleExpand : undefined}
+          >
             <ToolCallIcon
               kind="edit"
               statusClass={statusClass()}
@@ -997,18 +1006,47 @@ function FileChangeCard(props: {
                 {isAborted() ? 'aborted' : 'failed'}
               </span>
             </Show>
+            <Show when={errorMessage()}>
+              <button
+                type="button"
+                class="file-edit-error-toggle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.toggleExpand();
+                }}
+                aria-expanded={isErrorExpanded()}
+                aria-controls={errorBodyId}
+                aria-label={
+                  isErrorExpanded() ? 'Collapse file change error' : 'Expand file change error'
+                }
+              >
+                <svg
+                  class={`tool-invocation-chevron ${isErrorExpanded() ? 'expanded' : ''}`}
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 4l4 4-4 4" />
+                </svg>
+              </button>
+            </Show>
             <Show when={completedDurationLabel()}>
               <span class="tool-invocation-duration file-edit-duration">
                 {completedDurationLabel()}
               </span>
             </Show>
           </div>
-          <Show when={errorMessage()}>
+          <Show when={isErrorExpanded() && errorMessage()}>
             {(message) => (
               <ClampedToolText
+                id={errorBodyId}
                 content={message()}
                 title={`${action()} error`}
-                language="text"
+                language="plaintext"
                 class="file-edit-error-detail"
                 role="alert"
                 aria-label="File change error"
@@ -1397,7 +1435,7 @@ function GenericToolCall(props: {
             <ClampedToolText
               content={(props.state as ToolStateError).error}
               title={`${props.title} (error)`}
-              language="text"
+              language="plaintext"
               class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
             />
           </Show>

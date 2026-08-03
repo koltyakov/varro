@@ -1029,6 +1029,9 @@ kbd {
   color: var(--color-vscode-fg);
   text-align: left;
   transition: opacity 0.1s;
+  user-select: none;
+  -webkit-user-select: none;
+  caret-color: transparent;
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover {
@@ -1595,6 +1598,35 @@ kbd {
   color: var(--color-vscode-error);
   background: color-mix(in srgb, var(--color-vscode-error) 5%, transparent);
   font-family: inherit;
+}
+
+.file-change-card-header.is-expandable {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  caret-color: transparent;
+}
+
+.file-edit-error-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 1px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.file-edit-error-toggle:hover .tool-invocation-chevron {
+  opacity: 0.7;
+}
+
+.file-edit-error-toggle:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
 }
 
 .file-change-card-header,

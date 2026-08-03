@@ -342,6 +342,16 @@ describe('webview message validation', () => {
       type: 'vscode/open-text',
       payload: { content: '', title: 'tool', language: 'shellscript' },
     });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: 'failed', title: 'Edit error', language: 'plaintext' },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: 'failed', title: 'Edit error', language: 'plaintext' },
+    });
   });
 
   it('normalizes accepted API request methods to uppercase', () => {

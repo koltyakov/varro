@@ -53,6 +53,7 @@ export function openToolText(payload: { content: string; title: string; language
  * scrollable in one axis and sends the full text to an editor tab on demand.
  */
 export function ClampedToolText(props: {
+  id?: string;
   content: string;
   /** Names the editor tab when the full text is opened. */
   title: string;
@@ -101,6 +102,7 @@ export function ClampedToolText(props: {
   // added a row of chrome to say what the fade already says.
   return (
     <pre
+      id={props.id}
       ref={(el) => (preRef = el)}
       class={`${props.class ?? ''} tool-text-clamped`}
       classList={{ 'is-truncated': truncated() }}

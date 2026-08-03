@@ -140,7 +140,10 @@ export async function selectSessionWithDependencies(
   if (options?.markSeen ?? true) {
     deps.markSessionSeen(id);
   }
-  deps.setMessagesIncremental(messages);
+  const todoSync = batch(() => {
+    deps.setMessagesIncremental(messages);
+    return deps.syncTodosForSession(id, messages).catch(() => {});
+  });
   clearMessagesLoadingIfOwned();
   deps.syncFailedSessionsFromMessages(messages);
   deps.requestMessageListScrollToBottom();
@@ -164,7 +167,7 @@ export async function selectSessionWithDependencies(
 
   await mcpSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-  await deps.syncTodosForSession(id, messages).catch(() => {});
+  await todoSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.loadQuestions().catch(() => {});
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
