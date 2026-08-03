@@ -4367,7 +4367,7 @@ describe('registerSessionEventHandlers', () => {
     expect(syncTodosFromMessages).toHaveBeenLastCalledWith([remainingMessage]);
   });
 
-  it('[VIRT-10] removes a deleted message from cached pages and prompt history', () => {
+  it('removes a deleted message from cached pages and prompt history', () => {
     const handlers = installHandlers();
     const removedMessage = createUserEntry({ id: 'remove-message' });
     resetMessageWindowState();

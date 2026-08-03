@@ -246,7 +246,7 @@ describe('optimistic user message reconciliation', () => {
 });
 
 describe('history prepend reconciliation', () => {
-  it('[VIRT-11] preserves existing entry identity when equivalent history is prepended', () => {
+  it('preserves existing entry identity when equivalent history is prepended', () => {
     const current = {
       info: userMessage('msg-current'),
       parts: [imagePart('image-1', 'msg-current'), imagePart('image-2', 'msg-current')],

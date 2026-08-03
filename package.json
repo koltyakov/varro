@@ -61,7 +61,6 @@
     "solid-js": "1.9.14"
   },
   "devDependencies": {
-    "@napi-rs/wasm-runtime": "1.2.2",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
@@ -75,7 +74,6 @@
     "jsdom": "30.0.1",
     "oxfmt": "0.62.0",
     "oxlint": "1.77.0",
-    "postcss": "8.5.25",
     "rolldown": "1.2.2",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",

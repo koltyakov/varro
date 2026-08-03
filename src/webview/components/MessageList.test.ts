@@ -1199,7 +1199,7 @@ describe('MessageList history pagination', () => {
     animationFrames.restore();
   });
 
-  it('[VIRT-11] preserves image carousel selection through a history prepend', async () => {
+  it('preserves image carousel selection through a history prepend', async () => {
     const currentMessageId = 'current-image-user';
     const current = {
       info: userMessage(currentMessageId),

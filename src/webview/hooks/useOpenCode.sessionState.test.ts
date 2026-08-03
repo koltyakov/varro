@@ -566,7 +566,7 @@ describe('useOpenCode session state flows', () => {
     });
   });
 
-  it('[VIRT-06] preserves append and removal events that beat a stale latest response', async () => {
+  it('preserves append and removal events that beat a stale latest response', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -609,7 +609,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('[VIRT-06] preserves an append without relying on a later removal invalidation', async () => {
+  it('preserves an append without relying on a later removal invalidation', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -647,7 +647,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('[VIRT-06] does not reintroduce a removed message from an in-flight older page', async () => {
+  it('does not reintroduce a removed message from an in-flight older page', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -693,7 +693,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('[VIRT-07] keeps a newer selection load when an inactive sync resolves late', async () => {
+  it('keeps a newer selection load when an inactive sync resolves late', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleBackground = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
@@ -742,7 +742,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('[VIRT-08] clears every old history store after empty and disjoint resyncs', async () => {
+  it('clears every old history store after empty and disjoint resyncs', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
@@ -799,7 +799,7 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
-  it('[VIRT-09] continues full-history loading through an empty continuation page', async () => {
+  it('continues full-history loading through an empty continuation page', async () => {
     const { stateModule, hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
     const emptyPage = [] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
@@ -826,7 +826,7 @@ describe('useOpenCode session state flows', () => {
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBeUndefined();
   });
 
-  it('[VIRT-09] terminates a cursor cycle across separate one-page history loads', async () => {
+  it('terminates a cursor cycle across separate one-page history loads', async () => {
     const { stateModule, hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
     const pageA = [userEntry('message-2')] as Awaited<
@@ -853,7 +853,7 @@ describe('useOpenCode session state flows', () => {
     expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
   });
 
-  it('[VIRT-09] terminates a prompt cursor cycle across separate history requests', async () => {
+  it('terminates a prompt cursor cycle across separate history requests', async () => {
     const { hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
     const pageA = [userEntry('prompt-a')] as Awaited<
@@ -878,7 +878,7 @@ describe('useOpenCode session state flows', () => {
     expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(2);
   });
 
-  it('[VIRT-10] canonically resyncs and resets history after a committed revert', async () => {
+  it('canonically resyncs and resets history after a committed revert', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));

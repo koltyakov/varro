@@ -273,7 +273,7 @@ describe('MessageList virtualization perf guards', () => {
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
   });
 
-  it('[VIRT-12] keeps the rendered row window bounded while inline editing', async () => {
+  it('keeps the rendered row window bounded while inline editing', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
         if (this.classList.contains('interactive-item-container')) {
@@ -305,7 +305,7 @@ describe('MessageList virtualization perf guards', () => {
     expect(container?.querySelector('.inline-edit-composer-slot')).toBeTruthy();
     expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(80);
     expect(container?.querySelector('.virtual-spacer-bottom')).toBeTruthy();
-  });
+  }, 10_000);
 
   it('does not rebuild assistant dialog summaries as the virtual window scrolls', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(

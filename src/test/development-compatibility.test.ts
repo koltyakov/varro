@@ -16,11 +16,9 @@ describe('development compatibility', () => {
     expect(packageJson.devDependencies).toMatchObject({
       vite: '8.2.0',
       rolldown: '1.2.2',
-      '@napi-rs/wasm-runtime': '1.2.2',
     });
     expect(packageLock.packages['node_modules/vite']?.version).toBe('8.2.0');
     expect(packageLock.packages['node_modules/rolldown']?.version).toBe('1.2.2');
-    expect(packageLock.packages['node_modules/@napi-rs/wasm-runtime']?.version).toBe('1.2.2');
   });
 
   it('runs CI at the exact advertised Node floors', async () => {
