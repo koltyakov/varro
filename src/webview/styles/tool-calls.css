@@ -1298,6 +1298,11 @@ kbd {
   opacity: 0.9;
 }
 
+.chat-tool-invocation-part .terminal-command-output-viewport {
+  max-height: calc(7.25em + 16px);
+  overflow-y: auto;
+}
+
 /* Muted, not italic: these panels are monospace, and the mono fallbacks render
    italic as a slanted synthetic face that reads as a different font. */
 .chat-tool-invocation-part .terminal-command-output-empty {

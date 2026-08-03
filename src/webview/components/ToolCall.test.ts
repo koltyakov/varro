@@ -478,6 +478,51 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
   });
 
+  it('keeps expanded running command output scrolled to its latest line', async () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: {
+        status: 'running',
+        input: { command: 'npm test' },
+        title: 'npm test',
+        metadata: { content: [{ type: 'text', text: 'test 1' }] },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    cleanup();
+    cleanup = undefined;
+    const updatedPart: ToolPart = {
+      ...part,
+      state: {
+        status: 'running',
+        input: { command: 'npm test' },
+        title: 'npm test',
+        metadata: { content: [{ type: 'text', text: 'test 1\ntest 2\ntest 3' }] },
+        time: { start: 0 },
+      },
+    };
+    cleanup = render(() => ToolCall({ part: updatedPart }), container!);
+
+    const output = container?.querySelector<HTMLDivElement>('.terminal-command-output-viewport');
+    if (!output) throw new Error('Expected live command output');
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, value: 120 });
+    Object.defineProperty(output, 'clientHeight', { configurable: true, value: 40 });
+    output.scrollTop = 0;
+    await Promise.resolve();
+
+    expect(output.textContent).toContain('test 3');
+    expect(output.scrollTop).toBe(80);
+  });
+
   it('hides completed generic tool durations under one second', () => {
     const part: ToolPart = {
       id: 'tool-1',

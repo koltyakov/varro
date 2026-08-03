@@ -308,6 +308,7 @@ describe('projected tool execution', () => {
     const harness = createHarness();
     emit(harness, 'session.next.tool.called', { name: 'bash', timestamp: 1000 });
     emit(harness, 'session.next.tool.progress', {
+      progress: 'working',
       structured: { pct: 40 },
       content: [{ type: 'text', text: 'working' }],
     });
@@ -318,6 +319,7 @@ describe('projected tool execution', () => {
       metadata: {
         structured: { pct: 40 },
         content: [{ type: 'text', text: 'working' }],
+        progress: 'working',
       },
     });
   });

@@ -8,6 +8,7 @@ import {
   createSignal,
   createUniqueId,
   onCleanup,
+  onMount,
 } from 'solid-js';
 import { isAbortedToolError } from '../../shared/error-classification';
 import type {
@@ -277,6 +278,30 @@ function isBlank(value: string) {
   return value.trim().length === 0;
 }
 
+function getRunningToolOutput(state: ToolPart['state']) {
+  if (state.status !== 'running') return '';
+  const metadata = state.metadata;
+  const content = metadata?.content;
+
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const text = content
+      .flatMap((item) => {
+        if (!item || typeof item !== 'object') return [];
+        const value = item as Record<string, unknown>;
+        return value.type === 'text' && typeof value.text === 'string' ? [value.text] : [];
+      })
+      .join('\n');
+    if (text) return text;
+  }
+
+  for (const key of ['output', 'progress']) {
+    const value = metadata?.[key];
+    if (typeof value === 'string') return value;
+  }
+  return '';
+}
+
 export function getVisibleInputEntries(input: Record<string, unknown>) {
   return Object.entries(input).filter(([, value]) => hasVisibleInputValue(value));
 }
@@ -493,6 +518,7 @@ export function ToolCall(props: {
     if (state().status !== 'completed') return '';
     return (state() as ToolStateCompleted).output || '';
   });
+  const runningOutput = createMemo(() => getRunningToolOutput(state()));
 
   createEffect(() => {
     setExpanded(getToolCallExpanded(expansionKey()));
@@ -547,6 +573,7 @@ export function ToolCall(props: {
         toggleExpand={toggleExpand}
         inputEntries={inputEntries()}
         fullOutput={fullOutput()}
+        runningOutput={runningOutput()}
         lightweight={props.lightweight}
       />
     );
@@ -1092,6 +1119,7 @@ function GenericToolCall(props: {
   toggleExpand: () => void;
   inputEntries: Array<[string, unknown]>;
   fullOutput: string;
+  runningOutput: string;
   lightweight?: boolean;
 }) {
   const toolName = () => normalizeToolName(props.tool.tool);
@@ -1415,6 +1443,11 @@ function GenericToolCall(props: {
                   </Show>
                 </div>
               </Show>
+              <Show when={props.state.status === 'running' && !isBlank(props.runningOutput)}>
+                <div class="terminal-command-row terminal-command-row-output">
+                  <LiveTerminalOutput content={props.runningOutput} />
+                </div>
+              </Show>
             </div>
           </Show>
           <Show
@@ -1499,6 +1532,44 @@ function TerminalCommandRow(props: { command: string }) {
       </span>
       <pre class="terminal-command-text terminal-command-single-line">{props.command}</pre>
       <CopyIconButton text={props.command} label="command" />
+    </div>
+  );
+}
+
+function LiveTerminalOutput(props: { content: string }) {
+  let viewportRef: HTMLDivElement | undefined;
+  let contentRef: HTMLPreElement | undefined;
+
+  const scrollToBottom = () => {
+    if (!viewportRef) return;
+    const bottom = Math.max(0, viewportRef.scrollHeight - viewportRef.clientHeight);
+    if (Math.abs(viewportRef.scrollTop - bottom) <= 1) return;
+    viewportRef.scrollTop = bottom;
+  };
+
+  createEffect(() => {
+    void props.content;
+    queueMicrotask(scrollToBottom);
+  });
+
+  onMount(() => {
+    if (!contentRef || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(scrollToBottom);
+    observer.observe(contentRef);
+    onCleanup(() => observer.disconnect());
+  });
+
+  return (
+    <div
+      ref={(el) => (viewportRef = el)}
+      class="terminal-command-output-viewport"
+      role="log"
+      aria-label="Live command output"
+      aria-live="polite"
+    >
+      <pre ref={(el) => (contentRef = el)} class="terminal-command-text terminal-command-output">
+        {props.content}
+      </pre>
     </div>
   );
 }

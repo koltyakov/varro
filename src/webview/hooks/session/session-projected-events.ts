@@ -165,6 +165,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
 
     if (eventName === 'session.next.tool.progress') {
       if (!existingTool || existingTool.state.status !== 'running') return true;
+      const progress = getEventString(props, 'progress');
       sessionStore.upsertPart({
         ...existingTool,
         state: {
@@ -173,6 +174,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
             ...existingTool.state.metadata,
             structured: asToolMetadata(props.structured),
             content: props.content,
+            ...(progress ? { progress } : {}),
           },
         },
       });
