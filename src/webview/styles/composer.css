@@ -262,17 +262,26 @@
   z-index: var(--z-popup);
   max-height: 220px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 14%, transparent) transparent;
   border-radius: var(--chat-radius-popover);
   border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
   background: var(--color-vscode-surface-raised);
   box-shadow: var(--chat-shadow-popover);
-  padding: 5px 0;
+  padding: 4px;
+  animation: fade-in 0.1s ease-out;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .composer-completion-header {
-  padding: 6px 8px 8px;
-  font-size: 11px;
+  margin-bottom: 4px;
+  padding: 5px 8px 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
+  font-size: 10.5px;
   font-weight: 600;
+  line-height: 1.2;
   letter-spacing: 0.02em;
   color: var(--color-vscode-muted);
 }
@@ -280,15 +289,20 @@
 .composer-completion-item {
   display: flex;
   width: 100%;
+  min-height: 30px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border: none;
   background: transparent;
   border-radius: var(--radius-chip);
-  padding: 6px 8px;
+  padding: 7px 8px;
   text-align: left;
+  font-family: inherit;
   color: var(--color-vscode-fg);
   cursor: pointer;
+  transition:
+    background-color 0.08s,
+    color 0.08s;
 }
 
 .composer-completion-item:hover {
@@ -297,13 +311,12 @@
 }
 
 .composer-completion-item.selected {
-  border-radius: 0;
   background: color-mix(
     in srgb,
-    var(--color-vscode-accent) 18%,
+    var(--color-vscode-accent) 16%,
     var(--color-vscode-surface-raised)
   );
-  box-shadow: color-mix(in srgb, var(--color-vscode-accent) 18%, var(--color-vscode-surface-raised))
+  box-shadow: color-mix(in srgb, var(--color-vscode-accent) 16%, var(--color-vscode-surface-raised))
     var(--composer-completion-scrollbar-inset) 0 0;
   color: var(--vscode-list-activeSelectionForeground, var(--color-vscode-fg));
 }
@@ -313,32 +326,38 @@
   align-items: center;
   justify-content: center;
   width: 14px;
+  height: 15px;
   flex-shrink: 0;
   color: var(--color-vscode-muted);
 }
 
+.composer-completion-icon svg {
+  display: block;
+}
+
+.composer-completion-item.selected .composer-completion-icon {
+  color: var(--color-vscode-fg);
+}
+
 .composer-completion-title-shell {
+  display: flex;
+  height: 15px;
+  align-items: center;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
 .composer-completion-title {
-  display: inline-block;
+  display: block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   font-weight: 500;
-  line-height: 1;
+  line-height: 15px;
   flex-shrink: 0;
-}
-
-.composer-completion-item.completion-file:hover .composer-completion-title.marquee {
-  overflow: visible;
-  text-overflow: clip;
-  animation: composer-title-marquee var(--marquee-duration, 6s) linear infinite alternate;
 }
 
 .composer-completion-detail {
@@ -348,9 +367,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  line-height: 1;
+  line-height: 15px;
   color: var(--color-vscode-muted);
-  margin-left: 2px;
 }
 
 .composer-completion-item.completion-agent .composer-completion-title-shell {
@@ -388,17 +406,7 @@
 
 .composer-completion-item.completion-file .composer-completion-detail {
   flex: 0 0 auto;
-  max-width: 9.5ch;
-}
-
-@keyframes composer-title-marquee {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(calc(var(--marquee-distance, 0px) * -1));
-  }
+  max-width: 14ch;
 }
 
 .toolbar-picker {
@@ -1038,7 +1046,8 @@
   overflow: hidden;
 }
 
-.interactive-input-part.model-picker-open > :is(.chat-queue-container, .todo-block) {
+.interactive-input-part:is(.model-picker-open, .mention-completion-open)
+  > :is(.chat-queue-container, .todo-block) {
   visibility: hidden;
 }
 

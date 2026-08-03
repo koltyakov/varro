@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: The OpenCode Workbench",
-  "version": "0.23.9",
+  "version": "0.23.10",
   "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
   "categories": [
     "AI",
@@ -54,29 +54,29 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.11",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
     "marked": "18.0.7",
     "solid-js": "1.9.14"
   },
   "devDependencies": {
-    "@napi-rs/wasm-runtime": "1.1.6",
+    "@napi-rs/wasm-runtime": "1.2.2",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
     "@types/node": "26.1.2",
-    "@types/vscode": "1.120.0",
+    "@types/vscode": "1.125.0",
     "@vitest/coverage-v8": "4.1.10",
     "@vscode/vsce": "3.9.2",
     "cross-spawn": "7.0.6",
     "css.escape": "1.5.1",
     "esbuild": "0.28.1",
-    "jsdom": "28.1.0",
-    "oxfmt": "0.61.0",
-    "oxlint": "1.76.0",
+    "jsdom": "30.0.1",
+    "oxfmt": "0.62.0",
+    "oxlint": "1.77.0",
     "postcss": "8.5.25",
-    "rolldown": "1.2.0",
+    "rolldown": "1.2.2",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.2.0",
@@ -369,8 +369,8 @@
     "theme": "dark"
   },
   "engines": {
-    "node": "^22.12.0 || >=24.0.0",
-    "vscode": "^1.120.0"
+    "node": "^22.22.2 || >=24.15.0",
+    "vscode": "^1.125.0"
   },
   "volta": {
     "node": "24.16.0",

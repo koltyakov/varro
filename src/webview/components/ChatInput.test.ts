@@ -1604,6 +1604,69 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.changed-files-block')).toBe(files);
   });
 
+  it('keeps queue, todo, and file panels mounted while the @ menu is open', async () => {
+    setShowChangedFiles(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 1_000, {
+        summary: {
+          additions: 1,
+          deletions: 0,
+          files: 1,
+          diffs: [{ file: 'src/app.ts', before: '', after: 'updated', additions: 1, deletions: 0 }],
+        },
+      }),
+    ]);
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('queuedMessages', [
+      { id: 'queue-1', sessionId: 'session-1', text: 'Queued follow-up' },
+    ]);
+    setState('todos', [
+      { id: 'todo-1', content: 'Keep working', status: 'in_progress', priority: 'medium' },
+    ]);
+    setState('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputText('@hel');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const inputPart = container?.querySelector('.interactive-input-part');
+    const queue = container?.querySelector('.chat-queue-container');
+    const todo = container?.querySelector('.todo-block:not(.changed-files-block)');
+    const files = container?.querySelector('.changed-files-block');
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    expect(queue).not.toBeNull();
+    expect(todo).not.toBeNull();
+    expect(files).not.toBeNull();
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '@hel'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+    expect(inputPart?.classList.contains('mention-completion-open')).toBe(true);
+    expect(container?.querySelector('.chat-queue-container')).toBe(queue);
+    expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
+    expect(container?.querySelector('.changed-files-block')).toBe(files);
+
+    setInputText('');
+    await flushAsyncWork();
+
+    expect(inputPart?.classList.contains('mention-completion-open')).toBe(false);
+    expect(container?.querySelector('.chat-queue-container')).toBe(queue);
+    expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
+    expect(container?.querySelector('.changed-files-block')).toBe(files);
+  });
+
   it('queues busy composer attachments and clears them from the input', () => {
     setInputText('Follow up with context');
     setIsLoading(true);

@@ -26,24 +26,22 @@ type RalphFormStateMock = {
   editorContext: Pick<EditorContext, 'workspacePath' | 'activeFile'>;
 };
 
-const stateMock = vi.hoisted(
-  (): RalphFormStateMock => ({
-    activeSessionId: null,
-    selectedModel: null,
-    selectedAgent: null,
-    providers: [],
-    providerDefaults: {},
-    allAgents: [],
-    messages: [],
-    queuedMessages: [],
-    sessionStatus: {},
-    desktopSessionPaneSide: 'left',
-    editorContext: {
-      workspacePath: null,
-      activeFile: null,
-    },
-  })
-);
+const stateMock = vi.hoisted((): RalphFormStateMock => ({
+  activeSessionId: null,
+  selectedModel: null,
+  selectedAgent: null,
+  providers: [],
+  providerDefaults: {},
+  allAgents: [],
+  messages: [],
+  queuedMessages: [],
+  sessionStatus: {},
+  desktopSessionPaneSide: 'left',
+  editorContext: {
+    workspacePath: null,
+    activeFile: null,
+  },
+}));
 
 const clientMocks = vi.hoisted(() => ({
   create: vi.fn(),

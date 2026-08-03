@@ -869,7 +869,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const mentionAgents = createMemo(() =>
     state.allAgents
       .filter((agent) => agent.mode === 'subagent' || agent.mode === 'all')
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .toSorted((a, b) => a.name.localeCompare(b.name))
   );
 
   const mentionCompletionSource = createMemo(() =>
@@ -1061,6 +1061,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       composerCompletions().length > 0 || (completion.type === 'mention' && showFileSearchHint())
     );
   };
+
+  const showMentionCompletionMenu = createMemo(
+    () => isFocused() && activeCompletion()?.type === 'mention' && showCompletionMenu()
+  );
 
   const showFloatingInputPopover = createMemo(
     () =>
@@ -2706,7 +2710,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   return (
     <div
-      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() || showMcpPicker() ? 'model-picker-open' : ''}`}
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() || showMcpPicker() ? 'model-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
     >
       <Show when={isDraggingOver()}>
         <DropOverlay />

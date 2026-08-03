@@ -25,12 +25,6 @@
     color: var(--color-vscode-muted);
   }
 
-  .composer-completion-item.completion-file:hover .composer-completion-title.marquee {
-    animation: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .ralph-iter-verdicts-track {
     animation: none;
   }

@@ -105,6 +105,9 @@ describe('CompletionMenu', () => {
     expect(buttons).toHaveLength(3);
     expect(buttons[0]?.textContent).toContain('/plan');
     expect(buttons[1]?.className).toContain('selected');
+    expect(buttons[1]?.querySelector('.composer-completion-icon svg')?.getAttribute('width')).toBe(
+      '12'
+    );
     expect(buttons[2]?.querySelector('.composer-completion-title')?.getAttribute('title')).toBe(
       fileItem.label
     );
@@ -136,7 +139,7 @@ describe('CompletionMenu', () => {
     expect(container?.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('scrolls the selected item into view and enables marquee overflow only on hover for files', async () => {
+  it('scrolls the selected item into view without animating long file names', async () => {
     vi.spyOn(HTMLButtonElement.prototype, 'offsetTop', 'get').mockImplementation(
       function (this: HTMLButtonElement) {
         return this.textContent?.includes('/plan') ? 0 : 60;
@@ -148,14 +151,19 @@ describe('CompletionMenu', () => {
         return this.classList.contains('composer-completion-menu') ? 40 : 0;
       }
     );
-    vi.spyOn(HTMLSpanElement.prototype, 'clientWidth', 'get').mockImplementation(
-      function (this: HTMLSpanElement) {
-        return this.classList.contains('composer-completion-title-shell') ? 40 : 0;
+    vi.spyOn(HTMLDivElement.prototype, 'offsetWidth', 'get').mockImplementation(
+      function (this: HTMLDivElement) {
+        return this.classList.contains('composer-completion-menu') ? 100 : 0;
       }
     );
-    vi.spyOn(HTMLSpanElement.prototype, 'scrollWidth', 'get').mockImplementation(
-      function (this: HTMLSpanElement) {
-        return this.classList.contains('composer-completion-title') ? 140 : 0;
+    vi.spyOn(HTMLDivElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function (this: HTMLDivElement) {
+        return this.classList.contains('composer-completion-menu') ? 90 : 0;
+      }
+    );
+    vi.spyOn(HTMLDivElement.prototype, 'clientLeft', 'get').mockImplementation(
+      function (this: HTMLDivElement) {
+        return this.classList.contains('composer-completion-menu') ? 1 : 0;
       }
     );
 
@@ -179,10 +187,10 @@ describe('CompletionMenu', () => {
       container?.querySelectorAll<HTMLSpanElement>('.composer-completion-title') ?? []
     ).find((element) => element.getAttribute('title') === fileItem.label);
 
-    expect(menu?.scrollTop).toBe(40);
-    expect(fileTitle?.className).toContain('marquee');
-    expect(fileTitle?.style.getPropertyValue('--marquee-distance')).toBe('100px');
-    expect(fileTitle?.className).not.toContain('selected');
+    expect(menu?.scrollTop).toBe(44);
+    expect(menu?.style.getPropertyValue('--composer-completion-scrollbar-inset')).toBe('8px');
+    expect(fileTitle?.classList.contains('marquee')).toBe(false);
+    expect(fileTitle?.getAttribute('style')).toBeNull();
 
     if (!menu) {
       throw new Error('Expected completion menu to render');
@@ -212,5 +220,29 @@ describe('CompletionMenu', () => {
 
     const icon = container?.querySelector('.composer-completion-icon svg');
     expect(icon?.getAttribute('viewBox')).toBe('0 0 16 16');
+    expect(icon?.getAttribute('width')).toBe('12');
+    expect(icon?.getAttribute('height')).toBe('12');
+  });
+
+  it('renders the outlined document icon for file mention completions', () => {
+    cleanup = render(
+      () =>
+        CompletionMenu({
+          items: [fileItem],
+          selectedIndex: 0,
+          onSelect: vi.fn(),
+        }),
+      container!
+    );
+
+    const icon = container?.querySelector('.composer-completion-icon svg');
+    const paths = icon?.querySelectorAll('path') ?? [];
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(icon?.getAttribute('width')).toBe('12');
+    expect(icon?.getAttribute('height')).toBe('12');
+    expect(icon?.getAttribute('fill')).toBe('none');
+    expect(paths).toHaveLength(2);
+    expect(paths[0]?.getAttribute('stroke')).toBe('currentColor');
+    expect(paths[0]?.getAttribute('stroke-width')).toBe('1.6');
   });
 });
