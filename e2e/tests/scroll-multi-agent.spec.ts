@@ -147,21 +147,22 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     expect(box).not.toBeNull();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
-    const positions: number[] = [await list.evaluate((element) => element.scrollTop)];
     for (let index = 0; index < 40; index += 1) {
+      const before = await getVisibleAnchor(list);
+      expect(before.id).not.toBe('');
+      if (before.scrollTop < 200) break;
+
       await page.mouse.wheel(0, -200);
-      await waitForAnimationFrames(page, 2);
-      positions.push(await list.evaluate((element) => element.scrollTop));
-    }
-
-    for (let index = 1; index < positions.length; index += 1) {
-      expect(positions[index]).toBeLessThanOrEqual(positions[index - 1]! + 2);
-    }
-
-    const viewportHeight = await list.evaluate((element) => element.clientHeight);
-    for (let index = 1; index < positions.length; index += 1) {
-      const upwardDelta = positions[index - 1]! - positions[index]!;
-      expect(upwardDelta).toBeLessThan(viewportHeight * 0.8);
+      const samples = await sampleVisibleAnchorAcrossFrames(list, 4, before.id);
+      expect(
+        samples.every((sample) => sample.id === before.id),
+        JSON.stringify({ index, before, samples })
+      ).toBe(true);
+      const settled = samples.at(-1)!;
+      expect(Math.abs(settled.top - before.top - 200), `wheel step ${index}`).toBeLessThan(4);
+      for (const sample of samples.slice(1)) {
+        expect(Math.abs(sample.top - settled.top), `settling step ${index}`).toBeLessThan(1.5);
+      }
     }
   });
 
@@ -300,7 +301,6 @@ test.describe('multi-agent large virtualized scroll stability', () => {
     for (let index = 0; index < 24; index += 1) {
       const before = await getVisibleAnchor(list);
       expect(before.id).not.toBe('');
-      const beforeDocumentTop = before.top + before.scrollTop;
 
       await page.mouse.wheel(0, -1);
       await appendDeltaToMultiAgentLargeStreaming(
@@ -311,7 +311,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       const samples = await sampleVisibleAnchorAcrossFrames(list, 4, before.id);
       for (const sample of samples) {
         expect(sample.id).toBe(before.id);
-        expect(Math.abs(sample.top + sample.scrollTop - beforeDocumentTop)).toBeLessThan(1.5);
+        expect(Math.abs(sample.top - before.top - 1)).toBeLessThan(1.5);
         expect(sample.scrollTop).toBeLessThanOrEqual(before.scrollTop + 1);
       }
     }
@@ -328,25 +328,34 @@ test.describe('multi-agent large virtualized scroll stability', () => {
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
 
-    const detachedScrollTop = await list.evaluate((element) => {
+    await list.evaluate((element) => {
       const mid = Math.floor(element.scrollHeight / 2);
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
       element.scrollTop = mid;
       element.dispatchEvent(new Event('scroll'));
-      return element.scrollTop;
     });
     await waitForAnimationFrames(page, 3);
+    const detachedAnchor = await getVisibleAnchor(list);
+    expect(detachedAnchor.id).not.toBe('');
 
     for (let i = 0; i < 10; i += 1) {
       await appendDeltaToMultiAgentLargeStreaming(
         page,
         `\n\nDetached streaming chunk ${i}: ${'content should not move viewport '.repeat(6)}`
       );
-      await waitForAnimationFrames(page, 2);
+      const samples = await sampleVisibleAnchorAcrossFrames(list, 2, detachedAnchor.id);
+      expect(
+        samples.every(
+          (sample) =>
+            sample.id === detachedAnchor.id && Math.abs(sample.top - detachedAnchor.top) < 1.5
+        ),
+        JSON.stringify({ i, detachedAnchor, samples })
+      ).toBe(true);
     }
 
-    const afterStreaming = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(afterStreaming - detachedScrollTop)).toBeLessThan(10);
+    const afterStreaming = await getVisibleAnchor(list, detachedAnchor.id);
+    expect(afterStreaming.id).toBe(detachedAnchor.id);
+    expect(Math.abs(afterStreaming.top - detachedAnchor.top)).toBeLessThan(1.5);
   });
 
   test('no viewport blank space at any scroll position in multi-agent large transcript', async ({

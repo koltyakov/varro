@@ -100,7 +100,8 @@ test('the first image message does not overlap the sticky prompt', async ({ page
     if (!sendToExtension) throw new Error('Extension bridge is missing');
     bridgeWindow.__sendToExtension = (message) => {
       const request = message as { type?: string; payload?: { path?: string } };
-      if (request.type === 'api/request' && request.payload?.path?.includes('/prompt_async')) return;
+      if (request.type === 'api/request' && request.payload?.path?.includes('/prompt_async'))
+        return;
       return sendToExtension(message);
     };
   });
@@ -115,9 +116,7 @@ test('the first image message does not overlap the sticky prompt', async ({ page
   await expect
     .poll(() =>
       row.evaluate((element) => {
-        const sticky = document.querySelector<HTMLElement>(
-          '.latest-user-message-sticky-overlay'
-        );
+        const sticky = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
         const prompt = element.querySelector<HTMLElement>('.user-message-card');
         if (!sticky || !prompt) return 0;
         const stickyBox = sticky.getBoundingClientRect();
@@ -334,8 +333,7 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
   await expect(sticky).toBeVisible();
 
   const result = await list.evaluate(async (element) => {
-    const sourceSelector =
-      '[data-msg-id="message-sticky-first-image-user"] .user-message-card';
+    const sourceSelector = '[data-msg-id="message-sticky-first-image-user"] .user-message-card';
     let sawSticky = false;
     let overlapFrames = 0;
     let maxVisibleSourceHeight = 0;
@@ -442,27 +440,32 @@ test('image sticky yields after a fractional upward wheel tick reveals its sourc
     for (let frame = 0; frame < 200; frame += 1) {
       const source = document.querySelector<HTMLElement>(sourceSelector);
       const listTop = element.getBoundingClientRect().top;
-      if (source) {
-        const sourceBottom = source.getBoundingClientRect().bottom;
-        if (sourceBottom <= listTop && sourceBottom > listTop - 1) {
-          const delta = 0.75;
-          element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
-          element.scrollTop = Math.max(0, element.scrollTop - delta);
-          element.dispatchEvent(new Event('scroll'));
-          let stickyVisibleFrames = 0;
-          for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
-            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            if (document.querySelector('.latest-user-message-sticky-overlay')) {
-              stickyVisibleFrames += 1;
-            }
+      if (source && source.getBoundingClientRect().bottom <= listTop) {
+        const targetBottom = listTop - 0.25;
+        element.scrollTop += source.getBoundingClientRect().bottom - targetBottom;
+        element.dispatchEvent(new Event('scroll'));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+        const sourceBottomBefore = source.getBoundingClientRect().bottom;
+        const delta = 0.75;
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
+        element.scrollTop = Math.max(0, element.scrollTop - delta);
+        element.dispatchEvent(new Event('scroll'));
+        const sourceBottomAfter = source.getBoundingClientRect().bottom;
+        let stickyVisibleFrames = 0;
+        for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          if (document.querySelector('.latest-user-message-sticky-overlay')) {
+            stickyVisibleFrames += 1;
           }
-          return {
-            sourceBottom,
-            listTop,
-            stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
-            stickyVisibleFrames,
-          };
         }
+        return {
+          sourceBottomBefore,
+          sourceBottomAfter,
+          listTop,
+          stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
+          stickyVisibleFrames,
+        };
       }
 
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
@@ -474,6 +477,8 @@ test('image sticky yields after a fractional upward wheel tick reveals its sourc
   });
 
   expect(result).not.toBeNull();
+  expect(result?.sourceBottomBefore).toBeLessThanOrEqual(result?.listTop ?? 0);
+  expect(result?.sourceBottomAfter).toBeGreaterThan(result?.listTop ?? Number.POSITIVE_INFINITY);
   expect(result?.stickyVisible, JSON.stringify(result)).toBe(false);
   expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(0);
 });
@@ -564,9 +569,7 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
 
 test('terminal attachment sticky preview navigates to its original message', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 1064 });
-  await page.goto(
-    '/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment&windowed=1'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment&windowed=1');
 
   const list = page.locator('.interactive-list');
   const sticky = page.locator('.latest-user-message-sticky');

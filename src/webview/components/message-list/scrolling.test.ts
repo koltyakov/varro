@@ -41,6 +41,30 @@ describe('performScrollToBottom', () => {
     );
     expect(container.scrollTop).toBe(300);
   });
+
+  it('does not rewrite scrollTop when the container is already at the bottom', () => {
+    const container = document.createElement('div');
+    let scrollTop = 300;
+    const writes: number[] = [];
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 480 });
+    Object.defineProperty(container, 'clientHeight', { configurable: true, value: 180 });
+    Object.defineProperty(container, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+        writes.push(value);
+      },
+    });
+
+    expect(performScrollToBottom({ container, now: 250, programmaticScrollWindowMs: 200 })).toEqual(
+      {
+        nextScrollTop: 300,
+        nextIgnoreScrollUntil: 450,
+      }
+    );
+    expect(writes).toEqual([]);
+  });
 });
 
 describe('resolveAutoScrollOnUserScroll', () => {
@@ -453,6 +477,89 @@ describe('expansion scroll anchors', () => {
     });
     expect(container.scrollTop).toBe(220);
 
+    container.remove();
+  });
+
+  it('ignores expired and disconnected anchors', () => {
+    const container = document.createElement('div');
+    const anchor = document.createElement('button');
+    document.body.append(container, anchor);
+    const captured = { element: anchor, top: 10, expiresAt: 20 };
+
+    expect(
+      restoreExpansionScrollAnchor({
+        anchor: captured,
+        container,
+        now: 21,
+        programmaticScrollWindowMs: 200,
+      })
+    ).toBeNull();
+
+    anchor.remove();
+    expect(
+      restoreExpansionScrollAnchor({
+        anchor: { ...captured, expiresAt: 100 },
+        container,
+        now: 30,
+        programmaticScrollWindowMs: 200,
+      })
+    ).toBeNull();
+    container.remove();
+  });
+
+  it('clamps a restored anchor to the top scroll boundary', () => {
+    const container = document.createElement('div');
+    const anchor = document.createElement('button');
+    container.append(anchor);
+    document.body.append(container);
+    Object.defineProperty(container, 'scrollTop', {
+      configurable: true,
+      writable: true,
+      value: 5,
+    });
+    container.getBoundingClientRect = () => new DOMRect(0, 100, 100, 100);
+    anchor.getBoundingClientRect = () => new DOMRect(0, 105, 100, 20);
+
+    expect(
+      restoreExpansionScrollAnchor({
+        anchor: { element: anchor, top: 30, expiresAt: 100 },
+        container,
+        now: 20,
+        programmaticScrollWindowMs: 200,
+      })
+    ).toEqual({ nextScrollTop: 0, nextIgnoreScrollUntil: 220 });
+    expect(container.scrollTop).toBe(0);
+    container.remove();
+  });
+
+  it('does not write scrollTop for a subpixel anchor drift', () => {
+    const container = document.createElement('div');
+    const anchor = document.createElement('button');
+    container.append(anchor);
+    document.body.append(container);
+    let scrollTop = 200;
+    const writes: number[] = [];
+    Object.defineProperty(container, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value;
+        writes.push(value);
+      },
+    });
+    container.getBoundingClientRect = () => new DOMRect(0, 100, 100, 100);
+    anchor.getBoundingClientRect = () => new DOMRect(0, 150.5, 100, 20);
+
+    expect(
+      restoreExpansionScrollAnchor({
+        anchor: { element: anchor, top: 50, expiresAt: 100 },
+        container,
+        now: 20,
+        programmaticScrollWindowMs: 200,
+      })
+    ).toEqual({ nextScrollTop: 200.5, nextIgnoreScrollUntil: 220 });
+    expect(writes).toEqual([]);
+    expect(container.scrollTop).toBe(200);
     container.remove();
   });
 });

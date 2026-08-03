@@ -392,6 +392,42 @@ describe('useOpenCode session state flows', () => {
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-1');
   });
 
+  it('retains a live append that arrives while an older history page is in flight', async () => {
+    const olderPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockResolvedValueOnce([{ info: userMessage('user-3'), parts: [] }]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+    clientMocks.sessionMessages.mockReturnValueOnce(olderPage.promise);
+
+    const load = hookModule.loadOlderSessionHistoryPage('session-1');
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenLastCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-older',
+      });
+    });
+    stateModule.upsertMessage({ info: userMessage('user-4'), parts: [] });
+
+    olderPage.resolve([
+      { info: userMessage('user-1'), parts: [] },
+      { info: userMessage('user-2'), parts: [] },
+    ]);
+
+    await expect(load).resolves.toBe(true);
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-1',
+      'user-2',
+      'user-3',
+      'user-4',
+    ]);
+  });
+
   it('returns a detached older-history response after A -> B -> A reselection', async () => {
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const initialA = [{ info: userMessage('user-a-initial'), parts: [] }] as Awaited<

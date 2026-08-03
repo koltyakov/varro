@@ -74,6 +74,76 @@ describe('buildVirtualMetrics', () => {
     });
   });
 
+  it.each([
+    {
+      change: 'a prepend',
+      itemIds: ['x', 'a', 'b', 'c'],
+      expectedPrefix: [0, 30, 70, 120, 180],
+    },
+    {
+      change: 'a middle insertion',
+      itemIds: ['a', 'x', 'b', 'c'],
+      expectedPrefix: [0, 40, 70, 120, 180],
+    },
+    {
+      change: 'a middle removal',
+      itemIds: ['a', 'c'],
+      expectedPrefix: [0, 40, 100],
+    },
+    {
+      change: 'a reorder',
+      itemIds: ['b', 'a', 'c'],
+      expectedPrefix: [0, 50, 90, 150],
+    },
+  ])('invalidates cached offsets after $change', ({ itemIds, expectedPrefix }) => {
+    const previousItemIds = ['a', 'b', 'c'];
+    const measuredHeights = new Map([
+      ['a', 40],
+      ['b', 50],
+      ['c', 60],
+      ['x', 30],
+    ]);
+    const previous = buildVirtualMetrics({ itemIds: previousItemIds, measuredHeights });
+
+    expect(
+      buildVirtualMetrics({
+        itemIds,
+        measuredHeights,
+        previous: { metrics: previous, itemIds: previousItemIds },
+      })
+    ).toEqual({
+      prefix: expectedPrefix,
+      totalHeight: expectedPrefix.at(-1),
+      itemCount: itemIds.length,
+    });
+  });
+
+  it.each([
+    { dirtyFromIndex: 0, id: 'a', height: 70, expectedPrefix: [0, 70, 120, 180] },
+    { dirtyFromIndex: 2, id: 'c', height: 90, expectedPrefix: [0, 40, 90, 180] },
+  ])(
+    'rebuilds from dirty boundary $dirtyFromIndex without retaining a stale prefix',
+    ({ dirtyFromIndex, id, height, expectedPrefix }) => {
+      const itemIds = ['a', 'b', 'c'];
+      const measuredHeights = new Map([
+        ['a', 40],
+        ['b', 50],
+        ['c', 60],
+      ]);
+      const previous = buildVirtualMetrics({ itemIds, measuredHeights });
+      measuredHeights.set(id, height);
+
+      expect(
+        buildVirtualMetrics({
+          itemIds,
+          measuredHeights,
+          previous: { metrics: previous, itemIds },
+          dirtyFromIndex,
+        }).prefix
+      ).toEqual(expectedPrefix);
+    }
+  );
+
   it('keeps prefix offsets and spacers on whole CSS pixels', () => {
     expect(
       buildVirtualMetrics({
@@ -150,6 +220,37 @@ describe('calculateVirtualRange', () => {
         viewportHeight: 50,
       })
     ).toEqual({ start: 0, end: 0, coreStart: 0, coreEnd: 0, topPad: 0, bottomPad: 0 });
+  });
+
+  it('skips runs of zero-height rows at exact viewport boundaries', () => {
+    const itemIds = ['empty-a', 'empty-b', 'visible-a', 'visible-b'];
+    const measuredHeights = new Map([
+      ['empty-a', 0],
+      ['empty-b', 0],
+      ['visible-a', 40],
+      ['visible-b', 40],
+    ]);
+
+    expect(
+      calculateVirtualRange({
+        itemIds,
+        measuredHeights,
+        scrollTop: 0,
+        viewportHeight: 20,
+        overscan: 0,
+      })
+    ).toEqual({
+      start: 2,
+      end: 3,
+      coreStart: 2,
+      coreEnd: 3,
+      topPad: 0,
+      bottomPad: 40,
+    });
+
+    const metrics = buildVirtualMetrics({ itemIds, measuredHeights });
+    expect(getFirstVisibleMessageIndexFromVirtualMetrics({ metrics, scrollTop: 0 })).toBe(2);
+    expect(getFirstVisibleMessageIndexFromVirtualMetrics({ metrics, scrollTop: 40 })).toBe(3);
   });
 });
 

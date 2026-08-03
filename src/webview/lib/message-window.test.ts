@@ -143,6 +143,16 @@ describe('history window state', () => {
     ]);
   });
 
+  it('deduplicates overlapping prefetched pages while preserving the newer cached entry', () => {
+    const newerM2 = entry('m2');
+    cacheSessionHistoryPage('session-1', 'cursor-newer', [newerM2, entry('m3')]);
+    cacheSessionHistoryPage('session-1', 'cursor-older', [entry('m1'), entry('m2')]);
+
+    const history = getPrefetchedSessionHistory('session-1');
+    expect(history.map((item) => item.info.id)).toEqual(['m1', 'm2', 'm3']);
+    expect(history[1]).toBe(newerM2);
+  });
+
   it('clears every cached value for one session', () => {
     setSessionHistoryCursor('session-1', 'history-cursor');
     setSessionHistoryPromptCursor('session-1', 'prompt-cursor');
@@ -198,5 +208,12 @@ describe('mergeOlderHistory', () => {
 
     expect(merged.map((item) => item.info.id)).toEqual(['m1', 'm2', 'm3']);
     expect(merged[1]).toBe(current[0]);
+  });
+
+  it('keeps identical message IDs from different sessions distinct', () => {
+    const current = [entry('shared-id', 'session-current')];
+    const older = entry('shared-id', 'session-older');
+
+    expect(mergeOlderHistory(current, [older])).toEqual([older, current[0]]);
   });
 });

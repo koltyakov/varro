@@ -5427,6 +5427,137 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('preserves the visible row for one mixed resize batch above, at, and below it', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const rowHeights = Array.from({ length: 50 }, () => 100);
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    const changedRows = [8, 14, 20, 25].map(
+      (index) => container?.querySelector(`[data-msg-id="assistant-${index}"]`) as HTMLDivElement
+    );
+    expect(anchor).toBeInstanceOf(HTMLDivElement);
+    expect(changedRows.every((row) => row instanceof HTMLDivElement)).toBe(true);
+    const rowObserver = observers.find((observer) => observer.targets.has(anchor));
+    expect(rowObserver).toBeDefined();
+    const anchorTopBefore = anchor.getBoundingClientRect().top;
+
+    rowHeights[8] = 130;
+    rowHeights[14] = 80;
+    rowHeights[20] = 180;
+    rowHeights[25] = 160;
+    rowObserver!.callback(
+      changedRows.map(
+        (row, index) =>
+          ({
+            target: row,
+            borderBoxSize: [{ blockSize: rowHeights[[8, 14, 20, 25][index]!]!, inlineSize: 500 }],
+          }) as unknown as ResizeObserverEntry
+      ),
+      rowObserver as unknown as ResizeObserver
+    );
+
+    expect(scrollTopValue).toBe(2010);
+    expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+
+    const belowRow = changedRows[3]!;
+    rowHeights[25] = 200;
+    rowObserver!.callback(
+      [
+        {
+          target: belowRow,
+          borderBoxSize: [{ blockSize: 200, inlineSize: 500 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+    expect(scrollTopValue).toBe(2010);
+    expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+    animationFrames.restore();
+  });
+
   it('does not give an explicitly render-empty row a provisional virtual height', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let list: HTMLDivElement | null = null;

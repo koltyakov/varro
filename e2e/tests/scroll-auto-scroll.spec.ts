@@ -3,29 +3,9 @@ import type { Locator } from '@playwright/test';
 import { getScrollMetrics, waitForAnimationFrame, waitForAnimationFrames } from './helpers';
 import { appendDeltaToLastLargeAssistant, appendDeltaToRapidStreaming } from './scroll-helpers';
 
-async function getVirtualScrollSample(list: Locator) {
-  return list.evaluate((element) => {
-    const containerRect = element.getBoundingClientRect();
-    const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
-    const firstVisible = rows.find((row) => {
-      const rect = row.getBoundingClientRect();
-      return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-    });
-    const id = firstVisible?.dataset.msgId ?? '';
-    const match = /message-heterogeneous-(user|assistant)-(\d+)(?:-([ab]))?/.exec(id);
-    const turnIndex = match ? Number(match[2]) : 0;
-    const roleOffset = match?.[1] === 'assistant' ? (match[3] === 'b' ? 2 : 1) : 0;
-    return {
-      scrollTop: element.scrollTop,
-      firstIndex: turnIndex * 3 + roleOffset,
-      viewportHeight: element.clientHeight,
-    };
-  });
-}
-
 async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 6) {
   return list.evaluate(async (element, frames) => {
-    const samples: Array<{ id: string; top: number }> = [];
+    const samples: Array<{ id: string; top: number; scrollTop: number }> = [];
     for (let index = 0; index < frames; index += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const containerRect = element.getBoundingClientRect();
@@ -36,6 +16,7 @@ async function sampleVisibleAnchorAcrossFrames(list: Locator, frameCount = 6) {
       samples.push({
         id: row?.dataset.msgId ?? '',
         top: row ? row.getBoundingClientRect().top - containerRect.top : Number.NaN,
+        scrollTop: element.scrollTop,
       });
     }
     return samples;
@@ -447,24 +428,22 @@ test.describe('auto-scroll', () => {
     expect(box).not.toBeNull();
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
-    const samples: Array<{ scrollTop: number; firstIndex: number; viewportHeight: number }> = [
-      await getVirtualScrollSample(list),
-    ];
-
     for (let index = 0; index < 35; index += 1) {
-      await page.mouse.wheel(0, -180);
-      await waitForAnimationFrames(page, 2);
-      samples.push(await getVirtualScrollSample(list));
-    }
+      const before = (await sampleVisibleAnchorAcrossFrames(list, 2)).at(-1)!;
+      expect(before.id).not.toBe('');
+      if (before.scrollTop < 180) break;
 
-    for (let index = 1; index < samples.length; index += 1) {
-      const previous = samples[index - 1]!;
-      const current = samples[index]!;
-      const upwardScrollDelta = previous.scrollTop - current.scrollTop;
-      expect(current.scrollTop).toBeLessThanOrEqual(previous.scrollTop + 2);
-      expect(upwardScrollDelta).toBeLessThan(current.viewportHeight * 0.8);
-      expect(current.firstIndex).toBeLessThanOrEqual(previous.firstIndex + 1);
-      expect(previous.firstIndex - current.firstIndex).toBeLessThan(14);
+      await page.mouse.wheel(0, -180);
+      const tops = await sampleMessageTopAcrossFrames(list, before.id, 4);
+      expect(
+        tops.every((top) => top !== null),
+        JSON.stringify({ index, before, tops })
+      ).toBe(true);
+      const settledTop = tops.at(-1)!;
+      expect(Math.abs(settledTop! - before.top - 180), `wheel step ${index}`).toBeLessThan(4);
+      for (const top of tops.slice(1)) {
+        expect(Math.abs(top! - settledTop!), `settling step ${index}`).toBeLessThan(1.5);
+      }
     }
   });
 
@@ -553,15 +532,15 @@ test.describe('auto-scroll', () => {
       });
       if (before.scrollTop <= 1) break;
       await page.mouse.wheel(0, -80);
-      await waitForAnimationFrames(page, 2);
-      const afterTop = await list.evaluate((element, id) => {
-        const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-          (candidate) => candidate.dataset.msgId === id
-        );
-        return row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
-      }, before.id);
-      if (afterTop !== null) {
-        expect(Math.abs(afterTop - before.top - 80), `wheel step ${step}`).toBeLessThan(70);
+      const tops = await sampleMessageTopAcrossFrames(list, before.id, 4);
+      expect(
+        tops.every((top) => top !== null),
+        JSON.stringify({ step, before, tops })
+      ).toBe(true);
+      const settledTop = tops.at(-1)!;
+      expect(Math.abs(settledTop! - before.top - 80), `wheel step ${step}`).toBeLessThan(6);
+      for (const top of tops.slice(1)) {
+        expect(Math.abs(top! - settledTop!), `settling step ${step}`).toBeLessThan(1.5);
       }
     }
   });
@@ -569,6 +548,7 @@ test.describe('auto-scroll', () => {
   test('preserves the same row through exact 50 plus 50 plus final pagination', async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
     await page.goto(
       '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
     );
@@ -619,6 +599,7 @@ test.describe('auto-scroll', () => {
         expect(top).not.toBeNull();
         expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
       }
+      expect(await list.locator('[data-msg-id]').count()).toBeLessThan(80);
     };
 
     await loadPageAtTop();
@@ -635,7 +616,7 @@ test.describe('auto-scroll', () => {
     await loadPageAtTop();
     await expect(historyBanner).toHaveCount(0);
 
-    const historyRequestCursors = await page.evaluate(() => {
+    const historyRequests = await page.evaluate(() => {
       const harness = window as Window & {
         __varroE2E?: { requests?: Array<{ path: string }> };
       };
@@ -643,9 +624,16 @@ test.describe('auto-scroll', () => {
         .filter((request) =>
           request.path.includes('/session/session-assistant-heavy-history/message')
         )
-        .map((request) => new URL(request.path, 'https://example.test').searchParams.get('before'));
+        .map((request) => {
+          const params = new URL(request.path, 'https://example.test').searchParams;
+          return { before: params.get('before'), limit: params.get('limit') };
+        });
     });
-    expect(historyRequestCursors).toEqual([null, '79', '29']);
+    expect(historyRequests).toEqual([
+      { before: null, limit: '50' },
+      { before: '79', limit: '50' },
+      { before: '29', limit: '50' },
+    ]);
   });
 
   test('transfers deferred history ownership after native PageDown movement', async ({ page }) => {
