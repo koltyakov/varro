@@ -310,10 +310,12 @@ export function MessageList() {
   let pendingMeasuredAppendScroll = false;
   let pendingMeasuredAppendAnchor: { messageId: string; top: number; topPad: number } | null = null;
   let pendingScrollToBottomRequest = false;
+  let deferredScrollToBottomRequestKey: number | null = null;
   let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
   let stickyJumpSettleEpoch = 0;
+  const [stickyNavigationInProgress, setStickyNavigationInProgress] = createSignal(false);
   let editRevealEpoch = 0;
   let historyOwnedEdit: { messageId: string; sessionId: string } | null = null;
   let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
@@ -395,6 +397,10 @@ export function MessageList() {
   const displayedStickyUserMessagePreview = createMemo(
     () => pendingStickyJump()?.preview ?? stickyUserMessagePreview()
   );
+
+  function stickyNavigationOwnsScroll() {
+    return stickyNavigationInProgress() || pendingStickyJump() !== null;
+  }
   const [stickyPreviewScrollTop, setStickyPreviewScrollTop] = createSignal(0);
   const [stickyPreviewViewportHeight, setStickyPreviewViewportHeight] = createSignal(0);
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
@@ -582,7 +588,12 @@ export function MessageList() {
 
     if (!correctBottom) return;
     requestAnimationFrame(() => {
-      if (epoch !== widthResizeEpoch || !autoScroll() || pendingStickyJump() || editingMessage()) {
+      if (
+        epoch !== widthResizeEpoch ||
+        !autoScroll() ||
+        stickyNavigationOwnsScroll() ||
+        editingMessage()
+      ) {
         return;
       }
       performScroll();
@@ -1545,7 +1556,7 @@ export function MessageList() {
     }
 
     const capturedAutoScroll = autoScroll();
-    if (capturedAutoScroll || pendingStickyJump() || userScrollRecentlyActive()) {
+    if (capturedAutoScroll || stickyNavigationOwnsScroll() || userScrollRecentlyActive()) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -1555,7 +1566,7 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
 
     queueMicrotask(() => {
-      if (!pendingStickyJump()) restoreVisibleScrollAnchor(anchor);
+      if (!stickyNavigationOwnsScroll()) restoreVisibleScrollAnchor(anchor);
     });
   }
 
@@ -1567,6 +1578,16 @@ export function MessageList() {
     }
 
     mountedMessageRows.set(messageId, element);
+    if (element.classList.contains('interactive-request')) {
+      const currentStickyPreview = untrack(stickyUserMessagePreview);
+      if (
+        currentStickyPreview &&
+        shouldHideStickyUserMessagePreviewImmediately(currentStickyPreview)
+      ) {
+        setStickyUserMessagePreview(null);
+        previousStickyPreviewId = currentStickyPreview.id;
+      }
+    }
     if (!shouldMeasureRows() && element.classList.contains('interactive-request')) {
       scheduleStickyPreviewGeometryRefresh();
     }
@@ -1782,7 +1803,7 @@ export function MessageList() {
   }
 
   function shouldCorrectBottomAfterResize() {
-    if (!containerRef || !autoScroll() || pendingStickyJump()) return false;
+    if (!containerRef || !autoScroll() || stickyNavigationOwnsScroll()) return false;
 
     const nextBottomScrollTop = bottomScrollTop();
     return nextBottomScrollTop > containerRef.scrollTop + 1;
@@ -1796,7 +1817,7 @@ export function MessageList() {
   }
 
   function performScroll(options?: { force?: boolean }) {
-    if (pendingStickyJump()) return;
+    if (stickyNavigationOwnsScroll()) return;
     if (appendScrollRafId) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
@@ -1847,7 +1868,7 @@ export function MessageList() {
   }
 
   function reserveLostBottomSpace() {
-    if (!containerRef || !autoScroll() || !pinnedToBottom || pendingStickyJump()) return;
+    if (!containerRef || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll()) return;
 
     const previousBottomTarget = Math.max(lastAutoScrolledBottomScrollTop, lastObservedScrollTop);
     const currentBottomTarget = bottomScrollTop();
@@ -1881,7 +1902,7 @@ export function MessageList() {
   }
 
   function startAppendScrollTransition(sessionId: string) {
-    if (!containerRef || pendingStickyJump()) return;
+    if (!containerRef || stickyNavigationOwnsScroll()) return;
     pendingMeasuredAppendScroll = false;
     if (appendScrollRafId) {
       cancelAnimationFrame(appendScrollRafId);
@@ -1918,7 +1939,7 @@ export function MessageList() {
         appendScrollSessionId !== sessionId ||
         state.activeSessionId !== sessionId ||
         !autoScroll() ||
-        pendingStickyJump()
+        stickyNavigationOwnsScroll()
       ) {
         appendScrollRafId = 0;
         appendScrollSessionId = null;
@@ -2000,7 +2021,7 @@ export function MessageList() {
 
   function startFollowLoop(sessionId: string, options?: { immediate?: boolean }) {
     if (appendScrollRafId) return;
-    if (pendingStickyJump()) {
+    if (stickyNavigationOwnsScroll()) {
       activeFollowLoopSessionId = null;
       return;
     }
@@ -2018,7 +2039,7 @@ export function MessageList() {
 
     function tick() {
       initialScrollRafId = 0;
-      if (!containerRef || !trackRef || pendingStickyJump()) {
+      if (!containerRef || !trackRef || stickyNavigationOwnsScroll()) {
         activeFollowLoopSessionId = null;
         return;
       }
@@ -2139,7 +2160,7 @@ export function MessageList() {
     const userScrolledUp =
       now - lastWheelUpAt <= 160 ||
       (scrollDelta < -1 && now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS);
-    const confirmedManualUpwardMovement = scrollDelta < -1 && userScrolledUp;
+    const confirmedManualUpwardMovement = scrollDelta < 0 && userScrolledUp;
     if (!autoScrollEnabled || now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS || userScrolledUp) {
       lastUserScrollAt = now;
     }
@@ -2156,6 +2177,7 @@ export function MessageList() {
       : null;
     // Do not wait for the coalesced sticky pass when a slow scroll reveals the source card.
     if (
+      confirmedManualUpwardMovement &&
       currentStickyPreview &&
       currentStickySource &&
       currentStickySource.getBoundingClientRect().bottom > containerRef.getBoundingClientRect().top
@@ -2182,7 +2204,7 @@ export function MessageList() {
     }
     // Resize corrections can look like downward movement after an upward wheel.
     const shouldReattachToBottom =
-      !pendingStickyJump() &&
+      !stickyNavigationOwnsScroll() &&
       !editingMessage() &&
       !autoScrollEnabled &&
       !userScrolledUp &&
@@ -2230,7 +2252,7 @@ export function MessageList() {
     if (
       top <= 24 &&
       showTruncatedHistoryBanner() &&
-      !pendingStickyJump() &&
+      !stickyNavigationOwnsScroll() &&
       (!autoScrollEnabled || decision.nextAutoScroll === false)
     ) {
       void handleLoadOlderHistory();
@@ -2239,10 +2261,13 @@ export function MessageList() {
 
   function onWheel(event: WheelEvent) {
     if (widthResizeActive) publishPendingWidthMeasurements();
-    if (containerRef && event.deltaY > 0.5) {
+    if (nestedScrollerWillConsumeWheel(event)) return;
+    const deltaY = getWheelDeltaPixels(event);
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    if (containerRef && deltaY > 0.5) {
       const top = containerRef.scrollTop;
       const maxScrollTop = getEditMaxScrollTop(top);
-      if (maxScrollTop !== null && top + event.deltaY >= maxScrollTop - 1) {
+      if (maxScrollTop !== null && top + deltaY >= maxScrollTop - 1) {
         containerRef.scrollTop = maxScrollTop;
         event.preventDefault();
         event.stopPropagation();
@@ -2253,19 +2278,57 @@ export function MessageList() {
       if (distanceFromBottom() <= 1) return;
     }
     lastWheelAt = performance.now();
-    if (event.deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
+    if (deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
       activeFollowLoopSessionId = null;
     }
-    if (event.deltaY < -0.5) {
+    if (deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
       if (autoScroll() || pinnedToBottom || followModeLocked) {
         disengageBottomFollow();
         resumeAutoScrollAfterDiffFocus = false;
       }
     }
+  }
+
+  function getWheelDeltaPixels(event: WheelEvent) {
+    let deltaY = event.deltaY;
+    if (event.deltaMode === 1) {
+      const styles = containerRef ? getComputedStyle(containerRef) : null;
+      deltaY *=
+        Number.parseFloat(styles?.lineHeight || '') ||
+        (Number.parseFloat(styles?.fontSize || '') || 13) * 1.35;
+    } else if (event.deltaMode === 2) {
+      deltaY *= containerRef?.clientHeight || 0;
+    }
+    return deltaY;
+  }
+
+  function nestedScrollerWillConsumeWheel(event: WheelEvent) {
+    if (!containerRef || !(event.target instanceof Element)) return false;
+    const deltaY = getWheelDeltaPixels(event);
+    for (let element: Element | null = event.target; element && element !== containerRef;) {
+      if (element instanceof HTMLElement) {
+        const styles = getComputedStyle(element);
+        const overflowY = styles.overflowY;
+        const scrollable =
+          (overflowY === 'auto' || overflowY === 'scroll') &&
+          element.scrollHeight > element.clientHeight + 1;
+        if (
+          scrollable &&
+          (styles.overscrollBehaviorY === 'contain' ||
+            styles.overscrollBehaviorY === 'none' ||
+            (deltaY < 0 && element.scrollTop > 0) ||
+            (deltaY > 0 && element.scrollTop + element.clientHeight < element.scrollHeight - 1))
+        ) {
+          return true;
+        }
+      }
+      element = element.parentElement;
+    }
+    return false;
   }
 
   function handleKeyDown(event: KeyboardEvent) {
@@ -2288,14 +2351,22 @@ export function MessageList() {
     ) {
       return;
     }
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (widthResizeActive) publishPendingWidthMeasurements();
     lastScrollInputAt = performance.now();
+  }
+
+  function cancelStickyNavigation() {
+    deferredScrollToBottomRequestKey = null;
+    stickyJumpSettleEpoch += 1;
+    setStickyNavigationInProgress(false);
+    setPendingStickyJump(null);
   }
 
   function handlePointerDown(event: PointerEvent) {
     const pointerTarget = event.target;
     if (pointerTarget instanceof Element && pointerTarget.closest('.user-message-card')) {
-      stickyJumpSettleEpoch += 1;
+      cancelStickyNavigation();
     }
     if (
       !containerRef ||
@@ -2325,6 +2396,7 @@ export function MessageList() {
       if (!inScrollbarGutter) return;
     }
     if (widthResizeActive) publishPendingWidthMeasurements();
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     pointerScrollOwnershipActive = true;
     lastScrollInputAt = performance.now();
   }
@@ -2371,7 +2443,9 @@ export function MessageList() {
     if (!containerRef) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest('.user-message-card')) stickyJumpSettleEpoch += 1;
+    if (target.closest('.user-message-card')) {
+      cancelStickyNavigation();
+    }
     if (target.closest('.diff-view-filename')) return;
     const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
     if (!control || !containerRef.contains(control)) return;
@@ -2393,12 +2467,34 @@ export function MessageList() {
     });
   }
 
+  function handleExternalLayoutClickCapture(event: MouseEvent) {
+    if (!containerRef || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll()) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const todoToggle = target.closest<HTMLElement>('.todo-block-header[aria-expanded="true"]');
+    const todoList = todoToggle
+      ?.closest('.todo-block')
+      ?.querySelector<HTMLElement>('.todo-block-list');
+    if (!todoList) return;
+
+    const styles = getComputedStyle(todoList);
+    const collapseHeight =
+      todoList.getBoundingClientRect().height +
+      (parseFloat(styles.marginTop) || 0) +
+      (parseFloat(styles.marginBottom) || 0);
+    if (collapseHeight <= 0.5) return;
+
+    appendBottomReserveTarget = bottomScrollTop();
+    setAppendBottomReserve((reserve) => reserve + collapseHeight);
+  }
+
   onMount(() => {
     if (!containerRef) return;
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     containerRef.addEventListener('focusin', handleFocusIn);
     containerRef.addEventListener('focusout', handleFocusOut);
     containerRef.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('click', handleExternalLayoutClickCapture, true);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('pointerup', releasePointerScrollOwnership);
     document.addEventListener('pointercancel', releasePointerScrollOwnership);
@@ -2514,6 +2610,7 @@ export function MessageList() {
       containerRef?.removeEventListener('focusin', handleFocusIn);
       containerRef?.removeEventListener('focusout', handleFocusOut);
       containerRef?.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('click', handleExternalLayoutClickCapture, true);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerup', releasePointerScrollOwnership);
       document.removeEventListener('pointercancel', releasePointerScrollOwnership);
@@ -2607,7 +2704,13 @@ export function MessageList() {
     const candidate = stickyUserMessagePreviewCandidate();
     const current = untrack(stickyUserMessagePreview);
 
-    if (current?.id === candidate?.id && current?.text === candidate?.text) {
+    if (
+      current?.id === candidate?.id &&
+      current?.index === candidate?.index &&
+      current?.text === candidate?.text &&
+      current?.attachmentCount === candidate?.attachmentCount &&
+      current?.imageCount === candidate?.imageCount
+    ) {
       previousStickyPreviewId = current?.id ?? null;
       if (stickyPreviewDebounceTimer) {
         clearTimeout(stickyPreviewDebounceTimer);
@@ -2685,6 +2788,7 @@ export function MessageList() {
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     cancelPendingScroll();
     pendingScrollToBottomRequest = false;
+    deferredScrollToBottomRequestKey = null;
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
     followModeLocked = false;
@@ -2694,6 +2798,7 @@ export function MessageList() {
     diffFocusPauseActive = false;
     resumeAutoScrollAfterDiffFocus = false;
     setPendingStickyJump(null);
+    setStickyNavigationInProgress(false);
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
@@ -2708,7 +2813,7 @@ export function MessageList() {
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       scheduleVisibleMeasurement();
-      if (pendingStickyJump()) return;
+      if (stickyNavigationOwnsScroll()) return;
       if (sessionId && pendingInitialScrollSessionId === sessionId) {
         pendingInitialScrollSessionId = null;
         performScroll();
@@ -2733,7 +2838,7 @@ export function MessageList() {
     const currentStreamingTextLength = streamingTextLength();
     if (
       !sessionId ||
-      pendingStickyJump() ||
+      stickyNavigationOwnsScroll() ||
       currentStreamingTextLength === 0 ||
       (!autoScroll() && !pinnedToBottom)
     )
@@ -2742,7 +2847,7 @@ export function MessageList() {
     queueMicrotask(() => {
       if (
         state.activeSessionId !== sessionId ||
-        pendingStickyJump() ||
+        stickyNavigationOwnsScroll() ||
         (!autoScroll() && !pinnedToBottom)
       )
         return;
@@ -2757,8 +2862,14 @@ export function MessageList() {
     const requestKey = messageListScrollRequestKey();
     if (previousRequestKey === undefined) return requestKey;
     if (!sessionId || !containerRef) return requestKey;
+    const requestChanged = requestKey !== previousRequestKey;
+    if (!requestChanged && deferredScrollToBottomRequestKey !== requestKey) return requestKey;
     invalidatePendingHistoryRestoration(sessionId);
-    if (pendingStickyJump()) return requestKey;
+    if (stickyNavigationOwnsScroll()) {
+      if (requestChanged) deferredScrollToBottomRequestKey = requestKey;
+      return requestKey;
+    }
+    deferredScrollToBottomRequestKey = null;
     if (diffFocusPauseActive) {
       resumeAutoScrollAfterDiffFocus = true;
       return requestKey;
@@ -2947,12 +3058,16 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     const findRow = () => mountedMessageRows.get(preview.id);
     let previousMeasurementVersion = -1;
+    let bootstrapFrames = 0;
+    let settleFrames = 0;
     while (state.activeSessionId === sessionId && isCurrent()) {
       const messageIndex = messages().findIndex((entry) => entry.info.id === preview.id);
       if (messageIndex < 0) return null;
 
       if (shouldMeasureRows() && !shouldVirtualize()) {
         previousMeasurementVersion = -1;
+        bootstrapFrames += 1;
+        if (bootstrapFrames >= 60) return null;
         await waitForAnimationFrame();
         continue;
       }
@@ -2966,20 +3081,25 @@ export function MessageList() {
           setScrollTop(nextScrollTop);
           setStickyPreviewScrollTop(nextScrollTop);
         }
+        settleFrames += 1;
+        if (settleFrames >= 12) return null;
         await waitForAnimationFrame();
         continue;
       }
 
+      if (shouldMeasureRows()) alignMountedMessage(preview);
+
       const currentMeasurementVersion = measurementVersion();
-      if (currentMeasurementVersion === previousMeasurementVersion) return row;
+      if (currentMeasurementVersion === previousMeasurementVersion || settleFrames >= 11)
+        return row;
       previousMeasurementVersion = currentMeasurementVersion;
+      settleFrames += 1;
       await waitForAnimationFrame();
     }
     return null;
   }
 
-  function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
-    disengageBottomFollow();
+  function alignMountedMessage(preview: StickyUserMessagePreview): boolean {
     const row = mountedMessageRows.get(preview.id);
     if (!row) return false;
     if (shouldMeasureRows() && containerRef) {
@@ -2994,8 +3114,13 @@ export function MessageList() {
     return true;
   }
 
+  function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
+    disengageBottomFollow();
+    return alignMountedMessage(preview);
+  }
+
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
-    if (pendingStickyJump()) return;
+    if (stickyNavigationOwnsScroll()) return;
     finishWidthResizeNow();
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
@@ -3005,11 +3130,25 @@ export function MessageList() {
       activeHistoryLoad?.generation !== activeSessionGeneration
     ) {
       const settleEpoch = ++stickyJumpSettleEpoch;
+      setStickyNavigationInProgress(true);
+      const clearNavigation = () => {
+        if (stickyJumpSettleEpoch === settleEpoch) setStickyNavigationInProgress(false);
+      };
       if (!navigateToMountedMessage(preview)) {
-        void waitAndNavigateToMessage(preview, () => stickyJumpSettleEpoch === settleEpoch);
+        void waitAndNavigateToMessage(preview, () => stickyJumpSettleEpoch === settleEpoch).finally(
+          clearNavigation
+        );
       } else if (shouldMeasureRows()) {
         const sessionId = state.activeSessionId;
-        if (sessionId) void settleMountedStickyPreviewJump(preview, sessionId, settleEpoch);
+        if (sessionId) {
+          void settleMountedStickyPreviewJump(preview, sessionId, settleEpoch).finally(
+            clearNavigation
+          );
+        } else {
+          clearNavigation();
+        }
+      } else {
+        clearNavigation();
       }
       return;
     }
@@ -3103,6 +3242,7 @@ export function MessageList() {
     if (needsHistory) {
       try {
         while (
+          pendingStickyJump() === jump &&
           state.activeSessionId === sessionId &&
           !messages().some((entry) => entry.info.id === preview.id)
         ) {
@@ -3116,16 +3256,22 @@ export function MessageList() {
       clearPendingJump();
       return;
     }
-    const ready = await waitForMessageRow(preview, () => pendingStickyJump() === jump);
-    clearPendingJump();
-    if (!ready || state.activeSessionId !== sessionId) return;
-    await waitForAnimationFrame();
-    if (state.activeSessionId === sessionId) {
-      const settleEpoch = ++stickyJumpSettleEpoch;
-      await waitAndNavigateToMessage(
-        preview,
-        () => state.activeSessionId === sessionId && stickyJumpSettleEpoch === settleEpoch
-      );
+    try {
+      const ready = await waitForMessageRow(preview, () => pendingStickyJump() === jump);
+      if (!ready || state.activeSessionId !== sessionId) return;
+      await waitForAnimationFrame();
+      if (state.activeSessionId === sessionId) {
+        const settleEpoch = ++stickyJumpSettleEpoch;
+        await waitAndNavigateToMessage(
+          preview,
+          () =>
+            pendingStickyJump() === jump &&
+            state.activeSessionId === sessionId &&
+            stickyJumpSettleEpoch === settleEpoch
+        );
+      }
+    } finally {
+      clearPendingJump();
     }
   }
 
@@ -3210,7 +3356,7 @@ export function MessageList() {
         !containerRef
       )
         return;
-      if (pendingStickyJump()) return;
+      if (stickyNavigationOwnsScroll()) return;
       if (pendingOlderHistoryAnchors.get(sessionId) !== pendingAnchor) return;
       if (pendingAnchor.invalidated) return;
       if (userScrollOwnershipEpoch !== pendingAnchor.ownershipEpoch) return;
@@ -3219,7 +3365,7 @@ export function MessageList() {
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
       } else if (pendingAnchor.anchor) {
         queueMicrotask(() => {
-          if (pendingStickyJump()) return;
+          if (stickyNavigationOwnsScroll()) return;
           if (generation !== activeSessionGeneration) return;
           if (state.activeSessionId !== sessionId) return;
           if (pendingAnchor.invalidated) return;

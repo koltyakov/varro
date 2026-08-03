@@ -1916,6 +1916,36 @@ describe('ChatInput', () => {
     expect(state.queuedMessages[2]?.id).toBe('q3');
   });
 
+  it('keeps an edited paused message queued when the session becomes idle', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'paused follow-up', paused: true },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setInputText('edited paused follow-up');
+    setIsLoading(false);
+    await flushAsyncWork();
+
+    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    expect(sendButton).not.toBeNull();
+    sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toHaveLength(1);
+    expect(state.queuedMessages[0]?.text).toBe('edited paused follow-up');
+    expect(state.queuedMessages[0]?.paused).toBe(true);
+  });
+
   it('pauses automatic queue dispatch while a queued message is being edited', async () => {
     vi.useFakeTimers();
     setIsLoading(true);

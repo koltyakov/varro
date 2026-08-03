@@ -1144,20 +1144,50 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         'data:image/svg+xml,' +
         encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"/>'),
     });
-    const assistant = makeAssistantMessage(
+    const messages: MessageEntry[] = [user];
+    for (let index = 0; index < 79; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-first-image-assistant-${index}`,
+          user.info.id,
+          `Response step ${index + 1}: enough history to exercise paginated sticky behavior.`,
+          BASE_TIME - 18_000 + index
+        )
+      );
+    }
+    const laterImageUser = makeUserMessage(
       session.id,
-      'message-sticky-first-image-assistant',
-      user.info.id,
-      Array.from(
-        { length: 24 },
-        (_, index) =>
-          `Response section ${index + 1}: enough content to scroll slowly back to the first image prompt.`
-      ).join('\n\n'),
-      BASE_TIME - 18_000
+      'message-sticky-later-image-user',
+      ['A later image prompt must also yield before a slow wheel tick reveals it.'],
+      BASE_TIME - 10_000
     );
+    laterImageUser.parts.push({
+      id: 'message-sticky-later-image-file',
+      sessionID: session.id,
+      messageID: laterImageUser.info.id,
+      type: 'file',
+      mime: 'image/svg+xml',
+      filename: 'later-image.svg',
+      url:
+        'data:image/svg+xml,' +
+        encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"/>'),
+    });
+    messages.push(laterImageUser);
+    for (let index = 0; index < 39; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-later-image-assistant-${index}`,
+          laterImageUser.info.id,
+          `Later image response step ${index + 1}.`,
+          BASE_TIME - 9_000 + index
+        )
+      );
+    }
     state.sessions = [session];
     state.sessionStatuses[session.id] = { type: 'idle' };
-    state.messagesBySessionId[session.id] = [user, assistant];
+    state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 50;
     return state;
@@ -1277,6 +1307,24 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500
     );
     const messages: MessageEntry[] = [];
+    const olderUser = makeUserMessage(
+      session.id,
+      'message-sticky-terminal-older-user',
+      ['Older request that remains outside the initial message window.'],
+      BASE_TIME - 200_000
+    );
+    messages.push(olderUser);
+    for (let index = 0; index < 69; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-terminal-older-assistant-${index}`,
+          olderUser.info.id,
+          `Older implementation step ${index + 1}.`,
+          BASE_TIME - 199_000 + index
+        )
+      );
+    }
     const historyUser = makeUserMessage(
       session.id,
       'message-sticky-terminal-history-user',
@@ -1284,7 +1332,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 100_000
     );
     messages.push(historyUser);
-    for (let index = 0; index < 34; index += 1) {
+    for (let index = 0; index < 15; index += 1) {
       messages.push(
         makeAssistantMessage(
           session.id,
@@ -1306,19 +1354,42 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 20_000
     );
     messages.push(terminalUser);
-    for (let index = 0; index < 14; index += 1) {
-      messages.push(
-        makeAssistantMessage(
-          session.id,
-          `message-sticky-terminal-assistant-${index}`,
-          terminalUser.info.id,
-          Array.from(
-            { length: 8 },
-            (_, line) => `Assistant step ${index + 1}, terminal failure detail ${line + 1}.`
-          ).join('\n\n'),
-          BASE_TIME - 19_000 + index
-        )
+    for (let index = 0; index < 33; index += 1) {
+      const assistant = makeAssistantMessage(
+        session.id,
+        `message-sticky-terminal-assistant-${index}`,
+        terminalUser.info.id,
+        index === 32
+          ? Array.from(
+              { length: 12 },
+              (_, line) => `Final verification detail ${line + 1} remains visible near the bottom.`
+            ).join('\n\n')
+          : '',
+        BASE_TIME - 19_000 + index
       );
+      if (index < 18) {
+        assistant.parts = [
+          {
+            id: `message-sticky-terminal-tool-${index}`,
+            sessionID: session.id,
+            messageID: assistant.info.id,
+            type: 'tool',
+            callID: `message-sticky-terminal-call-${index}`,
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: `npm run verification-${index + 1}` },
+              output: `Verification ${index + 1} passed`,
+              title: `npm run verification-${index + 1}`,
+              metadata: { exit: 0 },
+              time: { start: BASE_TIME - 19_000 + index, end: BASE_TIME - 18_000 + index },
+            },
+          },
+        ];
+      } else if (index !== 32) {
+        assistant.parts = [];
+      }
+      messages.push(assistant);
     }
 
     state.sessions = [session];
@@ -3819,7 +3890,9 @@ async function handleApiRequest(
     const messages = state.messagesBySessionId[sessionId] || [];
     const windowed =
       new URLSearchParams(window.location.search).get('windowed') === '1' &&
-      (sessionId === 'session-diff-preview-large-transcript' ||
+      (sessionId === 'session-sticky-preview-first-image' ||
+        sessionId === 'session-sticky-preview-terminal' ||
+        sessionId === 'session-diff-preview-large-transcript' ||
         sessionId === 'session-assistant-heavy-history');
     if (!windowed) return messages;
 

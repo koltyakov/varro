@@ -253,9 +253,10 @@ test.describe('auto-scroll', () => {
     await todoToggle.click();
 
     const samples = await sampleMessageTopAcrossFrames(list, 'message-large-assistant-239', 12);
-    expect(samples.every((sample) => sample !== null && Math.abs(sample - previousTop) <= 1)).toBe(
-      true
-    );
+    expect(
+      samples.every((sample) => sample !== null && Math.abs(sample - previousTop) <= 1),
+      JSON.stringify({ previousTop, samples })
+    ).toBe(true);
     await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
     const reserve = page.locator('.append-scroll-bottom-reserve');
     await expect(reserve).toBeVisible();

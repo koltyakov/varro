@@ -1793,7 +1793,9 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.file-read-card')).not.toBeNull();
-    expect(container?.querySelector('.file-read-target')?.textContent).toBe('message-edit-state.ts');
+    expect(container?.querySelector('.file-read-target')?.textContent).toBe(
+      'message-edit-state.ts'
+    );
     expect(container?.querySelector('.file-change-card')).toBeNull();
   });
 });

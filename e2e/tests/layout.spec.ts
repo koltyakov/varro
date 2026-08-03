@@ -327,7 +327,7 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 800 });
-  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-first-image');
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-first-image&windowed=1');
 
   const list = page.locator('.interactive-list');
   const sticky = page.locator('.latest-user-message-sticky');
@@ -339,19 +339,63 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
     let sawSticky = false;
     let overlapFrames = 0;
     let maxVisibleSourceHeight = 0;
-    for (let frame = 0; frame < 1_000 && element.scrollTop > 0; frame += 1) {
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -2, bubbles: true }));
-      element.scrollTop = Math.max(0, element.scrollTop - 2);
+    for (let frame = 0; frame < 1_000; frame += 1) {
+      const source = document.querySelector<HTMLElement>(sourceSelector);
+      const listTop = element.getBoundingClientRect().top;
+      const nearSource = !!source && source.getBoundingClientRect().bottom > listTop - 300;
+      const delta = nearSource ? 2 : 80;
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
+      if (
+        source &&
+        source.getBoundingClientRect().bottom <= listTop &&
+        source.getBoundingClientRect().bottom + delta > listTop &&
+        document.querySelector('.latest-user-message-sticky-overlay')
+      ) {
+        return {
+          hidden: false,
+          overlap: true,
+          reason: 'sticky remained for projected wheel collision',
+          overlapFrames,
+          maxVisibleSourceHeight,
+          sawSticky,
+          scrollTop: element.scrollTop,
+        };
+      }
+      element.scrollTop = Math.max(0, element.scrollTop - delta);
       element.dispatchEvent(new Event('scroll'));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
       const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
-      const source = document.querySelector<HTMLElement>(sourceSelector);
-      if (!source) return { hidden: false, overlap: true, reason: 'source prompt unmounted' };
-      if (overlay) sawSticky = true;
+      const currentSource = document.querySelector<HTMLElement>(sourceSelector);
+      if (overlay?.textContent?.includes('Sticky message overlap with message containing image')) {
+        sawSticky = true;
+      }
+      if (!sawSticky) continue;
+      if (sawSticky && !overlay && !currentSource) {
+        return {
+          hidden: true,
+          overlap: true,
+          reason: 'sticky hidden before source mounted',
+          overlapFrames,
+          maxVisibleSourceHeight,
+          sawSticky,
+          scrollTop: element.scrollTop,
+        };
+      }
+      if (!currentSource) continue;
 
-      const listTop = element.getBoundingClientRect().top;
-      const sourceBottom = source.getBoundingClientRect().bottom;
+      const sourceBottom = currentSource.getBoundingClientRect().bottom;
+      if (sawSticky && !overlay && sourceBottom <= listTop) {
+        return {
+          hidden: true,
+          overlap: true,
+          reason: 'sticky hidden while source remained above viewport',
+          overlapFrames,
+          maxVisibleSourceHeight,
+          sawSticky,
+          scrollTop: element.scrollTop,
+        };
+      }
       if (sourceBottom > listTop) {
         maxVisibleSourceHeight = Math.max(maxVisibleSourceHeight, sourceBottom - listTop);
         if (overlay) overlapFrames += 1;
@@ -380,6 +424,58 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
   expect(result.sawSticky, JSON.stringify(result)).toBe(true);
   expect(result.overlap, JSON.stringify(result)).toBe(false);
   expect(result.hidden, JSON.stringify(result)).toBe(true);
+  expect(result.maxVisibleSourceHeight, JSON.stringify(result)).toBeGreaterThan(0);
+});
+
+test('image sticky yields after a fractional upward wheel tick reveals its source', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-first-image&windowed=1');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  await expect(sticky).toContainText('A later image prompt');
+
+  const result = await list.evaluate(async (element) => {
+    const sourceSelector = '[data-msg-id="message-sticky-later-image-user"] .user-message-card';
+    for (let frame = 0; frame < 200; frame += 1) {
+      const source = document.querySelector<HTMLElement>(sourceSelector);
+      const listTop = element.getBoundingClientRect().top;
+      if (source) {
+        const sourceBottom = source.getBoundingClientRect().bottom;
+        if (sourceBottom <= listTop && sourceBottom > listTop - 1) {
+          const delta = 0.75;
+          element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
+          element.scrollTop = Math.max(0, element.scrollTop - delta);
+          element.dispatchEvent(new Event('scroll'));
+          let stickyVisibleFrames = 0;
+          for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            if (document.querySelector('.latest-user-message-sticky-overlay')) {
+              stickyVisibleFrames += 1;
+            }
+          }
+          return {
+            sourceBottom,
+            listTop,
+            stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
+            stickyVisibleFrames,
+          };
+        }
+      }
+
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 20);
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return null;
+  });
+
+  expect(result).not.toBeNull();
+  expect(result?.stickyVisible, JSON.stringify(result)).toBe(false);
+  expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(0);
 });
 
 test('virtualized long sticky preview yields while scrolling at narrow width', async ({ page }) => {
@@ -467,31 +563,54 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
 });
 
 test('terminal attachment sticky preview navigates to its original message', async ({ page }) => {
-  await page.setViewportSize({ width: 486, height: 800 });
-  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment');
+  await page.setViewportSize({ width: 486, height: 1064 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=sticky-preview-terminal-attachment&windowed=1'
+  );
 
   const list = page.locator('.interactive-list');
   const sticky = page.locator('.latest-user-message-sticky');
   const terminalCard = page.locator(
     '[data-msg-id="message-sticky-terminal-user"] .user-message-card'
   );
-  const laterAssistant = page.locator('[data-msg-id="message-sticky-terminal-assistant-13"]');
+  const laterAssistant = page.locator('[data-msg-id="message-sticky-terminal-assistant-32"]');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect(page.locator('.message-history-banner')).toBeAttached();
+  await expect(page.locator('[data-msg-id="message-sticky-terminal-older-user"]')).toHaveCount(0);
 
-  await list.evaluate((element) => {
-    const target = document.querySelector<HTMLElement>(
-      '[data-msg-id="message-sticky-terminal-assistant-13"]'
-    );
-    if (!target) throw new Error('Later assistant is not mounted');
-    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
-    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top;
-    element.dispatchEvent(new Event('scroll'));
-  });
   await expect(laterAssistant).toBeInViewport();
   await expect(sticky).toContainText('Terminal: zsh');
-  await expect(terminalCard).toHaveCount(0);
 
-  await sticky.click();
+  const clickFrames = await sticky.evaluate(async (card) => {
+    (card as HTMLElement).click();
+    const samples: Array<{
+      scrollTop: number;
+      stickyVisible: boolean;
+      targetTop: number | null;
+    }> = [];
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const scrollList = document.querySelector<HTMLElement>('.interactive-list')!;
+      const target = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-sticky-terminal-user"] .user-message-card'
+      );
+      samples.push({
+        scrollTop: scrollList.scrollTop,
+        stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
+        targetTop: target
+          ? target.getBoundingClientRect().top - scrollList.getBoundingClientRect().top
+          : null,
+      });
+    }
+    return samples;
+  });
+  expect(
+    clickFrames.every(
+      ({ stickyVisible, targetTop }) =>
+        !stickyVisible && targetTop !== null && targetTop >= 6 && targetTop <= 10
+    ),
+    JSON.stringify(clickFrames)
+  ).toBe(true);
   await expect
     .poll(() =>
       terminalCard.evaluate((card) => {
@@ -508,8 +627,6 @@ test('terminal attachment sticky preview navigates to its original message', asy
       })
     )
     .toBeLessThanOrEqual(10);
-  await expect(terminalCard).toBeInViewport();
-  await page.waitForTimeout(500);
   await expect(terminalCard).toBeInViewport();
 
   await terminalCard.evaluate((card) => (card as HTMLElement).click());

@@ -1416,7 +1416,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (
       mode !== 'steer' &&
       mode !== 'after-stop' &&
-      isComposerBusy() &&
+      (isComposerBusy() || queuedEdit?.sessionId === composerSessionId()) &&
       !composerHasActiveQuestion() &&
       !composerHasActivePermission() &&
       composerSessionId() &&
