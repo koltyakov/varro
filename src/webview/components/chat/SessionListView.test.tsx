@@ -1401,6 +1401,7 @@ describe('SessionListView load errors', () => {
     const archived = session('archived', now - 2 * 86_400_000);
     loadMoreSessionsMock.mockImplementationOnce(async () => {
       setState('sessions', [recent, archived]);
+      setState('sessionsHasMore', false);
     });
     setState('sessions', [recent]);
     setState('sessionsHasMore', true);
@@ -1412,7 +1413,7 @@ describe('SessionListView load errors', () => {
       const archive = Array.from(
         container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
       ).find((button) => button.textContent?.includes('Archive'));
-      expect(archive?.textContent).toContain('1+');
+      expect(archive?.textContent).toContain('1');
     });
   });
 
@@ -1440,14 +1441,18 @@ describe('SessionListView load errors', () => {
     globalThis.IntersectionObserver =
       TestIntersectionObserver as unknown as typeof IntersectionObserver;
     const now = Date.now();
-    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    const archivedSessions = Array.from({ length: 50 }, (_, index) =>
+      session(`archived-${index}`, now - (index + 2) * 86_400_000)
+    );
+    setState('sessions', [session('recent', now), ...archivedSessions]);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
 
     const archive = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.session-list-section-toggle')
     ).find((button) => button.textContent?.includes('Archive'));
-    expect(archive?.textContent).toContain('1+');
+    expect(archive?.textContent).toContain('50+');
+    expect(loadMoreSessionsMock).not.toHaveBeenCalled();
 
     archive!.click();
     const continuation = container.querySelector('.session-list-continuation')!;
@@ -1455,6 +1460,16 @@ describe('SessionListView load errors', () => {
       [{ target: continuation, isIntersecting: true } as IntersectionObserverEntry],
       {} as IntersectionObserver
     );
+
+    await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
+  });
+
+  it('loads another session window by default while Archive has fewer than 50 sessions', async () => {
+    const now = Date.now();
+    setState('sessions', [session('recent', now), session('archived', now - 2 * 86_400_000)]);
+    setState('sessionsHasMore', true);
+
+    cleanup = render(() => <SessionListView />, container);
 
     await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
   });
@@ -1472,6 +1487,8 @@ describe('SessionListView load errors', () => {
     setState('sessions', loadedSessions);
     setState('sessionsHasMore', true);
     cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => expect(loadMoreSessionsMock).toHaveBeenCalledOnce());
 
     const getArchive = () =>
       Array.from(
@@ -1496,7 +1513,7 @@ describe('SessionListView load errors', () => {
       roots: true,
       signal: expect.any(AbortSignal),
     });
-    expect(loadMoreSessionsMock).not.toHaveBeenCalled();
+    expect(loadMoreSessionsMock).toHaveBeenCalledOnce();
     expect(container.querySelector('.session-list-continuation')).toBeNull();
     expect(appState.sessions).toEqual(loadedSessions);
 

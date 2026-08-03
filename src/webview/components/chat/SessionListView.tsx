@@ -228,6 +228,7 @@ export type SessionStatusIndicatorKind =
   | 'completed';
 
 const SESSION_SHOW_MORE_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_ARCHIVE_PRELOAD_TARGET = 50;
 const SUBAGENT_SESSION_PAGE_SIZE = 100;
 const MAX_SUBAGENT_SESSION_LIMIT = 1_000_000;
 const SESSION_SEARCH_LIMIT = 30;
@@ -1149,7 +1150,7 @@ export function SessionListView(props: {
   createEffect(() => {
     if (
       !isDefaultGroupedView() ||
-      overflowOtherSessions().length > 0 ||
+      overflowOtherSessions().length >= SESSION_ARCHIVE_PRELOAD_TARGET ||
       !state.sessionsHasMore ||
       state.sessionsLoadingMore ||
       state.sessionsPaginationError
