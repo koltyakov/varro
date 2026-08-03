@@ -1775,6 +1775,27 @@ describe('ToolCall', () => {
     );
     expect(container?.querySelector('.file-read-target[href]')).toBeNull();
   });
+
+  it('renders read paths containing edit as reads rather than file changes', () => {
+    const part: ToolPart = {
+      id: 'tool-edit-path-read',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-edit-path-read',
+      tool: 'read',
+      state: completedState(
+        { filePath: 'src/webview/lib/message-edit-state.ts' },
+        'src/webview/lib/message-edit-state.ts'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-read-card')).not.toBeNull();
+    expect(container?.querySelector('.file-read-target')?.textContent).toBe('message-edit-state.ts');
+    expect(container?.querySelector('.file-change-card')).toBeNull();
+  });
 });
 
 describe('FileChangeCard', () => {

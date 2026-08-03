@@ -83,7 +83,11 @@ function InlineEditComposerSlot() {
 export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
-  const animateEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
+  const claimedEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
+  const hasImage = props.msg.parts.some(
+    (part) => part.type === 'file' && part.mime.startsWith('image/')
+  );
+  const animateEntrance = claimedEntrance && !hasImage;
   const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;

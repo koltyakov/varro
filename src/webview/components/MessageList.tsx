@@ -1567,6 +1567,9 @@ export function MessageList() {
     }
 
     mountedMessageRows.set(messageId, element);
+    if (!shouldMeasureRows() && element.classList.contains('interactive-request')) {
+      scheduleStickyPreviewGeometryRefresh();
+    }
     if (!shouldMeasureRows()) return;
 
     measureMountedRow(element, messageId);
@@ -2147,6 +2150,19 @@ export function MessageList() {
       });
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
+    const currentStickyPreview = untrack(stickyUserMessagePreview);
+    const currentStickySource = currentStickyPreview
+      ? getStickyUserMessageSourceElement(currentStickyPreview.id)
+      : null;
+    // Do not wait for the coalesced sticky pass when a slow scroll reveals the source card.
+    if (
+      currentStickyPreview &&
+      currentStickySource &&
+      currentStickySource.getBoundingClientRect().bottom > containerRef.getBoundingClientRect().top
+    ) {
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = currentStickyPreview.id;
+    }
     const activeSessionId = state.activeSessionId;
     const pendingHistoryAnchor = activeSessionId
       ? pendingOlderHistoryAnchors.get(activeSessionId)
@@ -2468,9 +2484,11 @@ export function MessageList() {
         lastContainerFontSize = currentContainerFontSize;
         beginWidthResize({ fontChanged });
       }
-      // Below the virtualization threshold rows have no individual ResizeObserver. Invalidate the
-      // sticky DOM pass when the track changes so streamed assistant growth can reveal it again.
-      if (trackChanged && !shouldMeasureRows() && !autoScroll()) {
+      // Below the virtualization threshold rows have no individual ResizeObserver. Keep an active
+      // sticky preview collision-aware even when bottom-follow owns scrolling and moves a prompt.
+      const shouldRefreshUnmeasuredSticky =
+        !autoScroll() || untrack(stickyUserMessagePreview) !== null;
+      if (trackChanged && !shouldMeasureRows() && shouldRefreshUnmeasuredSticky) {
         if (widthResizeActive && widthChanged) pendingWidthMeasurementPublish = true;
         else setMeasurementVersion((version) => version + 1);
         scheduleStickyPreviewGeometryRefresh({ force: !widthChanged });

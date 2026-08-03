@@ -885,10 +885,11 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
   const after = stringValue(source, ['newString', 'new_string', 'after', 'newContent', 'content']);
   const patch = firstString(source, ['patch', 'diff']);
   const normalizedToolName = toolName.trim().toLowerCase();
+  const titleChange = parseTitleFileChange(title);
   const inferredKind =
     (fromPath && toPath && normalizePath(fromPath) !== normalizePath(toPath) ? 'moved' : null) ||
     kindFromText(firstString(source, OPERATION_KEYS)) ||
-    kindFromText(title) ||
+    titleChange?.kind ||
     kindFromText(normalizedToolName) ||
     (FILE_CHANGE_TOOL_NAMES.has(normalizedToolName) ? 'edited' : null);
 
@@ -899,7 +900,6 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
     const to = toPath || primaryPath;
     const path = to || from;
     if (!path) {
-      const titleChange = parseTitleFileChange(title);
       if (!titleChange || titleChange.kind !== 'moved') return null;
       return withDedupeKey({ ...titleChange, additions, deletions });
     }
@@ -918,7 +918,6 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
 
   const path = primaryPath || toPath || fromPath;
   if (!path) {
-    const titleChange = parseTitleFileChange(title);
     if (!titleChange || titleChange.kind === 'moved') return null;
     return withDedupeKey({ ...titleChange, additions, deletions });
   }

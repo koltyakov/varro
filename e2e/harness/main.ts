@@ -36,6 +36,7 @@ const SCENARIO_NAMES = [
   'startup-race',
   'plan-ready',
   'sticky-preview',
+  'sticky-preview-first-image',
   'sticky-preview-large-transcript',
   'sticky-preview-terminal-attachment',
   'todo-queue',
@@ -1116,6 +1117,48 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = [user1, assistant1, user2, assistant2];
     state.persistedActiveSessionId = session.id;
     addDenseSearchModels(state);
+    state.nextSequence = 50;
+    return state;
+  }
+
+  if (name === 'sticky-preview-first-image') {
+    const session = makeSession(
+      'session-sticky-preview-first-image',
+      'First image sticky overlap',
+      BASE_TIME - 500
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-sticky-first-image-user',
+      ['Sticky message overlap with message containing image is broken'],
+      BASE_TIME - 20_000
+    );
+    user.parts.push({
+      id: 'message-sticky-first-image-file',
+      sessionID: session.id,
+      messageID: user.info.id,
+      type: 'file',
+      mime: 'image/svg+xml',
+      filename: 'first-image.svg',
+      url:
+        'data:image/svg+xml,' +
+        encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"/>'),
+    });
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-sticky-first-image-assistant',
+      user.info.id,
+      Array.from(
+        { length: 24 },
+        (_, index) =>
+          `Response section ${index + 1}: enough content to scroll slowly back to the first image prompt.`
+      ).join('\n\n'),
+      BASE_TIME - 18_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
     state.nextSequence = 50;
     return state;
   }

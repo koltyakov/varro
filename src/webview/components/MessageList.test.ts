@@ -404,6 +404,27 @@ describe('MessageList entrance animation', () => {
     );
   });
 
+  it('shows newly appended image messages immediately', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
+      {
+        info: userMessage('user-2'),
+        parts: [textPart('text-2', 'Prompt with image'), filePart('image-1', 'Image')],
+      },
+    ]);
+    await Promise.resolve();
+
+    const imageRow = container?.querySelector('[data-msg-id="user-2"]');
+    expect(imageRow?.querySelector('.chat-image-preview-trigger')).not.toBeNull();
+    expect(imageRow?.classList).not.toContain('interactive-item-entering');
+  });
+
   it('does not height-animate appends once row measurement is active', async () => {
     const buildMessages = (count: number) =>
       Array.from({ length: count }, (_, index) => ({
@@ -4142,6 +4163,90 @@ describe('MessageList sticky prompt preview', () => {
     nextUserTop = 72;
     list!.scrollTop = 1_348;
     list?.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+
+    animationFrames.restore();
+  });
+
+  it('hides the sticky when bottom-follow moves the next user row into its overlay', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    let nextUserTop = 220;
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 1_700);
+        }
+        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+          return new DOMRect(0, 10, 500, 74);
+        }
+
+        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+        if (messageId === 'assistant-1') return new DOMRect(0, 20, 500, 280);
+        if (messageId === 'user-2') return new DOMRect(0, nextUserTop, 500, 52);
+        if (messageId === 'assistant-2') return new DOMRect(0, nextUserTop + 80, 500, 160);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_700 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
+
+    nextUserTop = 70;
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(list) && observer.targets.has(track)
+    );
+    expect(layoutObserver).toBeDefined();
+    layoutObserver!.callback(
+      [{ target: track } as unknown as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
     animationFrames.flush();
     await Promise.resolve();
 

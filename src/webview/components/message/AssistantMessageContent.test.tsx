@@ -413,6 +413,30 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
   });
 
+  it('does not group reads and searches containing edit words as file edits', () => {
+    const readPart: ToolPart = {
+      ...fileEditPart('read-edit-path', 'src/webview/lib/message-edit-state.ts'),
+      tool: 'read',
+      state: completedToolState(
+        { filePath: 'src/webview/lib/message-edit-state.ts' },
+        'src/webview/lib/message-edit-state.ts'
+      ),
+    };
+    const grepPart: ToolPart = {
+      ...fileEditPart('grep-edit-title', 'src/webview/components'),
+      tool: 'grep',
+      state: completedToolState(
+        { path: 'src/webview/components', pattern: 'Editing message|editing-message' },
+        'Editing message|editing-message'
+      ),
+    };
+
+    renderAssistantMessageContent({ parts: [readPart, grepPart] });
+
+    expect(container?.querySelector('.assistant-file-edit-stack')).toBeNull();
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(2);
+  });
+
   it('revises file stack keys only when inline preview content affects layout', () => {
     const compactPart = fileEditPart('edit-1', 'src/one.ts');
     const previewPart: ToolPart = {

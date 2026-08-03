@@ -752,6 +752,28 @@ describe('tool file change helpers', () => {
     ).toBeNull();
   });
 
+  it('does not mistake edit words in read paths or search titles for file changes', () => {
+    expect(
+      getToolFileChanges(
+        'read',
+        completedState(
+          { filePath: 'src/webview/lib/message-edit-state.ts' },
+          { title: 'src/webview/lib/message-edit-state.ts' }
+        )
+      )
+    ).toEqual([]);
+
+    expect(
+      getToolFileChanges(
+        'grep',
+        completedState(
+          { path: 'src/webview/components', pattern: 'Editing message|editing-message' },
+          { title: 'Editing message|editing-message' }
+        )
+      )
+    ).toEqual([]);
+  });
+
   it('reuses cached results for the same tool state object', () => {
     const state = completedState({ path: 'src/app.ts' }, { title: 'Edited src/app.ts' });
     const first = getToolFileChange('edit', state);

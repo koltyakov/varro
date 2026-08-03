@@ -57,6 +57,76 @@ test('single image messages reserve their preview height before loading', async 
     .toBe(224);
 });
 
+test('the first image message does not overlap the sticky prompt', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+  await page.addStyleTag({
+    content:
+      '.interactive-item-entering.measured-entrance-active { animation-play-state: paused !important; }',
+  });
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(page.locator('.latest-user-message-sticky')).toBeVisible();
+
+  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByText('GPT-4.1', { exact: true }).click();
+  await expect(page.getByTitle('OpenAI / GPT-4.1')).toBeVisible();
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.evaluate((node) => {
+    const file = new File(
+      ['<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>'],
+      'message.svg',
+      { type: 'image/svg+xml' }
+    );
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+    node.dispatchEvent(event);
+  });
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toBeVisible();
+
+  await composer.fill('Image message appears immediately');
+  await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __sendToExtension?: (message: unknown) => void | Promise<void>;
+    };
+    const sendToExtension = bridgeWindow.__sendToExtension;
+    if (!sendToExtension) throw new Error('Extension bridge is missing');
+    bridgeWindow.__sendToExtension = (message) => {
+      const request = message as { type?: string; payload?: { path?: string } };
+      if (request.type === 'api/request' && request.payload?.path?.includes('/prompt_async')) return;
+      return sendToExtension(message);
+    };
+  });
+  await page.keyboard.press('Enter');
+
+  const row = page
+    .locator('.interactive-request')
+    .filter({ hasText: 'Image message appears immediately' })
+    .last();
+  await expect(row.locator('.chat-image-preview-trigger')).toHaveCSS('height', '224px');
+  await expect(row).not.toHaveClass(/interactive-item-entering/);
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const sticky = document.querySelector<HTMLElement>(
+          '.latest-user-message-sticky-overlay'
+        );
+        const prompt = element.querySelector<HTMLElement>('.user-message-card');
+        if (!sticky || !prompt) return 0;
+        const stickyBox = sticky.getBoundingClientRect();
+        return stickyBox.bottom - prompt.getBoundingClientRect().top;
+      })
+    )
+    .toBeLessThanOrEqual(0);
+});
+
 test('sticky preview hides before the next prompt can overlap it', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
 
@@ -251,6 +321,65 @@ test('sticky preview follows live prompt geometry when the assistant row grows',
   expect(promptTop).toBeGreaterThan(600);
   await expect(sticky).toBeVisible();
   await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
+});
+
+test('first image prompt dismisses its sticky preview during slow upward scrolling', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-first-image');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  await expect(sticky).toBeVisible();
+
+  const result = await list.evaluate(async (element) => {
+    const sourceSelector =
+      '[data-msg-id="message-sticky-first-image-user"] .user-message-card';
+    let sawSticky = false;
+    let overlapFrames = 0;
+    let maxVisibleSourceHeight = 0;
+    for (let frame = 0; frame < 1_000 && element.scrollTop > 0; frame += 1) {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -2, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 2);
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+      const source = document.querySelector<HTMLElement>(sourceSelector);
+      if (!source) return { hidden: false, overlap: true, reason: 'source prompt unmounted' };
+      if (overlay) sawSticky = true;
+
+      const listTop = element.getBoundingClientRect().top;
+      const sourceBottom = source.getBoundingClientRect().bottom;
+      if (sourceBottom > listTop) {
+        maxVisibleSourceHeight = Math.max(maxVisibleSourceHeight, sourceBottom - listTop);
+        if (overlay) overlapFrames += 1;
+        else
+          return {
+            hidden: true,
+            overlap: overlapFrames > 0,
+            overlapFrames,
+            maxVisibleSourceHeight,
+            sawSticky,
+            scrollTop: element.scrollTop,
+          };
+      }
+    }
+
+    return {
+      hidden: !document.querySelector('.latest-user-message-sticky-overlay'),
+      overlap: overlapFrames > 0,
+      overlapFrames,
+      maxVisibleSourceHeight,
+      sawSticky,
+      scrollTop: element.scrollTop,
+    };
+  });
+
+  expect(result.sawSticky, JSON.stringify(result)).toBe(true);
+  expect(result.overlap, JSON.stringify(result)).toBe(false);
+  expect(result.hidden, JSON.stringify(result)).toBe(true);
 });
 
 test('virtualized long sticky preview yields while scrolling at narrow width', async ({ page }) => {
