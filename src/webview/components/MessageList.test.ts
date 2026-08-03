@@ -404,6 +404,27 @@ describe('MessageList entrance animation', () => {
     );
   });
 
+  it('does not height-animate appends once row measurement is active', async () => {
+    const buildMessages = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        info: userMessage(`user-${index}`),
+        parts: [{ ...textPart(`text-${index}`, `Prompt ${index}`), messageID: `user-${index}` }],
+      }));
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(buildMessages(50));
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    replaceMessages(buildMessages(51));
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="user-50"]')?.classList).not.toContain(
+      'interactive-item-entering'
+    );
+  });
+
   it('does not mark appends as entering while scrolled away from the bottom', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First')] }]);
@@ -5005,7 +5026,7 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBeNull();
   });
 
-  it('does not immediately re-show the loading row during short visible-stream gaps', async () => {
+  it('re-shows the loading row only after a sustained visible-stream gap', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       {
@@ -5032,7 +5053,7 @@ describe('MessageList loading row', () => {
     setState('streamingPartId', null);
     setState('streamingText', '');
     await Promise.resolve();
-    vi.advanceTimersByTime(179);
+    vi.advanceTimersByTime(599);
     await Promise.resolve();
 
     expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
@@ -5047,6 +5068,41 @@ describe('MessageList loading row', () => {
     expect(
       container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
     ).toBe(false);
+  });
+
+  it('does not flash the loading row when the final event arrives during the stream grace period', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [textPart('text-1', '[Working directory: /workspace]')],
+      },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    setState('streamingPartId', 'text-1');
+    setState('streamingText', 'Final response');
+    await Promise.resolve();
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(599);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+
+    stopLoading();
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+
+    const settledRow = container?.querySelector('.interactive-loading-row');
+    expect(settledRow == null || settledRow.classList.contains('is-reserved')).toBe(true);
   });
 
   it('keeps the loading row reserved across brief inactive gaps', async () => {

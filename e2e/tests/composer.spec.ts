@@ -99,6 +99,51 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
+test('keeps an optimistic steer visible through metadata and stale history handoff', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue&stalePromptSync=1');
+  const text = 'Keep this steer visible while history catches up';
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill(text);
+  await page.getByTitle('Add to queue (Enter)').click();
+
+  await page.evaluate((promptText) => {
+    const harness = window as Window & { optimisticMessageSamples?: boolean[] };
+    harness.optimisticMessageSamples = [];
+    const sample = () => {
+      const visible = [...document.querySelectorAll<HTMLElement>('.chat-turn-user')].some((row) =>
+        row.textContent?.includes(promptText)
+      );
+      harness.optimisticMessageSamples?.push(visible);
+      if ((harness.optimisticMessageSamples?.length ?? 0) < 50) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, text);
+
+  const steerButton = page.getByRole('button', { name: 'Send as Steer' });
+  await steerButton.focus();
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { optimisticMessageSamples?: boolean[] }).optimisticMessageSamples
+            ?.length ?? 0
+      )
+    )
+    .toBe(50);
+
+  const samples = await page.evaluate(
+    () =>
+      (window as Window & { optimisticMessageSamples?: boolean[] }).optimisticMessageSamples ?? []
+  );
+  const firstVisible = samples.indexOf(true);
+  expect(firstVisible).toBeGreaterThanOrEqual(0);
+  expect(samples.slice(firstVisible).every(Boolean)).toBe(true);
+  await expect(page.getByText(text, { exact: true })).toHaveCount(1);
+});
+
 test('keeps pre-input panel space reserved while model and MCP pickers are open', async ({
   page,
 }) => {

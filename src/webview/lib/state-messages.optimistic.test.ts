@@ -49,6 +49,47 @@ beforeEach(() => {
 });
 
 describe('optimistic user message reconciliation', () => {
+  it('preserves an unacknowledged optimistic row across a stale incremental refresh', () => {
+    const previous = {
+      info: userMessage('msg-previous'),
+      parts: [textPart('part-previous', 'msg-previous', 'previous prompt')],
+    };
+    const optimistic = {
+      info: userMessage('msg-pending'),
+      parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
+    };
+    upsertMessage(previous);
+    upsertMessage(optimistic);
+
+    setMessagesIncremental([previous]);
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
+    expect(state.messages[1]!.parts).toEqual(optimistic.parts);
+  });
+
+  it('replaces a preserved optimistic row when its exact server message arrives', () => {
+    const previous = {
+      info: userMessage('msg-previous'),
+      parts: [textPart('part-previous', 'msg-previous', 'previous prompt')],
+    };
+    const optimistic = {
+      info: userMessage('msg-pending'),
+      parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
+    };
+    upsertMessage(previous);
+    upsertMessage(optimistic);
+    setMessagesIncremental([previous]);
+
+    const acknowledged = {
+      info: userMessage('msg-pending'),
+      parts: [textPart('part-server', 'msg-pending', 'new prompt')],
+    };
+    setMessagesIncremental([previous, acknowledged]);
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
+    expect(state.messages[1]!.parts).toEqual(acknowledged.parts);
+  });
+
   it('does not reconcile a different server ID based only on matching text', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'hello world')]));
     upsertMessage({
@@ -139,8 +180,23 @@ describe('optimistic user message reconciliation', () => {
     upsertMessageInfo(userMessage('msg-older'));
 
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-newer']);
-    expect(state.messages[0]!.parts).toEqual([]);
+    expect(state.messages[0]!.parts).toHaveLength(1);
     expect(state.messages[1]!.parts).toHaveLength(1);
+  });
+
+  it('keeps optimistic text between message metadata and its authoritative part', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [textPart('msg-1-part-0', 'msg-1', 'optimistic text')],
+    });
+
+    upsertMessageInfo(userMessage('msg-1'));
+    expect(state.messages[0]!.parts).toEqual([
+      textPart('msg-1-part-0', 'msg-1', 'optimistic text'),
+    ]);
+
+    upsertPart(textPart('part-server', 'msg-1', 'server text'));
+    expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
 
   it('keeps images attached to their exact IDs when acknowledgements arrive out of order', () => {
@@ -202,20 +258,21 @@ describe('optimistic image parts carried onto the server message', () => {
     expect(state.messages).toHaveLength(1);
     const entry = state.messages[0]!;
     expect(entry.info.id).toBe(OPTIMISTIC_ID);
-    expect(entry.parts).toHaveLength(1);
-    const carried = entry.parts[0] as FilePart;
+    expect(entry.parts).toHaveLength(2);
+    expect(entry.parts[0]).toEqual(textPart('p-1', OPTIMISTIC_ID, 'look at this'));
+    const carried = entry.parts[1] as FilePart;
     expect(carried.id).toBe(`${OPTIMISTIC_ID}-optimistic-file-1`);
     expect(carried.messageID).toBe(OPTIMISTIC_ID);
     expect(carried.sessionID).toBe('session-1');
     expect(carried.url).toBe('data:image/png;base64,AAAA');
   });
 
-  it('drops non-image optimistic parts when rebasing onto the server message', () => {
+  it('keeps non-image optimistic parts until a server part arrives', () => {
     upsertMessage(optimisticEntry([textPart('p-1', OPTIMISTIC_ID, 'text only')]));
     upsertMessageInfo(userMessage(OPTIMISTIC_ID));
 
     expect(state.messages).toHaveLength(1);
-    expect(state.messages[0]!.parts).toEqual([]);
+    expect(state.messages[0]!.parts).toEqual([textPart('p-1', OPTIMISTIC_ID, 'text only')]);
   });
 });
 

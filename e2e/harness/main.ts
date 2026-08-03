@@ -104,6 +104,7 @@ type ScenarioState = {
   sessions: Session[];
   sessionStatuses: Record<string, SessionStatus>;
   messagesBySessionId: Record<string, MessageEntry[]>;
+  stalePromptMessageSnapshotBySessionId: Record<string, MessageEntry[]>;
   providers: Provider[];
   providerDefaults: Record<string, string>;
   agents: Agent[];
@@ -731,6 +732,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     sessions: [],
     sessionStatuses: {},
     messagesBySessionId: {},
+    stalePromptMessageSnapshotBySessionId: {},
     providers: structuredClone(providers),
     providerDefaults: { [DEFAULT_PROVIDER_ID]: DEFAULT_MODEL_ID },
     agents: structuredClone(agents),
@@ -3327,7 +3329,13 @@ function appendMockPromptMessages(
   state: ScenarioState,
   sessionId: string,
   textParts: string[],
-  options: { providerID?: string; modelID?: string; variant?: string; agent?: string } = {}
+  options: {
+    providerID?: string;
+    modelID?: string;
+    variant?: string;
+    agent?: string;
+    messageID?: string;
+  } = {}
 ) {
   const promptText =
     textParts.find((text) => !text.startsWith('[Working directory:')) || 'Untitled request';
@@ -3335,7 +3343,7 @@ function appendMockPromptMessages(
   const modelID = options.modelID || DEFAULT_MODEL_ID;
   const agent = options.agent || 'build';
   const createdAt = nextTimestamp(state);
-  const userId = `message-user-${state.nextSequence}`;
+  const userId = options.messageID || `message-user-${state.nextSequence}`;
   const assistantId = `message-assistant-${state.nextSequence}`;
   const userMessage: MessageEntry = {
     info: {
@@ -3347,7 +3355,9 @@ function appendMockPromptMessages(
       model: { providerID, modelID, ...(options.variant ? { variant: options.variant } : {}) },
     },
     parts: textParts.map((text, index) => ({
-      id: `${userId}-part-${index + 1}`,
+      id: options.messageID
+        ? `part-server-${state.nextSequence}-${index + 1}`
+        : `${userId}-part-${index + 1}`,
       sessionID: sessionId,
       messageID: userId,
       type: 'text',
@@ -3372,7 +3382,7 @@ function appendMockPromptMessages(
     assistantMessage,
   ];
 
-  return { assistantMessage, createdAt };
+  return { userMessage, assistantMessage, createdAt };
 }
 
 function extractTodoPayload(value: unknown): Todo[] | null {
@@ -3758,6 +3768,11 @@ async function handleApiRequest(
   const messageMatch = path.match(/^\/session\/([^/]+)\/message$/);
   if (messageMatch && method === 'GET') {
     const sessionId = decodeURIComponent(messageMatch[1]!);
+    const stalePromptSnapshot = state.stalePromptMessageSnapshotBySessionId[sessionId];
+    if (stalePromptSnapshot) {
+      delete state.stalePromptMessageSnapshotBySessionId[sessionId];
+      return stalePromptSnapshot;
+    }
     const messages = state.messagesBySessionId[sessionId] || [];
     const windowed =
       new URLSearchParams(window.location.search).get('windowed') === '1' &&
@@ -3818,6 +3833,13 @@ async function handleApiRequest(
   if (promptMatch && method === 'POST') {
     const sessionId = decodeURIComponent(promptMatch[1]!);
     const payload = asRecord(body);
+    const simulateStalePromptSync =
+      new URLSearchParams(window.location.search).get('stalePromptSync') === '1';
+    if (simulateStalePromptSync) {
+      state.stalePromptMessageSnapshotBySessionId[sessionId] = [
+        ...(state.messagesBySessionId[sessionId] || []),
+      ];
+    }
     const parts = Array.isArray(payload.parts) ? payload.parts : [];
     const textParts = parts
       .map((part) => asRecord(part))
@@ -3834,13 +3856,33 @@ async function handleApiRequest(
       typeof model.modelID === 'string' && model.modelID ? model.modelID : DEFAULT_MODEL_ID;
     const variant = typeof payload.variant === 'string' ? payload.variant : undefined;
     const agent = typeof payload.agent === 'string' && payload.agent ? payload.agent : 'build';
-    const { assistantMessage, createdAt } = appendMockPromptMessages(state, sessionId, textParts, {
-      providerID,
-      modelID,
-      variant,
-      agent,
-    });
+    const { userMessage, assistantMessage, createdAt } = appendMockPromptMessages(
+      state,
+      sessionId,
+      textParts,
+      {
+        providerID,
+        modelID,
+        variant,
+        agent,
+        messageID: typeof payload.messageID === 'string' ? payload.messageID : undefined,
+      }
+    );
     const assistantId = assistantMessage.info.id;
+    if (simulateStalePromptSync) {
+      dispatchToWebview({
+        type: 'server/event',
+        payload: { type: 'message.updated', properties: { info: userMessage.info } },
+      });
+      window.setTimeout(() => {
+        for (const part of userMessage.parts) {
+          dispatchToWebview({
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          });
+        }
+      }, 200);
+    }
 
     if (
       agent === 'plan' ||
@@ -3922,6 +3964,9 @@ async function handleApiRequest(
       state.sessionStatuses[sessionId] = { type: 'busy' };
     } else {
       state.sessionStatuses[sessionId] = { type: 'idle' };
+    }
+    if (simulateStalePromptSync) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
     return null;
   }

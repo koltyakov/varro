@@ -72,6 +72,246 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(15);
   });
 
+  test('does not push a full transcript backward when send-time panels collapse', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'todo.updated',
+            properties: {
+              sessionID: 'session-large-transcript',
+              todos: [
+                {
+                  content: 'Completed work from the previous turn',
+                  status: 'completed',
+                  priority: 'medium',
+                },
+              ],
+            },
+          },
+        },
+        '*'
+      );
+    });
+    await expect(page.getByRole('button', { name: /Todos/i })).toBeVisible();
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+    await waitForAnimationFrames(page, 6);
+
+    await composer.fill(
+      Array.from(
+        { length: 8 },
+        (_, index) => `Keep the full transcript stable while sending, line ${index + 1}.`
+      ).join('\n')
+    );
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+    await waitForAnimationFrames(page, 6);
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __sendToExtension?: (message: unknown) => void | Promise<void>;
+        sendTransitionSamples?: Array<{ previousTop: number; entering: boolean }>;
+      };
+      const originalSend = harness.__sendToExtension;
+      harness.__sendToExtension = async (message) => {
+        const request = message as { type?: string; payload?: { path?: string } };
+        if (request.type === 'api/request' && request.payload?.path?.endsWith('/prompt_async')) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        await originalSend?.(message);
+      };
+
+      const container = document.querySelector<HTMLElement>('.interactive-list')!;
+      const previousMessage = container.querySelector<HTMLElement>(
+        '[data-msg-id="message-large-assistant-239"]'
+      )!;
+      const previousIds = new Set(
+        [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].map(
+          (row) => row.dataset.msgId
+        )
+      );
+      const samples: Array<{ previousTop: number; entering: boolean }> = [
+        {
+          previousTop:
+            previousMessage.getBoundingClientRect().top - container.getBoundingClientRect().top,
+          entering: false,
+        },
+      ];
+      const observer = new MutationObserver(() => {
+        const appended = [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+          (row) => !previousIds.has(row.dataset.msgId)
+        );
+        if (!appended) return;
+        observer.disconnect();
+
+        const sample = () => {
+          samples.push({
+            previousTop:
+              previousMessage.getBoundingClientRect().top - container.getBoundingClientRect().top,
+            entering: appended.classList.contains('measured-entrance-active'),
+          });
+          if (samples.length < 25) requestAnimationFrame(sample);
+          else harness.sendTransitionSamples = samples;
+        };
+        requestAnimationFrame(sample);
+      });
+      observer.observe(container, { childList: true, subtree: true });
+    });
+
+    await page.getByTitle('Send (Enter)').click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { sendTransitionSamples?: unknown }).sendTransitionSamples
+        )
+      )
+      .not.toBeUndefined();
+
+    const samples = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            sendTransitionSamples?: Array<{ previousTop: number; entering: boolean }>;
+          }
+        ).sendTransitionSamples ?? []
+    );
+    const previousTops = samples.map((sample) => sample.previousTop);
+    for (let index = 1; index < previousTops.length; index += 1) {
+      expect(previousTops[index]!).toBeLessThanOrEqual(previousTops[index - 1]! + 1);
+      expect(previousTops[index - 1]! - previousTops[index]!).toBeLessThan(30);
+    }
+    expect(samples.every((sample) => !sample.entering)).toBe(true);
+    await expect(page.locator('.chat-turn-user').last()).toContainText(
+      'Keep the full transcript stable while sending, line 1.'
+    );
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(15);
+  });
+
+  test('keeps the transcript anchored when the todo list collapses', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const list = page.locator('.interactive-list');
+    const previousMessage = page.locator('[data-msg-id="message-large-assistant-239"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'todo.updated',
+            properties: {
+              sessionID: 'session-large-transcript',
+              todos: Array.from({ length: 7 }, (_, index) => ({
+                content: `Remaining work item ${index + 1}`,
+                status: index === 0 ? 'in_progress' : 'pending',
+                priority: 'medium',
+              })),
+            },
+          },
+        },
+        '*'
+      );
+    });
+
+    const todoToggle = page.getByRole('button', { name: /Todos/i });
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+    await waitForAnimationFrames(page, 6);
+
+    const previousTop = await previousMessage.evaluate(
+      (element) =>
+        element.getBoundingClientRect().top -
+        element.closest('.interactive-list')!.getBoundingClientRect().top
+    );
+    await todoToggle.click();
+
+    const samples = await sampleMessageTopAcrossFrames(list, 'message-large-assistant-239', 12);
+    expect(samples.every((sample) => sample !== null && Math.abs(sample - previousTop) <= 1)).toBe(
+      true
+    );
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
+    const reserve = page.locator('.append-scroll-bottom-reserve');
+    await expect(reserve).toBeVisible();
+    const firstReserveHeight = await reserve.evaluate(
+      (element) => element.getBoundingClientRect().height
+    );
+
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    const expansionSamples = await sampleMessageTopAcrossFrames(
+      list,
+      'message-large-assistant-239',
+      12
+    );
+    expect(
+      expansionSamples.every((sample) => sample !== null && Math.abs(sample - previousTop) <= 1)
+    ).toBe(true);
+    await expect(reserve).toHaveCount(0);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(reserve).toBeVisible();
+    const secondReserveHeight = await reserve.evaluate(
+      (element) => element.getBoundingClientRect().height
+    );
+    expect(Math.abs(secondReserveHeight - firstReserveHeight)).toBeLessThanOrEqual(1);
+
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(reserve).toHaveCount(0);
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(reserve).toBeVisible();
+    const thirdReserveHeight = await reserve.evaluate(
+      (element) => element.getBoundingClientRect().height
+    );
+    expect(Math.abs(thirdReserveHeight - firstReserveHeight)).toBeLessThanOrEqual(1);
+
+    const detachedScrollTop = await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 300);
+      element.dispatchEvent(new Event('scroll'));
+      return element.scrollTop;
+    });
+    await expect(reserve).toHaveCount(0);
+    await waitForAnimationFrames(page, 3);
+    expect(
+      Math.abs((await list.evaluate((element) => element.scrollTop)) - detachedScrollTop)
+    ).toBe(0);
+  });
+
   test('manual scroll up disengages auto-scroll', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');

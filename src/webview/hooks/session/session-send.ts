@@ -743,10 +743,12 @@ export async function sendMessageWithDependencies(
     sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
     effectiveModel
   );
+  if (deps.getActiveSessionId() === sessionId) {
+    deps.requestMessageListScrollToBottom();
+  }
   if (optimisticMessage) {
     deps.appendOptimisticMessage?.(optimisticMessage);
   }
-  if (deps.getActiveSessionId() === sessionId) deps.requestMessageListScrollToBottom();
 
   try {
     await deps.sendAsync(sessionId, sendBody);

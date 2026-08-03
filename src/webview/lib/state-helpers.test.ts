@@ -1438,6 +1438,14 @@ describe('state helpers', () => {
     expect(stateModule.state.messages[0]?.info.id).toBe('message-1');
     expect(stateModule.state.messages[0]?.parts).toEqual([
       {
+        id: 'message-1-part-0',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        type: 'text',
+        text: 'Review [image.png]',
+        synthetic: true,
+      },
+      {
         id: 'message-1-optimistic-file-1',
         sessionID: 'session-1',
         messageID: 'message-1',

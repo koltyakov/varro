@@ -488,6 +488,13 @@ input:focus-visible {
   overflow-anchor: none;
 }
 
+.append-scroll-bottom-reserve {
+  flex: 0 0 auto;
+  min-height: 0;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
 /* An empty message row (no rendered content) must not contribute any
    vertical space — otherwise it inflates the gap between two adjacent
    non-empty rows from the canonical 12px to ~24px. */

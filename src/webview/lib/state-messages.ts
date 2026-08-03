@@ -53,7 +53,7 @@ export function upsertMessageInfo(info: Message) {
           const optimisticEntry = msgs[idx]!;
           msgs[idx] = {
             info,
-            parts: getOptimisticImageFilePartsForServerMessage(optimisticEntry, info),
+            parts: getAcknowledgedOptimisticParts(optimisticEntry, info),
           };
           messageIndex.invalidate();
           return;
@@ -68,6 +68,18 @@ export function upsertMessageInfo(info: Message) {
       }
     })
   );
+}
+
+function getAcknowledgedOptimisticParts(optimisticEntry: MessageEntry, info: Message): Part[] {
+  return optimisticEntry.parts.map((part, index) => {
+    if (!isImageFilePart(part)) return part;
+    return {
+      ...cloneValue(part),
+      id: getOptimisticImagePartId(info.id, index),
+      sessionID: info.sessionID,
+      messageID: info.id,
+    };
+  });
 }
 
 function getOptimisticImageFilePartsForServerMessage(
@@ -392,6 +404,7 @@ export function setMessagesIncremental(
 ) {
   flushPendingStreamingDeltas();
   const current = state.messages;
+  incoming = preserveMissingOptimisticUserMessages(current, incoming);
   const streamingSnapshot = getStreamingTextSnapshot();
   if (current === incoming) return;
   if (current.length === 0 || incoming.length === 0) {
@@ -460,6 +473,17 @@ export function setMessagesIncremental(
     );
   });
   recordSettledAssistantMarkers(incoming);
+}
+
+function preserveMissingOptimisticUserMessages(current: MessageEntry[], incoming: MessageEntry[]) {
+  const incomingIds = new Set(incoming.map((entry) => entry.info.id));
+  const pending = current.filter(
+    (entry) =>
+      isOptimisticUserMessage(entry) &&
+      !isOptimisticUserMessageId(entry.info.id) &&
+      !incomingIds.has(entry.info.id)
+  );
+  return pending.length > 0 ? [...incoming, ...pending] : incoming;
 }
 
 export function hasSettledLatestAssistantMessage(

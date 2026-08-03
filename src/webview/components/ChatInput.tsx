@@ -580,6 +580,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
+  const [sendComposerMinHeight, setSendComposerMinHeight] = createSignal(0);
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -588,6 +589,32 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     getLeftGroup: () => toolbarLeftRef,
     getRightGroup: () => toolbarRightRef,
     setMode: setToolbarCompactMode,
+  });
+  let heldComposerSessionId: string | null = null;
+  let heldComposerMessageCount = 0;
+
+  function holdComposerHeightUntilMessageAppend(sessionId: string | null) {
+    if (!sessionId || !inputFrameRef) return;
+    heldComposerSessionId = sessionId;
+    heldComposerMessageCount = state.messages.length;
+    setSendComposerMinHeight(inputFrameRef.getBoundingClientRect().height);
+  }
+
+  function releaseHeldComposerHeight() {
+    heldComposerSessionId = null;
+    heldComposerMessageCount = 0;
+    setSendComposerMinHeight(0);
+  }
+
+  createEffect(() => {
+    if (sendComposerMinHeight() <= 0) return;
+    const heldSessionId = heldComposerSessionId;
+    if (!heldSessionId) return;
+    const activeSessionId = state.activeSessionId;
+    const messageCount = state.messages.length;
+    if (activeSessionId !== heldSessionId || messageCount > heldComposerMessageCount) {
+      releaseHeldComposerHeight();
+    }
   });
 
   function captureComposerSnapshot(): ComposerSnapshot {
@@ -1430,6 +1457,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setHistoryIndex(null);
     setHistoryDraft('');
     setCompletionIndex(0);
+    holdComposerHeightUntilMessageAppend(sendSessionId);
     setInputText('');
     const clearedInputVersion = inputTextMutationVersion();
     resetPastedImageIndex();
@@ -1452,6 +1480,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       if (queuedEdit) removeQueuedMessage(queuedEdit.id);
       setQueuedMessageEdit(null);
     }
+    if (!sent) releaseHeldComposerHeight();
     if (
       !sent &&
       composerSessionId() === sendSessionId &&
@@ -2816,6 +2845,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             inputFrameRef = el;
           }}
           class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+          style={{
+            'min-height': sendComposerMinHeight() ? `${sendComposerMinHeight()}px` : undefined,
+          }}
           onDragEnter={(e) => {
             if (isQueuedMessageDrag(e)) return;
             e.preventDefault();

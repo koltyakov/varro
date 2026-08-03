@@ -124,8 +124,9 @@ const VIRTUALIZE_THRESHOLD = 50;
 
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const WIDTH_RESIZE_SETTLE_MS = 100;
+const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
-const LOADING_ROW_REAPPEAR_DELAY_MS = 180;
+const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
 const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 // Only offer "jump to latest" when at least this much content is hidden
@@ -304,6 +305,10 @@ export function MessageList() {
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
   let initialScrollRafId = 0;
+  let appendScrollRafId = 0;
+  let appendScrollSessionId: string | null = null;
+  let pendingMeasuredAppendScroll = false;
+  let pendingMeasuredAppendAnchor: { messageId: string; top: number; topPad: number } | null = null;
   let pendingScrollToBottomRequest = false;
   let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
@@ -377,6 +382,7 @@ export function MessageList() {
 
   const [scrollTop, setScrollTop] = createSignal(0);
   const [viewportHeight, setViewportHeight] = createSignal(0);
+  const [appendBottomReserve, setAppendBottomReserve] = createSignal(0);
   const [measurementVersion, setMeasurementVersion] = createSignal(0);
   const [hasBootstrappedVirtualization, setHasBootstrappedVirtualization] = createSignal(false);
   const [stickyPreviewGeometryVersion, setStickyPreviewGeometryVersion] = createSignal(0);
@@ -638,6 +644,7 @@ export function MessageList() {
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let trailingSummarySettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowHiddenByVisibleStream = false;
+  let appendBottomReserveTarget = 0;
 
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
@@ -761,11 +768,16 @@ export function MessageList() {
       return;
     }
 
-    // Only mark appends while pinned to the bottom; a message that arrives
-    // while scrolled up must not animate when it is scrolled into view later.
-    const appendedIds: string[] = autoScroll()
+    // Only animate appends in unmeasured lists. A height animation would feed
+    // intermediate sizes into virtual metrics while bottom-follow is settling.
+    const appendedMessageIds = autoScroll()
       ? getNewlyAppendedMessageIds(previousEntranceMessageIds, currentMessageIds)
       : [];
+    if (appendedMessageIds.length > 0 && currentMessageIds.length >= VIRTUALIZE_THRESHOLD) {
+      pendingMeasuredAppendScroll = true;
+      pendingMeasuredAppendAnchor ??= captureVisibleScrollAnchor();
+    }
+    const appendedIds = currentMessageIds.length < VIRTUALIZE_THRESHOLD ? appendedMessageIds : [];
     previousEntranceMessageIds = currentMessageIds;
     setEnteringMessageIds(new Set(appendedIds));
   });
@@ -1782,6 +1794,7 @@ export function MessageList() {
 
   function performScroll(options?: { force?: boolean }) {
     if (pendingStickyJump()) return;
+    if (appendScrollRafId) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
     const now = performance.now();
@@ -1806,6 +1819,152 @@ export function MessageList() {
     });
   }
 
+  function cancelAppendScrollTransition() {
+    pendingMeasuredAppendScroll = false;
+    pendingMeasuredAppendAnchor = null;
+    appendScrollSessionId = null;
+    if (!appendScrollRafId) return;
+    cancelAnimationFrame(appendScrollRafId);
+    appendScrollRafId = 0;
+  }
+
+  function reconcileAppendBottomReserve() {
+    if (!containerRef) return;
+    const reserve = untrack(appendBottomReserve);
+    if (reserve <= 0) return;
+
+    const unreservedBottom = Math.max(
+      0,
+      containerRef.scrollHeight - reserve - containerRef.clientHeight
+    );
+    const nextReserve = Math.max(0, appendBottomReserveTarget - unreservedBottom);
+    if (Math.abs(nextReserve - reserve) <= 0.5) return;
+    setAppendBottomReserve(nextReserve);
+    if (nextReserve <= 0.5) appendBottomReserveTarget = 0;
+  }
+
+  function reserveLostBottomSpace() {
+    if (!containerRef || !autoScroll() || !pinnedToBottom || pendingStickyJump()) return;
+
+    const previousBottomTarget = Math.max(lastAutoScrolledBottomScrollTop, lastObservedScrollTop);
+    const currentBottomTarget = bottomScrollTop();
+    if (currentBottomTarget >= previousBottomTarget - 0.5) return;
+
+    appendBottomReserveTarget = previousBottomTarget;
+    setAppendBottomReserve((reserve) => reserve + previousBottomTarget - currentBottomTarget);
+    setPreservedScrollTop(previousBottomTarget);
+  }
+
+  function consumeBottomReserve(amount: number) {
+    if (amount <= 0.5) return;
+    const reserve = untrack(appendBottomReserve);
+    if (reserve <= 0.5) return;
+
+    const nextReserve = Math.max(0, reserve - amount);
+    setAppendBottomReserve(nextReserve);
+    if (nextReserve <= 0.5) appendBottomReserveTarget = 0;
+  }
+
+  function releaseOffscreenBottomReserve() {
+    if (!containerRef || untrack(appendBottomReserve) <= 0.5) return;
+    const reserveElement = trackRef?.querySelector<HTMLElement>('.append-scroll-bottom-reserve');
+    if (!reserveElement) return;
+    if (reserveElement.getBoundingClientRect().top < containerRef.getBoundingClientRect().bottom) {
+      return;
+    }
+
+    appendBottomReserveTarget = 0;
+    setAppendBottomReserve(0);
+  }
+
+  function startAppendScrollTransition(sessionId: string) {
+    if (!containerRef || pendingStickyJump()) return;
+    pendingMeasuredAppendScroll = false;
+    if (appendScrollRafId) {
+      cancelAnimationFrame(appendScrollRafId);
+      appendScrollRafId = 0;
+      appendScrollSessionId = null;
+    }
+    reserveLostBottomSpace();
+    const appendAnchor = pendingMeasuredAppendAnchor;
+    pendingMeasuredAppendAnchor = null;
+    restoreVisibleScrollAnchor(appendAnchor, { useMessageOffsetFallback: true });
+    if (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      performScroll({ force: true });
+      startFollowLoop(sessionId);
+      return;
+    }
+    if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
+    initialScrollRafId = 0;
+    activeFollowLoopSessionId = null;
+
+    const startedAt = performance.now();
+    const startTop = containerRef.scrollTop;
+    appendScrollSessionId = sessionId;
+    followModeLocked = true;
+    pinnedToBottom = true;
+
+    // Rows keep their final measured height; only the viewport coordinate moves during the reveal.
+    const tick = (now: number) => {
+      const container = containerRef;
+      if (
+        !container ||
+        appendScrollSessionId !== sessionId ||
+        state.activeSessionId !== sessionId ||
+        !autoScroll() ||
+        pendingStickyJump()
+      ) {
+        appendScrollRafId = 0;
+        appendScrollSessionId = null;
+        return;
+      }
+
+      reconcileAppendBottomReserve();
+      const target = bottomScrollTop();
+      const progress = Math.min(1, Math.max(0, (now - startedAt) / APPEND_SCROLL_TRANSITION_MS));
+      const nextTop = startTop + (target - startTop) * progress;
+      suppressSyncScrollTop = true;
+      container.scrollTop = nextTop;
+      suppressSyncScrollTop = false;
+      lastObservedScrollTop = container.scrollTop;
+      expectedScrollTop = target;
+      ignoreScrollUntil = now + PROGRAMMATIC_SCROLL_WINDOW_MS;
+      batch(() => {
+        setScrollTop(container.scrollTop);
+        setViewportHeight(container.clientHeight);
+      });
+      scheduleStickyPreviewViewportState(container.scrollTop, container.clientHeight);
+
+      if (progress < 1) {
+        appendScrollRafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      appendScrollRafId = 0;
+      appendScrollSessionId = null;
+      performScroll({ force: true });
+      startFollowLoop(sessionId);
+    };
+
+    appendScrollRafId = requestAnimationFrame(tick);
+  }
+
+  function startPendingAppendScrollTransition(sessionId: string) {
+    if (appendScrollSessionId === sessionId && appendScrollRafId) {
+      pendingMeasuredAppendScroll = false;
+      const appendAnchor = pendingMeasuredAppendAnchor;
+      pendingMeasuredAppendAnchor = null;
+      restoreVisibleScrollAnchor(appendAnchor, { useMessageOffsetFallback: true });
+      return true;
+    }
+    if (!pendingMeasuredAppendScroll) return false;
+    startAppendScrollTransition(sessionId);
+    return true;
+  }
+
   function cancelPendingScroll() {
     if (stickyPreviewDebounceTimer) {
       clearTimeout(stickyPreviewDebounceTimer);
@@ -1820,6 +1979,7 @@ export function MessageList() {
     if (activeFollowLoopSessionId) {
       activeFollowLoopSessionId = null;
     }
+    cancelAppendScrollTransition();
   }
 
   function disengageBottomFollow() {
@@ -1836,6 +1996,7 @@ export function MessageList() {
   }
 
   function startFollowLoop(sessionId: string, options?: { immediate?: boolean }) {
+    if (appendScrollRafId) return;
     if (pendingStickyJump()) {
       activeFollowLoopSessionId = null;
       return;
@@ -1970,6 +2131,7 @@ export function MessageList() {
     }
     if (actualScrollMovement && userScrollInputActive) {
       lastUserOwnedScrollMovementAt = now;
+      releaseOffscreenBottomReserve();
     }
     const userScrolledUp =
       now - lastWheelUpAt <= 160 ||
@@ -2283,8 +2445,12 @@ export function MessageList() {
       const trackChanged =
         entries.length === 0 || entries.some((entry) => entry.target === trackRef);
       const currentContainerClientHeight = containerRef.clientHeight;
+      const containerHeightDelta = currentContainerClientHeight - lastContainerClientHeight;
       const containerHeightChanged = currentContainerClientHeight !== lastContainerClientHeight;
       lastContainerClientHeight = currentContainerClientHeight;
+      if (containerHeightDelta > 0.5) reserveLostBottomSpace();
+      else if (containerHeightDelta < -0.5) consumeBottomReserve(-containerHeightDelta);
+      if (trackChanged) reconcileAppendBottomReserve();
       const currentContainerFontSize = containerChanged
         ? parseFloat(getComputedStyle(containerRef).fontSize) || 0
         : lastContainerFontSize;
@@ -2348,6 +2514,7 @@ export function MessageList() {
       cancelScheduledMeasurement();
       cancelScheduledStickyPreviewFrame();
       cancelWidthResize();
+      cancelAppendScrollTransition();
       activeFollowLoopSessionId = null;
     });
   });
@@ -2492,6 +2659,8 @@ export function MessageList() {
     cancelScheduledStickyPreviewFrame();
     cancelWidthResize();
     setHasBootstrappedVirtualization(false);
+    setAppendBottomReserve(0);
+    appendBottomReserveTarget = 0;
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
     setMeasurementVersion((version) => version + 1);
@@ -2534,6 +2703,7 @@ export function MessageList() {
           pendingScrollToBottomRequest = false;
           setAutoScroll(true);
         }
+        if (startPendingAppendScrollTransition(sessionId)) return;
         performScroll();
         startFollowLoop(sessionId);
       }
@@ -2578,6 +2748,19 @@ export function MessageList() {
 
     pendingScrollToBottomRequest = true;
     followModeLocked = true;
+    if (shouldMeasureRows()) {
+      pendingMeasuredAppendAnchor ??= captureVisibleScrollAnchor();
+      requestAnimationFrame(() => {
+        if (
+          disposed ||
+          messageListScrollRequestKey() !== requestKey ||
+          pendingMeasuredAppendScroll
+        ) {
+          return;
+        }
+        pendingMeasuredAppendAnchor = null;
+      });
+    }
     lastWheelAt = Number.NEGATIVE_INFINITY;
     lastUserScrollAt = Number.NEGATIVE_INFINITY;
     lastWheelUpAt = Number.NEGATIVE_INFINITY;
@@ -2585,6 +2768,7 @@ export function MessageList() {
     setAutoScroll(true);
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
+      if (startPendingAppendScrollTransition(sessionId)) return;
       performScroll({ force: true });
       startFollowLoop(sessionId);
     });
@@ -3163,6 +3347,13 @@ export function MessageList() {
           </Show>
           <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
             <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
+          </Show>
+          <Show when={appendBottomReserve() > 0.5}>
+            <div
+              class="append-scroll-bottom-reserve"
+              style={{ height: `${appendBottomReserve()}px` }}
+              aria-hidden="true"
+            />
           </Show>
         </div>
       </div>
