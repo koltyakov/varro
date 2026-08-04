@@ -63,6 +63,19 @@ describe('MessageRouter', () => {
     expect(cb.setWebviewFocus).toHaveBeenCalledWith(true);
   });
 
+  it('dispatches command state with the active chat model', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const model = { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' };
+
+    await router.handleMessage({
+      type: 'commands/state',
+      payload: { canAbort: true, canSwitchSessions: false, model },
+    });
+
+    expect(cb.updateCommandState).toHaveBeenCalledWith(true, false, model);
+  });
+
   it('dispatches providers/watch', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

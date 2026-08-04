@@ -119,6 +119,7 @@ export function Chat() {
 
   createEffect(() => {
     const activeSessionId = state.activeSessionId;
+    const selectedModel = state.selectedModel;
     const canSwitchSessions =
       shouldRenderWorkspace() &&
       !showSettings() &&
@@ -131,13 +132,20 @@ export function Chat() {
       payload: {
         canAbort: Boolean(activeSessionId) && isActiveSessionWorking(),
         canSwitchSessions,
+        model: selectedModel
+          ? {
+              providerID: selectedModel.providerID,
+              modelID: selectedModel.modelID,
+              ...(selectedModel.variant ? { variant: selectedModel.variant } : {}),
+            }
+          : null,
       },
     });
   });
   onCleanup(() => {
     postMessage({
       type: 'commands/state',
-      payload: { canAbort: false, canSwitchSessions: false },
+      payload: { canAbort: false, canSwitchSessions: false, model: null },
     });
   });
 

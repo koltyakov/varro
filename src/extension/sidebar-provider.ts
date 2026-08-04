@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
-import type { DroppedFile, ExtensionMessage, WebviewMessage } from '../shared/protocol';
+import type {
+  ChatModelSelection,
+  DroppedFile,
+  ExtensionMessage,
+  WebviewMessage,
+} from '../shared/protocol';
 import { AutoApproveJudge } from './auto-approve-judge';
+import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { FileSearchService } from './file-search-service';
@@ -42,6 +48,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private static readonly SESSION_RECONCILE_GRACE_MS = 10_000;
 
   private lastStatusBarStateKey = '';
+  private activeChatModel: ChatModelSelection | null = null;
   private readonly fileSearch: FileSearchService;
   private readonly sessionState: SessionStateManager;
   private readonly sessionTrash: SessionTrashManager;
@@ -49,6 +56,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly queuedMessages: QueuedMessageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
+  private readonly commitMessageService: CommitMessageService;
   private readonly sessionTitleFallback: SessionTitleFallback;
   private readonly ralphHost: RalphHost;
   private readonly messageRouter: MessageRouter;
@@ -136,6 +144,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.sessionState,
       this.sessionTrash,
       SidebarProvider.RECYCLE_BIN_CLEANUP_INTERVAL_MS
+    );
+    this.commitMessageService = new CommitMessageService(
+      server,
+      this.hiddenSessions,
+      () => this.runtime.ensureServerStarted(),
+      () => this.contextProvider.context.workspacePath || undefined,
+      () => this.activeChatModel,
+      async () => {
+        const status = await this.providerLimitService.get('openai', null);
+        return status.status === 'available' && status.planName?.trim().toLowerCase() === 'pro';
+      }
     );
 
     this.serverEventBridge = new ServerEventBridge(
@@ -235,6 +254,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this.webviewSession.updateCommandState(canAbort, canSwitchSessions),
         },
         setProviderWatchActive: (active) => this.setProviderWatchActive(active),
+        setActiveChatModel: (model) => {
+          this.activeChatModel = model;
+        },
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
         restProxy: this.restProxy,
@@ -348,6 +370,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   searchSessions() {
     this.webviewSession.searchSessions();
+  }
+
+  async generateCommitMessage(sourceControl?: vscode.SourceControl) {
+    await this.commitMessageService.generate(sourceControl);
   }
 
   hasPendingAttention() {

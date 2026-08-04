@@ -162,9 +162,6 @@ export function QueuedMessages(props: {
                   <Show when={item.paused}>
                     <span class="chat-queue-paused-label">Paused</span>
                   </Show>
-                  <Show when={isEditing()}>
-                    <span class="chat-queue-editing-label">Editing</span>
-                  </Show>
                 </div>
                 <Show when={attachmentCount > 0}>
                   <span
@@ -189,6 +186,9 @@ export function QueuedMessages(props: {
                   </span>
                 </Show>
                 <div class="chat-queue-actions">
+                  <Show when={isEditing()}>
+                    <span class="chat-queue-editing-label">Editing</span>
+                  </Show>
                   <button
                     class={`chat-queue-control chat-queue-icon-action${item.paused ? ' is-active' : ''}`}
                     onClick={(event) => props.onSetPaused(item, !item.paused, event.altKey)}

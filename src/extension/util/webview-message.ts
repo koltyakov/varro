@@ -185,16 +185,39 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
 
     case 'commands/state': {
       const payload = asRecord(message?.payload);
-      return typeof payload?.canAbort === 'boolean' &&
-        typeof payload.canSwitchSessions === 'boolean'
-        ? {
-            type,
-            payload: {
-              canAbort: payload.canAbort,
-              canSwitchSessions: payload.canSwitchSessions,
-            },
-          }
-        : null;
+      if (
+        typeof payload?.canAbort !== 'boolean' ||
+        typeof payload.canSwitchSessions !== 'boolean'
+      ) {
+        return null;
+      }
+      if (payload.model === null) {
+        return {
+          type,
+          payload: {
+            canAbort: payload.canAbort,
+            canSwitchSessions: payload.canSwitchSessions,
+            model: null,
+          },
+        };
+      }
+      const model = asRecord(payload.model);
+      const providerID = getBoundedString(model?.providerID, MAX_RALPH_ID_LENGTH);
+      const modelID = getBoundedString(model?.modelID, MAX_RALPH_ID_LENGTH);
+      if (!providerID || !modelID) return null;
+      const variant =
+        model?.variant === undefined
+          ? undefined
+          : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
+      if (model?.variant !== undefined && !variant) return null;
+      return {
+        type,
+        payload: {
+          canAbort: payload.canAbort,
+          canSwitchSessions: payload.canSwitchSessions,
+          model: { providerID, modelID, ...(variant ? { variant } : {}) },
+        },
+      };
     }
 
     case 'vscode/open-settings': {
@@ -1015,7 +1038,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/provider/auth', methodsNoQuery('GET')),
   route('/command', methodsNoQuery('GET')),
   route('/mcp', methodsNoQuery('GET')),
-  route('/file/status', methodsNoQuery('GET')),
+  route('/vcs/status', methodsNoQuery('GET')),
   route('/agent', methodsNoQuery('GET')),
   route('/question', methodsNoQuery('GET')),
   route('/permission', methodsNoQuery('GET')),

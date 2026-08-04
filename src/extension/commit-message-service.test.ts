@@ -1,0 +1,908 @@
+import type * as vscode from 'vscode';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { PermissionRule } from '../shared/opencode-types';
+
+const mocks = vi.hoisted(() => {
+  type CancellationListener = () => void;
+  type ProgressTask = (
+    progress: { report: (value: unknown) => void },
+    token: {
+      readonly isCancellationRequested: boolean;
+      onCancellationRequested(listener: CancellationListener): { dispose(): void };
+    }
+  ) => Promise<unknown>;
+
+  const cancellationListeners = new Set<CancellationListener>();
+  let cancellationRequested = false;
+  const extensionSlot: { value: unknown } = { value: undefined };
+  const window = {
+    activeTextEditor: undefined as { document: { uri: { fsPath: string } } } | undefined,
+    showWarningMessage: vi.fn((..._args: unknown[]): Promise<string | undefined> =>
+      Promise.resolve(undefined)
+    ),
+    showErrorMessage: vi.fn((..._args: unknown[]): Promise<string | undefined> =>
+      Promise.resolve(undefined)
+    ),
+    showInformationMessage: vi.fn((..._args: unknown[]): Promise<string | undefined> =>
+      Promise.resolve(undefined)
+    ),
+    showQuickPick: vi.fn((..._args: unknown[]): Promise<unknown | undefined> =>
+      Promise.resolve(undefined)
+    ),
+    withProgress: vi.fn(async (_options: unknown, task: ProgressTask) => {
+      cancellationListeners.clear();
+      cancellationRequested = false;
+      return task(
+        { report: vi.fn() },
+        {
+          get isCancellationRequested() {
+            return cancellationRequested;
+          },
+          onCancellationRequested(listener: CancellationListener) {
+            cancellationListeners.add(listener);
+            return { dispose: () => cancellationListeners.delete(listener) };
+          },
+        }
+      );
+    }),
+  };
+
+  return {
+    extensionSlot,
+    window,
+    getExtension: vi.fn(() => extensionSlot.value),
+    uriFile: vi.fn((fsPath: string) => ({ fsPath })),
+    clipboardWriteText: vi.fn((_value: string) => Promise.resolve()),
+    executeCommand: vi.fn((_command: string) => Promise.resolve()),
+    triggerCancellation() {
+      cancellationRequested = true;
+      for (const listener of cancellationListeners) listener();
+    },
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+  };
+});
+
+vi.mock('vscode', () => ({
+  extensions: { getExtension: mocks.getExtension },
+  window: mocks.window,
+  Uri: { file: mocks.uriFile },
+  ProgressLocation: { SourceControl: 1 },
+  env: { clipboard: { writeText: mocks.clipboardWriteText } },
+  commands: { executeCommand: mocks.executeCommand },
+}));
+
+vi.mock('./logger', () => ({ logger: mocks.logger }));
+
+import { CommitMessageService } from './commit-message-service';
+import { HiddenSessionManager } from './hidden-session-manager';
+import type { OpenCodeServer } from './server';
+
+type HiddenSessionActions = Pick<
+  HiddenSessionManager,
+  'registerPendingTitle' | 'forgetPendingTitle' | 'hide' | 'retainUntilDeleted'
+>;
+
+type RequestOptions = {
+  config?: unknown;
+  providers?: unknown;
+  messageResponse?: unknown | (() => unknown | Promise<unknown>);
+  sessionResponse?: unknown | (() => unknown | Promise<unknown>);
+  onMessage?: () => void;
+};
+
+function uri(fsPath: string): vscode.Uri {
+  return { fsPath } as vscode.Uri;
+}
+
+function createRepository(root = '/repo', patch = 'diff --git a/src/a.ts b/src/a.ts\n+change') {
+  return {
+    rootUri: uri(root),
+    inputBox: { value: '' },
+    ui: { selected: false },
+    state: {
+      indexChanges: [{ uri: uri(`${root}/src/a.ts`) }],
+      mergeChanges: [] as Array<{ uri: vscode.Uri }>,
+    },
+    status: vi.fn(() => Promise.resolve()),
+    diff: vi.fn((_cached?: boolean) => Promise.resolve(patch)),
+    log: vi.fn((_options: { maxEntries: number }) =>
+      Promise.resolve([{ message: 'feat: prior subject\n\nPrior body' }])
+    ),
+  };
+}
+
+function setGitRepositories(
+  repositories: ReturnType<typeof createRepository>[],
+  options: {
+    active?: boolean;
+    getRepository?: (value: vscode.Uri) => (typeof repositories)[number] | null;
+  } = {}
+) {
+  const getRepository = vi.fn(
+    options.getRepository ||
+      ((value: vscode.Uri) =>
+        repositories.find(
+          (repository) =>
+            value.fsPath === repository.rootUri.fsPath ||
+            value.fsPath.startsWith(`${repository.rootUri.fsPath}/`)
+        ) || null)
+  );
+  const api = { repositories, getRepository };
+  const git = { enabled: true, getAPI: vi.fn(() => api) };
+  const extension = {
+    isActive: options.active !== false,
+    exports: git,
+    activate: vi.fn(() => Promise.resolve(git)),
+  };
+  mocks.extensionSlot.value = extension;
+  return { api, extension, git };
+}
+
+function createHiddenSessions() {
+  const actions = {
+    registerPendingTitle: vi.fn<HiddenSessionActions['registerPendingTitle']>(),
+    forgetPendingTitle: vi.fn<HiddenSessionActions['forgetPendingTitle']>(),
+    hide: vi.fn<HiddenSessionActions['hide']>(),
+    retainUntilDeleted: vi.fn<HiddenSessionActions['retainUntilDeleted']>(),
+  } satisfies HiddenSessionActions;
+  return Object.assign(new HiddenSessionManager(), actions);
+}
+
+function createRequest(options: RequestOptions = {}) {
+  const request = vi.fn<OpenCodeServer['request']>(async (method, path) => {
+    if (method === 'POST' && path.startsWith('/session?')) {
+      return resolveOption(
+        Object.prototype.hasOwnProperty.call(options, 'sessionResponse')
+          ? options.sessionResponse
+          : { id: 'helper-1' }
+      );
+    }
+    if (method === 'GET' && path.startsWith('/config?')) {
+      const value = Object.prototype.hasOwnProperty.call(options, 'config')
+        ? options.config
+        : { small_model: 'openai/gpt-4o-mini' };
+      if (value instanceof Error) throw value;
+      return value;
+    }
+    if (method === 'GET' && path.startsWith('/config/providers?')) {
+      const value = Object.prototype.hasOwnProperty.call(options, 'providers')
+        ? options.providers
+        : { providers: [] };
+      if (value instanceof Error) throw value;
+      return value;
+    }
+    if (method === 'POST' && /\/session\/[^/]+\/message\?/.test(path)) {
+      options.onMessage?.();
+      return resolveOption(
+        Object.prototype.hasOwnProperty.call(options, 'messageResponse')
+          ? options.messageResponse
+          : {
+              info: {
+                structured: {
+                  subject: 'feat: generated message',
+                  body: 'Explain the generated change.',
+                },
+              },
+            }
+      );
+    }
+    if (method === 'POST' && /\/session\/[^/]+\/abort\?/.test(path)) return true;
+    if (method === 'DELETE' && path.startsWith('/session/')) return true;
+    throw new Error(`Unexpected request ${method} ${path}`);
+  });
+  return request;
+}
+
+function resolveOption(value: unknown | (() => unknown | Promise<unknown>)) {
+  return typeof value === 'function' ? value() : value;
+}
+
+function createService(
+  request = createRequest(),
+  hiddenSessions = createHiddenSessions(),
+  workspacePath?: string,
+  activeModel: { providerID: string; modelID: string; variant?: string } | null = null,
+  openAIPro = false
+) {
+  const ensureServerStarted = vi.fn(() => Promise.resolve());
+  const isOpenAIPro = vi.fn(() => Promise.resolve(openAIPro));
+  const service = new CommitMessageService(
+    { request },
+    hiddenSessions,
+    ensureServerStarted,
+    () => workspacePath,
+    () => activeModel,
+    isOpenAIPro
+  );
+  return { service, request, hiddenSessions, ensureServerStarted, isOpenAIPro };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let index = 0; index < 100; index += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error('Timed out waiting for test condition');
+}
+
+async function flush(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+}
+
+function requestBody(request: ReturnType<typeof createRequest>, pathPart: string) {
+  const call = request.mock.calls.find(([_method, path]) => path.includes(pathPart));
+  return call?.[2] as Record<string, unknown> | undefined;
+}
+
+function resolveToolAction(rules: PermissionRule[], tool: string) {
+  return rules.findLast((rule) => rule.permission === '*' || rule.permission === tool)?.action;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.extensionSlot.value = undefined;
+  mocks.window.activeTextEditor = undefined;
+  mocks.window.showWarningMessage.mockResolvedValue(undefined);
+  mocks.window.showErrorMessage.mockResolvedValue(undefined);
+  mocks.window.showInformationMessage.mockResolvedValue(undefined);
+  mocks.window.showQuickPick.mockResolvedValue(undefined);
+});
+
+describe('CommitMessageService', () => {
+  it('generates a scoped staged-only message with the small model and deny-all permissions', async () => {
+    const patch = `${'x'.repeat(100_005)}SECRET_TAIL`;
+    const repository = createRepository('/repo with spaces', patch);
+    repository.state.indexChanges.push({ uri: uri('/repo with spaces/docs/complete path.md') });
+    repository.log.mockResolvedValue([
+      { message: 'feat: prior style\r\n\r\nBody' },
+      { message: 'fix: second example' },
+    ]);
+    setGitRepositories([repository], { active: false });
+    const request = createRequest({
+      messageResponse: {
+        info: {
+          structured_output: {
+            subject: '  feat: generated subject\r\n ',
+            body: 'Explain this.  \r\n\r\n\r\nMore context. ',
+          },
+        },
+      },
+    });
+    const { service, hiddenSessions, ensureServerStarted, isOpenAIPro } = createService(request);
+
+    await service.generate();
+
+    expect(mocks.getExtension).toHaveBeenCalledWith('vscode.git');
+    expect(
+      (mocks.extensionSlot.value as { activate: ReturnType<typeof vi.fn> }).activate
+    ).toHaveBeenCalledOnce();
+    expect(repository.status).toHaveBeenCalledOnce();
+    expect(repository.diff).toHaveBeenCalledTimes(2);
+    expect(repository.diff).toHaveBeenNthCalledWith(1, true);
+    expect(repository.diff).toHaveBeenNthCalledWith(2, true);
+    expect(repository.log).toHaveBeenCalledWith({ maxEntries: 10 });
+    expect(ensureServerStarted).toHaveBeenCalledOnce();
+    expect(isOpenAIPro).not.toHaveBeenCalled();
+    expect(mocks.window.withProgress).toHaveBeenCalledWith(
+      {
+        location: 1,
+        title: 'Generating commit message',
+        cancellable: true,
+      },
+      expect.any(Function)
+    );
+
+    const directory = 'directory=%2Frepo%20with%20spaces';
+    expect(request.mock.calls.map(([method, path]) => [method, path])).toEqual([
+      ['POST', `/session?${directory}`],
+      ['GET', `/config?${directory}`],
+      ['POST', `/session/helper-1/message?${directory}`],
+      ['DELETE', `/session/helper-1?${directory}`],
+    ]);
+
+    const sessionBody = requestBody(request, '/session?');
+    const rules = sessionBody?.permission as PermissionRule[];
+    expect(resolveToolAction(rules, 'StructuredOutput')).toBe('allow');
+    expect(resolveToolAction(rules, 'bash')).toBe('deny');
+    expect(resolveToolAction(rules, 'unknown_custom_tool')).toBe('deny');
+    expect(rules.slice(-2)).toEqual([
+      { permission: '*', pattern: '*', action: 'deny' },
+      { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
+    ]);
+
+    const messageBody = requestBody(request, '/message?');
+    expect(messageBody).toMatchObject({
+      model: { providerID: 'openai', modelID: 'gpt-4o-mini' },
+      format: {
+        type: 'json_schema',
+        retryCount: 1,
+        schema: {
+          additionalProperties: false,
+          required: ['subject'],
+          properties: {
+            subject: { type: 'string', maxLength: 72 },
+            body: { type: 'string', maxLength: 4000 },
+          },
+        },
+      },
+    });
+    const system = messageBody?.system as string;
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(system).toContain('untrusted data');
+    expect(system).toContain('at most 72 characters');
+    expect(prompt).toContain('src/a.ts');
+    expect(prompt).toContain('docs/complete path.md');
+    expect(prompt).toContain('feat: prior style');
+    expect(prompt).toContain('fix: second example');
+    expect(prompt).not.toContain('Body');
+    expect(prompt).not.toContain('SECRET_TAIL');
+    const sentDiff = prompt
+      .split('----- BEGIN UNTRUSTED STAGED DIFF -----\n')[1]
+      ?.split('\n----- END UNTRUSTED STAGED DIFF -----')[0];
+    expect(sentDiff).toHaveLength(100_000);
+
+    expect(repository.inputBox.value).toBe(
+      'feat: generated subject\n\nExplain this.\n\nMore context.'
+    );
+    expect(hiddenSessions.registerPendingTitle).toHaveBeenCalledOnce();
+    expect(hiddenSessions.registerPendingTitle.mock.invocationCallOrder[0]).toBeLessThan(
+      request.mock.invocationCallOrder[0] || Infinity
+    );
+    expect(hiddenSessions.hide).toHaveBeenCalledWith('helper-1');
+    expect(hiddenSessions.forgetPendingTitle).toHaveBeenCalledOnce();
+    expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledWith('helper-1');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+    expect(mocks.logger.error).not.toHaveBeenCalled();
+  });
+
+  it('omits the model when small_model is absent and treats history failure as best effort', async () => {
+    const repository = createRepository();
+    repository.log.mockRejectedValue(new Error('No history yet'));
+    setGitRepositories([repository]);
+    const request = createRequest({ config: {} });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(requestBody(request, '/message?')).not.toHaveProperty('model');
+    expect(repository.inputBox.value).toContain('feat: generated message');
+  });
+
+  it('prefers GPT Luna from a connected provider when small_model is absent', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      config: {},
+      providers: {
+        providers: [
+          {
+            id: 'openai',
+            models: {
+              'gpt-5.6-luna': {
+                id: 'gpt-5.6-luna',
+                name: 'GPT-5.6 Luna',
+                variants: { low: { reasoningEffort: 'low' } },
+              },
+            },
+          },
+          {
+            id: 'anthropic',
+            models: { opus: { id: 'opus', name: 'Claude Opus' } },
+          },
+        ],
+      },
+    });
+    const { service, isOpenAIPro } = createService(request, createHiddenSessions(), undefined, {
+      providerID: 'anthropic',
+      modelID: 'opus',
+      variant: 'high',
+    });
+
+    await service.generate();
+
+    expect(requestBody(request, '/message?')).toMatchObject({
+      model: { providerID: 'openai', modelID: 'gpt-5.6-luna' },
+    });
+    expect(isOpenAIPro).not.toHaveBeenCalled();
+    expect(requestBody(request, '/message?')).not.toHaveProperty('variant');
+  });
+
+  it('prefers OpenAI GPT Luna Fast for a Pro plan', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      config: {},
+      providers: {
+        providers: [
+          {
+            id: 'openai',
+            models: {
+              'gpt-5.6-luna': { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+              'gpt-5.6-luna-fast': {
+                id: 'gpt-5.6-luna-fast',
+                name: 'GPT-5.6 Luna Fast',
+                options: { serviceTier: 'priority' },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const { service, isOpenAIPro } = createService(
+      request,
+      createHiddenSessions(),
+      undefined,
+      null,
+      true
+    );
+
+    await service.generate();
+
+    expect(isOpenAIPro).toHaveBeenCalledOnce();
+    expect(requestBody(request, '/message?')?.model).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna-fast',
+    });
+  });
+
+  it('uses standard Luna when Luna Fast is exposed without a confirmed Pro plan', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      config: {},
+      providers: {
+        providers: [
+          {
+            id: 'openai',
+            models: {
+              'gpt-5.6-luna-fast': {
+                id: 'gpt-5.6-luna-fast',
+                name: 'GPT-5.6 Luna Fast',
+              },
+              'gpt-5.6-luna': { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+            },
+          },
+        ],
+      },
+    });
+    const { service, isOpenAIPro } = createService(request);
+
+    await service.generate();
+
+    expect(isOpenAIPro).toHaveBeenCalledOnce();
+    expect(requestBody(request, '/message?')?.model).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna',
+    });
+  });
+
+  it('uses the active chat model with low reasoning when GPT Luna is unavailable', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      config: {},
+      providers: {
+        providers: [
+          {
+            id: 'anthropic',
+            models: {
+              opus: {
+                id: 'opus',
+                name: 'Claude Opus',
+                variants: {
+                  high: { reasoningEffort: 'high' },
+                  low: { reasoningEffort: 'low' },
+                  none: { reasoningEffort: 'none' },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const { service } = createService(request, createHiddenSessions(), undefined, {
+      providerID: 'anthropic',
+      modelID: 'opus',
+      variant: 'high',
+    });
+
+    await service.generate();
+
+    expect(requestBody(request, '/message?')).toMatchObject({
+      model: { providerID: 'anthropic', modelID: 'opus' },
+      variant: 'low',
+    });
+    expect(requestBody(request, '/message?')?.model).toEqual({
+      providerID: 'anthropic',
+      modelID: 'opus',
+    });
+  });
+
+  it('does not use an active chat model missing from connected providers', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({ config: {}, providers: { providers: [] } });
+    const { service } = createService(request, createHiddenSessions(), undefined, {
+      providerID: 'openai',
+      modelID: 'missing',
+      variant: 'high',
+    });
+
+    await service.generate();
+
+    expect(requestBody(request, '/message?')).not.toHaveProperty('model');
+    expect(requestBody(request, '/message?')).not.toHaveProperty('variant');
+  });
+
+  it.each([
+    ['structured', { info: { structured: { subject: 'valid subject' } } }],
+    ['structured_output', { info: { structured_output: { subject: 'valid subject' } } }],
+    ['structuredOutput', { info: { structuredOutput: { subject: 'valid subject' } } }],
+    [
+      'text JSON',
+      { parts: [{ type: 'text', text: '{"subject":"valid subject","body":"Valid body"}' }] },
+    ],
+  ])('accepts %s commit-message output', async (_shape, messageResponse) => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const { service } = createService(createRequest({ messageResponse }));
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toContain('valid subject');
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('warns without calling OpenCode when there are no staged changes', async () => {
+    const repository = createRepository('/repo', ' \r\n ');
+    setGitRepositories([repository]);
+    const { service, request, ensureServerStarted } = createService();
+
+    await service.generate();
+
+    expect(repository.status).toHaveBeenCalledOnce();
+    expect(repository.diff).toHaveBeenCalledWith(true);
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('no staged changes')
+    );
+    expect(ensureServerStarted).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('rejects merge changes before reading the staged diff', async () => {
+    const repository = createRepository();
+    repository.state.mergeChanges.push({ uri: uri('/repo/conflicted.ts') });
+    setGitRepositories([repository]);
+    const { service, request } = createService();
+
+    await service.generate();
+
+    expect(repository.diff).not.toHaveBeenCalled();
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('merge changes')
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('prefers the Git UI selected repository over editor and workspace repositories', async () => {
+    const editorRepository = createRepository('/editor');
+    const selectedRepository = createRepository('/selected');
+    selectedRepository.ui.selected = true;
+    mocks.window.activeTextEditor = { document: { uri: uri('/editor/src/file.ts') } };
+    setGitRepositories([editorRepository, selectedRepository]);
+    const { service, request } = createService(createRequest(), createHiddenSessions(), '/editor');
+
+    await service.generate();
+
+    expect(selectedRepository.status).toHaveBeenCalledOnce();
+    expect(editorRepository.status).not.toHaveBeenCalled();
+    expect(
+      request.mock.calls.every(([_method, path]) => path.includes('directory=%2Fselected'))
+    ).toBe(true);
+  });
+
+  it('prefers an explicit source control root over the selected repository', async () => {
+    const explicitRepository = createRepository('/explicit');
+    const selectedRepository = createRepository('/selected');
+    selectedRepository.ui.selected = true;
+    setGitRepositories([explicitRepository, selectedRepository]);
+    const { service } = createService();
+    const sourceControl = { rootUri: explicitRepository.rootUri } as vscode.SourceControl;
+
+    await service.generate(sourceControl);
+
+    expect(explicitRepository.status).toHaveBeenCalledOnce();
+    expect(selectedRepository.status).not.toHaveBeenCalled();
+  });
+
+  it('shows distinguishable repository roots and handles quick-pick cancellation', async () => {
+    const first = createRepository('/workspace/first');
+    const second = createRepository('/other/first');
+    setGitRepositories([first, second], { getRepository: () => null });
+    const { service, request } = createService();
+
+    await service.generate();
+
+    expect(mocks.window.showQuickPick).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ label: '/workspace/first' }),
+        expect.objectContaining({ label: '/other/first' }),
+      ],
+      expect.anything()
+    );
+    expect(first.status).not.toHaveBeenCalled();
+    expect(second.status).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('requires modal confirmation before replacing an existing commit input', async () => {
+    const repository = createRepository();
+    repository.inputBox.value = 'Keep this draft';
+    setGitRepositories([repository]);
+    mocks.window.showWarningMessage.mockResolvedValueOnce('Cancel');
+    const { service, request } = createService();
+
+    await service.generate();
+
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('not empty'),
+      { modal: true },
+      'Replace',
+      'Cancel'
+    );
+    expect(repository.inputBox.value).toBe('Keep this draft');
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('copies generated output only when chosen after the input changes', async () => {
+    const repository = createRepository();
+    repository.inputBox.value = 'Initial draft';
+    setGitRepositories([repository]);
+    mocks.window.showWarningMessage
+      .mockResolvedValueOnce('Replace')
+      .mockResolvedValueOnce('Copy Generated Message');
+    const request = createRequest({
+      onMessage: () => {
+        repository.inputBox.value = 'New user draft';
+      },
+    });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(mocks.window.showWarningMessage).toHaveBeenLastCalledWith(
+      expect.stringContaining('input changed'),
+      'Replace Anyway',
+      'Copy Generated Message'
+    );
+    expect(repository.inputBox.value).toBe('New user draft');
+    expect(mocks.clipboardWriteText).toHaveBeenCalledWith(
+      'feat: generated message\n\nExplain the generated change.'
+    );
+    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+  });
+
+  it('does not write or copy when the changed-input prompt is dismissed', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      onMessage: () => {
+        repository.inputBox.value = 'User edit';
+      },
+    });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('User edit');
+    expect(mocks.clipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  it('does not apply output when the authoritative staged diff changes', async () => {
+    const repository = createRepository('/repo', 'first staged patch');
+    repository.diff
+      .mockResolvedValueOnce('first staged patch')
+      .mockResolvedValueOnce('changed staged patch');
+    setGitRepositories([repository]);
+    const { service } = createService();
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Staged changes changed')
+    );
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('silently aborts and deletes a helper session when generation is cancelled', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const response = deferred<unknown>();
+    const request = createRequest({ messageResponse: () => response.promise });
+    const { service, hiddenSessions } = createService(request);
+
+    const generation = service.generate();
+    await waitFor(() => request.mock.calls.some(([, path]) => path.includes('/message?')));
+    mocks.triggerCancellation();
+    await generation;
+    await waitFor(() =>
+      request.mock.calls.some(([method, path]) => method === 'DELETE' && path.includes('helper-1'))
+    );
+
+    expect(request).toHaveBeenCalledWith('POST', '/session/helper-1/abort?directory=%2Frepo');
+    expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
+    expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledWith('helper-1');
+    expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(repository.inputBox.value).toBe('');
+
+    response.resolve({ info: { structured: { subject: 'late stale output' } } });
+    await flush();
+    expect(repository.inputBox.value).toBe('');
+  });
+
+  it('hides, aborts, and deletes a helper session created after cancellation', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const session = deferred<unknown>();
+    const request = createRequest({ sessionResponse: () => session.promise });
+    const { service, hiddenSessions } = createService(request);
+
+    const generation = service.generate();
+    await waitFor(() =>
+      request.mock.calls.some(([method, path]) => method === 'POST' && path.startsWith('/session?'))
+    );
+    mocks.triggerCancellation();
+    await generation;
+    expect(hiddenSessions.forgetPendingTitle).not.toHaveBeenCalled();
+
+    session.resolve({ id: 'helper-late' });
+    await waitFor(() =>
+      request.mock.calls.some(
+        ([method, path]) => method === 'DELETE' && path.includes('helper-late')
+      )
+    );
+
+    expect(hiddenSessions.hide).toHaveBeenCalledWith('helper-late');
+    expect(hiddenSessions.forgetPendingTitle).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith('POST', '/session/helper-late/abort?directory=%2Frepo');
+    expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-late?directory=%2Frepo');
+    expect(repository.inputBox.value).toBe('');
+  });
+
+  it('reports timeout and cleans up the helper session', async () => {
+    vi.useFakeTimers();
+    try {
+      const repository = createRepository();
+      setGitRepositories([repository]);
+      const response = deferred<unknown>();
+      const request = createRequest({ messageResponse: () => response.promise });
+      const { service } = createService(request);
+
+      const generation = service.generate();
+      await waitFor(() => request.mock.calls.some(([, path]) => path.includes('/message?')));
+      await vi.advanceTimersByTimeAsync(30_000);
+      await generation;
+      await flush();
+
+      expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+        'Generating commit message timed out.'
+      );
+      expect(request).toHaveBeenCalledWith('POST', '/session/helper-1/abort?directory=%2Frepo');
+      expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
+      expect(repository.inputBox.value).toBe('');
+
+      response.resolve({ info: { structured: { subject: 'too late' } } });
+      await flush();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prevents duplicate in-flight generation for the same root', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const response = deferred<unknown>();
+    const request = createRequest({ messageResponse: () => response.promise });
+    const { service } = createService(request);
+
+    const first = service.generate();
+    await waitFor(() => request.mock.calls.some(([, path]) => path.includes('/message?')));
+    await service.generate();
+
+    expect(repository.status).toHaveBeenCalledOnce();
+    expect(mocks.window.showInformationMessage).toHaveBeenCalledWith(
+      'A commit message is already being generated for this repository.'
+    );
+    expect(
+      request.mock.calls.filter(
+        ([method, path]) => method === 'POST' && path.startsWith('/session?')
+      )
+    ).toHaveLength(1);
+
+    mocks.triggerCancellation();
+    await first;
+  });
+
+  it('rejects malformed output, cleans up, and never logs the staged patch', async () => {
+    const patch = 'PRIVATE_STAGED_PATCH';
+    const repository = createRepository('/repo', patch);
+    setGitRepositories([repository]);
+    const request = createRequest({
+      messageResponse: {
+        info: { structured: { subject: '', extra: true } },
+        parts: [{ type: 'text', text: 'not json' }],
+      },
+    });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
+    expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('invalid commit message')
+    );
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('invalid commit message')
+    );
+    expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain(patch);
+  });
+
+  it('surfaces a meaningful provider error without applying output', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const request = createRequest({
+      messageResponse: {
+        info: {
+          error: { name: 'ProviderError', data: { message: 'Quota exceeded for this model' } },
+        },
+      },
+    });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('ProviderError: Quota exceeded for this model')
+    );
+    expect(repository.inputBox.value).toBe('');
+  });
+
+  it('reports a missing Git extension and rejects a disabled Git API', async () => {
+    const { service, request } = createService();
+
+    await service.generate();
+
+    expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+      'The built-in Git extension is unavailable.'
+    );
+    expect(request).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mocks.extensionSlot.value = {
+      isActive: true,
+      exports: { enabled: false, getAPI: vi.fn() },
+      activate: vi.fn(),
+    };
+    await service.generate();
+
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Git integration is disabled')
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+});

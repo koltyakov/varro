@@ -419,8 +419,28 @@ function sharedRequest<T>(
 function getCachedFileStatus(): Promise<RepoFileStatus[]> {
   const now = Date.now();
   if (fileStatusCache && fileStatusCache.expiresAt > now) return fileStatusCache.promise;
-  const promise = apiCall('GET', '/file/status')
-    .then((response) => requireArray<RepoFileStatus>(response, '/file/status'))
+  const path = '/vcs/status';
+  const promise = apiCall('GET', path)
+    .then((response) =>
+      requireArray<unknown>(response, path).map((value) => {
+        const status = requireRecord(value, path);
+        if (
+          typeof status.file !== 'string' ||
+          typeof status.additions !== 'number' ||
+          typeof status.deletions !== 'number' ||
+          (status.status !== 'added' && status.status !== 'deleted' && status.status !== 'modified')
+        ) {
+          throw malformedResponse(path, 'valid VCS file status entries');
+        }
+        const fileStatus: RepoFileStatus = {
+          path: status.file,
+          added: status.additions,
+          removed: status.deletions,
+          status: status.status,
+        };
+        return fileStatus;
+      })
+    )
     .catch((err) => {
       if (fileStatusCache?.promise === promise) fileStatusCache = null;
       throw err;

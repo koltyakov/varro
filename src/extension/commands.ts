@@ -104,6 +104,13 @@ export function registerCommands(
       await vscode.commands.executeCommand('workbench.view.scm');
     }),
 
+    vscode.commands.registerCommand(
+      'varro.generateCommitMessage',
+      async (sourceControl?: vscode.SourceControl) => {
+        await sidebar.generateCommitMessage(sourceControl);
+      }
+    ),
+
     vscode.commands.registerCommand('varro.agents.openGlobal', async () => {
       try {
         await openAgentsFile(vscode.Uri.file(getOpenCodeConfigDirectory()));

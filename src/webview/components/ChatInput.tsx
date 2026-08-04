@@ -2483,10 +2483,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
   const showMcpControl = createMemo(() => {
     const statuses = mcpStatuses();
-    return (
-      connectedMcpCount() > 0 ||
-      (statuses.length > 0 && statuses.every((status) => status.status === 'disabled'))
-    );
+    return statuses.length > 0;
   });
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {

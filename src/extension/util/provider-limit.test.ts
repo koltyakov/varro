@@ -138,10 +138,16 @@ describe('provider limit helpers', () => {
   it('builds provider probes from auth.json and known provider defaults', () => {
     const authStore = parseProviderAuthStore(
       JSON.stringify({
-        openai: { type: 'oauth', access: 'token-1' },
+        openai: { type: 'oauth', access: 'token-1', accountId: 'acct_openai' },
         'github-copilot': { type: 'oauth', access: 'token-2' },
       })
     );
+
+    expect(authStore.openai).toEqual({
+      type: 'oauth',
+      access: 'token-1',
+      accountId: 'acct_openai',
+    });
 
     expect(
       buildProviderLimitProbe(

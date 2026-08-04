@@ -94,6 +94,33 @@ describe('session MCP helpers', () => {
     expect(connectMcp).not.toHaveBeenCalled();
   });
 
+  it('does not reconnect MCPs that require a configured client ID', async () => {
+    const connectMcp = vi.fn(async () => {});
+    const authenticateMcp = vi.fn(async () => {});
+
+    await syncSessionMcpsWithDependencies(
+      {
+        getSelectedMcpsForSession: () => ['registered-server'],
+        getMcpStatus: () => ({
+          'registered-server': {
+            status: 'needs_client_registration',
+            error: 'Please provide clientId in config.',
+          },
+        }),
+        loadMcps: vi.fn(async () => {}),
+        getAvailableMcpNames: () => ['registered-server'],
+        connectMcp,
+        authenticateMcp,
+        disconnectMcp: vi.fn(async () => {}),
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(connectMcp).not.toHaveBeenCalled();
+    expect(authenticateMcp).not.toHaveBeenCalled();
+  });
+
   it('keeps MCPs required by a running background session connected', async () => {
     const connectMcp = vi.fn(async () => {});
     const disconnectMcp = vi.fn(async () => {});

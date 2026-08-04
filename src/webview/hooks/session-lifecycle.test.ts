@@ -177,6 +177,20 @@ describe('session-lifecycle helpers', () => {
     expect(setup.deps.clearActiveSessionState).toHaveBeenCalledTimes(1);
   });
 
+  it('filters sessions archived by OpenCode', () => {
+    const archived = session('archived', '/repo', 2);
+    archived.time.archived = 3;
+    const setup = createDeps({
+      activeSessionId: 'archived',
+      sessions: [session('active', '/repo', 1), archived],
+    });
+
+    applySessions(setup.deps, setup.current.sessions);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['active']);
+    expect(setup.deps.clearActiveSessionState).toHaveBeenCalledOnce();
+  });
+
   it('treats Windows workspace paths as case-insensitive when filtering sessions', () => {
     const setup = createDeps({
       sessions: [
@@ -318,6 +332,21 @@ describe('session-lifecycle helpers', () => {
     upsertSession(setup.deps, session('session-1', '/repo', 3));
 
     expect(setup.deps.markSessionSeen).not.toHaveBeenCalled();
+  });
+
+  it('removes an existing session tree when OpenCode archives its root', () => {
+    const archived = session('root', '/repo', 3);
+    archived.time.archived = 4;
+    const setup = createDeps({
+      activeSessionId: 'root',
+      sessions: [session('root'), session('child', '/repo', 2, 'root'), session('other')],
+    });
+
+    upsertSession(setup.deps, archived);
+
+    expect(setup.current.sessions.map((item) => item.id)).toEqual(['other']);
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('root');
+    expect(setup.deps.clearPendingAbort).toHaveBeenCalledWith('child');
   });
 
   it('keeps newer session metadata when an older snapshot arrives later', () => {

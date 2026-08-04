@@ -5,7 +5,7 @@
 
 **The complete OpenCode experience inside VS Code.**
 
-Varro brings [OpenCode](https://opencode.ai) into a compact, project-aware workbench for daily agentic development. Run agents, manage parallel sessions, review plans and file changes, control models and permissions, and monitor context, tokens, and provider limits without leaving the editor.
+Varro brings [OpenCode](https://opencode.ai) into a compact, project-aware workbench for daily agentic development. Run agents, manage parallel sessions, review plans and file changes, generate commit messages, control models and permissions, and monitor context, tokens, and provider limits without leaving the editor.
 
 Varro builds on OpenCode instead of replacing it. Your local OpenCode configuration remains the source of truth for agents, providers, models, commands, skills, and MCP servers.
 
@@ -17,6 +17,7 @@ Varro builds on OpenCode instead of replacing it. Your local OpenCode configurat
 - **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
 - **Parallel work that stays understandable.** Workspace sessions clearly identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar keep background sessions visible.
 - **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
+- **Commit messages where you commit.** Generate a repository-aware message from exactly the changes staged in VS Code, without leaving Source Control or handing commit control to the model.
 - **Usage you can act on.** Provider limits and reset windows appear next to model controls when available, while detailed accounting covers context fill, input, output, reasoning, cache, and sub-agent tokens.
 - **Compact by design.** The complete workflow remains readable in a sidebar, with an optional session pane for larger layouts.
 
@@ -56,10 +57,17 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 
 ![Provider and model selection in Varro](https://raw.githubusercontent.com/koltyakov/varro/main/assets/providers.png)
 
+## Auto-Generated Commit Messages
+
+Stage the changes you intend to commit, then use the quick wand icon in the Source Control toolbar or run `Varro: Generate Commit Message` from the Command Palette. Varro analyzes only the staged diff, follows recent repository commit style when possible, and fills the selected Git repository's commit input for review.
+
+Generation never stages files or commits automatically. Varro preserves an existing draft unless you approve replacement, detects staging or input changes while generation is running, and keeps its temporary helper session out of chat history.
+
 ## Additional Workflows
 
 - Answer OpenCode questions and permission requests in the chat
 - Open changed files or hand the session off to VS Code Source Control
+- Generate a commit message from staged changes with the quick Source Control toolbar action or the Command Palette
 - Open a completed plan as a Markdown document or continue it in an implementation session
 - Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls; Ralph runs use `Full access`
 - Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`

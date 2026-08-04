@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-08-01T15:47:55.121Z",
+  "generatedAt": "2026-08-04T03:31:04.604Z",
   "declaredFloor": "1.16.0",
-  "declaredCeiling": "1.18.11",
+  "declaredCeiling": "1.18.12",
   "results": [
     {
-      "requestedVersion": "1.18.11",
-      "serverVersion": "1.18.11",
+      "requestedVersion": "1.18.12",
+      "serverVersion": "1.18.12",
       "compatible": true
     },
     {

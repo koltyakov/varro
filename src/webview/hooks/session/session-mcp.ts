@@ -111,7 +111,10 @@ export async function syncSessionMcpsWithDependencies(
 
   const authenticate = [...desiredSet].filter((name) => statuses[name]?.status === 'needs_auth');
   const connect = [...desiredSet].filter(
-    (name) => !connected.includes(name) && statuses[name]?.status !== 'needs_auth'
+    (name) =>
+      !connected.includes(name) &&
+      statuses[name]?.status !== 'needs_auth' &&
+      statuses[name]?.status !== 'needs_client_registration'
   );
   const disconnect = connected.filter((name) => !desiredSet.has(name));
   if (connect.length === 0 && authenticate.length === 0 && disconnect.length === 0) return;

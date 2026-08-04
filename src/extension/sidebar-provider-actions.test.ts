@@ -111,6 +111,7 @@ function createActionFixture() {
     server: server as unknown as SidebarProviderActionDeps['server'],
     post: vi.fn(),
     setProviderWatchActive: vi.fn(),
+    setActiveChatModel: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
     postTerminalSelection: vi.fn(),
@@ -157,6 +158,16 @@ describe('createSidebarProviderActions', () => {
       'opencode --session session-1',
       'OpenCode Session'
     );
+  });
+
+  it('updates command state and mirrors the active chat model', () => {
+    const { actions, deps, webviewSession } = createActionFixture();
+    const model = { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' };
+
+    actions.updateCommandState(true, false, model);
+
+    expect(webviewSession.updateCommandState).toHaveBeenCalledWith(true, false);
+    expect(deps.setActiveChatModel).toHaveBeenCalledWith(model);
   });
 
   it('posts blocker updates while polling and restarts once the server is idle', async () => {

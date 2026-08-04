@@ -1583,18 +1583,17 @@
   transition: opacity 0.1s;
 }
 
-.chat-queue-item.is-editing .chat-queue-body {
-  padding-right: 30px;
-}
-
 .chat-queue-item:is(:hover, :focus-within) .chat-queue-actions {
   opacity: 1;
   pointer-events: auto;
 }
 
 .chat-queue-item.is-editing .chat-queue-actions {
+  position: static;
+  gap: 8px;
   opacity: 1;
   pointer-events: auto;
+  transform: none;
 }
 
 .chat-queue-container.is-reordering .chat-queue-item .chat-queue-actions {

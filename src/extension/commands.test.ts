@@ -75,6 +75,7 @@ function register(
     openAttentionSessions: vi.fn(),
     postDroppedFiles: vi.fn(),
     postTerminalSelection: vi.fn(),
+    generateCommitMessage: vi.fn(() => Promise.resolve()),
   };
   const contextProvider = {
     context: { workspacePath },
@@ -553,6 +554,15 @@ describe('sidebar navigation commands', () => {
     await runCommand('varro.openSourceControl');
 
     expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+  });
+
+  it('forwards the selected source control to commit-message generation', async () => {
+    const { sidebar } = register();
+    const sourceControl = { id: 'git', rootUri: fileUri('/repo') };
+
+    await runCommand('varro.generateCommitMessage', sourceControl);
+
+    expect(sidebar.generateCommitMessage).toHaveBeenCalledWith(sourceControl);
   });
 });
 

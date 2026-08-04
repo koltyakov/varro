@@ -256,6 +256,26 @@ OpenCode approval flows stay inside the chat UI.
 
 `Full access` updates the session permission rules and auto-approves pending permission prompts for that session. Select it only when the session can operate without confirmation.
 
+## Generate Commit Messages
+
+Varro integrates commit-message generation directly into VS Code Source Control.
+
+1. Stage the exact changes you intend to commit.
+2. Use the quick wand icon in the Source Control toolbar, or run `Varro: Generate Commit Message` from the Command Palette.
+3. Review or edit the generated text in Git's commit input, then commit normally.
+
+Generation is staged-only. Unstaged changes are not sent to the model or described in the result. Varro rejects unresolved merge changes and asks you to stage files when the index is empty.
+
+The model is selected in this order:
+
+1. OpenCode's repository-scoped `small_model`, when configured
+2. OpenAI GPT Luna Fast when the connected account is confirmed as a Pro plan
+3. A standard GPT Luna model exposed by a connected provider
+4. The active Varro chat model, using an available low-reasoning variant instead of the selected high or max variant
+5. OpenCode's default model when none of the preceding routes is available
+
+The staged patch, staged paths, and recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Varro never logs the patch, stages files, or executes the commit. It also rechecks the staged diff and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
+
 ## Output In The Chat
 
 Varro renders OpenCode output as structured UI instead of plain text only.
@@ -283,6 +303,7 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - `Varro: About`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
+- `Varro: Generate Commit Message` generates from staged changes with OpenCode's configured `small_model`; otherwise it prefers GPT Luna Fast for a confirmed OpenAI Pro account, standard GPT Luna, the active chat model at low reasoning, and finally OpenCode's default model. It fills the selected Git repository's commit input without committing
 - `Varro: Open Global AGENTS.md`
 - `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
@@ -329,7 +350,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro requires OpenCode 1.16.0 or newer and this release is compatibility-tested through 1.18.11.
+- OpenCode CLI incompatible: Varro requires OpenCode 1.16.0 or newer and this release is compatibility-tested through 1.18.12.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: run `/connect` or `opencode auth login`, then reopen Varro.

@@ -149,6 +149,11 @@
         "title": "Varro: Open Source Control"
       },
       {
+        "command": "varro.generateCommitMessage",
+        "title": "Varro: Generate Commit Message",
+        "icon": "$(wand)"
+      },
+      {
         "command": "varro.agents.openGlobal",
         "title": "Varro: Open Global AGENTS.md"
       },
@@ -188,6 +193,13 @@
           "command": "varro.chat.addTerminalSelectionToContext",
           "when": "terminalTextSelected",
           "group": "z_varro"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "varro.generateCommitMessage",
+          "when": "scmProvider == git",
+          "group": "navigation@99"
         }
       ],
       "commandPalette": [

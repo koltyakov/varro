@@ -63,6 +63,12 @@ export interface WorkspaceFilePick {
 
 export type PermissionMode = 'default' | 'auto' | 'full';
 
+export type ChatModelSelection = {
+  providerID: string;
+  modelID: string;
+  variant?: string;
+};
+
 export function isPermissionMode(value: unknown): value is PermissionMode {
   return value === 'default' || value === 'auto' || value === 'full';
 }
@@ -573,7 +579,11 @@ export type WebviewMessage =
   | { type: 'workspace/select'; payload: { path: string } }
   | {
       type: 'commands/state';
-      payload: { canAbort: boolean; canSwitchSessions: boolean };
+      payload: {
+        canAbort: boolean;
+        canSwitchSessions: boolean;
+        model: ChatModelSelection | null;
+      };
     }
   | { type: 'webview/focus'; payload: { focused: boolean } }
   | { type: 'providers/watch'; payload: { active: boolean } }

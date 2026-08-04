@@ -167,7 +167,11 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
   const existingById = new Map(deps.getState().sessions.map((session) => [session.id, session]));
   const nextSessions = sortSessions(
     sessions
-      .filter((session) => isSessionInWorkspace(session, deps.getCurrentWorkspacePath()))
+      .filter(
+        (session) =>
+          typeof session.time.archived !== 'number' &&
+          isSessionInWorkspace(session, deps.getCurrentWorkspacePath())
+      )
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
   );
   batch(() => {
@@ -249,6 +253,12 @@ export function removeDeletedSessionTree(
 
 export function upsertSession(deps: LifecycleDependencies, session: Session) {
   const { activeSessionId, sessions, showSessionPicker } = deps.getState();
+  if (typeof session.time.archived === 'number') {
+    if (sessions.some((item) => item.id === session.id)) {
+      removeDeletedSessionTree(deps, session.id, sessions);
+    }
+    return;
+  }
   if (!isSessionInWorkspace(session, deps.getCurrentWorkspacePath())) {
     if (sessions.some((item) => item.id === session.id)) {
       applySessions(

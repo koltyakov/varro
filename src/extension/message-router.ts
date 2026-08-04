@@ -3,6 +3,7 @@ import { logger } from './logger';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ConfigUpdatePayload = Extract<WebviewMessage, { type: 'config/update' }>['payload'];
+type CommandStatePayload = Extract<WebviewMessage, { type: 'commands/state' }>['payload'];
 type DroppedContentFile = Extract<
   WebviewMessage,
   { type: 'files/drop-content' }
@@ -26,7 +27,11 @@ type RalphMessage = Extract<
 
 export interface MessageRouterCallbacks {
   ready(): Promise<void>;
-  updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
+  updateCommandState(
+    canAbort: boolean,
+    canSwitchSessions: boolean,
+    model: CommandStatePayload['model']
+  ): void;
   setWebviewFocus(focused: boolean): void;
   setProviderWatchActive(active: boolean): void;
   requestContext(): void;
@@ -71,7 +76,11 @@ export class MessageRouter {
           await this.callbacks.updateQueuedMessages(msg.payload);
           break;
         case 'commands/state':
-          this.callbacks.updateCommandState(msg.payload.canAbort, msg.payload.canSwitchSessions);
+          this.callbacks.updateCommandState(
+            msg.payload.canAbort,
+            msg.payload.canSwitchSessions,
+            msg.payload.model
+          );
           break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);

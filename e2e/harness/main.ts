@@ -3947,7 +3947,7 @@ async function handleApiRequest(
     return state.pendingPermissions;
   }
 
-  if (method === 'GET' && path === '/file/status') {
+  if (method === 'GET' && path === '/vcs/status') {
     return [];
   }
 

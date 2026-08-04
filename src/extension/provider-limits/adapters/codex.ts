@@ -145,7 +145,7 @@ function buildCodexHeaders(credentials: CodexCredentials) {
     'User-Agent': CODEX_USER_AGENT,
     ...(credentials.accountID
       ? {
-          'ChatClaude-Account-Id': credentials.accountID,
+          'ChatGPT-Account-Id': credentials.accountID,
           'X-Account-Id': credentials.accountID,
         }
       : {}),
@@ -400,7 +400,7 @@ async function resolveCodexCredentials(authStore: Record<string, ProviderAuthRec
   if (auth?.type === 'oauth') {
     return {
       accessToken: auth.access,
-      accountID: null,
+      accountID: auth.accountId || null,
     } satisfies CodexCredentials;
   }
 

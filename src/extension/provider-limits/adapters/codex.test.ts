@@ -108,7 +108,7 @@ describe('createCodexAdapter', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer codex-file-token',
-          'ChatClaude-Account-Id': 'acct_123',
+          'ChatGPT-Account-Id': 'acct_123',
           'X-Account-Id': 'acct_123',
         }),
       })

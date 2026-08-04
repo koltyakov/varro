@@ -8,7 +8,7 @@ import type {
 import { getString } from '../../shared/type-utils';
 
 export type ProviderAuthRecord =
-  | { type: 'oauth'; access: string }
+  | { type: 'oauth'; access: string; accountId?: string }
   | { type: 'api' | 'wellknown'; key: string };
 
 type ProviderModel = {
@@ -225,7 +225,12 @@ export function parseProviderAuthStore(raw: string): Record<string, ProviderAuth
     if (!auth) continue;
 
     if (auth.type === 'oauth' && typeof auth.access === 'string' && auth.access.trim()) {
-      authStore[providerID] = { type: 'oauth', access: auth.access.trim() };
+      const accountId = getString(auth.accountId ?? auth.account_id);
+      authStore[providerID] = {
+        type: 'oauth',
+        access: auth.access.trim(),
+        ...(accountId ? { accountId } : {}),
+      };
       continue;
     }
 

@@ -1,6 +1,6 @@
-import type { DroppedFile, EditorDiagnostic } from '../../shared/protocol';
+import type { ChatModelSelection, DroppedFile, EditorDiagnostic } from '../../shared/protocol';
 
-export type SelectedModel = { providerID: string; modelID: string; variant?: string };
+export type SelectedModel = ChatModelSelection;
 export type SessionSelectionOptions = { markSeen?: boolean; selectedModel?: SelectedModel };
 export type ModelVariantSelections = Record<string, string>;
 

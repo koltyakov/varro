@@ -794,6 +794,21 @@ describe('extension activation', () => {
 });
 
 describe('extension manifest', () => {
+  it('contributes commit-message generation to the command palette and Source Control', () => {
+    expect(packageJson.contributes.commands).toContainEqual({
+      command: 'varro.generateCommitMessage',
+      title: 'Varro: Generate Commit Message',
+      icon: '$(wand)',
+    });
+    expect(packageJson.contributes.menus['scm/title']).toEqual([
+      {
+        command: 'varro.generateCommitMessage',
+        when: 'scmProvider == git',
+        group: 'navigation@99',
+      },
+    ]);
+  });
+
   it('constrains the server port setting to valid TCP ports', () => {
     const properties = packageJson.contributes.configuration.properties as Record<
       string,

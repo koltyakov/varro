@@ -270,7 +270,7 @@ describe('client', () => {
       { path: '/mcp', load: () => client.mcp.status() },
       { path: '/question', load: () => client.question.list() },
       { path: '/permission', load: () => client.permission.list() },
-      { path: '/file/status', load: () => client.file.status() },
+      { path: '/vcs/status', load: () => client.file.status() },
     ];
 
     for (const request of requests) {
@@ -572,8 +572,12 @@ describe('client', () => {
     const nextConsumer = client.file.status();
     expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
 
-    const currentValue = [{ path: 'src/current.ts' }];
-    currentDeferred.resolve(currentValue);
+    const currentValue = [
+      { path: 'src/current.ts', added: 4, removed: 1, status: 'modified' as const },
+    ];
+    currentDeferred.resolve([
+      { file: 'src/current.ts', additions: 4, deletions: 1, status: 'modified' },
+    ]);
     await expect(Promise.all([currentRequest, nextConsumer])).resolves.toEqual([
       currentValue,
       currentValue,
@@ -583,20 +587,30 @@ describe('client', () => {
   it('caches file status requests for two seconds', async () => {
     const { client } = await loadClient();
     const nowSpy = vi.spyOn(Date, 'now');
-    const response = [{ path: 'src/app.ts' }];
+    const response = [{ file: 'src/app.ts', additions: 2, deletions: 1, status: 'modified' }];
+    const expected = [{ path: 'src/app.ts', added: 2, removed: 1, status: 'modified' }];
 
     nowSpy.mockReturnValueOnce(1_000);
     nowSpy.mockReturnValueOnce(1_500);
     nowSpy.mockReturnValueOnce(3_100);
     bridgeMocks.apiCall.mockResolvedValue(response);
 
-    expect(await client.file.status()).toBe(response);
-    expect(await client.file.status()).toBe(response);
-    expect(await client.file.status()).toBe(response);
+    expect(await client.file.status()).toEqual(expected);
+    expect(await client.file.status()).toEqual(expected);
+    expect(await client.file.status()).toEqual(expected);
 
     expect(bridgeMocks.apiCall).toHaveBeenCalledTimes(2);
-    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(1, 'GET', '/file/status');
-    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(2, 'GET', '/file/status');
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(1, 'GET', '/vcs/status');
+    expect(bridgeMocks.apiCall).toHaveBeenNthCalledWith(2, 'GET', '/vcs/status');
+  });
+
+  it('rejects malformed VCS status entries', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue([
+      { file: 'src/app.ts', additions: 2, deletions: '1', status: 'modified' },
+    ]);
+
+    await expect(client.file.status()).rejects.toThrow('/vcs/status');
   });
 
   it('clears the file status cache after a failed request', async () => {

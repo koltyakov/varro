@@ -252,6 +252,20 @@ export function handleExtensionMessageWithDependencies(
       ) {
         deps.openExternal?.(msg.payload.properties.url);
       }
+      if (
+        msg.payload.type === 'catalog.updated' ||
+        msg.payload.type === 'models-dev.refreshed' ||
+        msg.payload.type === 'integration.updated' ||
+        msg.payload.type === 'integration.connection.updated'
+      ) {
+        deps.refreshProviders();
+      }
+      if (
+        msg.payload.type === 'integration.updated' ||
+        msg.payload.type === 'integration.connection.updated'
+      ) {
+        deps.revalidateProviderAuth?.();
+      }
       break;
     case 'providers/refresh':
       deps.refreshProviders();

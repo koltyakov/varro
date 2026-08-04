@@ -377,7 +377,12 @@ function serializeProviderAuthStore(authStore: Record<string, ProviderAuthRecord
       .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([providerID, auth]) =>
         auth.type === 'oauth'
-          ? [providerID, auth.type, fingerprintSecret(auth.access)]
+          ? [
+              providerID,
+              auth.type,
+              fingerprintSecret(auth.access),
+              fingerprintSecret(auth.accountId || ''),
+            ]
           : [providerID, auth.type, fingerprintSecret(auth.key)]
       )
   );

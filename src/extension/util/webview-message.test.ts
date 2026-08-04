@@ -128,6 +128,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/authenticate')).toBe(true);
     expect(isAllowedApiRequest('GET', '/provider/auth')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/vcs/status')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/authorize')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/callback')).toBe(true);
     expect(isAllowedApiRequest('GET', '/experimental/workspace/status')).toBe(true);
@@ -163,6 +164,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', 'https://example.com/session')).toBe(false);
     expect(isAllowedApiRequest('GET', '//example.com/session')).toBe(false);
     expect(isAllowedApiRequest('GET', '/experimental/console')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/file/status')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&directory=%2Fb')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session?directory=%2Fa&extra=1')).toBe(false);
@@ -772,11 +774,28 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'commands/state',
-        payload: { canAbort: true, canSwitchSessions: false },
+        payload: {
+          canAbort: true,
+          canSwitchSessions: false,
+          model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
+        },
       })
     ).toEqual({
       type: 'commands/state',
-      payload: { canAbort: true, canSwitchSessions: false },
+      payload: {
+        canAbort: true,
+        canSwitchSessions: false,
+        model: { providerID: 'openai', modelID: 'gpt-5.6-sol', variant: 'high' },
+      },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: true, model: null },
+      })
+    ).toEqual({
+      type: 'commands/state',
+      payload: { canAbort: false, canSwitchSessions: true, model: null },
     });
     expect(
       parseWebviewMessage({
@@ -790,7 +809,13 @@ describe('webview message validation', () => {
     expect(
       parseWebviewMessage({
         type: 'commands/state',
-        payload: { canAbort: 'yes', canSwitchSessions: false },
+        payload: { canAbort: 'yes', canSwitchSessions: false, model: null },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'commands/state',
+        payload: { canAbort: false, canSwitchSessions: false, model: { providerID: 'openai' } },
       })
     ).toBeNull();
   });

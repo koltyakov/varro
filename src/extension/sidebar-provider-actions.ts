@@ -8,7 +8,7 @@ import type { SidebarProviderContextFiles } from './sidebar-provider-context-fil
 import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import type { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import type { OpenCodeServer } from './server';
-import type { ExtensionMessage } from '../shared/protocol';
+import type { ChatModelSelection, ExtensionMessage } from '../shared/protocol';
 
 type ConfigPayload = Extract<
   Parameters<MessageRouterCallbacks['updateConfig']>[0],
@@ -25,6 +25,7 @@ export interface SidebarProviderActionDeps {
     updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
   };
   setProviderWatchActive(active: boolean): void;
+  setActiveChatModel(model: ChatModelSelection | null): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   restProxy: RestProxy;
@@ -74,8 +75,9 @@ export function createSidebarProviderActions(
 
   return {
     ready: () => deps.handleReadyMessage(),
-    updateCommandState: (canAbort, canSwitchSessions) => {
+    updateCommandState: (canAbort, canSwitchSessions, model) => {
       deps.webviewSession.updateCommandState(canAbort, canSwitchSessions);
+      deps.setActiveChatModel(model);
     },
     setWebviewFocus: (focused) => {
       deps.webviewSession.setFocus(focused);

@@ -705,7 +705,7 @@ describe('ChatInput', () => {
     );
   });
 
-  it('shows connected MCPs or an all-disabled zero count and toggles the picker', async () => {
+  it('shows configured MCPs and toggles the picker', async () => {
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
@@ -742,7 +742,7 @@ describe('ChatInput', () => {
       gamma: { status: 'failed' },
       delta: { status: 'disabled' },
     });
-    expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
+    expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('0');
 
     setState('mcpStatus', {
       alpha: { status: 'disabled' },

@@ -446,6 +446,17 @@ describe('mount bridge helpers', () => {
         properties: { mcpName: 'docs', url: 'https://mcp.example.com/authorize' },
       },
     });
+    for (const type of [
+      'catalog.updated',
+      'models-dev.refreshed',
+      'integration.updated',
+      'integration.connection.updated',
+    ] as const) {
+      handleExtensionMessageWithDependencies(deps, {
+        type: 'server/event',
+        payload: { type, properties: {} },
+      });
+    }
     handleExtensionMessageWithDependencies(deps, { type: 'providers/refresh' });
     handleExtensionMessageWithDependencies(deps, {
       type: 'providers/refresh',
@@ -461,8 +472,8 @@ describe('mount bridge helpers', () => {
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(2);
-    expect(refreshProviders).toHaveBeenCalledTimes(2);
-    expect(revalidateProviderAuth).toHaveBeenCalledTimes(1);
+    expect(refreshProviders).toHaveBeenCalledTimes(6);
+    expect(revalidateProviderAuth).toHaveBeenCalledTimes(3);
     expect(openExternal).toHaveBeenCalledWith('https://mcp.example.com/authorize');
   });
 
