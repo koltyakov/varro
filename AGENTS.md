@@ -25,3 +25,4 @@
 - UI design: never use a decorative accent rail on only one edge of a component, such as a thick left border or inset edge shadow. Use full-perimeter borders, backgrounds, or shadows instead; structural dividers between internal sections are allowed.
 - Post-change actions: after code changes, run the narrowest relevant verification commands you can (`npm run lint` or `npm run lint:check`, targeted `npm run test -- ...`, and `npm run typecheck` when types changed). Do not stop after implementation without reporting what you ran and the result.
 - Repo-local Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
+- OpenCode version bumps: follow `docs/opencode-version-bumps.md`.

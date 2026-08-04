@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: The OpenCode Workbench",
-  "version": "0.23.11",
+  "version": "0.23.12",
   "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
   "categories": [
     "AI",
@@ -53,7 +53,7 @@
     "vscode:install": "node scripts/vscode-install.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.12",
+    "@opencode-ai/sdk": "^1.18.13",
     "dompurify": "^3.4.13",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",

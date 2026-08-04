@@ -388,7 +388,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro requires OpenCode 1.16.0 or newer and this release is compatibility-tested through 1.18.12.
+- OpenCode CLI incompatible: Varro requires OpenCode 1.16.0 or newer and this release is compatibility-tested through 1.18.13.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: run `/connect` or `opencode auth login`, then reopen Varro.
