@@ -134,6 +134,7 @@ export interface OpenCodeRuntime {
   sendMessage(
     text: string,
     options?: {
+      agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
       queuedAttachments?: {
@@ -1654,6 +1655,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function sendMessage(
     text: string,
     options?: {
+      agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
       queuedAttachments?: {

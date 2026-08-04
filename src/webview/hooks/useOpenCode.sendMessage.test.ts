@@ -50,6 +50,23 @@ describe('sendMessage', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
   });
 
+  it('uses an explicitly captured agent instead of the current selection', async () => {
+    const { stateModule, hookModule } = await loadModules();
+
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('selectedAgent', 'plan');
+    clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    clientMocks.sessionGet.mockResolvedValue(session());
+    clientMocks.sessionMessages.mockResolvedValue([]);
+
+    await hookModule.sendMessage('Implement the plan', { agent: 'build' });
+
+    expect(clientMocks.sessionSendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ agent: 'build' })
+    );
+  });
+
   it('does not promote temporary session routing to global defaults when sending', async () => {
     const { stateModule, hookModule } = await loadModules();
 

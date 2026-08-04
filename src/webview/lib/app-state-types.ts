@@ -12,6 +12,7 @@ export interface QueuedMessage {
   id: string;
   sessionId: string;
   text: string;
+  agent?: string;
   paused?: boolean;
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];

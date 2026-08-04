@@ -197,7 +197,12 @@ describe('state helpers', () => {
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
     stateModule.enqueueMessage({ id: 'other', sessionId: 'session-2', text: 'other' });
-    stateModule.enqueueMessage({ id: 'q2', sessionId: 'session-1', text: 'second' });
+    stateModule.enqueueMessage({
+      id: 'q2',
+      sessionId: 'session-1',
+      text: 'second',
+      agent: 'build',
+    });
 
     stateModule.reorderQueuedMessage('q2', 'q1');
     stateModule.reorderQueuedMessage('q2', 'other');
@@ -213,6 +218,7 @@ describe('state helpers', () => {
     stateModule = await loadState();
 
     expect(stateModule.state.queuedMessages.map((item) => item.id)).toEqual(['q2', 'other']);
+    expect(stateModule.state.queuedMessages[0]?.agent).toBe('build');
 
     stateModule.removeQueuedMessage('q2');
     stateModule.clearQueuedMessagesForSession('session-1');
@@ -240,6 +246,7 @@ describe('state helpers', () => {
           id: 'host',
           sessionId: 'session-1',
           text: 'host snapshot',
+          agent: 'plan',
           paused: true,
           droppedFiles: [],
           clipboardImages: [
@@ -261,6 +268,7 @@ describe('state helpers', () => {
 
       expect(stateModule.state.queuedMessages.map((message) => message.id)).toEqual(['host']);
       expect(stateModule.state.queuedMessages[0]?.paused).toBe(true);
+      expect(stateModule.state.queuedMessages[0]?.agent).toBe('plan');
       expect(stateModule.state.queuedMessages[0]?.clipboardImages).toEqual([
         {
           id: 'image-1',

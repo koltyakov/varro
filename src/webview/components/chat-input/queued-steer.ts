@@ -63,6 +63,7 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
     sent =
       (await sendMessage(item.text, {
         delivery: 'steer',
+        ...(item.agent ? { agent: item.agent } : {}),
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,

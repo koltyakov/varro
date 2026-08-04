@@ -75,6 +75,7 @@ export type QueuedAttachmentSnapshot = Pick<
 >;
 
 type SessionSendOptions = SendFlowOptions & {
+  agent?: string;
   queuedAttachments?: QueuedAttachmentSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
@@ -539,7 +540,7 @@ export class SessionSendOperations {
     const activeSessionId = appStore.state.activeSessionId;
     const targetSessionId = options?.targetSessionId ?? activeSessionId;
     const defaultPermissionMode = permissionsStore.getPermissionModeForSession(null);
-    const selectedAgent = appStore.state.selectedAgent;
+    const selectedAgent = options?.agent ?? appStore.state.selectedAgent;
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
     const capturedComposerState: ComposerState = {
       selectedAgent,

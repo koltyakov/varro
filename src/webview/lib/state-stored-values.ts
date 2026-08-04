@@ -200,6 +200,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
   const id = normalizeStoredString(record?.id);
   const sessionId = normalizeStoredString(record?.sessionId);
   if (!id || !sessionId || typeof record?.text !== 'string') return null;
+  const agent = normalizeStoredString(record.agent);
   const droppedFiles = Array.isArray(record.droppedFiles)
     ? record.droppedFiles
         .map(normalizeStoredDroppedFile)
@@ -229,6 +230,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     id,
     sessionId,
     text: record.text,
+    ...(agent ? { agent } : {}),
     ...(record.paused === true ? { paused: true } : {}),
     droppedFiles,
     clipboardImages,

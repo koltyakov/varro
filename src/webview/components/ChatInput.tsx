@@ -1434,6 +1434,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         id: createAttachmentID(),
         sessionId,
         text: sendableText,
+        ...(state.selectedAgent ? { agent: state.selectedAgent } : {}),
         ...(queuedMessagePaused ? { paused: true } : {}),
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
@@ -1518,6 +1519,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     let sent = false;
     try {
       sent = await sendMessage(item.text, {
+        ...(item.agent ? { agent: item.agent } : {}),
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,

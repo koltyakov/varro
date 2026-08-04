@@ -158,6 +158,7 @@ afterEach(() => {
   setState('agents', []);
   setState('allAgents', []);
   setState('providerDefaults', {});
+  setState('selectedAgent', null);
   setState('selectedModel', null);
   setState('modelVariantSelections', {});
   setState('providerLimits', {});
@@ -1671,6 +1672,7 @@ describe('ChatInput', () => {
     setInputText('Follow up with context');
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
+    setState('selectedAgent', 'build');
     setState('droppedFiles', [{ path: '/repo/src/a.ts', relativePath: 'src/a.ts', type: 'file' }]);
     setState('clipboardImages', [
       { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
@@ -1693,6 +1695,7 @@ describe('ChatInput', () => {
     expect(state.queuedMessages).toHaveLength(1);
     expect(state.queuedMessages[0]).toMatchObject({
       text: 'Follow up with context',
+      agent: 'build',
       droppedFiles: [
         {
           path: '/repo/src/a.ts',
@@ -1712,6 +1715,34 @@ describe('ChatInput', () => {
         },
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+  });
+
+  it('dispatches a queued message with the agent selected when it was queued', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('selectedAgent', 'plan');
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        sessionId: 'session-1',
+        text: 'Implement the plan',
+        agent: 'build',
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Implement the plan', {
+      agent: 'build',
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
     });
   });
 
