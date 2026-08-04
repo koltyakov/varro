@@ -1742,7 +1742,7 @@ function SessionListItem(props: {
       isFailed: props.isFailed,
       hasPendingInput: hasPendingInput(),
       isRunning: props.isRunning,
-      isPlanReady: props.isCompletedPlanSession,
+      isPlanReady: props.isCompletedPlanSession && hasUnreadCompletion(),
       isCompleted: hasUnreadCompletion(),
     });
   const indicatorTitle = (kind: SessionStatusIndicatorKind) => {

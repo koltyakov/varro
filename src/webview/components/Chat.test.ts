@@ -2016,14 +2016,19 @@ describe('header status badges', () => {
     expect(sidebarHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
   });
 
-  it('keeps seen plan sessions in the plan-ready badge until skipped or implemented', () => {
+  it('keeps seen plans ready without showing the header badge', () => {
     setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
     setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
     setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setShowSessionPicker(true);
 
     const indicators = deriveSessionIndicators(state.sessions);
     expect(indicators.planReadyIds.has('plan-1')).toBe(true);
     expect(indicators.newlyCompletedIds.has('plan-1')).toBe(false);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(container?.querySelector('.chat-header-plan-badge')).toBeNull();
   });
 
   it('does not mark an empty session with the plan agent as plan ready', () => {
@@ -2104,7 +2109,7 @@ describe('header status badges', () => {
     expect(planTagIndex).toBeLessThan(ageIndex);
   });
 
-  it('continues to show a plan tag for plan-ready sessions', () => {
+  it('hides the indicator but keeps the plan tag for seen plan-ready sessions', () => {
     setState('sessions', [session('plan-1', 200), session('session-1', 100)]);
     setState('activeSessionId', 'session-1');
     setState('lastSeenSessions', { 'plan-1': 200, 'session-1': 100 });
@@ -2116,6 +2121,7 @@ describe('header status badges', () => {
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
     );
 
+    expect(planRow?.querySelector('.session-item-indicator')).toBeNull();
     expect(planRow?.querySelector('.session-item-plan-tag')?.textContent?.trim()).toBe('Plan');
   });
 
@@ -2861,11 +2867,41 @@ describe('usage-limit session status precedence', () => {
 
     cleanup = render(() => Chat(), container!);
 
-    const indicator = container?.querySelector('.session-item .session-item-indicator');
+    const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
+      (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
+    );
+    const indicator = planRow?.querySelector('.session-item-indicator');
 
     expect(indicator?.classList.contains('is-completed')).toBe(false);
     expect(indicator?.classList.contains('is-plan-completed')).toBe(true);
     expect(indicator?.getAttribute('aria-label')).toBe('Plan ready');
+    expect(planRow?.querySelector('.session-item-plan-tag')?.textContent?.trim()).toBe('Plan');
+    expect(container?.querySelector('.chat-header-plan-badge')).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('restores the plan-ready indicator when a seen plan receives a newer update', () => {
+    setState('sessions', [session('active', 600), session('plan-1', 500)]);
+    setState('activeSessionId', 'active');
+    setState('sessionSelectedAgents', { 'plan-1': 'plan' });
+    setState('lastSeenSessions', { active: 600, 'plan-1': 500 });
+    setShowSessionPicker(true);
+
+    cleanup = render(() => Chat(), container!);
+
+    const getPlanRow = () =>
+      Array.from(container?.querySelectorAll('.session-item') ?? []).find(
+        (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
+      );
+
+    expect(getPlanRow()?.querySelector('.session-item-indicator')).toBeNull();
+
+    setState('sessions', [session('active', 600), session('plan-1', 501)]);
+
+    const indicator = getPlanRow()?.querySelector('.session-item-indicator');
+    expect(indicator?.classList.contains('is-plan-completed')).toBe(true);
+    expect(indicator?.getAttribute('aria-label')).toBe('Plan ready');
+    expect(getPlanRow()?.querySelector('.session-item-plan-tag')?.textContent?.trim()).toBe('Plan');
+    expect(container?.querySelector('.chat-header-plan-badge')).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('returns to running once the 429 notice is cleared', () => {

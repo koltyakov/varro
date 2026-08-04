@@ -7,6 +7,7 @@ import {
   openAttentionSessionsKey,
   sessionSearchFocusKey,
   isSessionAwaitingInput,
+  isSessionUnread,
   isActiveSessionWorking,
   getSessionTreeRootId,
   setShowSettings,
@@ -283,7 +284,9 @@ export function Chat() {
       (sessionId) => indicators.runningIds.has(sessionId),
       (sessionId) => indicators.attentionIds.has(sessionId),
       (sessionId) => indicators.failedIds.has(sessionId),
-      (session) => indicators.planReadyIds.has(session.id),
+      (session) =>
+        indicators.planReadyIds.has(session.id) &&
+        isSessionUnread(session.id, session.time.updated),
       (session) => indicators.newlyCompletedIds.has(session.id)
     );
   });
