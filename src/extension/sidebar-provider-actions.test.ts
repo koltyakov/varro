@@ -79,6 +79,9 @@ function createActionFixture() {
   const sessionExportService = {
     exportSession: vi.fn(() => Promise.resolve()),
   };
+  const usageReportService = {
+    openReport: vi.fn(() => Promise.resolve()),
+  };
   const restProxy = {
     handleRequest: vi.fn(() => Promise.resolve()),
   };
@@ -105,6 +108,8 @@ function createActionFixture() {
       contextFilesState as unknown as SidebarProviderActionDeps['contextFilesState'],
     sessionExportService:
       sessionExportService as unknown as SidebarProviderActionDeps['sessionExportService'],
+    usageReportService:
+      usageReportService as unknown as SidebarProviderActionDeps['usageReportService'],
     restProxy: restProxy as unknown as SidebarProviderActionDeps['restProxy'],
     sessionDiffProvider,
     toolOutputProvider,
@@ -137,6 +142,7 @@ function createActionFixture() {
     deps,
     restProxy,
     sessionExportService,
+    usageReportService,
     server,
     webviewSession,
   };
@@ -199,6 +205,7 @@ describe('createSidebarProviderActions', () => {
       deps,
       restProxy,
       sessionExportService,
+      usageReportService,
       webviewSession,
     } = createActionFixture();
 
@@ -211,6 +218,7 @@ describe('createSidebarProviderActions', () => {
     actions.clearTerminalSelection();
     actions.runInTerminal('npm test', 'Tests');
     await actions.exportSession('session-1');
+    await actions.generateUsageReport(false);
     await actions.handleDroppedPaths(['/repo/a.ts']);
     await actions.handleDroppedContent([{ name: 'a.ts', content: 'QQ==', size: 1 }]);
     actions.removeContextFile('/repo/a.ts');
@@ -236,6 +244,7 @@ describe('createSidebarProviderActions', () => {
     expect(contextProvider.clearTerminalSelection).toHaveBeenCalledOnce();
     expect(deps.runInTerminal).toHaveBeenCalledWith('npm test', 'Tests');
     expect(sessionExportService.exportSession).toHaveBeenCalledWith('session-1');
+    expect(usageReportService.openReport).toHaveBeenCalledWith(false);
     expect(deps.handleDroppedPaths).toHaveBeenCalledWith(['/repo/a.ts']);
     expect(deps.handleDroppedContent).toHaveBeenCalledWith([
       { name: 'a.ts', content: 'QQ==', size: 1 },

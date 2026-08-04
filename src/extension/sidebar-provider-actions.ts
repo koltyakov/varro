@@ -8,6 +8,7 @@ import type { SidebarProviderContextFiles } from './sidebar-provider-context-fil
 import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import type { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import type { OpenCodeServer } from './server';
+import type { UsageReportService } from './usage-report-service';
 import type { ChatModelSelection, ExtensionMessage } from '../shared/protocol';
 
 type ConfigPayload = Extract<
@@ -28,6 +29,7 @@ export interface SidebarProviderActionDeps {
   setActiveChatModel(model: ChatModelSelection | null): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
+  usageReportService: UsageReportService;
   restProxy: RestProxy;
   sessionDiffProvider: SessionDiffDocumentProvider;
   toolOutputProvider: ToolOutputDocumentProvider;
@@ -103,6 +105,7 @@ export function createSidebarProviderActions(
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
+    generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
     openSettings: async (query) => {
       await vscode.commands.executeCommand(
         'workbench.action.openSettings',

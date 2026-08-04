@@ -32,6 +32,7 @@ export function getSlashCommands(props: {
   onAttachDiagnostics: () => void;
   onOpenSettings: () => void;
   onExportSession: () => void;
+  onGenerateStats: (includeAllTime: boolean) => void;
   customCommands: Command[];
 }): SlashCommand[] {
   const reservedBuiltInNames = new Set([
@@ -46,6 +47,7 @@ export function getSlashCommands(props: {
     'diagnostics',
     'settings',
     'export',
+    'stats',
     'fork',
     'thinking',
     'reasoning',
@@ -124,6 +126,14 @@ export function getSlashCommands(props: {
       description: 'Export the current session',
       action: () => {
         props.onExportSession();
+      },
+    },
+    {
+      name: 'stats',
+      aliases: [],
+      description: 'Generate a usage report; add all for all time',
+      action: (args) => {
+        props.onGenerateStats(args.trim().toLowerCase() === 'all');
       },
     },
     {

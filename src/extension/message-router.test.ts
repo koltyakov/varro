@@ -25,6 +25,7 @@ function createCallbacks(): MessageRouterCallbacks {
     runInTerminal: vi.fn(),
     openSessionInOpenCode: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
+    generateUsageReport: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
     restartServer: vi.fn(() => Promise.resolve()),
@@ -146,6 +147,15 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'session/export', payload: { sessionId: 's1' } });
     expect(cb.exportSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('dispatches usage/report', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'usage/report', payload: { includeAllTime: true } });
+
+    expect(cb.generateUsageReport).toHaveBeenCalledWith(true);
   });
 
   it('dispatches session/open-in-opencode', async () => {

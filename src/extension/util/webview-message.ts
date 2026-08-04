@@ -92,6 +92,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'terminal/run': true,
   'session/open-in-opencode': true,
   'session/export': true,
+  'usage/report': true,
   'vscode/open-settings': true,
   'vscode/show-output': true,
   'files/drop': true,
@@ -133,6 +134,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'files/pick':
     case 'vscode/show-output':
       return { type };
+
+    case 'usage/report': {
+      const payload = asRecord(message?.payload);
+      return typeof payload?.includeAllTime === 'boolean'
+        ? { type, payload: { includeAllTime: payload.includeAllTime } }
+        : null;
+    }
 
     case 'server/restart': {
       const payload = asRecord(message?.payload);

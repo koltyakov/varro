@@ -116,6 +116,7 @@ Current built-in slash commands include:
 - `/diagnostics` attaches active-file Problems to the next message
 - `/settings` opens VS Code Settings filtered to Varro
 - `/export` opens a JSON export of the current session in the editor
+- `/stats` opens a Markdown usage report for the last 30 days across all OpenCode projects; `/stats all` also includes retained all-time usage
 - `/thinking` or `/reasoning` toggles thinking block visibility
 - `/compact` or `/summarize` compacts conversation context
 - `/fork` forks the current session
@@ -125,6 +126,8 @@ Current built-in slash commands include:
 - `/abort` or `/stop` stops the current run
 
 Custom OpenCode commands loaded from your local config also appear in the same completion list. Skill-sourced commands are browsed through `/skills` instead of being mixed into the main slash-command list.
+
+`/stats` scans the last 30 days of retained OpenCode history across projects and opens an untitled Markdown report. Use `/stats all` when you need the slower all-time scan. Deleted OpenCode history cannot be included.
 
 Some commands only appear when they apply. For example, `/init` only appears in blank sessions and `/abort` only appears while a session is active.
 

@@ -930,6 +930,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         if (!sessionId) return;
         postMessage({ type: 'session/export', payload: { sessionId } });
       },
+      onGenerateStats: (includeAllTime) => {
+        postMessage({ type: 'usage/report', payload: { includeAllTime } });
+      },
       customCommands: state.commands,
     })
   );

@@ -343,11 +343,15 @@ export function createAppState(): AppStateInstance {
   const [providerLimitThresholdPercent, setProviderLimitThresholdPercent] = createSignal(
     readProviderLimitThresholdPercent(initialWebviewState)
   );
-  const [inputText, setInputTextValue] = createSignal('');
+  const [inputText, setInputTextValue] = createSignal(
+    readStoredString(STORAGE_KEYS.inputDraft) ?? ''
+  );
   const [inputTextMutationVersion, setInputTextMutationVersion] = createSignal(0);
   const setInputText: Setter<string> = (value) => {
     setInputTextMutationVersion((version) => version + 1);
-    return setInputTextValue(value);
+    const nextValue = setInputTextValue(value);
+    writeStored(STORAGE_KEYS.inputDraft, nextValue || null);
+    return nextValue;
   };
   const [nextPastedImageIndex, setNextPastedImageIndex] = createSignal(1);
   const [isLoading, setIsLoading] = createSignal(false);

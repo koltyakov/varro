@@ -70,7 +70,7 @@ Generation never stages files or commits automatically. Varro preserves an exist
 - Generate a commit message from staged changes with the quick Source Control toolbar action or the Command Palette
 - Open a completed plan as a Markdown document or continue it in an implementation session
 - Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls; Ralph runs use `Full access`
-- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`
+- Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`
 - Reconnect to resumable sessions after a VS Code reload
 
 ## Quick Start

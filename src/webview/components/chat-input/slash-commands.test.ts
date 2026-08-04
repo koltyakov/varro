@@ -12,6 +12,7 @@ vi.mock('../../hooks/useOpenCode', () => ({
 
 describe('getSlashCommands', () => {
   it('includes init for blank sessions alongside built-ins and custom commands', () => {
+    const onGenerateStats = vi.fn();
     const commands = getSlashCommands({
       isBusy: false,
       canUndo: true,
@@ -25,6 +26,7 @@ describe('getSlashCommands', () => {
       onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onGenerateStats,
       customCommands: [
         {
           name: 'test',
@@ -55,6 +57,7 @@ describe('getSlashCommands', () => {
       'sessions',
       'settings',
       'skills',
+      'stats',
       'test',
       'thinking',
     ]);
@@ -66,6 +69,11 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.name === 'test')).toBe(true);
     expect(commands.some((command) => command.name === 'undo')).toBe(false);
     expect(commands.filter((command) => command.name === 'settings')).toHaveLength(1);
+
+    commands.find((command) => command.name === 'stats')?.action('');
+    commands.find((command) => command.name === 'stats')?.action('all');
+    expect(onGenerateStats).toHaveBeenNthCalledWith(1, false);
+    expect(onGenerateStats).toHaveBeenNthCalledWith(2, true);
   });
 
   it('hides init outside blank sessions', () => {
@@ -82,6 +90,7 @@ describe('getSlashCommands', () => {
       onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onGenerateStats: () => {},
       customCommands: [],
     });
 
@@ -102,6 +111,7 @@ describe('getSlashCommands', () => {
       onAttachDiagnostics: () => {},
       onOpenSettings: () => {},
       onExportSession: () => {},
+      onGenerateStats: () => {},
       customCommands: [
         {
           name: 'init',

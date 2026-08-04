@@ -39,6 +39,7 @@ import { SidebarProviderBridge } from './sidebar-provider-bridge';
 import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
+import { UsageReportService } from './usage-report-service';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -62,6 +63,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly messageRouter: MessageRouter;
   private readonly restProxy: RestProxy;
   public readonly sessionExportService: SessionExportService;
+  private readonly usageReportService: UsageReportService;
   private readonly contextFilesState: SidebarProviderContextFiles;
   private readonly bridge: SidebarProviderBridge;
   private readonly runtime: SidebarProviderRuntime;
@@ -137,6 +139,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
     this.sessionExportService = new SessionExportService(server, SidebarProvider.EXPORT_TIMEOUT_MS);
+    this.usageReportService = new UsageReportService(server, () =>
+      this.runtime.ensureServerStarted()
+    );
     this.sessionDiffProvider = new SessionDiffDocumentProvider(server);
     this.toolOutputProvider = new ToolOutputDocumentProvider();
     this.runtime = new SidebarProviderRuntime(
@@ -259,6 +264,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         },
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
+        usageReportService: this.usageReportService,
         restProxy: this.restProxy,
         sessionDiffProvider: this.sessionDiffProvider,
         toolOutputProvider: this.toolOutputProvider,
