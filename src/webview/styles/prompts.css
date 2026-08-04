@@ -49,9 +49,9 @@
 
 .question-summary-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) fit-content(45%);
+  grid-template-columns: minmax(0, 1fr);
   align-items: baseline;
-  gap: 12px;
+  gap: 2px;
   padding: 7px 10px;
   font-size: 11.5px;
   line-height: 1.4;
@@ -68,11 +68,10 @@
 }
 
 .question-summary-answer {
-  max-width: 260px;
   color: var(--color-vscode-fg);
   font-weight: 600;
   overflow-wrap: anywhere;
-  text-align: right;
+  text-align: left;
 }
 
 .question-summary-answer.is-unanswered {
@@ -479,16 +478,6 @@ body.vscode-light .question-custom-input {
 }
 
 @media (max-width: 560px) {
-  .question-summary-item {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  .question-summary-answer {
-    max-width: none;
-    text-align: left;
-  }
-
   .question-prompt-actions {
     flex-wrap: wrap;
     justify-content: flex-end;

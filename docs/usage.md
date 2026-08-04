@@ -36,6 +36,16 @@ opencode serve --port 4096
 
 If the CLI is installed somewhere that is not on `PATH`, set `varro.server.command` to the executable path.
 
+## Workspace And Remote Environments
+
+Varro requires a trusted, non-virtual workspace because it starts a process with access to workspace files. VS Code does not enable the extension in Restricted Mode or virtual workspaces such as repositories opened without a local or remote filesystem checkout.
+
+Varro is a workspace extension. In Remote SSH, Dev Containers, and similar setups where VS Code runs workspace extensions remotely, Varro and the OpenCode server run on that remote extension host. In those environments:
+
+- `127.0.0.1`, port `4096`, and a manually started OpenCode server refer to the remote host or container, not your desktop.
+- The OpenCode CLI, `varro.server.command`, provider credentials, and OpenCode configuration must be available on that host.
+- Files dragged from the desktop can use Varro's bounded content-upload fallback when their local paths are unavailable to the remote extension host.
+
 ## What Varro Sends As Context
 
 Varro can include more than the text in the composer.
@@ -83,6 +93,16 @@ Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. 
 - `Escape` closes any open composer popup or cancels message editing; otherwise, it returns to the session list without stopping a running session.
 - `Tab` accepts the highlighted slash-command or mention completion.
 - Slash commands are available directly in the composer.
+
+### Queued Messages
+
+Queued messages belong to the session where they were created and dispatch from top to bottom when that session is active, connected, and idle. A pending permission, question, edit, failed dispatch, or steering request prevents automatic dispatch until it is resolved.
+
+- Drag the handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder messages within the same session.
+- Pause or resume an individual message. `Option`/`Alt`-click applies the same action to every queued message for that session.
+- Send a queued message immediately as a steering message, retry a failed send, edit it when the composer is clear, or remove it.
+- Text, selected agent, files, diagnostics, terminal selections, and pasted images are persisted in VS Code workspace state across window and webview reloads. Image data stays in extension-host persistence instead of synchronous webview storage.
+- Successfully dispatched and explicitly removed messages leave the queue. Failed messages remain available for retry.
 
 Current built-in slash commands include:
 
@@ -165,6 +185,21 @@ The composer can show two pieces of model metadata:
 - Context usage, based on token totals from assistant messages and the selected model's context window.
 
 If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
+
+### Provider-Limit Polling And Credentials
+
+Provider-limit polling is enabled by default. Varro polls every `120` seconds and, when that default is in use, every `30` seconds while the active session is working. Results are cached briefly in the extension host.
+
+Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, GitHub Copilot, Gemini, OpenRouter, Z.AI, MiniMax, and Kimi, plus metadata-header probes for compatible OpenAI and GitHub Copilot configurations. Availability depends on the provider and credential type; unsupported providers simply do not show quota details.
+
+To retrieve quota metadata, the extension host can:
+
+- Read the OpenCode authentication store at `${XDG_DATA_HOME:-~/.local/share}/opencode/auth.json` and provider/model metadata.
+- Read provider-specific local credentials when available: `~/.claude/.credentials.json`, `${CODEX_HOME:-~/.codex}/auth.json` or `CODEX_TOKEN`, `${GEMINI_HOME:-~/.gemini}/oauth_creds.json` or `GEMINI_ACCESS_TOKEN`, and GitHub CLI `hosts.yml` under its configured or default config directory.
+- Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
+- Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
+
+Set `varro.providerLimits.disabled` to `true` to stop provider-limit polling and hide its UI. This setting does not affect normal model requests that OpenCode makes while you chat.
 
 ### Recommended OpenCode Configuration
 

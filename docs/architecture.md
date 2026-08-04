@@ -43,6 +43,7 @@ Registers the VS Code command surface that surrounds the chat UI.
 - `varro.about`
 - `varro.showOutput`
 - `varro.openSourceControl`
+- `varro.generateCommitMessage`
 - `varro.agents.openGlobal`
 - `varro.agents.initializeProject`
 - `varro.chat.addToContext`
@@ -169,6 +170,7 @@ That initial state includes:
 - terminal selection
 - dropped files
 - config such as thinking expansion and desktop session pane side
+- whether the extension host is remote
 - interrupted session IDs
 - pending permission and question snapshots
 
@@ -257,28 +259,36 @@ Ralph is a plan-driven orchestration layer that runs on the extension host, so i
 
 ## Request And Event Flow
 
+The lists below show representative traffic rather than every protocol variant. The `ExtensionMessage` and `WebviewMessage` unions in `src/shared/protocol.ts` are the canonical inventory.
+
 ### Webview to extension
 
 The webview sends:
 
 - `api/request` for OpenCode REST calls
+- `workspace/select` and `queued-messages/update` for workspace and queue persistence
 - `files/search`, `files/pick`, `files/drop`, `files/drop-content`, and `files/remove` for context management
-- `vscode/open` and `vscode/open-settings` for editor integration
+- `vscode/open`, `vscode/open-text`, `vscode/open-external`, and `vscode/open-settings` for editor integration
 - `session/export` to open a JSON export of the current session
 - `terminal/run` to launch setup commands such as `opencode auth login`
-- `config/update` and `webview/focus` for UI preference and focus synchronization
+- `providers/watch`, `providers/refresh`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
+- `ralph/*` for host-owned Ralph lifecycle and state synchronization
 
 ### Extension to webview
 
 The extension sends:
 
 - `server/status`
+- `server/restart-blocked`
 - `server/event`
+- `providers/refresh`
 - `context/update`
 - `terminal-selection/update`
 - `files/dropped` and `files/removed`
+- `config/update` and `api/response`
 - `theme/update`
-- `command/new-session`, `command/focus-input`, and `command/abort`
+- `command/*` messages for session navigation and actions
+- `ralph/state`
 
 ### Prompt construction
 
@@ -345,7 +355,7 @@ The webview adds more derived states on top of that data.
 - The webview JavaScript and CSS are bundled as separate local webview resources; only initial state and the small host bridge bootstrap are inline under a CSP nonce.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
-- Queued follow-up prompts are stored client-side and auto-dispatched once the active session becomes idle.
+- Queued follow-up prompts are persisted in extension-host workspace state and auto-dispatched once the active session becomes idle. The browser-side mirror excludes image-bearing entries from synchronous local storage.
 - Message loads are windowed: sessions fetch only the most recent messages (`src/webview/lib/message-window.ts`), older loaded entries are stitched back in during resyncs, and a transcript banner offers loading the full history on demand.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.

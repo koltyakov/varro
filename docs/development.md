@@ -4,7 +4,7 @@ This document covers source setup, packaging, and debugging for the Varro VS Cod
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 22.12+ on Node 22, or Node 24+
+- [Node.js](https://nodejs.org/) 22.22.2+ on Node 22, or Node 24.15.0+
 - [VS Code](https://code.visualstudio.com/) 1.120 or newer
 - [OpenCode CLI](https://opencode.ai) installed globally
 
@@ -228,13 +228,14 @@ Drag and drop also has a fallback path for environments that do not expose local
 - Abort the active session
 - Restart the OpenCode server
 - Open About details, output, Source Control, or global/project `AGENTS.md`
+- Generate a commit message from staged changes
 - Add Explorer files, editor selections, or terminal selections to context
 
 ## Webview Responsibilities
 
 ### State And Connection
 
-`src/webview/lib/state.ts` holds client-side app state, including:
+`src/webview/lib/app-state.ts` owns client-side app state. `src/webview/lib/state.ts` is its compatibility barrel, and focused facades under `src/webview/lib/stores/` group operations for runtime consumers. The central state includes:
 
 - Sessions and active session
 - Messages, tool parts, todos, diffs, permissions, and questions
@@ -288,6 +289,8 @@ While a session is running:
 - follow-ups are queued instead of being sent immediately, including any files, images, or terminal selection attached to the queued message
 - `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply`
 - queued prompts are dispatched automatically once the active session becomes idle
+- queued prompts can be reordered, paused, edited, removed, retried, or sent immediately as steering messages
+- queue snapshots are persisted through the extension host in workspace state; synchronous browser storage excludes image-bearing entries to avoid blocking on large data URLs
 
 The session UI also distinguishes running, attention-needed, failed, completed, and plan-ready states. On larger layouts, the session list can stay pinned beside the main chat pane.
 
@@ -302,6 +305,8 @@ The implementation in `src/extension/provider-limit-service.ts` and `src/extensi
 3. `/experimental/console` metadata from OpenCode
 
 Results are cached briefly in the extension host before being shown in the composer toolbar.
+
+Adapters may read OpenCode and provider-specific local credentials, inspect local provider metadata, and make authenticated quota requests. The Anthropic adapter can refresh and atomically update `~/.claude/.credentials.json` when credentials from that file are rejected. See [Provider-Limit Polling And Credentials](usage.md#provider-limit-polling-and-credentials) for the user-facing disclosure and opt-out setting.
 
 ## MCP And Plan Flows
 
@@ -394,7 +399,13 @@ docs/
 | `npm run lint:check` | Run oxlint without fixing across the repository |
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
+| `npm run test:e2e` | Run the Playwright webview E2E suite |
 | `npm run test:coverage` | Run tests with coverage output |
+| `npm run test:compatibility` | Test the declared OpenCode compatibility range with Docker |
+| `npm run compatibility:discover` | Probe selected published OpenCode versions with Docker |
 | `npm run typecheck` | Check all TypeScript source, test, E2E, and tooling code |
+| `npm run package:vsix` | Create a VSIX from existing build output |
 | `npm run package` | Build and create a VSIX package |
 | `npm run vscode:install` | Package and install the VSIX into local VS Code |
+
+The OpenCode compatibility commands require a running Docker daemon. See the [compatibility harness guide](../scripts/opencode-compatibility/README.md) for floor checks, release discovery, and report behavior.

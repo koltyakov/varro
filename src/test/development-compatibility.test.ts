@@ -21,10 +21,18 @@ describe('development compatibility', () => {
     expect(packageLock.packages['node_modules/rolldown']?.version).toBe('1.2.2');
   });
 
-  it('runs CI at the exact advertised Node floors', async () => {
-    const workflow = await readFile(resolve('.github/workflows/ci.yml'), 'utf8');
+  it('aligns CI and documentation with the exact Node floors', async () => {
+    const [workflow, readme, developmentGuide] = await Promise.all([
+      readFile(resolve('.github/workflows/ci.yml'), 'utf8'),
+      readFile(resolve('README.md'), 'utf8'),
+      readFile(resolve('docs/development.md'), 'utf8'),
+    ]);
+    const advertisedFloors = '22.22.2+ on Node 22, or Node 24.15.0+';
 
+    expect(packageJson.engines.node).toBe('^22.22.2 || >=24.15.0');
     expect(workflow).toContain('node-version: [22.22.2, 24.15.0]');
     expect(workflow).not.toMatch(/^\s*node-version:\s+(?:22|24)\s*$/m);
+    expect(readme).toContain(advertisedFloors);
+    expect(developmentGuide).toContain(advertisedFloors);
   });
 });

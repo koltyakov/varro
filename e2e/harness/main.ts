@@ -68,6 +68,7 @@ const SCENARIO_NAMES = [
   'review-slash',
   'undo-session',
   'linked-tool-question',
+  'completed-tool-question',
   'tool-cards',
   'tool-cards-large-transcript',
   'subagent-sessions',
@@ -2158,6 +2159,69 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     ];
     state.nextSequence = 290;
+    return state;
+  }
+
+  if (name === 'completed-tool-question') {
+    const session = makeSession(
+      'session-completed-question',
+      'Completed tool question',
+      BASE_TIME - 500
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-completed-question-user',
+      ['Collect the reporting preferences.'],
+      BASE_TIME - 5_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-completed-question-assistant',
+      user.info.id,
+      'The reporting preferences are recorded.',
+      BASE_TIME - 4_000
+    );
+    assistant.parts = [
+      {
+        id: 'tool-completed-question-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'completed-question-call-1',
+        tool: 'question',
+        state: {
+          status: 'completed',
+          input: {
+            questions: [
+              { question: 'Which sessions should the report include?' },
+              { question: 'How should daily, weekly, and monthly periods be defined?' },
+              {
+                question: 'How should API cost estimates use the selected composer model?',
+              },
+              { question: 'Where should the generated Markdown file be written?' },
+            ],
+          },
+          output: 'User has answered your questions.',
+          title: 'Asked 4 questions',
+          metadata: {
+            answers: [
+              ['All OpenCode projects'],
+              ['Today, Last 7 days, Last 30 days, plus all time'],
+              [
+                'Token stats by provider and model are calculated to the API cost. The current model can fetch the prices.',
+              ],
+              ['Untitled Markdown'],
+            ],
+          },
+          time: { start: BASE_TIME - 4_000, end: BASE_TIME - 3_000 },
+        },
+      },
+    ];
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 300;
     return state;
   }
 
