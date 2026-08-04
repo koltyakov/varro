@@ -49,7 +49,7 @@
 
 .question-summary-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) fit-content(45%);
   align-items: baseline;
   gap: 12px;
   padding: 7px 10px;
@@ -68,7 +68,7 @@
 }
 
 .question-summary-answer {
-  max-width: min(45%, 260px);
+  max-width: 260px;
   color: var(--color-vscode-fg);
   font-weight: 600;
   overflow-wrap: anywhere;
