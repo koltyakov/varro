@@ -485,6 +485,45 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1'
+    );
+    const summary = page.locator('.assistant-activity-summary').last();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(summary).toContainText('Explored');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+
+    const topBefore = await summary.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+    await summary.click();
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
+
+    const samples = await summary.evaluate(async (element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      const tops: number[] = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      return tops;
+    });
+    expect(
+      samples.every((top) => Math.abs(top - topBefore) <= 1.5),
+      JSON.stringify({ topBefore, samples })
+    ).toBe(true);
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeGreaterThan(
+      10
+    );
+  });
+
   test('keeps visible rows stable after prepending heterogeneous history', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1');
     const list = page.locator('.interactive-list');

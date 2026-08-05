@@ -2604,9 +2604,15 @@ export function MessageList() {
     const anchor = isDiffToggle
       ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
       : control;
+    const expandsCompactActivity =
+      control.matches('.assistant-activity-summary') &&
+      control.getAttribute('aria-expanded') === 'false';
 
     if (isDiffToggle) {
       resumeAutoScrollAfterDiffFocus = false;
+      disengageBottomFollow();
+    } else if (expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked)) {
+      // The disclosure owns this geometry change so its details open below the clicked summary.
       disengageBottomFollow();
     }
 

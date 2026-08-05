@@ -55,6 +55,8 @@ break another unless the shared invariants below remain true.
   actions change its geometry.
 - Inline editing may keep its panel visible, but edit visibility corrections must not reactivate
   sticky navigation or bottom-follow.
+- Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
+  stays fixed while its details grow below it.
 
 ### Sticky Prompts
 

@@ -340,7 +340,6 @@
   gap: 6px;
   max-width: 100%;
   min-height: 0;
-  margin-top: 4px;
   padding: 0;
   border: 0;
   border-radius: var(--radius-control);
@@ -349,7 +348,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 11.5px;
-  line-height: 1;
+  line-height: 1.2;
   text-align: left;
   user-select: none;
   -webkit-user-select: none;
@@ -389,7 +388,7 @@
 }
 
 .assistant-activity-summary + .assistant-activity-details {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .assistant-activity-detail {

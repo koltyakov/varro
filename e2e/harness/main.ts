@@ -3813,6 +3813,8 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
+    compactToolOutput:
+      new URLSearchParams(window.location.search).get('compactToolOutput') === '1',
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,
