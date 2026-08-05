@@ -1038,21 +1038,14 @@ kbd {
   caret-color: transparent;
 }
 
-.chat-tool-invocation-part .tool-invocation-header-shell.has-command-copy .tool-invocation-header {
-  padding-right: calc(var(--space-5) + 36px);
-}
-
-.chat-tool-invocation-part .tool-invocation-header-shell.has-command-copy .tool-invocation-chevron {
-  position: absolute;
-  right: var(--space-5);
-}
-
 .chat-tool-invocation-part .tool-invocation-header-shell > .tool-copy-button {
   position: absolute;
   z-index: var(--z-chrome);
   top: 50%;
   right: calc(var(--space-5) + 14px);
   padding: 4px;
+  border-radius: var(--radius-xs);
+  background: var(--color-vscode-surface-subtle-alt);
   transform: translateY(-50%);
 }
 

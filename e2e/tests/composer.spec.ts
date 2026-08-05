@@ -63,7 +63,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   });
   expect(Math.abs(queueGeometry.queueWidth - queueGeometry.todoWidth)).toBeLessThanOrEqual(1);
   expect(queueGeometry.rowHeight).toBe(28);
-  expect(queueGeometry.rowHeight).toBeLessThan(queueGeometry.todoHeight);
+  expect(queueGeometry.todoHeight).toBe(queueGeometry.rowHeight);
 
   const queueControls = queueList.getByRole('listitem').locator('.chat-queue-control');
   await expect(queueControls).toHaveCount(5);
