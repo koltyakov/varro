@@ -2088,7 +2088,7 @@ describe('OpenCodeProcess install resolution', () => {
     expect(report.guidance).not.toContain('opencode upgrade');
     expect(report.guidance).toContain('bun');
     // `bun add -g ...` cannot run when bun is what went missing, so there is no
-    // command to offer — only the explanation.
+    // command to offer - only the explanation.
     expect(report.suggestedCommand).toBeNull();
   });
 

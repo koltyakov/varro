@@ -701,7 +701,7 @@ export async function sendMessageWithDependencies(
   if (!sessionId) {
     // Creating a session resets the active agent to the session default (e.g. build),
     // so capture the agent the user selected in the composer and re-apply it to the new
-    // session — otherwise the first message in a fresh chat ignores the chosen agent.
+    // session - otherwise the first message in a fresh chat ignores the chosen agent.
     const intendedAgent = deps.getSelectedAgent?.() ?? null;
     const createdId = await deps.createSession(deps.getDefaultPermissionMode());
     if (!createdId) return false;

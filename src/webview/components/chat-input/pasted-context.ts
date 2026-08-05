@@ -41,7 +41,7 @@ export type PastedMentionResult = {
 /**
  * Resolves `@file` mentions without touching global state. Attaching is left to
  * the caller so it can first confirm the composer that produced the paste is
- * still the one on screen — the lookups are async and the user may have sent,
+ * still the one on screen - the lookups are async and the user may have sent,
  * cleared, or switched sessions in the meantime.
  */
 export async function resolvePastedMentionContextFiles(text: string): Promise<PastedMentionResult> {

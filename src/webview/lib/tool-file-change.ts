@@ -329,8 +329,8 @@ function getLayoutContentSignature(content: string) {
     return `${length}:${lineCount}:${hash >>> 0}`;
   }
 
-  // Sample evenly across the whole content so a change anywhere — including the
-  // middle — still perturbs the signature, at a bounded cost.
+  // Sample evenly across the whole content so a change anywhere - including the
+  // middle - still perturbs the signature, at a bounded cost.
   const step = length / MAX_LAYOUT_CONTENT_SCAN_CHARS;
   for (let sample = 0; sample < MAX_LAYOUT_CONTENT_SCAN_CHARS; sample += 1) {
     const index = Math.floor(sample * step);
@@ -982,7 +982,7 @@ export function getDiffFileChanges(diffs: readonly FileDiff[]): FileChange[] {
   return [...byFile.values()];
 }
 
-// The same file is often reported twice — once by a tool (absolute path) and
+// The same file is often reported twice - once by a tool (absolute path) and
 // once by a patch part (workspace-relative path). Treat them as one file when
 // the absolute form ends with the relative form.
 function isSameFileKey(a: string, b: string): boolean {

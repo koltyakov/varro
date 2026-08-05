@@ -1431,7 +1431,7 @@ export class OpenCodeServer extends EventEmitter {
    * A CLI newer than Varro's tested ceiling is the normal state right after an
    * OpenCode release, so this only informs: blocking it would be worse than the
    * silence it replaces. Patch-level drift is expected within days of every
-   * release and is always logged but never popped up — only a minor or major
+   * release and is always logged but never popped up - only a minor or major
    * ahead of the tested version is worth interrupting for.
    */
   private notifyIfAboveTestedCeiling(observedVersion: string | undefined) {

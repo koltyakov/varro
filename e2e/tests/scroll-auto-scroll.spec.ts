@@ -524,6 +524,42 @@ test.describe('auto-scroll', () => {
     );
   });
 
+  test('keeps an unequal-height file edit pager fixed while switching pages', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&pagedDiff=1'
+    );
+    const pager = page.locator('.assistant-file-edit-pager').last();
+    const dots = pager.locator('.assistant-file-edit-pager-dot');
+    const dotGroup = pager.locator('.assistant-file-edit-pager-dots');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(dots).toHaveCount(2);
+    await expect(dots.nth(1)).toHaveAttribute('aria-pressed', 'true');
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+
+    const topBefore = await dotGroup.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+    await dots.first().click();
+    await expect(dots.first()).toHaveAttribute('aria-pressed', 'true');
+
+    const samples = await dotGroup.evaluate(async (element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      const tops: number[] = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      return tops;
+    });
+    expect(
+      samples.every((top) => Math.abs(top - topBefore) <= 1.5),
+      JSON.stringify({ topBefore, samples })
+    ).toBe(true);
+  });
+
   test('keeps visible rows stable after prepending heterogeneous history', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1');
     const list = page.locator('.interactive-list');

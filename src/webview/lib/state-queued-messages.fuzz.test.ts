@@ -9,7 +9,7 @@ import type { QueuedMessage } from './app-state-types';
  * session already occupies*, while every other session's messages must keep
  * their exact positions. That slot-remapping (`sessionIndex++` in
  * reorderQueuedMessage) is easy to break in ways no single example test
- * notices — e.g. off-by-one only when the sessions interleave a particular
+ * notices - e.g. off-by-one only when the sessions interleave a particular
  * way. So: run random op sequences against a trivially-correct reference
  * model and require the real state to match it exactly after every op.
  */

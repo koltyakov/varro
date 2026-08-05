@@ -3367,7 +3367,7 @@ function getPastedImageFilename(index: number) {
 
 /**
  * Removes the exact span the paste inserted, identified by its recorded offset
- * rather than by searching for its text — a composer that already contained the
+ * rather than by searching for its text - a composer that already contained the
  * same mention would otherwise lose the wrong copy. Any edit since the paste
  * (the value no longer matches the snapshot) leaves the text untouched.
  */

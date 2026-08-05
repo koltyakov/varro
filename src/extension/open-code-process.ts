@@ -2581,7 +2581,7 @@ export class OpenCodeProcess {
    * handles its own errors and can report failure while exiting successfully.
    * Only the version on disk settles it. Whatever the command printed is what
    * gets thrown, because that text is the only thing that can classify the
-   * failure into actionable guidance — a message invented here would always
+   * failure into actionable guidance - a message invented here would always
    * classify as `unknown`.
    */
   private async verifyUpgradedCli(targetVersion: string, diagnostics: string) {
@@ -2618,7 +2618,7 @@ export class OpenCodeProcess {
    * Resolves the CLI path and reports whether it was actually found on disk.
    * `found` is what separates "OpenCode is not installed" from "the path you
    * configured does not exist" and from "it is installed but not where Varro
-   * looked" — three failures that need three different instructions.
+   * looked" - three failures that need three different instructions.
    */
   resolveCommandInfo(): { command: string; found: boolean } {
     if (this.command) {

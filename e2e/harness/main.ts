@@ -2806,6 +2806,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500
     );
     const messages: MessageEntry[] = [];
+    const includePagedDiff = new URLSearchParams(window.location.search).get('pagedDiff') === '1';
 
     for (let index = 0; index < 60; index += 1) {
       const createdAt = BASE_TIME - (200 - index) * 1000;
@@ -2817,20 +2818,26 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
       const assistantId = `message-diff-preview-assistant-${index}`;
       const patchId = `${assistantId}-patch`;
+      const patchText =
+        includePagedDiff && index === 59
+          ? [
+              '*** Begin Patch',
+              '*** Update File: src/report-59.ts',
+              '@@',
+              "-export const status = 'pending';",
+              "+export const status = 'ready';",
+              '*** Add File: src/report-59-details.ts',
+              ...Array.from({ length: 45 }, (_, line) => `+export const detail${line} = ${line};`),
+              '*** End Patch',
+            ].join('\n')
+          : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
       const assistant = makeCompletedAssistantMessageWithParts(
         session.id,
         assistantId,
         user.info.id,
         createdAt + 1,
         `Prepared report update ${index}.`,
-        [
-          makeApplyPatchToolPart(
-            session.id,
-            assistantId,
-            patchId,
-            `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`
-          ),
-        ]
+        [makeApplyPatchToolPart(session.id, assistantId, patchId, patchText)]
       );
       messages.push(user, assistant);
     }
@@ -3813,8 +3820,7 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
-    compactToolOutput:
-      new URLSearchParams(window.location.search).get('compactToolOutput') === '1',
+    compactToolOutput: new URLSearchParams(window.location.search).get('compactToolOutput') === '1',
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,

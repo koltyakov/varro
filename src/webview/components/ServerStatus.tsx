@@ -108,7 +108,7 @@ function SecondaryButton(props: { label: string; onClick: () => void }) {
 }
 
 /**
- * Every error state offers a way out without leaving the panel — except where
+ * Every error state offers a way out without leaving the panel - except where
  * restarting is the destructive act the state exists to prevent: a restart
  * stops the running server unconditionally, which is exactly what the
  * active-sessions gate refused to do.
@@ -373,7 +373,7 @@ function MissingCliState() {
           Varro can scan, so point at the escape hatch instead of insisting
           OpenCode is missing. */}
       <p class="px-4 text-[11px] leading-normal text-vscode-muted">
-        Already installed? Varro could not find it on PATH — set the full path in{' '}
+        Already installed? Varro could not find it on PATH - set the full path in{' '}
         <button
           type="button"
           class="text-vscode-link hover:text-vscode-link-active hover:underline"

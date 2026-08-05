@@ -69,7 +69,7 @@ export function PermissionPrompt(props: { permission: Permission }) {
 
       <Show when={duplicateCount() > 1}>
         <div class="permission-prompt-group-note">
-          Requested {duplicateCount()} times in parallel — one response applies to all.
+          Requested {duplicateCount()} times in parallel - one response applies to all.
         </div>
       </Show>
 

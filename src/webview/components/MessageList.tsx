@@ -33,6 +33,7 @@ import {
 import {
   getAssistantActivityGroupMap,
   isAssistantActivityPart,
+  preserveAssistantActivityGroupKeys,
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { isAssistantMessage } from '../lib/message-metrics';
@@ -976,6 +977,8 @@ export function MessageList() {
     current: ReadonlyMap<string, string>
   ) {
     const currentMessageIds = new Set(messageIds());
+    const mountedRows: Array<{ element: HTMLDivElement; messageId: string }> = [];
+    let invalidatedUnmountedHeight = false;
 
     for (const messageId of getChangedInlinePreviewMessageIds(
       previous,
@@ -986,25 +989,61 @@ export function MessageList() {
         `[data-msg-id="${CSS.escape(messageId)}"]`
       );
       if (!mountedRow) {
-        const previousHeight = measuredHeights.get(messageId);
-        if (previousHeight === 0) {
-          measuredHeights.delete(messageId);
-          zeroHeightRenderContentSignatures.delete(messageId);
-          markVirtualMetricsDirty(messageId);
-          publishMeasurementVersion();
-          continue;
-        }
-        // Keep nonzero heights as provisional estimates until the row mounts again. Deleting one
-        // would disable virtualization and mount the entire transcript at once.
+        if (!measuredHeights.delete(messageId)) continue;
+        zeroHeightRenderContentSignatures.delete(messageId);
+        markVirtualMetricsDirty(messageId);
+        invalidatedUnmountedHeight = true;
         continue;
       }
-      queueMicrotask(() => {
-        if (!mountedRow.isConnected || mountedMessageRows.get(messageId) !== mountedRow) return;
-        if (!measureMountedRow(mountedRow, messageId)) return;
-        scheduleStickyPreviewGeometryRefresh({ force: true });
-        scheduleVisibleMeasurement({ afterResize: true });
-      });
+      mountedRows.push({ element: mountedRow, messageId });
     }
+
+    const activeSessionId = state.activeSessionId;
+    const invalidatedAnchorOwnershipEpoch = userScrollOwnershipEpoch;
+    const invalidatedAnchor =
+      invalidatedUnmountedHeight &&
+      !autoScroll() &&
+      !followModeLocked &&
+      !pendingScrollToBottomRequest &&
+      appendScrollRafId === 0 &&
+      !stickyNavigationOwnsScroll() &&
+      !editingMessage() &&
+      !pendingExpansionScrollAnchor &&
+      !pendingStructuralScrollAnchor &&
+      !diffFocusPauseActive &&
+      !(activeSessionId && pendingOlderHistoryAnchors.has(activeSessionId))
+        ? captureVisibleScrollAnchor()
+        : null;
+    const publishChangedLayout = () => {
+      publishMeasurementVersion();
+      if (!invalidatedAnchor) return;
+      queueMicrotask(() => {
+        if (
+          userScrollOwnershipEpoch === invalidatedAnchorOwnershipEpoch &&
+          !stickyNavigationOwnsScroll() &&
+          !pendingExpansionScrollAnchor
+        ) {
+          restoreVisibleScrollAnchor(invalidatedAnchor);
+        }
+      });
+    };
+
+    if (mountedRows.length === 0) {
+      if (invalidatedUnmountedHeight) publishChangedLayout();
+      return;
+    }
+
+    queueMicrotask(() => {
+      const connectedRows = mountedRows.filter(
+        ({ element, messageId }) =>
+          element.isConnected && mountedMessageRows.get(messageId) === element
+      );
+      const measuredMountedHeight = measureMountedRows(connectedRows, false);
+      if (!measuredMountedHeight && !invalidatedUnmountedHeight) return;
+      publishChangedLayout();
+      scheduleStickyPreviewGeometryRefresh({ force: true });
+      scheduleVisibleMeasurement({ afterResize: true });
+    });
   }
 
   createEffect(() => {
@@ -1394,16 +1433,25 @@ export function MessageList() {
     return changed;
   }
 
-  function measureMountedRow(element: HTMLDivElement, messageId: string) {
+  function measureMountedRows(
+    rows: Array<{ element: HTMLDivElement; messageId: string }>,
+    publish = true
+  ) {
     // Tests and no-layout environments may never deliver ResizeObserver entries, so virtualization
     // must not depend on observer callbacks alone.
-    const rect = element.getBoundingClientRect();
-    measuredRowInlineSizes.set(element, rect.width);
-    if (rect.height <= 0) return false;
-    const height = alignMeasuredRowBlockSize(element, rect.height);
-    if (!applyRowHeightMeasurements([{ messageId, height }])) return false;
-    scheduleMeasurementPublish('content');
+    const measurements = rows.flatMap(({ element, messageId }) => {
+      const rect = element.getBoundingClientRect();
+      measuredRowInlineSizes.set(element, rect.width);
+      if (rect.height <= 0) return [];
+      return [{ messageId, height: alignMeasuredRowBlockSize(element, rect.height) }];
+    });
+    if (!applyRowHeightMeasurements(measurements)) return false;
+    if (publish) scheduleMeasurementPublish('content');
     return true;
+  }
+
+  function measureMountedRow(element: HTMLDivElement, messageId: string) {
+    return measureMountedRows([{ element, messageId }]);
   }
 
   function applyRowHeightMeasurements(measurements: Array<{ messageId: string; height: number }>) {
@@ -2598,17 +2646,24 @@ export function MessageList() {
       cancelStickyNavigation();
     }
     if (target.closest('.diff-view-filename')) return;
-    const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
+    const pagerControl = target.closest<HTMLElement>('.assistant-file-edit-pager-dot');
+    if (pagerControl?.getAttribute('aria-pressed') === 'true') return;
+    const control =
+      pagerControl ?? target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
     if (!control || !containerRef.contains(control)) return;
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
-    const anchor = isDiffToggle
-      ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
-      : control;
+    const changesFileEditPage = control.matches('.assistant-file-edit-pager-dot');
+    const anchor = changesFileEditPage
+      ? (control.closest<HTMLElement>('.assistant-file-edit-pager-dots') ?? control)
+      : isDiffToggle
+        ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
+        : control;
     const expandsCompactActivity =
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
 
-    if (isDiffToggle) {
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    if (isDiffToggle || changesFileEditPage) {
       resumeAutoScrollAfterDiffFocus = false;
       disengageBottomFollow();
     } else if (expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked)) {
@@ -3149,36 +3204,42 @@ export function MessageList() {
       return result;
     });
   });
-  const assistantActivityGroupMap = createMemo(() => {
-    if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
+  const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
+    (previous) => {
+      if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
 
-    const previousSignatures = previousTrailingFileEventSignatureMap();
-    const normalizedMessages = messages().map((message) =>
-      isAssistantMessage(message.info)
-        ? {
-            info: message.info,
-            parts: deduplicateFileEdits(
-              collapseLeadingDuplicateFileEvents(
-                message.parts,
-                previousSignatures.get(message.info.id) ?? null
-              )
-            ),
-          }
-        : message
-    );
-    return getAssistantActivityGroupMap(
-      normalizedMessages,
-      (part) =>
-        shouldShowAssistantPartInline(part) &&
-        (!showInlineFileChanges() || !isFileEditPart(part)) &&
-        (part.type !== 'tool' ||
-          (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
-      (part) =>
-        part.type === 'text'
-          ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
-          : shouldShowAssistantPartInline(part)
-    );
-  });
+      const previousSignatures = previousTrailingFileEventSignatureMap();
+      const normalizedMessages = messages().map((message) =>
+        isAssistantMessage(message.info)
+          ? {
+              info: message.info,
+              parts: deduplicateFileEdits(
+                collapseLeadingDuplicateFileEvents(
+                  message.parts,
+                  previousSignatures.get(message.info.id) ?? null
+                )
+              ),
+            }
+          : message
+      );
+      return preserveAssistantActivityGroupKeys(
+        getAssistantActivityGroupMap(
+          normalizedMessages,
+          (part) =>
+            shouldShowAssistantPartInline(part) &&
+            (!showInlineFileChanges() || !isFileEditPart(part)) &&
+            (part.type !== 'tool' ||
+              (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
+          (part) =>
+            part.type === 'text'
+              ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
+              : shouldShowAssistantPartInline(part)
+        ),
+        previous
+      );
+    },
+    new Map()
+  );
   const compactActivityDisclosureLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(

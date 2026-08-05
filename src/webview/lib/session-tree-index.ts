@@ -72,7 +72,7 @@ export function createSessionTreeIndex() {
 
     // A session whose parent is missing from the list (hidden, trashed, scoped
     // to another workspace, or not synced yet) roots its own tree. Without this
-    // it — and every descendant under it — would never be indexed at all, and
+    // it - and every descendant under it - would never be indexed at all, and
     // `getTreeIds` would silently fall back to a single-session tree.
     const rootIds = sessions
       .filter((session) => !session.parentID || !sessionIds.has(session.parentID))

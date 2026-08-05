@@ -212,7 +212,7 @@ export class RestProxy {
       }
 
       // These paths arrive from the webview, so they stay confined to the
-      // workspace — the extension host must not be a read primitive for
+      // workspace - the extension host must not be a read primitive for
       // arbitrary local files.
       const workspaceFileRequest = this.parseWorkspaceFileRequest(method, payload.path);
       if (workspaceFileRequest) {

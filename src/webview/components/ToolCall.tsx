@@ -271,7 +271,7 @@ function normalizedComparableText(value: unknown) {
 
 /**
  * Whitespace-only output is empty output. A command that "succeeds silently"
- * usually returns a bare newline, which is truthy — treating it as content
+ * usually returns a bare newline, which is truthy - treating it as content
  * renders an empty box where the "(no output)" note belongs.
  */
 function isBlank(value: string) {
@@ -425,6 +425,7 @@ export function ToolCall(props: {
   permissionMatch?: ToolCallPermissionMatch | null;
   lightweight?: boolean;
   inlineFileChangeIndex?: number;
+  inlineFileChangeKey?: string;
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
@@ -515,7 +516,7 @@ export function ToolCall(props: {
   );
 
   // The full text. Detail views clamp what they render and open the rest in an
-  // editor tab, which replaced the old head/tail excerpt — that excerpt could
+  // editor tab, which replaced the old head/tail excerpt - that excerpt could
   // cut a closing tag out of the middle of the output.
   const fullOutput = createMemo(() => {
     if (state().status !== 'completed') return '';
@@ -558,6 +559,7 @@ export function ToolCall(props: {
           expanded={expanded()}
           toggleExpand={toggleExpand}
           inlineFileChangeIndex={props.inlineFileChangeIndex}
+          inlineFileChangeKey={props.inlineFileChangeKey}
         />
       );
     }
@@ -755,6 +757,7 @@ function FileChangeCard(props: {
   expanded: boolean;
   toggleExpand: () => void;
   inlineFileChangeIndex?: number;
+  inlineFileChangeKey?: string;
 }) {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
@@ -1110,7 +1113,7 @@ function FileChangeCard(props: {
             stateKey={
               props.inlineFileChangeIndex === undefined
                 ? props.previewStateKey
-                : `${props.previewStateKey}\u0000file:${props.inlineFileChangeIndex}`
+                : `${props.previewStateKey}\u0000file:${props.inlineFileChangeKey ?? props.inlineFileChangeIndex}`
             }
           />
         </div>
@@ -1543,7 +1546,7 @@ function GenericToolCall(props: {
 }
 
 /**
- * The command always occupies exactly one row — it is a label for the output
+ * The command always occupies exactly one row - it is a label for the output
  * below it, not something to read in full here. Copy is the escape hatch, so
  * an ellipsized command is still recoverable in one click.
  */

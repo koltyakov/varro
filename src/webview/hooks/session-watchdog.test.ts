@@ -214,7 +214,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
   });
 
   it('fast-paths when text is buffered in streamingText but not yet committed', async () => {
-    // The completion event was missed, so the text part is still empty — the
+    // The completion event was missed, so the text part is still empty - the
     // streamed text lives in the streaming buffer. This is strong evidence the
     // turn finished and should collapse the grace.
     const streamed = assistant('a1', 's1');
@@ -235,7 +235,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     // The ping case: message.updated completion arrived and settled the
     // assistant message, but the closing session.status idle was missed, so the
     // session is still locally busy. A settled latest assistant is the strongest
-    // local "done" signal — recover on the first server-idle poll instead of
+    // local "done" signal - recover on the first server-idle poll instead of
     // waiting out the no-evidence grace.
     const completed = assistant('a1', 's1', { time: { created: 1, completed: 2 } });
     completed.parts = [textPart('t1', 's1', 'Pong.')];

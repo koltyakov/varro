@@ -4,7 +4,7 @@ import { writeClipboard } from '../lib/write-clipboard';
 /**
  * Copy affordance for tool detail rows that render their value on a single
  * ellipsized line. The row deliberately hides the tail of long values, so this
- * is what keeps them recoverable — it is not decoration.
+ * is what keeps them recoverable - it is not decoration.
  *
  * Hidden until the row is hovered, but focus reveals it too: an invisible
  * focusable control is a keyboard trap.

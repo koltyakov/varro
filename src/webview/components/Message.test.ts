@@ -85,12 +85,12 @@ function reasoningPart(id: string, text: string): Part {
   };
 }
 
-function pressShift() {
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+function pressAlt() {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
 }
 
-function releaseShift() {
-  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }));
+function releaseAlt() {
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
 }
 
 function compactionPart(id: string, options?: { auto?: boolean; overflow?: boolean }): Part {
@@ -1354,7 +1354,7 @@ describe('Message assistant final answer rendering', () => {
     host.remove();
   });
 
-  it('shows the read mode toggle for large final answers only while Shift is pressed', () => {
+  it('shows the read mode toggle for large final answers only while Alt is pressed', () => {
     cleanup = render(
       () =>
         Message({
@@ -1383,12 +1383,12 @@ describe('Message assistant final answer rendering', () => {
 
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
 
-    pressShift();
+    pressAlt();
 
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
-    releaseShift();
+    releaseAlt();
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
 
@@ -1437,17 +1437,18 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
-    pressShift();
+    pressAlt();
 
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
     (toggle as HTMLButtonElement).click();
 
-    const overlay = container?.querySelector('.assistant-read-overlay');
-    const overlayContent = container?.querySelector('.assistant-read-mode-content');
+    const overlay = document.querySelector('.assistant-read-overlay');
+    const overlayContent = document.querySelector('.assistant-read-mode-content');
 
     expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(container?.contains(overlay!)).toBe(false);
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(true);
     expect(overlayContent?.textContent).toContain('Final answer for reading.');
     expect(overlayContent?.textContent).not.toContain('Status update.');
@@ -1455,7 +1456,7 @@ describe('Message assistant final answer rendering', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
-    expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
+    expect(document.querySelector('.assistant-read-overlay')).toBeNull();
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
   });
 

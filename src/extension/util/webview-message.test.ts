@@ -290,7 +290,7 @@ describe('webview message validation', () => {
 
   // The server-status recovery buttons post these; when the allowlist did not
   // cover them the buttons silently did nothing in production while component
-  // and e2e tests — which never run this parser — kept passing.
+  // and e2e tests - which never run this parser - kept passing.
   it.each([
     'npm i -g opencode-ai',
     'opencode upgrade',

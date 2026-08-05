@@ -7,12 +7,12 @@ import { createMessageIndex } from './message-index';
  *
  * The index is a performance cache over the message list; every lookup it
  * answers must match what a linear scan of the actual array would say. A
- * stale or mis-maintained cache doesn't crash — it silently routes streaming
+ * stale or mis-maintained cache doesn't crash - it silently routes streaming
  * deltas and part updates to the wrong part, which is exactly the kind of
  * regression example tests miss. So: apply long random sequences of the same
  * mutations the store performs (append/remove parts, add/remove/replace
  * messages, in-place part updates) with the store's notification discipline,
- * and after every step compare every id lookup — plus ids that were deleted —
+ * and after every step compare every id lookup - plus ids that were deleted -
  * against the brute-force answer.
  */
 
@@ -163,7 +163,7 @@ function runScenario(seed: number) {
         index.invalidate();
       }
     } else if (op === 4) {
-      // Replace a part in place (same id, same position) — content-only
+      // Replace a part in place (same id, same position) - content-only
       // change that must not disturb the cached locations.
       const withParts = msgs.filter((entry) => entry.parts.length > 0);
       if (withParts.length > 0) {

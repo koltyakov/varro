@@ -23,8 +23,8 @@ import {
  *
  *  1. The text a part renders (the Message.tsx selector: streamingText for
  *     the active part, committed text otherwise) is always a prefix of the
- *     part's final text — no garbled or interleaved chunks.
- *  2. Rendered text never gets shorter — no flicker/rollback while stale
+ *     part's final text - no garbled or interleaved chunks.
+ *  2. Rendered text never gets shorter - no flicker/rollback while stale
  *     snapshots and refreshes race the delta stream.
  *  3. Rendered text never runs ahead of what the server actually delivered.
  *  4. After the message finishes, every part holds exactly its full text and
@@ -128,7 +128,7 @@ type PartPlan = {
   chunks: string[];
 };
 
-/** What the user currently sees for a part — mirrors Message.tsx:115. */
+/** What the user currently sees for a part - mirrors Message.tsx:115. */
 function renderedText(partId: string) {
   const entry = state.messages.find((m) => m.info.id === MESSAGE_ID);
   const part = entry?.parts.find((p) => p.id === partId);
@@ -150,7 +150,7 @@ function cloneEntriesWithStaleTexts(rng: Rng, delivered: Map<string, string>): M
       const clone = JSON.parse(JSON.stringify(part)) as Part;
       const deliveredText = delivered.get(part.id);
       if (deliveredText !== undefined && (clone.type === 'text' || clone.type === 'reasoning')) {
-        // A refresh returns whatever the server has accumulated so far —
+        // A refresh returns whatever the server has accumulated so far -
         // any prefix of the delivered stream, possibly behind local state.
         clone.text = deliveredText.slice(0, randomInt(rng, 0, deliveredText.length));
       }
@@ -232,7 +232,7 @@ function runScenario(seed: number) {
   // things make this adversarial anyway:
   //  - With up-front announcement (an initial sync that already contains all
   //    parts), the transition from one part to the next happens without a
-  //    flush in between, so deltas of both parts share a frame — the
+  //    flush in between, so deltas of both parts share a frame - the
   //    "superseded in the same frame" family of flush paths.
   //  - The finalized snapshot of a part can arrive late, while the next part
   //    is already streaming, racing the previous-part commit logic.
@@ -273,7 +273,7 @@ function runScenario(seed: number) {
       }
     }
 
-    // The server closes out every streamed part with a finalized snapshot —
+    // The server closes out every streamed part with a finalized snapshot -
     // sometimes immediately, sometimes while the next part streams.
     if (rng() < 0.5) {
       sendFinalizedSnapshot(plan);

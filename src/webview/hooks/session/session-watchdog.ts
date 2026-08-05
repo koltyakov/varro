@@ -18,8 +18,8 @@ export const STUCK_SESSION_WATCHDOG_INTERVAL_MS = 1_000;
 // recovery with a small safety margin.
 export const STUCK_SESSION_GRACE_MS = 2_000;
 // Reduced grace (zero) used when local evidence says the turn is already done
-// — the latest assistant message is settled (completed/errored) or it streamed
-// its final text with no tools in flight — even though the closing status
+// - the latest assistant message is settled (completed/errored) or it streamed
+// its final text with no tools in flight - even though the closing status
 // event was missed. The server-idle confirmation is still required, but we no
 // longer demand it persist, so recovery happens on the first poll instead of
 // after the full grace window.
@@ -78,7 +78,7 @@ export async function reconcileStuckSessionsWithDependencies(
   // The active session's spinner is also driven by the global loading flag,
   // which can be left on when a completion event is missed even though no
   // session status is busy. Treat it as a candidate so the watchdog recovers
-  // orphaned loading states too — not just stale busy statuses.
+  // orphaned loading states too - not just stale busy statuses.
   if (deps.isLoading()) {
     const activeSessionId = deps.getActiveSessionId();
     if (activeSessionId) candidates.add(activeSessionId);
@@ -152,7 +152,7 @@ export type ForceReconcileIdleSessionDeps = {
 /**
  * Recovers a session the server has confirmed idle. Flips the local status to
  * idle, resyncs messages from the server (authoritative completion + tool
- * results), then — as a last resort for servers that never stamp completion —
+ * results), then - as a last resort for servers that never stamp completion -
  * settles the latest assistant message locally so all message-gated UI
  * converges. Finally stops the chat spinner when nothing in the tree is working.
  */
@@ -217,7 +217,7 @@ export function hasStreamedFinalResponse(
     // Text may still be buffered in the streaming state if the completion
     // event that would commit it (session.next.text.ended) was missed. Treat
     // non-empty buffered text for a part of this message as equivalent
-    // evidence — it collapses the watchdog grace for prompt recovery.
+    // evidence - it collapses the watchdog grace for prompt recovery.
     const hasBufferedText =
       !!streaming &&
       !!streaming.partId &&
@@ -232,7 +232,7 @@ export function hasStreamedFinalResponse(
 /**
  * Strong local evidence the latest turn for `sessionId` has finished, even when
  * its closing status event was missed: the latest assistant message is already
- * settled (completed or errored), or — if still unsettled — it streamed its
+ * settled (completed or errored), or - if still unsettled - it streamed its
  * final text with no tools in flight. The watchdog uses this to collapse its
  * grace window so a missed finish on a short turn (e.g. a ping whose idle /
  * step.ended events never arrived) recovers on the first server-idle poll.

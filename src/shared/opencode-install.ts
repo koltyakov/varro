@@ -151,7 +151,7 @@ export const OPENCODE_TERMINAL_COMMANDS: readonly string[] = [
 /**
  * True for the commands that replace the OpenCode binary on disk. Windows
  * cannot overwrite a running executable, so these need the managed server
- * stopped first — unlike the auth commands, which only touch config.
+ * stopped first - unlike the auth commands, which only touch config.
  */
 export function replacesOpenCodeBinary(command: string): boolean {
   return OPENCODE_TERMINAL_COMMANDS.includes(command.trim());

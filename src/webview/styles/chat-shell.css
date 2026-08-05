@@ -58,7 +58,6 @@ input:focus-visible {
 .interactive-session {
   --chat-horizontal-padding: 14px;
   --interactive-list-scrollbar-inset: 0px;
-  --chat-content-max-width: 960px;
   --chat-sidebar-width: 380px;
   --chat-radius-control: var(--radius-control);
   --chat-radius-card: var(--radius-bubble);
@@ -496,7 +495,7 @@ input:focus-visible {
 }
 
 /* An empty message row (no rendered content) must not contribute any
-   vertical space — otherwise it inflates the gap between two adjacent
+   vertical space - otherwise it inflates the gap between two adjacent
    non-empty rows from the canonical 12px to ~24px. */
 .interactive-item-container:empty {
   padding: 0;

@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   formatAssistantActivityCounts,
   getAssistantActivityStatus,
@@ -48,42 +49,42 @@ function getRevealTrackingKey(item: AssistantRenderItem) {
 
 const COMPACTION_BOUNDARY_RE =
   /^(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*\r?\n)+|(?:\r?\n(?: {0,3}(?:-(?:[ \t]*-){2,}|\*(?:[ \t]*\*){2,}|_(?:[ \t]*_){2,})[ \t]*))+[ \t]*(?:\r?\n\s*)*$/g;
-const [readModeShiftPressed, setReadModeShiftPressed] = createSignal(false);
-let readModeShiftListenerCount = 0;
+const [readModeAltPressed, setReadModeAltPressed] = createSignal(false);
+let readModeAltListenerCount = 0;
 
-function handleReadModeShiftKeydown(event: KeyboardEvent) {
-  if (event.key === 'Shift') setReadModeShiftPressed(true);
+function handleReadModeAltKeydown(event: KeyboardEvent) {
+  if (event.key === 'Alt') setReadModeAltPressed(true);
 }
 
-function handleReadModeShiftKeyup(event: KeyboardEvent) {
-  if (event.key === 'Shift') setReadModeShiftPressed(false);
+function handleReadModeAltKeyup(event: KeyboardEvent) {
+  if (event.key === 'Alt') setReadModeAltPressed(false);
 }
 
-function handleReadModeShiftMousemove(event: MouseEvent) {
-  setReadModeShiftPressed(event.shiftKey);
+function handleReadModeAltMousemove(event: MouseEvent) {
+  setReadModeAltPressed(event.altKey);
 }
 
-function handleReadModeShiftBlur() {
-  setReadModeShiftPressed(false);
+function handleReadModeAltBlur() {
+  setReadModeAltPressed(false);
 }
 
-function retainReadModeShiftListener() {
-  if (readModeShiftListenerCount === 0) {
-    window.addEventListener('keydown', handleReadModeShiftKeydown);
-    window.addEventListener('keyup', handleReadModeShiftKeyup);
-    window.addEventListener('mousemove', handleReadModeShiftMousemove);
-    window.addEventListener('blur', handleReadModeShiftBlur);
+function retainReadModeAltListener() {
+  if (readModeAltListenerCount === 0) {
+    window.addEventListener('keydown', handleReadModeAltKeydown);
+    window.addEventListener('keyup', handleReadModeAltKeyup);
+    window.addEventListener('mousemove', handleReadModeAltMousemove);
+    window.addEventListener('blur', handleReadModeAltBlur);
   }
-  readModeShiftListenerCount += 1;
+  readModeAltListenerCount += 1;
 
   return () => {
-    readModeShiftListenerCount -= 1;
-    if (readModeShiftListenerCount > 0) return;
-    window.removeEventListener('keydown', handleReadModeShiftKeydown);
-    window.removeEventListener('keyup', handleReadModeShiftKeyup);
-    window.removeEventListener('mousemove', handleReadModeShiftMousemove);
-    window.removeEventListener('blur', handleReadModeShiftBlur);
-    setReadModeShiftPressed(false);
+    readModeAltListenerCount -= 1;
+    if (readModeAltListenerCount > 0) return;
+    window.removeEventListener('keydown', handleReadModeAltKeydown);
+    window.removeEventListener('keyup', handleReadModeAltKeyup);
+    window.removeEventListener('mousemove', handleReadModeAltMousemove);
+    window.removeEventListener('blur', handleReadModeAltBlur);
+    setReadModeAltPressed(false);
   };
 }
 
@@ -229,6 +230,7 @@ type AssistantFileEditPage = {
   label: string;
   part: ToolPart;
   inlineFileChangeIndex?: number;
+  inlineFileChangeKey?: string;
 };
 
 function getAssistantFileEditPages(parts: readonly ToolPart[]): AssistantFileEditPage[] {
@@ -249,6 +251,7 @@ function getAssistantFileEditPages(parts: readonly ToolPart[]): AssistantFileEdi
       label: change.toPath || change.path,
       part,
       inlineFileChangeIndex: index,
+      inlineFileChangeKey: change.dedupeKey,
     }));
   });
 }
@@ -354,7 +357,7 @@ export function AssistantMessageContent(props: {
   const showReadModeToggle = createMemo(() => shouldShowReadModeToggle(finalTextContent()));
 
   createEffect(() => {
-    onCleanup(retainReadModeShiftListener());
+    onCleanup(retainReadModeAltListener());
   });
 
   createEffect(() => {
@@ -509,7 +512,7 @@ export function AssistantMessageContent(props: {
 
     const fileEditPages =
       item.kind === 'file-edit-stack' ? getAssistantFileEditPages(item.parts) : [];
-    const showFileEditPager =
+    const showFileEditPager = () =>
       item.kind === 'file-edit-stack' &&
       compactToolOutput() &&
       showInlineFileChanges() &&
@@ -537,7 +540,7 @@ export function AssistantMessageContent(props: {
       >
         <div class="assistant-file-edit-stack">
           <Show
-            when={showFileEditPager}
+            when={showFileEditPager()}
             fallback={
               <For each={item.parts}>
                 {(part) => (
@@ -586,7 +589,7 @@ export function AssistantMessageContent(props: {
             item.part.type === 'text' &&
             item.part.id === finalTextPartId() &&
             showReadModeToggle() &&
-            readModeShiftPressed()
+            readModeAltPressed()
           }
         >
           <div class="assistant-read-mode-toggle-shell">
@@ -642,37 +645,42 @@ export function AssistantMessageContent(props: {
         </div>
       </Show>
       <Show when={readModeOpen() && finalTextContent().trim().length > 0}>
-        <div
-          ref={(element) => onCleanup(trapModalFocus(element))}
-          class="assistant-read-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Read mode"
-          onClick={() => setReadModeOpen(false)}
-        >
-          <button
-            type="button"
-            class="assistant-read-mode-close"
-            aria-label="Exit read mode"
-            title="Exit read mode"
-            onClick={(event) => {
-              event.stopPropagation();
-              setReadModeOpen(false);
-            }}
+        <Portal>
+          <div
+            ref={(element) => onCleanup(trapModalFocus(element))}
+            class="assistant-read-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Read mode"
+            onClick={() => setReadModeOpen(false)}
           >
-            <CloseIcon />
-          </button>
-          <div class="assistant-read-overlay-scroll">
-            <div class="assistant-read-overlay-inner" onClick={(event) => event.stopPropagation()}>
-              <div class="assistant-read-mode-content">
-                <MarkdownRenderer
-                  content={finalTextContent()}
-                  cacheByContent={!!props.info.time.completed}
-                />
+            <button
+              type="button"
+              class="assistant-read-mode-close"
+              aria-label="Exit read mode"
+              title="Exit read mode"
+              onClick={(event) => {
+                event.stopPropagation();
+                setReadModeOpen(false);
+              }}
+            >
+              <CloseIcon />
+            </button>
+            <div class="assistant-read-overlay-scroll">
+              <div
+                class="assistant-read-overlay-inner"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div class="assistant-read-mode-content">
+                  <MarkdownRenderer
+                    content={finalTextContent()}
+                    cacheByContent={!!props.info.time.completed}
+                  />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </Portal>
       </Show>
     </div>
   );
@@ -713,6 +721,7 @@ function AssistantFileEditPager(props: {
           messageInfo={props.info}
           lightweight={props.lightweight}
           inlineFileChangeIndex={selectedPage().inlineFileChangeIndex}
+          inlineFileChangeKey={selectedPage().inlineFileChangeKey}
         />
       </div>
       <div class="assistant-file-edit-pager-dots" role="group" aria-label="File edit pages">
@@ -775,7 +784,7 @@ function AssistantActivityGroup(props: {
             </span>
             <Show when={activityStatus().failed > 0}>
               <span class="assistant-activity-status-failed">
-                {' · '}
+                {'· '}
                 {activityStatus().failed}{' '}
                 {activityStatus().failed === 1 ? 'tool failed' : 'tools failed'}
               </span>
@@ -851,8 +860,35 @@ function getAssistantFlowItemClass(
 
 function ExpandCornersIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M9.29 13.29 4 18.59V17a1 1 0 0 0-2 0v4a1 1 0 0 0 .08.38 1 1 0 0 0 .54.54A1 1 0 0 0 3 22H7a1 1 0 0 0 0-2H5.41l5.3-5.29a1 1 0 0 0-1.42-1.42ZM5.41 4H7a1 1 0 0 0 0-2H3a1 1 0 0 0-.38.08 1 1 0 0 0-.54.54A1 1 0 0 0 2 3V7a1 1 0 0 0 2 0V5.41l5.29 5.3a1 1 0 0 0 1.42 0 1 1 0 0 0 0-1.42ZM21 16a1 1 0 0 0-1 1v1.59l-5.29-5.3a1 1 0 0 0-1.42 1.42L18.59 20H17a1 1 0 0 0 0 2h4a1 1 0 0 0 .38-.08 1 1 0 0 0 .54-.54A1 1 0 0 0 22 21V17a1 1 0 0 0-1-1Zm.92-13.38a1 1 0 0 0-.54-.54A1 1 0 0 0 21 2H17a1 1 0 0 0 0 2h1.59l-5.3 5.29a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0L20 5.41V7a1 1 0 0 0 2 0V3a1 1 0 0 0-.08-.38Z" />
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M9 9L4 4M4 4V8M4 4H8"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M15 9L20 4M20 4V8M20 4H16"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M9 15L4 20M4 20V16M4 20H8"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M15 15L20 20M20 20V16M20 20H16"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
     </svg>
   );
 }

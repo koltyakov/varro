@@ -355,7 +355,10 @@
 }
 
 .assistant-activity-status-failed {
+  margin-left: 0.35em;
   color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
+  font-size: 11px;
+  line-height: inherit;
 }
 
 .assistant-activity-summary:focus-visible {
@@ -667,17 +670,15 @@ body.vscode-light
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item
   > .rendered-markdown
-  p {
-  /* Spacing between flow items is owned by `.assistant-message-flow { gap }`.
-     Flexbox gap does not collapse with child margins, so any margin here
-     would stack on top of the gap. Keep paragraphs flush. */
-  margin-bottom: 0;
-}
-
+  > [data-markdown-segment='tail']
+  > :last-child,
 .assistant-turn-content.assistant-turn-content-plain
   .assistant-message-flow-item
   > .rendered-markdown
+  > [data-markdown-segment='stable']:not(:has(+ [data-markdown-segment='tail'] > :first-child))
   > :last-child {
+  /* Flow-item spacing is owned by `.assistant-message-flow { gap }`; only
+     remove the final block margin so paragraphs within an item keep theirs. */
   margin-bottom: 0;
 }
 
@@ -1005,6 +1006,14 @@ body.vscode-light
   text-wrap: pretty;
 }
 
+.rendered-markdown p:has(+ p) {
+  margin-bottom: 16px;
+}
+
+.rendered-markdown p:has(+ :is(ul, ol)) {
+  margin-bottom: 10px;
+}
+
 .rendered-markdown li {
   text-wrap: pretty;
 }
@@ -1106,6 +1115,10 @@ body.vscode-light
   list-style: none;
   padding-inline-start: 18px;
   margin: 0 0 18px 0;
+}
+.rendered-markdown ul:has(+ p),
+.rendered-markdown ol:has(+ p) {
+  margin-bottom: 10px;
 }
 .rendered-markdown ol > li {
   position: relative;

@@ -163,6 +163,51 @@ export function getAssistantActivityGroupMap(
   return result;
 }
 
+export function preserveAssistantActivityGroupKeys(
+  current: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+  previous: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>
+) {
+  const previousGroupByPart = new Map<string, AssistantActivityGroupInfo>();
+  for (const groups of previous.values()) {
+    for (const group of groups) {
+      for (const part of group.parts) {
+        previousGroupByPart.set(`${part.sessionID}\u0000${part.messageID}\u0000${part.id}`, group);
+      }
+    }
+  }
+
+  const replacements = new Map<AssistantActivityGroupInfo, AssistantActivityGroupInfo>();
+  const claimedPreviousKeys = new Set<string>();
+  for (const groups of current.values()) {
+    for (const group of groups) {
+      if (replacements.has(group)) continue;
+
+      const previousGroups = new Set(
+        group.parts.flatMap((part) => {
+          const previousGroup = previousGroupByPart.get(
+            `${part.sessionID}\u0000${part.messageID}\u0000${part.id}`
+          );
+          return previousGroup ? [previousGroup] : [];
+        })
+      );
+      const previousGroup = previousGroups.size === 1 ? [...previousGroups][0] : undefined;
+      const preservedKey =
+        previousGroup && !claimedPreviousKeys.has(previousGroup.key)
+          ? previousGroup.key
+          : group.key;
+      claimedPreviousKeys.add(preservedKey);
+      replacements.set(group, preservedKey === group.key ? group : { ...group, key: preservedKey });
+    }
+  }
+
+  return new Map(
+    [...current].map(([messageId, groups]) => [
+      messageId,
+      groups.map((group) => replacements.get(group) ?? group),
+    ])
+  );
+}
+
 export function formatAssistantActivityCounts(
   parts: readonly AssistantActivityPart[],
   inProgress = false

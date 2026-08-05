@@ -22,6 +22,7 @@ export function MessagePart(props: {
   permissionMatch?: ToolCallPermissionMatch | null;
   lightweight?: boolean;
   inlineFileChangeIndex?: number;
+  inlineFileChangeKey?: string;
 }) {
   const p = () => props.part;
 
@@ -44,6 +45,7 @@ export function MessagePart(props: {
             permissionMatch={props.permissionMatch}
             lightweight={props.lightweight}
             inlineFileChangeIndex={props.inlineFileChangeIndex}
+            inlineFileChangeKey={props.inlineFileChangeKey}
           />
         );
       case 'reasoning':

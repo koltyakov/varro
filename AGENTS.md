@@ -15,6 +15,7 @@
 - Imports: builtins/external first, then local relative imports; keep `import type` separate where practical.
 - Use relative imports; do not introduce new path aliases.
 - Formatting follows existing `oxfmt`: 2-space indent, semicolons, single quotes, trailing commas in multiline literals.
+- Do not use em dashes in prose; use a hyphen (`-`) instead.
 - Naming: `PascalCase` for components/classes/types, `camelCase` for functions/vars, `UPPER_SNAKE_CASE` or `static readonly` for constants.
 - Keep changes minimal and local; extract helpers only when reuse or readability clearly improves.
 - If an extraction has one consumer, treat it as a file split: keep it private or use a class/object directly instead of adding a public factory API.

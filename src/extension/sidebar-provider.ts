@@ -542,7 +542,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   /**
    * Starts a periodic reconciliation poll whenever the extension tracks busy
    * sessions and the server is running. This is the fallback that recovers
-   * sessions whose completion event was lost — the webview-side watchdog only
+   * sessions whose completion event was lost - the webview-side watchdog only
    * runs while the panel is visible, so a hidden webview would never recover.
    * The poll asks the server (authoritative) which sessions are idle and, for
    * any that disagree with our busy set past the grace window, posts a

@@ -206,7 +206,7 @@ describe('SessionStateManager notifications', () => {
     manager.markSessionBusy('session-1');
     expect(manager.busy.has('session-1')).toBe(true);
 
-    // No intervening `busy` event — idle arrives directly.
+    // No intervening `busy` event - idle arrives directly.
     manager.handleServerEvent({
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'idle' } },

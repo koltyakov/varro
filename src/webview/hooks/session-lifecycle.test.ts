@@ -405,7 +405,7 @@ describe('session-lifecycle helpers', () => {
       workspace: '/repo',
     });
 
-    // session-2 is outside workspace and exists in the list — should be filtered out
+    // session-2 is outside workspace and exists in the list - should be filtered out
     upsertSession(setup.deps, session('session-2', '/other', 3));
 
     expect(setup.current.sessions.map((item) => item.id)).toEqual(['session-1']);

@@ -1178,7 +1178,7 @@ kbd {
    rather than as content that happens to end mid-sentence.
    Both stops are placed against the text, not the element box. Ending the
    gradient at 100% put full transparency at the bottom of the 8px padding, so
-   the last line only ever reached ~35% alpha — on a dark panel that reads as no
+   the last line only ever reached ~35% alpha - on a dark panel that reads as no
    fade at all. Ending it at the text's bottom edge instead makes the last line
    ramp all the way to invisible. Pairs with trimming blank lines off the
    preview, so there is always text under the gradient. */
@@ -1407,7 +1407,7 @@ kbd {
 
 /* Same surface as .terminal-command-card, deliberately: both are tool detail
    panels and should read as one component with different row anatomy. Keep
-   these two in sync — if the terminal panel's background or radius changes,
+   these two in sync - if the terminal panel's background or radius changes,
    this changes with it. The `black 14%` mix only works on a dark theme; the
    light/high-contrast-light override lives in base.css and lists every panel
    using this background, so add to that list before using it anywhere new. */
@@ -1419,7 +1419,7 @@ kbd {
 }
 
 /* Every row uses this one grid, including multi-line values like prompt and
-   result — those used to stack their value under the label, which broke the
+   result - those used to stack their value under the label, which broke the
    label/value alignment the rest of the card holds to.
    The label/value gutter comes from column-gap; the 10px outer inset matches
    the terminal panel's rows so both panels breathe the same. */
@@ -1432,7 +1432,7 @@ kbd {
 
 /* Each row is its own grid, so a per-row max-content label column would leave
    the values ragged. Subgrid hands every row the card's single column pair, so
-   the labels size to the widest one and all values start on the same edge —
+   the labels size to the widest one and all values start on the same edge -
    short labels (pattern/path) hug without a hardcoded floor. */
 @supports (grid-template-columns: subgrid) {
   .chat-tool-invocation-part .structured-tool-card {

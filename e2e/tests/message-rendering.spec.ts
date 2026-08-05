@@ -13,12 +13,42 @@ test('opens read mode for long assistant answers and preserves rendered content'
   await expect(page.getByRole('button', { name: 'Copy code' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open read mode' })).toHaveCount(0);
 
-  await page.keyboard.down('Shift');
+  await page.locator('.interactive-list-track').evaluate((track) => {
+    track.classList.add('virtualized');
+  });
+  const chatContentWidth = await page
+    .locator('.interactive-list-track')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  await page.keyboard.down('Alt');
   await page.getByRole('button', { name: 'Open read mode' }).click();
-  await page.keyboard.up('Shift');
+  await page.keyboard.up('Alt');
 
   const dialog = page.getByRole('dialog', { name: 'Read mode' });
   await expect(dialog).toBeVisible();
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          left: box.left,
+          top: box.top,
+          width: box.width,
+          height: box.height,
+          contentWidth: element
+            .querySelector('.assistant-read-overlay-inner')!
+            .getBoundingClientRect().width,
+          insideMessageRow: element.closest('.interactive-item-container') !== null,
+        };
+      })
+    )
+    .toEqual({
+      left: 0,
+      top: 0,
+      width: await page.evaluate(() => window.innerWidth),
+      height: await page.evaluate(() => window.innerHeight),
+      contentWidth: chatContentWidth,
+      insideMessageRow: false,
+    });
   await expect(dialog.getByText('rich assistant message controls')).toBeVisible();
   await expect(dialog.getByText("export const useful = 'e2e coverage';")).toBeVisible();
 
@@ -33,9 +63,9 @@ test('closes read mode with escape', async ({ page }) => {
   await expect(page.locator('.chat-header-title-text').first()).toHaveText(
     'Rendered message actions'
   );
-  await page.keyboard.down('Shift');
+  await page.keyboard.down('Alt');
   await page.getByRole('button', { name: 'Open read mode' }).click();
-  await page.keyboard.up('Shift');
+  await page.keyboard.up('Alt');
   const dialog = page.getByRole('dialog', { name: 'Read mode' });
   await expect(dialog).toBeVisible();
 

@@ -25,7 +25,7 @@ function activeRalphSessionId() {
 
 // Hosts the single live ChatInput. While a message is being edited the
 // composer DOM relocates into the edited message row (the Portal moves the
-// existing nodes — component state is preserved); otherwise it sits in the
+// existing nodes - component state is preserved); otherwise it sits in the
 // bottom slot.
 function ComposerHost() {
   const [bottomMount, setBottomMount] = createSignal<HTMLElement | null>(null);

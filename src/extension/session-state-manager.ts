@@ -1028,7 +1028,7 @@ export class SessionStateManager {
   /**
    * Compares locally-tracked busy sessions against server-authoritative status
    * (REST `/session/status`). Returns IDs of sessions the server has reported
-   * idle for at least `graceMs` while we still track them as busy — strong
+   * idle for at least `graceMs` while we still track them as busy - strong
    * evidence the completion event was lost (e.g. during an SSE reconnect or
    * while the webview was hidden, where the webview-side watchdog cannot run).
    * Clears those sessions locally (mirroring the normal completion path) so

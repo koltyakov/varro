@@ -141,7 +141,7 @@ export class AutoApproveJudge {
     const subject = describePermissionSubject(permission);
     logger.info(
       `[auto-approve] ${response.decision} (${source}) ${permission.type} "${subject}" session=${permission.sessionID}${
-        response.reason ? ` — ${response.reason}` : ''
+        response.reason ? ` - ${response.reason}` : ''
       }`
     );
   }

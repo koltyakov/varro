@@ -72,6 +72,7 @@ import {
 } from '../lib/message-window';
 import { client } from '../lib/client';
 import { setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -791,6 +792,7 @@ afterEach(async () => {
   setState('streamingPartId', null);
   setState('streamingText', '');
   resetMessageWindowState();
+  resetToolCallExpansionState();
   setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
@@ -989,6 +991,39 @@ describe('MessageList compact activity', () => {
     container?.querySelector<HTMLButtonElement>('.assistant-file-edit-pager-dot')?.click();
 
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('app.ts');
+  });
+
+  it('keeps an expanded activity group open when history extends it backward', async () => {
+    const command = toolPart('command-1', 'assistant-1', 'call-command-1');
+    const thought: Part = {
+      id: 'reasoning-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-2',
+      type: 'reasoning',
+      text: 'Verifying results',
+      time: { start: 3, end: 4 },
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
+
+    replaceMessages([
+      { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [command] },
+      { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
+    ]);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.assistant-activity-summary')?.getAttribute('aria-expanded')
+    ).toBe('true');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
   });
 });
 
@@ -1234,6 +1269,76 @@ describe('MessageList history pagination', () => {
     expansionControl.click();
 
     expansionOffset = 100;
+    layoutObserver!.callback(
+      [{ target: track } as unknown as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
+    harness.animationFrames.flush();
+    await Promise.resolve();
+    expect(harness.getScrollTop()).toBe(120);
+    const visibleRow = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    const visibleTopBefore =
+      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+
+    await harness.resolveLoad();
+
+    const visibleTopAfter =
+      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
+    expect(visibleTopAfter).toBe(visibleTopBefore);
+    expect(harness.getScrollTop()).toBe(320);
+    harness.animationFrames.restore();
+  });
+
+  it('transfers pending history ownership after a file edit page correction', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    let pageOffset = 0;
+    const harness = await mountDeferredHistory(
+      [
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+        { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+        { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+      ],
+      (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? pageOffset : 0)
+    );
+    await harness.startLoad(20);
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
+    );
+    const changedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    const pagerDots = document.createElement('div');
+    pagerDots.className = 'assistant-file-edit-pager-dots';
+    pagerDots.getBoundingClientRect = () =>
+      new DOMRect(0, 200 + pageOffset - harness.getScrollTop(), 500, 20);
+    const pageControl = document.createElement('button');
+    pageControl.className = 'assistant-file-edit-pager-dot';
+    pageControl.setAttribute('aria-pressed', 'false');
+    pagerDots.append(pageControl);
+    changedRow.append(pagerDots);
+    pageControl.click();
+
+    pageOffset = 100;
     layoutObserver!.callback(
       [{ target: track } as unknown as ResizeObserverEntry],
       layoutObserver as unknown as ResizeObserver
@@ -6194,25 +6299,28 @@ describe('MessageList auto-scroll', () => {
         const messageId = `assistant-${index}`;
         return {
           info: assistantMessage(messageId),
-          parts: [
-            {
-              id: `read-${index}`,
-              sessionID: 'session-1',
-              messageID: messageId,
-              type: 'tool' as const,
-              callID: `call-${index}`,
-              tool: 'read',
-              state: {
-                status: 'completed' as const,
-                input: { filePath: `src/file-${index}.ts` },
-                output: 'source',
-                title: `src/file-${index}.ts`,
-                metadata: {},
-                time: { start: 1, end: 2 },
-              },
-            },
-            { ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId },
-          ],
+          parts:
+            index >= 5 && index < 39
+              ? [
+                  {
+                    id: `read-${index}`,
+                    sessionID: 'session-1',
+                    messageID: messageId,
+                    type: 'tool' as const,
+                    callID: `call-${index}`,
+                    tool: 'read',
+                    state: {
+                      status: 'completed' as const,
+                      input: { filePath: `src/file-${index}.ts` },
+                      output: 'source',
+                      title: `src/file-${index}.ts`,
+                      metadata: {},
+                      time: { start: 1, end: 2 },
+                    },
+                  },
+                  { ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId },
+                ]
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
         };
       })
     );
@@ -6248,7 +6356,7 @@ describe('MessageList auto-scroll', () => {
     ];
     for (const row of mountedRows) {
       const index = Number(row.dataset.msgId!.replace('assistant-', ''));
-      rowHeights[index] = 60;
+      if (index >= 5 && index < 39) rowHeights[index] = 60;
     }
 
     setCompactToolOutput(true);
@@ -6260,6 +6368,200 @@ describe('MessageList auto-scroll', () => {
     expect(container?.querySelector('.assistant-activity-summary')).toBeInstanceOf(
       HTMLButtonElement
     );
+    expect(anchor.isConnected).toBe(true);
+    expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+    animationFrames.restore();
+  });
+
+  it('invalidates cached heights for offscreen rows when compact output changes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 5000);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        const activityPart = toolPart(`read-${index}`, messageId, `call-${index}`);
+        activityPart.tool = 'read';
+        activityPart.state = {
+          status: 'completed',
+          input: { filePath: `src/file-${index}.ts` },
+          output: 'source',
+          title: `src/file-${index}.ts`,
+          metadata: {},
+          time: { start: 1, end: 2 },
+        };
+        return {
+          info: assistantMessage(messageId, { parentID: 'user-1' }),
+          parts:
+            index < 40
+              ? [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }]
+              : [activityPart],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 0;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
+    const bottomSpacer = () =>
+      Number.parseFloat(
+        container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height || '0'
+      );
+    const bottomPadBefore = bottomSpacer();
+
+    setCompactToolOutput(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
+    expect(bottomSpacer() - bottomPadBefore).toBe(600);
+    animationFrames.restore();
+  });
+
+  it('preserves the visible row while invalidating offscreen heights above it', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const rowHeights = Array.from({ length: 50 }, () => 100);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            rowHeights.reduce((sum, height) => sum + height, 0)
+          );
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          const mountedIndexes = [
+            ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
+          ].map((row) => Number(row.dataset.msgId!.replace('assistant-', '')));
+          const firstMountedIndex = Math.min(...mountedIndexes, index);
+          const topPad = Number.parseFloat(
+            container?.querySelector<HTMLElement>('.virtual-spacer-top')?.style.height || '0'
+          );
+          const mountedHeightBefore = rowHeights
+            .slice(firstMountedIndex, index)
+            .reduce((sum, height) => sum + height, 0);
+          return new DOMRect(
+            0,
+            topPad + mountedHeightBefore - scrollTopValue,
+            500,
+            rowHeights[index]
+          );
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        const activityPart = toolPart(`read-${index}`, messageId, `call-${index}`);
+        activityPart.tool = 'read';
+        activityPart.state = {
+          status: 'completed',
+          input: { filePath: `src/file-${index}.ts` },
+          output: 'source',
+          title: `src/file-${index}.ts`,
+          metadata: {},
+          time: { start: 1, end: 2 },
+        };
+        return {
+          info: assistantMessage(messageId, { parentID: 'user-1' }),
+          parts:
+            index < 5
+              ? [activityPart]
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((sum, height) => sum + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    expect(anchor).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('[data-msg-id="assistant-0"]')).toBeNull();
+    const anchorTopBefore = anchor.getBoundingClientRect().top;
+    rowHeights[0] = 40;
+    for (let index = 1; index < 5; index += 1) rowHeights[index] = 0;
+
+    setCompactToolOutput(true);
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
     animationFrames.restore();

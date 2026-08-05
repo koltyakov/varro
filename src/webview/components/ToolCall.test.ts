@@ -455,7 +455,7 @@ describe('ToolCall', () => {
       callID: 'call-1',
       tool: 'bash',
       // A command that succeeds silently returns a bare newline, which is
-      // truthy — the old check rendered it as content.
+      // truthy - the old check rendered it as content.
       state: completedState({ command: 'rtk git diff --check' }, 'rtk git diff --check', '\n  \n'),
     };
 

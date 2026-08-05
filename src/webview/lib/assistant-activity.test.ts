@@ -5,6 +5,7 @@ import {
   getAssistantActivityGroupMap,
   getAssistantActivityStatus,
   isAssistantActivityPart,
+  preserveAssistantActivityGroupKeys,
 } from './assistant-activity';
 
 function completedTool(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
@@ -176,6 +177,20 @@ describe('assistant activity summaries', () => {
     expect(getAssistantActivityGroupMap(messages.slice(1)).get('assistant-1')?.[0]?.key).toBe(
       firstGroup?.key
     );
+
+    const initialWindow = getAssistantActivityGroupMap(messages.slice(2));
+    const prependedWindow = getAssistantActivityGroupMap(messages.slice(1));
+    expect(prependedWindow.get('assistant-2')?.[0]?.key).not.toBe(
+      initialWindow.get('assistant-2')?.[0]?.key
+    );
+
+    const preserved = preserveAssistantActivityGroupKeys(prependedWindow, initialWindow);
+    expect(preserved.get('assistant-1')?.[0]?.key).toBe(initialWindow.get('assistant-2')?.[0]?.key);
+    expect(preserved.get('assistant-2')?.[0]).toBe(preserved.get('assistant-1')?.[0]);
+    expect(preserved.get('assistant-1')?.[0]).toMatchObject({
+      ownerMessageId: 'assistant-1',
+      ownerPartId: 'bash-1',
+    });
   });
 
   it('starts a new activity group after visible response text', () => {

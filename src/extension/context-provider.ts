@@ -795,8 +795,8 @@ async function hasGitChange(uri: vscode.Uri): Promise<boolean> {
 
 /**
  * Containment by canonical path. `vscode.workspace.getWorkspaceFolder` matches
- * lexically, so a symlink inside the workspace that points outside it — say
- * `<workspace>/vendor -> /etc` — is reported as workspace-owned. Resolving both
+ * lexically, so a symlink inside the workspace that points outside it - say
+ * `<workspace>/vendor -> /etc` - is reported as workspace-owned. Resolving both
  * sides first closes that.
  */
 async function resolveInsideWorkspace(

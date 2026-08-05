@@ -25,6 +25,7 @@ type MockMessagePartProps = {
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
   inlineFileChangeIndex?: number;
+  inlineFileChangeKey?: string;
 };
 
 const markdownRendererMock = vi.hoisted(() =>
@@ -45,6 +46,7 @@ const messagePartMock = vi.hoisted(() =>
       data-part-id={props.part.id}
       data-part-type={props.part.type}
       data-inline-file-index={props.inlineFileChangeIndex}
+      data-inline-file-key={props.inlineFileChangeKey}
     >
       {props.streamedText ??
         (props.part.type === 'text' || props.part.type === 'reasoning'
@@ -132,6 +134,20 @@ function fileEditPart(id: string, path: string): ToolPart {
   };
 }
 
+function previewFileEditPart(id: string, path: string): ToolPart {
+  return {
+    ...fileEditPart(id, path),
+    state: completedToolState(
+      {
+        filePath: path,
+        oldString: `const ${id} = 1;`,
+        newString: `const ${id} = 2;`,
+      },
+      `updated ${path}`
+    ),
+  };
+}
+
 function toolPart(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
   return {
     id,
@@ -204,6 +220,14 @@ function pressShift() {
 
 function releaseShift() {
   window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift' }));
+}
+
+function pressAlt() {
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+}
+
+function releaseAlt() {
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
 }
 
 describe('deduplicateFileEdits', () => {
@@ -329,7 +353,7 @@ describe('AssistantMessageContent', () => {
       'Explored 2 files'
     );
     expect(container?.querySelector('.assistant-activity-status-failed')?.textContent).toBe(
-      ' · 1 tool failed'
+      '· 1 tool failed'
     );
     expect(container?.querySelector('.assistant-activity-group')?.classList).not.toContain(
       'has-failure'
@@ -551,7 +575,7 @@ describe('AssistantMessageContent', () => {
     ).toBe('edit-2');
   });
 
-  it('filters highlighted-card meta text using effective text and opens read mode for the final answer while Shift is pressed', async () => {
+  it('filters highlighted-card meta text and opens read mode only while Alt is pressed', async () => {
     const filteredPart = textPart('text-1', 'Visible before text rewrite');
     const finalPart = textPart(
       'text-2',
@@ -583,6 +607,10 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
 
     pressShift();
+    expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
+    releaseShift();
+
+    pressAlt();
 
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
@@ -590,26 +618,27 @@ describe('AssistantMessageContent', () => {
     (toggle as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
-      expect(container?.querySelector('.assistant-read-overlay')).toBeInstanceOf(HTMLDivElement);
+      expect(document.querySelector('.assistant-read-overlay')).toBeInstanceOf(HTMLDivElement);
     });
 
+    expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(true);
-    expect(container?.querySelector('.assistant-read-mode-content')?.textContent).toContain(
+    expect(document.querySelector('.assistant-read-mode-content')?.textContent).toContain(
       'Final answer for read mode.'
     );
-    expect(container?.querySelector('.assistant-read-mode-content')?.textContent).not.toContain(
+    expect(document.querySelector('.assistant-read-mode-content')?.textContent).not.toContain(
       '[Working directory: /workspace]'
     );
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 
     await vi.waitFor(() => {
-      expect(container?.querySelector('.assistant-read-overlay')).toBeNull();
+      expect(document.querySelector('.assistant-read-overlay')).toBeNull();
     });
 
     expect(document.body.classList.contains('chat-read-mode-open')).toBe(false);
 
-    releaseShift();
+    releaseAlt();
     expect(container?.querySelector('.assistant-read-mode-toggle')).toBeNull();
   });
 
@@ -625,6 +654,160 @@ describe('AssistantMessageContent', () => {
     expect(stack?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
   });
+
+  it.each([
+    {
+      compactOutput: false,
+      inlineChanges: false,
+      detailsShown: false,
+      summaryCount: 0,
+      pagerCount: 0,
+      detailCount: 0,
+      renderedPartCount: 3,
+    },
+    {
+      compactOutput: false,
+      inlineChanges: false,
+      detailsShown: true,
+      summaryCount: 0,
+      pagerCount: 0,
+      detailCount: 0,
+      renderedPartCount: 3,
+    },
+    {
+      compactOutput: false,
+      inlineChanges: true,
+      detailsShown: false,
+      summaryCount: 0,
+      pagerCount: 0,
+      detailCount: 0,
+      renderedPartCount: 3,
+    },
+    {
+      compactOutput: false,
+      inlineChanges: true,
+      detailsShown: true,
+      summaryCount: 0,
+      pagerCount: 0,
+      detailCount: 0,
+      renderedPartCount: 3,
+    },
+    {
+      compactOutput: true,
+      inlineChanges: false,
+      detailsShown: false,
+      summaryCount: 1,
+      pagerCount: 0,
+      detailCount: 0,
+      renderedPartCount: 0,
+    },
+    {
+      compactOutput: true,
+      inlineChanges: false,
+      detailsShown: true,
+      summaryCount: 1,
+      pagerCount: 0,
+      detailCount: 3,
+      renderedPartCount: 3,
+    },
+    {
+      compactOutput: true,
+      inlineChanges: true,
+      detailsShown: false,
+      summaryCount: 1,
+      pagerCount: 2,
+      detailCount: 0,
+      renderedPartCount: 1,
+    },
+    {
+      compactOutput: true,
+      inlineChanges: true,
+      detailsShown: true,
+      summaryCount: 1,
+      pagerCount: 2,
+      detailCount: 1,
+      renderedPartCount: 2,
+    },
+  ])('renders compact=$compactOutput inline=$inlineChanges details=$detailsShown', (expected) => {
+    setCompactToolOutput(expected.compactOutput);
+    setShowInlineFileChanges(expected.inlineChanges);
+    renderAssistantMessageContent({
+      parts: [
+        toolPart('read-1', 'read'),
+        previewFileEditPart('edit-1', 'src/one.ts'),
+        previewFileEditPart('edit-2', 'src/two.ts'),
+      ],
+    });
+
+    if (expected.detailsShown) {
+      container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+    }
+
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(
+      expected.summaryCount
+    );
+    expect(container?.querySelectorAll('.assistant-file-edit-pager-dot')).toHaveLength(
+      expected.pagerCount
+    );
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(
+      expected.detailCount
+    );
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(
+      expected.renderedPartCount
+    );
+  });
+
+  it('reactively adds and removes the file edit pager when compact output changes', () => {
+    setShowInlineFileChanges(true);
+    renderAssistantMessageContent({
+      parts: [
+        previewFileEditPart('edit-1', 'src/one.ts'),
+        previewFileEditPart('edit-2', 'src/two.ts'),
+      ],
+    });
+
+    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+
+    setCompactToolOutput(true);
+
+    expect(container?.querySelectorAll('.assistant-file-edit-pager-dot')).toHaveLength(2);
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(1);
+
+    setCompactToolOutput(false);
+
+    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+  });
+
+  it.each(['subagent', 'question'] as const)(
+    'does not page inline edits for %s output',
+    (variant) => {
+      setCompactToolOutput(true);
+      setShowInlineFileChanges(true);
+      const parts = [
+        previewFileEditPart('edit-1', 'src/one.ts'),
+        previewFileEditPart('edit-2', 'src/two.ts'),
+      ];
+
+      renderAssistantMessageContent({
+        info: createAssistantMessage(variant === 'subagent' ? { mode: 'subagent' } : {}),
+        parts,
+        questionRequestForTool:
+          variant === 'question'
+            ? (part) => ({
+                id: `question-${part.id}`,
+                sessionID: 'session-1',
+                questions: [],
+                tool: { messageID: part.messageID, callID: part.callID },
+              })
+            : undefined,
+      });
+
+      expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+      expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+    }
+  );
 
   it('pages compact inline edits across tool calls and files and preserves selection', () => {
     setCompactToolOutput(true);
@@ -688,6 +871,46 @@ describe('AssistantMessageContent', () => {
 
     expect(selectedPart()?.dataset.partId).toBe('edit-multi');
     expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
+  });
+
+  it('passes stable identities for individual diff pages', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    const files = [
+      {
+        type: 'update',
+        relativePath: 'src/one.ts',
+        before: 'one',
+        after: 'one updated',
+      },
+      {
+        type: 'update',
+        relativePath: 'src/two.ts',
+        before: 'two',
+        after: 'two updated',
+      },
+    ];
+    const initialPart: ToolPart = {
+      ...fileEditPart('edit-multi', 'src/one.ts'),
+      tool: 'apply_patch',
+      state: {
+        ...completedToolState({}, 'Edited 2 files'),
+        metadata: { files },
+      },
+    };
+    renderAssistantMessageContent({ parts: [initialPart] });
+
+    const selectedPart = () =>
+      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock');
+    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
+    const secondKey = selectedPart()?.dataset.inlineFileKey;
+    expect(secondKey).toBeTruthy();
+
+    container?.querySelector<HTMLButtonElement>('.assistant-file-edit-pager-dot')?.click();
+
+    expect(selectedPart()?.dataset.inlineFileIndex).toBe('0');
+    expect(selectedPart()?.dataset.inlineFileKey).toBeTruthy();
+    expect(selectedPart()?.dataset.inlineFileKey).not.toBe(secondKey);
   });
 
   it('does not group reads and searches containing edit words as file edits', () => {

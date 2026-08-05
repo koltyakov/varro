@@ -3020,7 +3020,7 @@ describe('registerSessionEventHandlers', () => {
       handlers.get('session.next.text.ended')?.({
         properties: { sessionID: 'session-1' },
       });
-      // A tool call arrives before the quiet window elapses — the turn is not done.
+      // A tool call arrives before the quiet window elapses - the turn is not done.
       handlers.get('session.next.tool.called')?.({
         properties: { sessionID: 'session-1', assistantMessageID: 'assistant-1', callID: 'call-1' },
       });

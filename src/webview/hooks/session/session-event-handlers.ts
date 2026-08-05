@@ -254,7 +254,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   let disposed = false;
   let pendingPermissionSync = false;
   let serverReconciliation: Promise<void> | null = null;
-  // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta — caller
+  // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta - caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
   const rememberSequenceEviction = (sessionId: string) => {

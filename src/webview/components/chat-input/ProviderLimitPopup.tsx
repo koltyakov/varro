@@ -102,7 +102,7 @@ function ProviderLimitRow(props: { window: ProviderLimitWindow }) {
         <span class="provider-limit-row-label">{props.window.label}</span>
         <Show
           when={remainingPercent() != null}
-          fallback={<span class="provider-limit-row-pct">—</span>}
+          fallback={<span class="provider-limit-row-pct">-</span>}
         >
           <span class="provider-limit-row-pct">{Math.round(remainingPercent()!)}%</span>
         </Show>

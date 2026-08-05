@@ -22,7 +22,7 @@ let messageEditDraftBackup: MessageEditDraftBackup | null = null;
 
 // DOM node inside the edited message row that hosts the relocated composer.
 // Null when no row currently offers an inline slot (not editing, or the row
-// is virtualized away) — the composer then falls back to its bottom slot.
+// is virtualized away) - the composer then falls back to its bottom slot.
 const [inlineEditMount, setInlineEditMount] = createSignal<HTMLElement | null>(null);
 
 export { editingMessage, inlineEditMount };

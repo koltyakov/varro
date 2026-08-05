@@ -24,7 +24,7 @@
 
 .ralph-form-card {
   /* The overlay is fixed-position, so it renders outside `.interactive-session`
-     and has to restate the chat aliases — but from the same scale, not its own. */
+     and has to restate the chat aliases - but from the same scale, not its own. */
   --chat-radius-control: var(--radius-control);
   --chat-radius-card: var(--radius-card);
   --chat-radius-popover: var(--radius-card);

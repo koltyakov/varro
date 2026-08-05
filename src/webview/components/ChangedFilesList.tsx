@@ -38,10 +38,10 @@ export function ChangedFilesList() {
     cachedSummaryStats = null;
   };
 
-  // The file rows reflect what THIS session's agent changed — the file-changing
+  // The file rows reflect what THIS session's agent changed - the file-changing
   // tool calls and patch parts in its own messages. The backend session summary
-  // (`session.summary.diffs`) can describe workspace-wide git changes — files
-  // edited by hand or by a sibling session — that a read-only session never
+  // (`session.summary.diffs`) can describe workspace-wide git changes - files
+  // edited by hand or by a sibling session - that a read-only session never
   // touched, so it is only used to bridge the brief gap before a running
   // session's edits stream in, never for an idle session.
   const changes = createMemo(() => {

@@ -161,7 +161,7 @@ describe('MarkdownRenderer', () => {
 
       // Parser fixed point: feed the rendered markup straight back into the HTML
       // parser with no sanitizer in between. Re-rendering it through
-      // MarkdownRenderer would just re-sanitize and prove nothing — the property
+      // MarkdownRenderer would just re-sanitize and prove nothing - the property
       // under test is that the string we hand to `innerHTML` cannot itself parse
       // into something executable.
       const sink = document.createElement('div');
