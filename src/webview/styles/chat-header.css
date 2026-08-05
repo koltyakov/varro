@@ -151,7 +151,7 @@
   border-radius: var(--radius-pill);
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
-  animation: pulse-soft 1.5s ease-in-out infinite;
+  animation: var(--animate-status-pulse);
 }
 
 .chat-header-completed-dot {
@@ -167,7 +167,7 @@
   width: 8px;
   height: 8px;
   border-radius: var(--radius-pill);
-  animation: pulse-soft 1.5s ease-in-out infinite;
+  animation: var(--animate-status-pulse);
 }
 
 .chat-header-attention-dot {

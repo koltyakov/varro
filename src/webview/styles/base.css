@@ -199,6 +199,7 @@
   );
   --animate-fade-in: fade-in 0.12s ease-out;
   --animate-pulse-soft: pulse-soft 1.5s ease-in-out infinite;
+  --animate-status-pulse: status-pulse 2s infinite;
   /* Geometry scale. Every corner in the webview snaps to one of these steps so
      sibling surfaces can't drift a pixel apart; `pill` and `50%` circles are
      the only shapes that opt out. Also exposed as Tailwind `rounded-*`. */
@@ -256,6 +257,24 @@
     opacity: 0.4;
   }
   50% {
+    opacity: 1;
+  }
+}
+
+/* Persistent indicators spend most of each cycle at a stable opacity so
+   Chromium can avoid presenting unchanged frames while the app is idle. */
+@keyframes status-pulse {
+  0%,
+  40% {
+    opacity: 1;
+    animation-timing-function: steps(6);
+  }
+  50%,
+  90% {
+    opacity: 0.4;
+    animation-timing-function: steps(6);
+  }
+  100% {
     opacity: 1;
   }
 }

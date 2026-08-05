@@ -6,6 +6,46 @@ async function getRenderedMessageRowCount(page: Page) {
   return getE2EState(page, () => document.querySelectorAll('[data-msg-id]').length);
 }
 
+test('persistent status pulses visibly alternate between held states', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+
+  const result = await page
+    .locator('.session-item-indicator.is-attention')
+    .evaluate(async (element) => {
+      const animation = element
+        .getAnimations()
+        .find(
+          (candidate) =>
+            candidate instanceof CSSAnimation && candidate.animationName === 'status-pulse'
+        );
+      if (!(animation?.effect instanceof KeyframeEffect)) {
+        throw new Error('status-pulse keyframes are unavailable');
+      }
+
+      const startTime = Number(animation.currentTime);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const advanced = Number(animation.currentTime) > startTime;
+      animation.pause();
+
+      const sample = (time: number) => {
+        animation.currentTime = time;
+        const style = getComputedStyle(element);
+        return Number(style.opacity);
+      };
+
+      return {
+        advanced,
+        bright: sample(200),
+        dim: sample(1200),
+      };
+    });
+
+  expect(result.advanced).toBe(true);
+  expect(result.bright).toBe(1);
+  expect(result.dim).toBe(0.4);
+});
+
 test('large transcripts keep rendered rows bounded while scrolling', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
 

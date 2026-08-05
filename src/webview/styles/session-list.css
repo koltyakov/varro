@@ -708,14 +708,14 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-status-indicator.is-attention {
   background: var(--color-vscode-accent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-accent) 40%, transparent);
-  animation: pulse-soft 1.5s ease-in-out infinite;
+  animation: var(--animate-status-pulse);
 }
 
 .session-item-indicator.is-failed,
 .session-status-indicator.is-failed {
   background: var(--color-vscode-error);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-error) 45%, transparent);
-  animation: pulse-soft 1.2s ease-in-out infinite;
+  animation: var(--animate-status-pulse);
 }
 
 .session-item-indicator.is-completed,
@@ -728,7 +728,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 .session-status-indicator.is-plan-completed {
   background: var(--color-vscode-warning);
   box-shadow: 0 0 6px color-mix(in srgb, var(--color-vscode-warning) 55%, transparent);
-  animation: pulse-soft 1.5s ease-in-out infinite;
+  animation: var(--animate-status-pulse);
 }
 
 .session-item-title {

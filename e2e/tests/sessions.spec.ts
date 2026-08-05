@@ -1,5 +1,54 @@
 import { expect, test } from '@playwright/test';
 
+test('uses duty-cycled animations only for persistent session statuses', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+
+  const statusIndicator = (title: string) =>
+    page.locator('.session-item').filter({ hasText: title }).locator('.session-item-indicator');
+
+  for (const title of [
+    'Plan awaiting implementation',
+    'Waiting on permission',
+    'Failing provider sync',
+  ]) {
+    await expect(statusIndicator(title)).toHaveCSS('animation-name', 'status-pulse');
+    await expect(statusIndicator(title)).toHaveCSS('animation-duration', '2s');
+  }
+
+  await expect(statusIndicator('Running lint repair')).toHaveCSS('animation-name', 'spin');
+  await page.locator('body').evaluate((body) => {
+    const indicator = document.createElement('span');
+    indicator.className = 'session-item-indicator session-status-indicator is-completed';
+    indicator.dataset.testCompletedIndicator = 'true';
+    body.append(indicator);
+  });
+  await expect(page.locator('[data-test-completed-indicator]')).toHaveCSS('animation-name', 'none');
+
+  for (const selector of [
+    '.chat-header-plan-dot',
+    '.chat-header-attention-dot',
+    '.chat-header-failed-dot',
+  ]) {
+    await expect(page.locator(selector)).toHaveCSS('animation-name', 'status-pulse');
+  }
+  await expect(page.locator('.chat-header-running-spinner')).toHaveCSS('animation-name', 'spin');
+});
+
+test('keeps persistent statuses static and visible with reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/e2e/harness/index.html?scenario=status-filters');
+
+  const indicator = page
+    .locator('.session-item')
+    .filter({ hasText: 'Waiting on permission' })
+    .locator('.session-item-indicator');
+
+  await expect(indicator).toBeVisible();
+  await expect(indicator).toHaveAttribute('aria-label', 'Permission request pending');
+  await expect(indicator).toHaveCSS('animation-iteration-count', '1');
+  await expect(indicator).toHaveCSS('opacity', '1');
+});
+
 test('restores a persisted active session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=restored-session');
 
