@@ -1,20 +1,20 @@
 {
   "name": "varro",
-  "displayName": "Varro: The OpenCode Workbench",
-  "version": "0.23.12",
-  "description": "The complete OpenCode experience for VS Code: project-aware chat, parallel sessions, agent and model controls, and deep usage insights.",
+  "displayName": "Varro: OpenCode Workbench",
+  "version": "0.23.14",
+  "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
     "Chat"
   ],
   "keywords": [
-    "agent",
+    "agentic-coding",
     "ai",
     "chat",
-    "coding-assistant",
-    "gui",
-    "llm",
-    "opencode"
+    "coding-agent",
+    "commit-message",
+    "opencode",
+    "opencode-gui"
   ],
   "homepage": "https://github.com/koltyakov/varro#readme",
   "bugs": {
@@ -57,7 +57,7 @@
     "dompurify": "^3.4.13",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
-    "marked": "18.0.7",
+    "marked": "18.0.9",
     "solid-js": "1.9.14"
   },
   "devDependencies": {

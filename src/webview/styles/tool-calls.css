@@ -1056,6 +1056,10 @@ kbd {
   flex-shrink: 0;
 }
 
+.chat-tool-invocation-part .tool-call-icon-tools {
+  transform: translateY(1px);
+}
+
 .chat-tool-invocation-part .tool-call-icon.tool-status-pending,
 .chat-tool-invocation-part .tool-call-icon.tool-status-completed,
 .chat-tool-invocation-part .tool-call-icon.tool-status-aborted,
