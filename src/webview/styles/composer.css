@@ -1182,8 +1182,7 @@
   background-color: transparent;
 }
 
-.todo-block:not(.changed-files-block)
-  .todo-block-list:is(:focus, :hover)::-webkit-scrollbar-thumb,
+.todo-block:not(.changed-files-block) .todo-block-list:is(:focus, :hover)::-webkit-scrollbar-thumb,
 .changed-files-list:hover::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--color-vscode-fg) 18%, transparent);
 }

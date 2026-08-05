@@ -1015,6 +1015,10 @@ kbd {
   margin-bottom: 0;
 }
 
+.chat-tool-invocation-part .tool-invocation-header-shell {
+  position: relative;
+}
+
 .chat-tool-invocation-part .tool-invocation-header {
   display: flex;
   width: 100%;
@@ -1032,6 +1036,24 @@ kbd {
   user-select: none;
   -webkit-user-select: none;
   caret-color: transparent;
+}
+
+.chat-tool-invocation-part .tool-invocation-header-shell.has-command-copy .tool-invocation-header {
+  padding-right: calc(var(--space-5) + 36px);
+}
+
+.chat-tool-invocation-part .tool-invocation-header-shell.has-command-copy .tool-invocation-chevron {
+  position: absolute;
+  right: var(--space-5);
+}
+
+.chat-tool-invocation-part .tool-invocation-header-shell > .tool-copy-button {
+  position: absolute;
+  z-index: var(--z-chrome);
+  top: 50%;
+  right: calc(var(--space-5) + 14px);
+  padding: 4px;
+  transform: translateY(-50%);
 }
 
 .chat-tool-invocation-part .tool-invocation-header:hover {
@@ -1255,6 +1277,8 @@ kbd {
 .chat-tool-invocation-part .terminal-command-row-input:hover .tool-copy-button,
 .chat-tool-invocation-part .structured-tool-row:hover .tool-copy-button,
 .chat-tool-invocation-part .tool-input-entry:hover .tool-copy-button,
+.chat-tool-invocation-part .tool-invocation-header-shell:hover > .tool-copy-button,
+.chat-tool-invocation-part .tool-copy-button.is-copied,
 .chat-tool-invocation-part .tool-copy-button:focus-visible {
   opacity: 1;
 }
@@ -1296,6 +1320,26 @@ kbd {
 
 .chat-tool-invocation-part .terminal-command-row-output .terminal-command-text {
   padding-left: 10px;
+}
+
+.chat-tool-invocation-part .terminal-command-row-error,
+.chat-tool-invocation-part .structured-tool-row-error {
+  background: color-mix(in srgb, var(--color-vscode-error) 8%, transparent);
+}
+
+.chat-tool-invocation-part .terminal-command-row-error .terminal-command-text,
+.chat-tool-invocation-part .structured-tool-row-error .structured-tool-label {
+  color: var(--color-vscode-error);
+}
+
+.chat-tool-invocation-part .terminal-command-row-error.is-aborted,
+.chat-tool-invocation-part .structured-tool-row-aborted {
+  background: color-mix(in srgb, var(--color-vscode-fg-muted) 5%, transparent);
+}
+
+.chat-tool-invocation-part .terminal-command-row-error.is-aborted .terminal-command-text,
+.chat-tool-invocation-part .structured-tool-row-aborted .structured-tool-label {
+  color: var(--color-vscode-fg-muted);
 }
 
 .chat-tool-invocation-part .terminal-command-output {

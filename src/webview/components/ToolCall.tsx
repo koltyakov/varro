@@ -484,7 +484,9 @@ export function ToolCall(props: {
   const statusClass = () => {
     switch (state().status) {
       case 'pending':
-        return 'tool-status-pending';
+        return normalizeToolName(tool().tool) === 'apply_patch'
+          ? 'tool-status-running'
+          : 'tool-status-pending';
       case 'running':
         return 'tool-status-running';
       case 'completed':
@@ -550,6 +552,7 @@ export function ToolCall(props: {
         <FileChangeCard
           toolState={state()}
           changes={fileChanges()}
+          animatePending={normalizeToolName(tool().tool) === 'apply_patch'}
           previewStateKey={expansionKey()}
           expanded={expanded()}
           toggleExpand={toggleExpand}
@@ -745,6 +748,7 @@ function ReadToolCard(props: {
 function FileChangeCard(props: {
   toolState: ToolPart['state'];
   changes: FileChange[];
+  animatePending: boolean;
   previewStateKey: string;
   expanded: boolean;
   toggleExpand: () => void;
@@ -842,14 +846,14 @@ function FileChangeCard(props: {
   };
 
   const statusClass = () => {
-    if (isPending()) return 'tool-status-pending';
+    if (isPending()) return props.animatePending ? 'tool-status-running' : 'tool-status-pending';
     if (isRunning()) return 'tool-status-running';
     if (isError()) return isAborted() ? 'tool-status-aborted' : 'tool-status-error';
     return 'tool-status-completed';
   };
 
   const statusLabel = () => {
-    if (isPending()) return 'Pending';
+    if (isPending()) return props.animatePending ? 'Running' : 'Pending';
     if (isRunning()) return 'Running';
     if (isError()) return isAborted() ? 'Aborted' : 'Failed';
     return 'Completed';
@@ -915,7 +919,9 @@ function FileChangeCard(props: {
               statusLabel={statusLabel()}
               class="file-edit-icon"
             />
-            <span class={`file-edit-action-label${isRunning() ? ' shimmer-progress' : ''}`}>
+            <span
+              class={`file-edit-action-label${isRunning() || (isPending() && props.animatePending) ? ' shimmer-progress' : ''}`}
+            >
               {action()}:
             </span>
             <Show
@@ -1286,91 +1292,80 @@ function GenericToolCall(props: {
   };
   const isExpanded = () => hasExpandableContent() && props.expanded;
 
-  // The bash card repeats the command as its `$` row, which is pure duplication
-  // when the header already shows the whole thing. The header ellipsizes at
-  // whatever width the panel happens to be, so this has to be measured rather
-  // than guessed — and it starts `true` so an unmeasured card errs toward
-  // showing the command instead of hiding it.
-  let titleRef: HTMLSpanElement | undefined;
-  const [titleClipped, setTitleClipped] = createSignal(true);
-  const measureTitle = () => {
-    if (titleRef) setTitleClipped(titleRef.scrollWidth > titleRef.clientWidth + 1);
-  };
-  createEffect(() => {
-    if (!isBash() || !isExpanded() || !titleRef) return;
-    // On a user-driven expand the header has been laid out for a while, so
-    // measure now — deferring would render the row and then yank it away. The
-    // microtask covers the other case: a card that starts expanded, where this
-    // effect runs before the header has any layout to read.
-    measureTitle();
-    queueMicrotask(measureTitle);
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measureTitle);
-    observer.observe(titleRef);
-    onCleanup(() => observer.disconnect());
-  });
   const commandMatchesTitle = () =>
     normalizedComparableText(bashCommand()) === normalizedComparableText(props.title);
-  // Never hide the command while it is the card's only content: without a
-  // completed output row the detail body would render empty.
-  const showBashCommandRow = () =>
-    props.state.status !== 'completed' || titleClipped() || !commandMatchesTitle();
+  // Never hide the command while it is the card's only content. Completed and
+  // failed calls have a result row; running calls only do once output arrives.
+  const hasBashResultRow = () =>
+    props.state.status === 'completed' ||
+    props.state.status === 'error' ||
+    (props.state.status === 'running' && !isBlank(props.runningOutput));
+  const showBashCommandRow = () => !hasBashResultRow() || !commandMatchesTitle();
+  const showHeaderCommandCopy = () => isBash() && isExpanded() && commandMatchesTitle();
 
   const bodyId = createUniqueId();
   return (
     <div class={`chat-tool-invocation-part${isTask() ? ' tool-invocation-task' : ''}`}>
-      <button
-        type="button"
-        class="tool-invocation-header"
-        onClick={props.toggleExpand}
-        disabled={!hasExpandableContent()}
-        aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
-        aria-controls={hasExpandableContent() ? bodyId : undefined}
+      <div
+        class={`tool-invocation-header-shell${showHeaderCommandCopy() ? ' has-command-copy' : ''}`}
       >
-        <ToolCallIcon toolName={props.tool.tool} statusClass={props.statusClass} />
-        <span
-          ref={(el) => (titleRef = el)}
-          class={`tool-invocation-title${props.state.status === 'running' && !isTask() ? ' shimmer-progress' : ''}`}
+        <button
+          type="button"
+          class="tool-invocation-header"
+          onClick={props.toggleExpand}
+          disabled={!hasExpandableContent()}
+          aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
+          aria-controls={hasExpandableContent() ? bodyId : undefined}
         >
-          {props.title}
-        </span>
-        <Show when={taskTokenUsage()}>
-          {(tokens) => (
-            <span class="tool-invocation-token-stats" title="Subagent tokens">
-              ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
-            </span>
-          )}
-        </Show>
-        <Show when={completedDurationLabel()}>
-          <span class="tool-invocation-duration">{completedDurationLabel()}</span>
-        </Show>
-        <Show when={runningDurationLabel()}>
-          <span class="tool-invocation-duration" title="Elapsed time">
-            {runningDurationLabel()}
-          </span>
-        </Show>
-        <Show when={taskRetryStatus()}>
-          {(retry) => <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>}
-        </Show>
-        <Show when={props.state.status === 'error'}>
-          <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
-            {isAborted() ? 'aborted' : 'failed'}
-          </span>
-        </Show>
-        <Show when={hasExpandableContent()}>
-          <svg
-            class={`tool-invocation-chevron ${isExpanded() ? 'expanded' : ''}`}
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+          <ToolCallIcon toolName={props.tool.tool} statusClass={props.statusClass} />
+          <span
+            class={`tool-invocation-title${props.statusClass === 'tool-status-running' && !isTask() ? ' shimmer-progress' : ''}`}
           >
-            <path d="M6 4l4 4-4 4" />
-          </svg>
+            {props.title}
+          </span>
+          <Show when={taskTokenUsage()}>
+            {(tokens) => (
+              <span class="tool-invocation-token-stats" title="Subagent tokens">
+                ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
+              </span>
+            )}
+          </Show>
+          <Show when={completedDurationLabel()}>
+            <span class="tool-invocation-duration">{completedDurationLabel()}</span>
+          </Show>
+          <Show when={runningDurationLabel()}>
+            <span class="tool-invocation-duration" title="Elapsed time">
+              {runningDurationLabel()}
+            </span>
+          </Show>
+          <Show when={taskRetryStatus()}>
+            {(retry) => (
+              <span class="tool-invocation-retry-label">retrying #{retry().attempt}</span>
+            )}
+          </Show>
+          <Show when={props.state.status === 'error' && !isExpanded()}>
+            <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
+              {isAborted() ? 'aborted' : 'failed'}
+            </span>
+          </Show>
+          <Show when={hasExpandableContent()}>
+            <svg
+              class={`tool-invocation-chevron ${isExpanded() ? 'expanded' : ''}`}
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M6 4l4 4-4 4" />
+            </svg>
+          </Show>
+        </button>
+        <Show when={showHeaderCommandCopy()}>
+          <CopyIconButton text={bashCommand()} label="command" />
         </Show>
-      </button>
+      </div>
       <Show when={isExpanded()}>
         <div id={bodyId} class="tool-invocation-detail animate-fade-in">
           <Show
@@ -1448,6 +1443,19 @@ function GenericToolCall(props: {
                   <LiveTerminalOutput content={props.runningOutput} />
                 </div>
               </Show>
+              <Show when={props.state.status === 'error'}>
+                <div
+                  class={`terminal-command-row terminal-command-row-output terminal-command-row-error${isAborted() ? ' is-aborted' : ''}`}
+                >
+                  <ClampedToolText
+                    content={(props.state as ToolStateError).error}
+                    title={`${props.title} (error)`}
+                    language="plaintext"
+                    class={`terminal-command-text terminal-command-output tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
+                    role="alert"
+                  />
+                </div>
+              </Show>
             </div>
           </Show>
           <Show
@@ -1464,7 +1472,7 @@ function GenericToolCall(props: {
               class="tool-invocation-output"
             />
           </Show>
-          <Show when={props.state.status === 'error' && !usesStructuredCard()}>
+          <Show when={props.state.status === 'error' && !isBash() && !usesStructuredCard()}>
             <ClampedToolText
               content={(props.state as ToolStateError).error}
               title={`${props.title} (error)`}
@@ -1638,7 +1646,7 @@ function StructuredToolCard(props: {
       <Show when={props.result}>
         {(result) => (
           <div
-            class={`structured-tool-row structured-tool-row-result${result().status ? ' structured-tool-row-error' : ''}`}
+            class={`structured-tool-row structured-tool-row-result${result().status ? ` structured-tool-row-${result().status}` : ''}`}
           >
             <span class="structured-tool-label">{result().label}</span>
             <ClampedToolText

@@ -287,6 +287,31 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
   });
 
+  it('animates pending apply_patch calls as in-progress tools', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'pending',
+        input: {},
+        raw: '',
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-call-icon-edit')?.classList).toContain(
+      'tool-status-running'
+    );
+    expect(container?.querySelector('.tool-invocation-title')?.classList).toContain(
+      'shimmer-progress'
+    );
+  });
+
   it('shows files from running apply_patch input in the compact edit card', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -327,6 +352,37 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
   });
 
+  it('animates a pending apply_patch file-change card', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'apply_patch',
+      state: {
+        status: 'pending',
+        input: {
+          patchText: `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-old
++new
+*** End Patch`,
+        },
+        raw: '',
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.file-edit-action-label')?.classList).toContain(
+      'shimmer-progress'
+    );
+    expect(container?.querySelector('.file-edit-icon')?.classList).toContain('tool-status-running');
+    expect(container?.querySelector('.file-edit-icon')?.getAttribute('aria-label')).toBe('Running');
+  });
+
   it('shows an aligned empty output row for completed bash commands', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -349,6 +405,45 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.terminal-command-output-empty')?.textContent).toBe(
       '(no output)'
     );
+  });
+
+  it('renders failed bash errors in the terminal result row', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'bash',
+      state: {
+        status: 'error',
+        input: { command: 'opencode --version' },
+        error: 'The user rejected permission to use this specific tool call.',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const errorRow = container?.querySelector('.terminal-command-row-error');
+    expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
+    expect(
+      container?.querySelector('.tool-invocation-header .tool-invocation-error-label')
+    ).toBeNull();
+    expect(
+      container?.querySelector('.tool-invocation-header-shell > .tool-copy-button')
+    ).not.toBeNull();
+    expect(errorRow?.classList).toContain('terminal-command-row-output');
+    expect(errorRow?.querySelector('.tool-invocation-error')?.textContent).toBe(
+      'The user rejected permission to use this specific tool call.'
+    );
+    expect(errorRow?.querySelector('.tool-invocation-error')?.getAttribute('role')).toBe('alert');
+    expect(
+      Array.from(container?.querySelector('.tool-invocation-detail')?.children || []).some(
+        (child) => child.classList.contains('tool-invocation-error')
+      )
+    ).toBe(false);
   });
 
   it('treats whitespace-only output as empty rather than rendering a blank box', () => {
@@ -391,7 +486,10 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
   });
 
-  it('drops the $ row when the header already shows the whole command', () => {
+  it('drops the $ row and copies from the expanded header when it shows the command', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const command = `rtk npx oxfmt --check ${'src/webview/components/ToolCall.tsx '.repeat(3)}`;
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -399,16 +497,43 @@ describe('ToolCall', () => {
       type: 'tool',
       callID: 'call-1',
       tool: 'bash',
-      // Header title and command are the same text, and jsdom reports no
-      // ellipsis, so the command row would be pure duplication.
-      state: completedState({ command: 'git status' }, 'git status', 'M src/app.ts'),
+      state: completedState({ command }, command, 'All matched files use the correct format.'),
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(
+      container?.querySelector('.tool-invocation-header-shell > .tool-copy-button')
+    ).toBeNull();
+
+    header?.click();
 
     expect(container?.querySelector('.terminal-command-row-input')).toBeNull();
     expect(container?.querySelector('.terminal-command-row-output')).not.toBeNull();
+    const copy = container?.querySelector<HTMLButtonElement>(
+      '.tool-invocation-header-shell > .tool-copy-button'
+    );
+    expect(copy).not.toBeNull();
+    expect(header?.contains(copy || null)).toBe(false);
+    expect(copy?.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(copy?.querySelector('svg')?.getAttribute('width')).toBe('12');
+    expect(copy?.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.4');
+    expect(
+      Array.from(copy?.querySelectorAll('path') || [], (path) => path.getAttribute('d'))
+    ).toEqual([
+      'M19.4 20H9.6C9.26863 20 9 19.7314 9 19.4V9.6C9 9.26863 9.26863 9 9.6 9H19.4C19.7314 9 20 9.26863 20 9.6V19.4C20 19.7314 19.7314 20 19.4 20Z',
+      'M15 9V4.6C15 4.26863 14.7314 4 14.4 4H4.6C4.26863 4 4 4.26863 4 4.6V14.4C4 14.7314 4.26863 15 4.6 15H9',
+    ]);
+
+    copy?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith(command);
+    await vi.waitFor(() => {
+      expect(copy?.classList).toContain('is-copied');
+      expect(copy?.title).toBe('Copied');
+    });
+    vi.unstubAllGlobals();
   });
 
   it('copies the full command even though the $ row renders one ellipsized line', async () => {
