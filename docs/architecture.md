@@ -54,15 +54,16 @@ Chat and context commands route through `SidebarProvider` and `ContextProvider`;
 
 #### `src/extension/server.ts`
 
-- Owns the local OpenCode process
+- Orchestrates OpenCode startup, compatibility policy, restart safety, and workspace selection
 - Checks health before auto-starting
-- Adds workspace scoping to non-global API calls
 - Connects to the OpenCode event stream at `/global/event` and filters events to the active workspace
 - Emits `status` and `event` to the rest of the extension
 
+The implementation is split across focused components: `open-code-process.ts` owns CLI discovery, process, port, and update behavior; `open-code-transport.ts` owns REST and SSE transport; and `server-lifecycle.ts` coordinates lifecycle state.
+
 Important behavior:
 
-- The current workspace folder is attached to requests through both a `directory` query param and `x-opencode-directory` header.
+- Workspace-sensitive non-global requests are scoped through both a `directory` query param and `x-opencode-directory` header. Global paths omit the `directory` query param; health and `/global/event` are explicitly unscoped, while generic global REST calls can still carry the directory header. Session status and most session-child routes are deliberately unscoped; Windows leaves additional session reads unscoped to avoid path casing and separator regressions. Aggregate session lists, statuses, permissions, and questions are filtered locally to the active workspace. Direct session-child routes remain ID-addressed and are normally reached through IDs from filtered session state.
 - If the SSE stream drops while the server is running, Varro retries with exponential backoff.
 - If the event stream drops but REST still works, Varro marks the event stream as degraded so the UI can show a reconnecting banner.
 - If the child process exits after startup, Varro attempts a limited restart sequence.
@@ -83,7 +84,7 @@ Clipboard-sensitive terminal capture is implemented here: Varro reads the termin
 This is the main extension-side coordinator.
 
 - Composes `WebviewSession`, `SidebarProviderBridge`, `MessageRouter`, `RestProxy`, `ServerEventBridge`, and `RalphHost`
-- Connects focused services for context files, dropped files, search, provider limits, exports, diffs, pins, hidden sessions, and the recycle bin
+- Connects focused services for context files, dropped files, search, provider limits, provider-file observation and revalidation, exports, usage reports, commit messages, diff and tool-output documents, queued messages, title fallback, pins, hidden sessions, and the recycle bin
 - Uses `SessionStateManager` to drive plan/failure/permission/question notifications and the status bar
 - Keeps routing and lifecycle ownership in the focused components rather than implementing those concerns directly
 
@@ -95,6 +96,10 @@ Supporting host components define the main boundaries:
 - `src/extension/rest-proxy.ts`: OpenCode REST forwarding and local `/varro/*` endpoints
 - `src/extension/server-event-bridge.ts`: server status and workspace-scoped event forwarding
 - `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
+- `src/extension/commit-message-service.ts` and `usage-report-service.ts`: repository-aware commit generation and retained-history usage reports
+- `src/extension/queued-message-store.ts`: authoritative workspace-state persistence for queued prompts and attachment data
+- `src/extension/provider-file-refresh-controller.ts`: OpenCode config and auth file observation, provider invalidation, and server revalidation
+- `src/extension/session-diff-document-provider.ts` and `tool-output-document-provider.ts`: read-only editor documents opened from the webview
 
 It also exposes the Varro extension-host API namespace, `/varro/*`.
 
@@ -116,6 +121,8 @@ It also exposes the Varro extension-host API namespace, `/varro/*`.
 - `DELETE /varro/session-trash`
 
 Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
+
+Commit-message generation is invoked by a VS Code command. Usage reports, opening a session in the OpenCode TUI, and read-only tool-output documents use dedicated webview messages rather than `/varro/*` routes.
 
 Drag and drop has two paths here.
 
@@ -170,9 +177,11 @@ That initial state includes:
 - terminal selection
 - dropped files
 - config such as thinking expansion and desktop session pane side
+- provider-limit configuration
 - whether the extension host is remote
 - interrupted session IDs
 - pending permission and question snapshots
+- recycle-bin entries, pinned session IDs, and queued-message snapshots
 
 `src/webview/index.tsx` mounts `AppRoot` and preserves a generic reload fallback for bootstrap failures. `src/webview/App.tsx` then shows:
 
@@ -198,8 +207,9 @@ It stores:
 - failed-session and usage-limit state
 - skipped plan-session markers
 - queued follow-up messages
+- the unsent composer text draft
 
-Several pieces are persisted in `localStorage`, including selected model, hidden models, permission mode preferences, and last active session ID.
+Browser preferences and drafts are persisted through `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. The authoritative queued-message snapshot, including attachment data, is stored separately in extension-host workspace state.
 
 Ralph loop state is owned by the extension host (`src/extension/ralph-host.ts`, persisted in the workspace Memento). `src/webview/lib/stores/ralph-store.ts` is a render mirror fed by `ralph/state` broadcasts, with optimistic local updates for immediate dashboard feedback.
 
@@ -254,7 +264,7 @@ Ralph is a plan-driven orchestration layer that runs on the extension host, so i
 - The loop creates one child session per iteration under the manager session, builds the iteration prompt from the plan document plus the previous iteration summary, and waits for the child to go idle.
 - Verification is intentionally split into a second turn. After the main work settles, the manager sends a dedicated verification prompt and parses `<name>: PASS|FAIL|SKIPPED` lines back out of the final assistant report.
 - If verification fails, the runner can spawn up to two repair child sessions for that iteration. Repair sessions stay under the same manager session so their history does not pollute the original iteration session.
-- Stop conditions come from both plan content and run history: `DONE` marker, consecutive passing iterations with a clean checklist, manual stop, iteration error, or iteration limit. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `incomplete` (not `done`, and not the harder `failed` reserved for true iteration errors).
+- Stop conditions come from plan content and runner state: an explicit `DONE` marker with no failure in the latest completed verification, a manual stop, an iteration error, or the iteration limit. Passing iterations do not stop the loop without `DONE`. Reaching the limit while the plan still has unchecked items or failed verification marks the run as `incomplete` (not `done`, and not the harder `failed` reserved for true iteration errors).
 - `Chat.tsx` and `ChatWorkspace.tsx` treat Ralph manager sessions specially: manager sessions render the Ralph dashboard, Ralph roots are tagged in the session list, and navigating back from an iteration child session returns to the owning Ralph dashboard.
 
 ## Request And Event Flow
@@ -266,10 +276,11 @@ The lists below show representative traffic rather than every protocol variant. 
 The webview sends:
 
 - `api/request` for OpenCode REST calls
-- `workspace/select` and `queued-messages/update` for workspace and queue persistence
-- `files/search`, `files/pick`, `files/drop`, `files/drop-content`, and `files/remove` for context management
+- `workspace/select`, `commands/state`, and `queued-messages/update` for workspace, command, and queue synchronization
+- `files/search`, `files/pick`, `files/drop`, `files/drop-content`, `files/remove`, and `files/clear` for context management
 - `vscode/open`, `vscode/open-text`, `vscode/open-external`, and `vscode/open-settings` for editor integration
-- `session/export` to open a JSON export of the current session
+- `session/export` and `session/open-in-opencode` to export or hand a session to the OpenCode TUI
+- `usage/report` to open recent or retained all-time usage accounting in a Markdown document
 - `terminal/run` to launch setup commands such as `opencode auth login`
 - `providers/watch`, `providers/refresh`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
 - `ralph/*` for host-owned Ralph lifecycle and state synchronization
@@ -356,7 +367,7 @@ The webview adds more derived states on top of that data.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
 - Queued follow-up prompts are persisted in extension-host workspace state and auto-dispatched once the active session becomes idle. The browser-side mirror excludes image-bearing entries from synchronous local storage.
-- Message loads are windowed: sessions fetch only the most recent messages (`src/webview/lib/message-window.ts`), older loaded entries are stitched back in during resyncs, and a transcript banner offers loading the full history on demand.
+- Message loads are windowed: opening a session fetches the newest 50 messages, reaching the top automatically prepends the next 50-message page while preserving the visible anchor, and the boundary banner becomes a `Retry` action only after a page request fails.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.

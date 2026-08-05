@@ -5,8 +5,8 @@ This guide covers the current Varro workflow inside VS Code.
 ## Open Varro
 
 - Click the `Varro` icon in the Activity Bar.
-- Varro defaults to the `Secondary Side Bar` so you can keep the editor visible while chatting.
-- VS Code and VSCodium are the target containers for the extension.
+- In VS Code and VSCodium, Varro defaults to the `Secondary Side Bar` so you can keep the editor visible while chatting.
+- In Cursor, Windsurf, and Devin, Varro attempts a one-time move to the `Primary Side Bar` instead.
 
 VS Code forks have limited support. See [VS Code Fork Compatibility](vscode-forks.md) for details.
 
@@ -94,6 +94,8 @@ Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. 
 - `Tab` accepts the highlighted slash-command or mention completion.
 - Slash commands are available directly in the composer.
 
+Unsent composer text is restored after webview or window reloads. This draft persistence covers text only; file, image, terminal, and diagnostic attachments are persisted when they are queued, not as part of an ordinary unsent draft.
+
 ### Queued Messages
 
 Queued messages belong to the session where they were created and dispatch from top to bottom when that session is active, connected, and idle. A pending permission, question, edit, failed dispatch, or steering request prevents automatic dispatch until it is resolved.
@@ -137,18 +139,20 @@ Use `Varro: Open Global AGENTS.md` to edit OpenCode's global instructions. `Varr
 
 ## Sessions
 
-Sessions are filtered to the current workspace directory, then sorted by most recently updated.
+Sessions are filtered to the current workspace directory. The default list is split into `Recent`, `Archive`, and `Recycle Bin`. `Archive` is a UI grouping for older ordinary sessions; opening it does not alter those sessions in OpenCode. Pinned and active-state sessions remain surfaced, while other sessions are ordered approximately by activity age.
 
 - Start a fresh session with `Varro: New Session` or the new chat button. Crafted composer text is kept for the new session, while file, image, terminal, and message-edit context is cleared.
 - Open the session list from the back button in the header.
-- Search sessions by title, session ID, or workspace directory, or run `Varro: Search Sessions` to open and focus search directly.
+- Search uses OpenCode's native root-session search across loaded and older history and returns up to 30 results. Matching fields depend on the installed OpenCode version. Run `Varro: Search Sessions` to open and focus search directly.
 - Filter or jump to `Running`, `Needs attention`, `Failed`, `Plan ready`, and `Completed` sessions from the header badges.
 - Open sub-agent sessions from the parent session row when they exist.
-- Rename, pin, copy the ID, share or unshare, or move sessions to the recycle bin from the session row actions. Sharing asks OpenCode to create a share link and copies it to the clipboard.
+- Top-level sessions can be renamed, pinned, or moved to the recycle bin. Any session can copy its ID, open in the OpenCode TUI, and be shared or unshared. Sharing asks OpenCode to create a share link and copies it to the clipboard.
 - Deleted session roots move into a recycle bin section where you can restore them or delete them permanently for 24 hours before they expire.
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
 - Changed-file rows open the selected session's before/after snapshot in VS Code's native diff editor when OpenCode provides both sides, with the working-tree Git diff as a fallback.
+
+Opening a session fetches the newest 50 messages. Scrolling to the top automatically prepends the next 50-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 
@@ -164,7 +168,7 @@ If VS Code reloads while a session was running, Varro reconnects to those sessio
 - A Ralph run creates a manager session with a dedicated dashboard plus one child session per iteration.
 - After each iteration settles, the Ralph manager sends a separate verification turn and expects lines like `<name>: PASS`, `<name>: FAIL - <cause>`, or `<name>: SKIPPED - <reason>`.
 - If verification fails, Ralph can spawn up to two repair sub-agents for that iteration before the loop moves on.
-- Ralph can pause, resume, or stop from the dashboard. It stops automatically when the plan starts with `DONE`, after consecutive passing iterations against a clean checklist, or when the iteration cap is reached. If the cap is reached with unchecked plan items or failed verification, the run is marked `incomplete` and can be continued with a higher limit.
+- Ralph can pause, resume, or stop from the dashboard. It stops early when the plan starts with `DONE` and the latest completed iteration has no failed verification; otherwise it runs to the iteration cap. If the cap is reached with unchecked plan items or failed verification, the run is marked `incomplete` and can be continued with a higher limit. Manual stops and iteration errors terminate the run separately.
 - Sessions that finished with the `plan` agent surface as `Plan ready` in the session list.
 - The latest plan response can be opened as a saved markdown plan document.
 - The latest plan response can also be handed off to the build flow so Varro continues with implementation instead of revising the plan.
@@ -202,7 +206,7 @@ To retrieve quota metadata, the extension host can:
 - Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
 - Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
 
-Set `varro.providerLimits.disabled` to `true` to stop provider-limit polling and hide its UI. This setting does not affect normal model requests that OpenCode makes while you chat.
+Set `varro.providerLimits.disabled` to `true` to stop periodic provider-limit polling and hide its UI. This setting does not affect normal model requests that OpenCode makes while you chat. It is not a complete provider-metadata opt-out: when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation can make a one-off OpenAI quota lookup to determine whether that model is eligible.
 
 ### Recommended OpenCode Configuration
 
@@ -312,7 +316,7 @@ The model is selected in this order:
 4. The active Varro chat model, using an available low-reasoning variant instead of the selected high or max variant
 5. OpenCode's default model when none of the preceding routes is available
 
-The staged patch, staged paths, and recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Varro never logs the patch, stages files, or executes the commit. It also rechecks the staged diff and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
+All staged paths, up to the first 100,000 characters of the staged patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Split larger staged diffs into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the staged diff and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
 
 ## Output In The Chat
 
@@ -320,6 +324,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 
 - Streaming assistant messages
 - Tool call cards with live status
+- Expanded shell tool cards stream command output while running, show failed or aborted output inline, and provide a command copy action
+- Long tool input or output can open in a read-only editor tab
 - Inline permission and question prompts
 - Todo tracking from `todowrite` or related todo events
 - Diff summaries for changed files
@@ -364,7 +370,7 @@ Context:
 
 Provider limits:
 
-- `varro.providerLimits.disabled` - disable provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use
+- `varro.providerLimits.disabled` - disable periodic provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use. Commit-message generation can still make a one-off OpenAI quota lookup when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available
 - `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
 
 Chat view:
@@ -388,7 +394,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: Varro requires OpenCode 1.16.0 or newer and this release is compatibility-tested through 1.18.13.
+- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.13` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: run `/connect` or `opencode auth login`, then reopen Varro.

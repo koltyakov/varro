@@ -17,15 +17,15 @@ Varro builds on OpenCode instead of replacing it. Your local OpenCode configurat
 - **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
 - **Parallel work that stays understandable.** Workspace sessions clearly identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar keep background sessions visible.
 - **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
-- **Commit messages where you commit.** Generate a repository-aware message from exactly the changes staged in VS Code, without leaving Source Control or handing commit control to the model.
+- **Commit messages where you commit.** Generate a repository-aware message from staged changes in VS Code, without leaving Source Control or handing commit control to the model.
 - **Usage you can act on.** Provider limits and reset windows appear next to model controls when available, while detailed accounting covers context fill, input, output, reasoning, cache, and sub-agent tokens.
 - **Compact by design.** The complete workflow remains readable in a sidebar, with an optional session pane for larger layouts.
 
 ## Sessions
 
-Sessions are filtered to the current workspace and sorted by recent activity. Each session can show changed files, line additions and removals, token usage, duration, and current state.
+Sessions are filtered to the current workspace and grouped into `Recent`, `Archive`, and `Recycle Bin`. Pinned and active-state sessions stay surfaced, while ordinary sessions are ordered approximately by activity. Each session can show changed files, line additions and removals, token usage, duration, and current state.
 
-You can search, pin, rename, resume, share or unshare, or move sessions to the recycle bin. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
+OpenCode's native search finds root sessions across loaded and older history. Top-level sessions can be pinned, renamed, or moved to the recycle bin. Any session can be resumed, opened in the OpenCode TUI, shared or unshared, or have its ID copied. Sharing asks OpenCode to create a share link and copies it to the clipboard. Sub-agent sessions remain linked to their parent session. On larger layouts, the session list can stay open beside the active chat.
 
 When the sidebar is hidden, Varro can notify you when a plan is ready, a top-level session fails, requests permission, or asks a question. The status bar also tracks top-level sessions that finish in the background.
 
@@ -40,6 +40,7 @@ When the sidebar is hidden, Varro can notify you when a plan is ready, a top-lev
 - Typing `@` searches workspace files and available agents.
 - While a session is running, you can queue a follow-up, steer the current run, or stop and replace the prompt.
 - Composer undo and redo include file and image attachment changes.
+- Unsent composer text is restored after webview or window reloads.
 
 ## Usage And Limits
 
@@ -59,9 +60,9 @@ MCP servers are also loaded from OpenCode and can be connected or disconnected p
 
 ## Auto-Generated Commit Messages
 
-Stage the changes you intend to commit, then use the quick wand icon in the Source Control toolbar or run `Varro: Generate Commit Message` from the Command Palette. Varro analyzes only the staged diff, follows recent repository commit style when possible, and fills the selected Git repository's commit input for review.
+Stage the changes you intend to commit, then use the quick wand icon in the Source Control toolbar or run `Varro: Generate Commit Message` from the Command Palette. Varro uses staged changes as the change input, follows recent repository commit style when possible, and fills the selected Git repository's commit input for review.
 
-Generation never stages files or commits automatically. Varro preserves an existing draft unless you approve replacement, detects staging or input changes while generation is running, and keeps its temporary helper session out of chat history.
+Generation never includes unstaged changes, stages files, or commits automatically. Varro preserves an existing draft unless you approve replacement, detects staging or input changes while generation is running, and keeps its temporary helper session out of chat history.
 
 ## Additional Workflows
 

@@ -151,18 +151,18 @@ See [architecture.md](architecture.md) for a deeper component-by-component break
 
 ### `OpenCodeServer`
 
-`src/extension/server.ts` is the bridge to the local OpenCode HTTP server.
+`src/extension/server.ts` orchestrates the bridge to the local OpenCode HTTP server. Process, update, and port behavior lives in `open-code-process.ts`; REST and SSE transport lives in `open-code-transport.ts`; and `server-lifecycle.ts` coordinates lifecycle state.
 
 - Checks `/global/health` before spawning anything
 - Starts `opencode serve --port <port>` only when Varro first needs the server and auto-start is enabled
-- Adds the current workspace directory to non-global requests
+- Scopes workspace-sensitive requests and filters deliberately unscoped responses
 - Opens an SSE connection to `/global/event` and filters events to the active workspace
 - Reconnects the event stream with backoff
 - Restarts the child process a limited number of times if it exits unexpectedly
 
 Important behavior:
 
-- The current workspace folder is attached to requests through both a `directory` query param and `x-opencode-directory` header.
+- Workspace-sensitive non-global requests carry both a `directory` query param and `x-opencode-directory` header. Global paths omit the `directory` query param; health and `/global/event` are explicitly unscoped, while generic global REST calls can still carry the directory header. Session status and most session-child routes are deliberately unscoped; Windows leaves additional session reads unscoped to avoid path casing and separator regressions. Aggregate session lists, statuses, permissions, and questions are filtered locally to the active workspace. Direct session-child routes remain ID-addressed and are normally reached through IDs from filtered session state.
 - If the spawned server reports that the configured port is already in use, Varro can retry on nearby ports.
 - If the SSE stream drops while REST is still available, Varro keeps the chat usable and reports the event stream as degraded.
 - A background maintenance loop checks the installed OpenCode CLI version, can suggest `opencode upgrade`, and can restart a Varro-managed server when the CLI is newer and no sessions are active.
@@ -186,6 +186,7 @@ It debounces editor and diagnostics updates before posting them to the webview.
 `src/extension/sidebar-provider.ts` owns the webview lifecycle and message bridge.
 
 - Composes the webview session, bridge, message router, REST proxy, server-event bridge, Ralph host, and focused file/session/provider services
+- Owns host services for commit messages, usage reports, queued-message persistence, provider-file observation and revalidation, session diffs, long tool output, and fallback session titles
 - Delegates loading and lifecycle recovery to `WebviewSession`
 - Routes validated webview messages through `MessageRouter` and `sidebar-provider-actions.ts`
 - Proxies OpenCode and local `/varro/*` calls through `RestProxy`
@@ -212,6 +213,8 @@ It also exposes the Varro extension-host API namespace, `/varro/*`:
 - `DELETE /varro/session-trash`
 
 Those paths share the same `api/request` bridge as OpenCode REST calls, but the extension host resolves them locally instead of forwarding them to OpenCode.
+
+Commit-message generation is invoked by a VS Code command. Usage reports, opening a session in the OpenCode TUI, and read-only tool-output documents use dedicated bridge messages rather than `/varro/*` routes.
 
 This is also the architecture boundary: the extension host acts as transport plus local `/varro/*` services, while the webview computes higher-level UI state from raw `server/event` traffic and follow-up `/varro/*` reads when needed.
 
@@ -244,6 +247,9 @@ Drag and drop also has a fallback path for environments that do not expose local
 - Workspace-scoped permission mode preferences and model visibility preferences
 - Current-document context toggles and skipped plan-session markers
 - Pending attention session IDs and interrupted session IDs from the extension host
+- Queued messages and the unsent composer text draft
+
+Browser preferences and drafts use `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Queued-message snapshots are stored separately in extension-host workspace state so attachment data survives webview and window reloads.
 
 `src/webview/hooks/useOpenCode.ts` is the stable public API. Runtime composition lives in `src/webview/hooks/runtime/open-code-runtime-instance.ts`, with focused operations and effects under `src/webview/hooks/session/`.
 
@@ -294,6 +300,8 @@ While a session is running:
 
 The session UI also distinguishes running, attention-needed, failed, completed, and plan-ready states. On larger layouts, the session list can stay pinned beside the main chat pane.
 
+Session message history is paged in 50-message windows. Opening a session loads the newest page; reaching the top prepends the next page while preserving the visible scroll anchor. See [Message List Virtualization](message-list-virtualization.md) for the identity and scroll invariants around this flow.
+
 ## Provider Limits
 
 Varro exposes `/varro/provider-limit` under the `/varro/*` extension-host API namespace.
@@ -306,7 +314,7 @@ The implementation in `src/extension/provider-limit-service.ts` and `src/extensi
 
 Results are cached briefly in the extension host before being shown in the composer toolbar.
 
-Adapters may read OpenCode and provider-specific local credentials, inspect local provider metadata, and make authenticated quota requests. The Anthropic adapter can refresh and atomically update `~/.claude/.credentials.json` when credentials from that file are rejected. See [Provider-Limit Polling And Credentials](usage.md#provider-limit-polling-and-credentials) for the user-facing disclosure and opt-out setting.
+Adapters may read OpenCode and provider-specific local credentials, inspect local provider metadata, and make authenticated quota requests. The Anthropic adapter can refresh and atomically update `~/.claude/.credentials.json` when credentials from that file are rejected. `varro.providerLimits.disabled` stops periodic polling and hides quota UI, but commit-message generation can still make a one-off OpenAI quota lookup for GPT Luna Fast eligibility when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available. See [Provider-Limit Polling And Credentials](usage.md#provider-limit-polling-and-credentials) for the user-facing disclosure.
 
 ## MCP And Plan Flows
 
@@ -365,7 +373,10 @@ If Varro launched the server itself and the configured port is already occupied 
 src/
   extension/          VS Code extension host code
     extension.ts      Activation entry point
-    server.ts         OpenCode server process management
+    server.ts         OpenCode server orchestration and policy
+    open-code-process.ts   CLI, process, port, and update behavior
+    open-code-transport.ts REST and SSE transport
+    server-lifecycle.ts    Lifecycle state coordination
     sidebar-provider.ts
     context-provider.ts
     commands.ts
