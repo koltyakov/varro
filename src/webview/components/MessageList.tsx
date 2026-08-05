@@ -27,9 +27,20 @@ import {
   messageStructureVersion,
   messageInfoVersion,
   showModelPicker,
+  compactToolOutput,
   showInlineFileChanges,
 } from '../lib/state';
+import {
+  getAssistantActivityGroupMap,
+  isAssistantActivityPart,
+  type AssistantActivityGroupInfo,
+} from '../lib/assistant-activity';
 import { isAssistantMessage } from '../lib/message-metrics';
+import {
+  isFileEditPart,
+  isWorkspaceDirectoryText,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
@@ -50,13 +61,20 @@ import {
 } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
-import { getTrailingFileEventSignature } from '../lib/message-event-collapse';
+import {
+  collapseLeadingDuplicateFileEvents,
+  getTrailingFileEventSignature,
+} from '../lib/message-event-collapse';
 import { getToolInlineFileChangesLayoutSignature } from '../lib/tool-file-change';
 import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
   getToolCallLookupKey,
 } from '../lib/tool-call-matching';
+import {
+  getMessageBlockExpanded,
+  trackMessageBlockExpansionState,
+} from '../lib/tool-call-expansion-state';
 import {
   ChatContentBottomFade,
   PendingActionRows,
@@ -93,6 +111,7 @@ import {
   type ExpansionScrollAnchor,
 } from './message-list/scrolling';
 import { VirtualizedContent } from './message-list/VirtualizedContent';
+import { deduplicateFileEdits } from './message/AssistantMessageContent';
 import {
   getLinkedToolCallKeys,
   getStandalonePermissionPrompts,
@@ -175,6 +194,45 @@ export function getInlinePreviewLayoutSignatures(
     }
   }
   return signatures;
+}
+
+export function getCompactActivityLayoutSignatures(
+  messages: readonly {
+    info: { id: string; role: 'user' | 'assistant' };
+    parts: readonly Part[];
+  }[],
+  enabled: boolean
+) {
+  const signatures = new Map<string, string>();
+  if (!enabled) return signatures;
+
+  for (const message of messages) {
+    if (message.info.role !== 'assistant') continue;
+    const activityPartIds = message.parts.flatMap((part) =>
+      isAssistantActivityPart(part) ? [part.id] : []
+    );
+    if (activityPartIds.length > 0) {
+      signatures.set(message.info.id, activityPartIds.join('\u0000'));
+    }
+  }
+  return signatures;
+}
+
+export function getCompactActivityDisclosureLayoutSignatures(
+  groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+  isExpanded: (key: string) => boolean
+) {
+  return new Map(
+    [...groups].map(([messageId, messageGroups]) => [
+      messageId,
+      messageGroups
+        .map(
+          (group) =>
+            `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}`
+        )
+        .join('\u0001'),
+    ])
+  );
 }
 
 export function getChangedInlinePreviewMessageIds(
@@ -857,6 +915,10 @@ export function MessageList() {
     getInlinePreviewLayoutSignatures(messages(), showInlineFileChanges())
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
+  const compactActivityLayoutSignatures = createMemo(() =>
+    getCompactActivityLayoutSignatures(messages(), compactToolOutput())
+  );
+  let previousCompactActivityLayoutSignatures = new Map<string, string>();
 
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
@@ -909,12 +971,14 @@ export function MessageList() {
     }
   });
 
-  createEffect(() => {
-    const current = inlinePreviewLayoutSignatures();
+  function scheduleChangedLayoutRowMeasurements(
+    previous: ReadonlyMap<string, string>,
+    current: ReadonlyMap<string, string>
+  ) {
     const currentMessageIds = new Set(messageIds());
 
     for (const messageId of getChangedInlinePreviewMessageIds(
-      previousInlinePreviewLayoutSignatures,
+      previous,
       current,
       currentMessageIds
     )) {
@@ -941,8 +1005,20 @@ export function MessageList() {
         scheduleVisibleMeasurement({ afterResize: true });
       });
     }
+  }
+
+  createEffect(() => {
+    const current = inlinePreviewLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(previousInlinePreviewLayoutSignatures, current);
 
     previousInlinePreviewLayoutSignatures = new Map(current);
+  });
+
+  createEffect(() => {
+    const current = compactActivityLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(previousCompactActivityLayoutSignatures, current);
+
+    previousCompactActivityLayoutSignatures = new Map(current);
   });
 
   createEffect(() => {
@@ -3067,6 +3143,53 @@ export function MessageList() {
       return result;
     });
   });
+  const assistantActivityGroupMap = createMemo(() => {
+    if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
+
+    const previousSignatures = previousTrailingFileEventSignatureMap();
+    const normalizedMessages = messages().map((message) =>
+      isAssistantMessage(message.info)
+        ? {
+            info: message.info,
+            parts: deduplicateFileEdits(
+              collapseLeadingDuplicateFileEvents(
+                message.parts,
+                previousSignatures.get(message.info.id) ?? null
+              )
+            ),
+          }
+        : message
+    );
+    return getAssistantActivityGroupMap(
+      normalizedMessages,
+      (part) =>
+        shouldShowAssistantPartInline(part) &&
+        (!showInlineFileChanges() || !isFileEditPart(part)) &&
+        (part.type !== 'tool' ||
+          (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
+      (part) =>
+        part.type === 'text'
+          ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
+          : shouldShowAssistantPartInline(part)
+    );
+  });
+  const compactActivityDisclosureLayoutSignatures = createMemo(() => {
+    trackMessageBlockExpansionState();
+    return getCompactActivityDisclosureLayoutSignatures(
+      assistantActivityGroupMap(),
+      (key) => getMessageBlockExpanded(key) ?? false
+    );
+  });
+  let previousCompactActivityDisclosureLayoutSignatures = new Map<string, string>();
+
+  createEffect(() => {
+    const current = compactActivityDisclosureLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(
+      previousCompactActivityDisclosureLayoutSignatures,
+      current
+    );
+    previousCompactActivityDisclosureLayoutSignatures = new Map(current);
+  });
 
   const assistantStackGroupMap = createMemo(
     () => new Map<string, AssistantFileEditStackGroup | null>()
@@ -3568,6 +3691,7 @@ export function MessageList() {
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
               assistantDialogSummaryMap={assistantDialogSummaryMap()}
+              assistantActivityGroupMap={assistantActivityGroupMap()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

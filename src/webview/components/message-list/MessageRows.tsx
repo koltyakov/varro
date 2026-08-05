@@ -8,6 +8,7 @@ import {
 } from '../../lib/message-edit-state';
 import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
+import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type {
@@ -38,6 +39,7 @@ export type MessageRowSharedProps = {
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
+  assistantActivityGroupMap?: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   claimMessageEntrance?: (messageId: string) => boolean;
@@ -104,6 +106,8 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
   });
   const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
+  const assistantActivityGroups = () =>
+    props.assistantActivityGroupMap?.get(props.msg.info.id) ?? null;
   const highlightFinalAnswer = () => {
     const info = props.msg.info;
     if (isAssistantMessage(info) && isAbortedAssistantError(info.error)) {
@@ -181,6 +185,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
           claimAssistantItemReveal={props.claimAssistantItemReveal}
           questionRequestForTool={props.questionRequestForTool}
           permissionMatchForTool={props.permissionMatchForTool}
+          compactActivityGroups={assistantActivityGroups()}
         />
       </Show>
       <Show when={summary()}>

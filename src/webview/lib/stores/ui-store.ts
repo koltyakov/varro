@@ -1,5 +1,6 @@
 import {
   composerFocusKey,
+  compactToolOutput,
   connectionInitialized,
   desktopSessionPaneSide,
   error,
@@ -18,6 +19,7 @@ import {
   requestSessionSearchFocus,
   setPersistentShowSessionPicker,
   setComposerFocusKey,
+  setCompactToolOutput,
   setConnectionInitialized,
   setDesktopSessionPaneSide,
   setError,
@@ -59,6 +61,8 @@ export const uiStore = {
   setShowThinking,
   expandThinkingByDefault,
   setExpandThinkingByDefault,
+  compactToolOutput,
+  setCompactToolOutput,
   showInlineFileChanges,
   setShowInlineFileChanges,
   showChangedFiles,

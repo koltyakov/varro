@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { resetDefaultAppState, setIsLoading } from '../../lib/state';
-import type { AssistantMessage, Part, TextPart, ToolPart } from '../../types';
+import {
+  resetDefaultAppState,
+  setCompactToolOutput,
+  setIsLoading,
+  setShowInlineFileChanges,
+} from '../../lib/state';
+import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
+import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
 import {
   AssistantMessageContent,
   deduplicateFileEdits,
@@ -120,6 +126,29 @@ function fileEditPart(id: string, path: string): ToolPart {
   };
 }
 
+function toolPart(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'tool',
+    callID: `call-${id}`,
+    tool,
+    state: completedToolState(input, tool),
+  };
+}
+
+function reasoningPart(id: string): ReasoningPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'reasoning',
+    text: 'Reasoning detail',
+    time: { start: 0, end: 1 },
+  };
+}
+
 function renderAssistantMessageContent(props: Partial<AssistantMessageContentProps> = {}) {
   const merged: AssistantMessageContentProps = {
     info: createAssistantMessage(),
@@ -141,6 +170,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   resetDefaultAppState();
+  resetToolCallExpansionState();
 });
 
 afterEach(() => {
@@ -151,6 +181,7 @@ afterEach(() => {
   document.body.classList.remove('chat-read-mode-open');
   markdownRendererMock.mockClear();
   messagePartMock.mockClear();
+  resetToolCallExpansionState();
   resetDefaultAppState();
   vi.unstubAllGlobals();
 });
@@ -186,6 +217,160 @@ describe('deduplicateFileEdits', () => {
 });
 
 describe('AssistantMessageContent', () => {
+  it('keeps activity parts ungrouped when compact tool output is disabled', () => {
+    renderAssistantMessageContent({
+      parts: [reasoningPart('reasoning-1'), toolPart('read-1', 'read')],
+    });
+
+    expect(container?.querySelector('.assistant-activity-group')).toBeNull();
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(2);
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+
+    setCompactToolOutput(true);
+
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(0);
+  });
+
+  it('groups consecutive activity, updates counters, and preserves expansion while streaming', () => {
+    setCompactToolOutput(true);
+    const initialParts: Part[] = [
+      reasoningPart('reasoning-1'),
+      toolPart('read-1', 'read', { filePath: 'src/a.ts' }),
+      toolPart('read-2', 'read', { filePath: 'src/b.ts' }),
+      toolPart('grep-1', 'grep', { pattern: 'activity' }),
+    ];
+    const [parts, setParts] = createSignal(initialParts);
+
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={createAssistantMessage({ time: { created: 0 } })}
+          parts={parts()}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+        />
+      ),
+      container!
+    );
+
+    const summary = () =>
+      container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search');
+    expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.assistant-activity-details')).toBeNull();
+
+    summary()?.click();
+
+    expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
+
+    setParts((current) => [...current, toolPart('bash-1', 'bash', { command: 'npm test' })]);
+
+    expect(summary()?.textContent).toContain(
+      'Explored 2 files, 1 thought, 1 search, 1 command'
+    );
+    expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
+  });
+
+  it('keeps inline file edits outside the compact activity disclosure', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    const edit = fileEditPart('edit-inline', 'src/app.ts');
+    edit.state = completedToolState(
+      {
+        filePath: 'src/app.ts',
+        oldString: 'const value = 1;',
+        newString: 'const value = 2;',
+      },
+      'Edited src/app.ts'
+    );
+
+    renderAssistantMessageContent({ parts: [edit] });
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.assistant-file-edit-stack')).not.toBeNull();
+    expect(container?.querySelector('[data-part-id="edit-inline"]')).not.toBeNull();
+  });
+
+  it('groups file edits when inline previews are disabled', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(false);
+    const edit = fileEditPart('edit-compact', 'src/app.ts');
+
+    renderAssistantMessageContent({ parts: [edit] });
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 edit'
+    );
+    expect(container?.querySelector('[data-part-id="edit-compact"]')).toBeNull();
+  });
+
+  it('applies failure emphasis only to the failed-tool suffix', () => {
+    setCompactToolOutput(true);
+    const failed = toolPart('read-failed', 'read', { filePath: 'src/failing.ts' });
+    failed.state = {
+      status: 'error',
+      input: { filePath: 'src/failing.ts' },
+      error: 'Read failed',
+      time: { start: 0, end: 1 },
+    };
+
+    renderAssistantMessageContent({ parts: [toolPart('read-1', 'read'), failed] });
+
+    expect(container?.querySelector('.assistant-activity-summary-main')?.textContent).toBe(
+      'Explored 2 files'
+    );
+    expect(container?.querySelector('.assistant-activity-status-failed')?.textContent).toBe(
+      ' · 1 tool failed'
+    );
+    expect(container?.querySelector('.assistant-activity-group')?.classList).not.toContain(
+      'has-failure'
+    );
+  });
+
+  it('keeps actionable tools outside compact activity groups', () => {
+    setCompactToolOutput(true);
+    const question = toolPart('question-1', 'question');
+    const [questionActive, setQuestionActive] = createSignal(false);
+
+    renderAssistantMessageContent({
+      parts: [toolPart('read-1', 'read'), question, toolPart('grep-1', 'grep')],
+      questionRequestForTool: (part) =>
+        questionActive() && part.id === question.id
+          ? {
+              id: 'question-request-1',
+              sessionID: 'session-1',
+              questions: [],
+              tool: { messageID: 'assistant-1', callID: question.callID },
+            }
+          : null,
+    });
+
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
+
+    setQuestionActive(true);
+
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:question-1"]')
+    ).not.toBeNull();
+  });
+
+  it('keeps delegated agent tasks outside compact activity groups', () => {
+    setCompactToolOutput(true);
+
+    renderAssistantMessageContent({
+      parts: [toolPart('read-1', 'read'), toolPart('task-1', 'task'), toolPart('grep-1', 'grep')],
+    });
+
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
+    expect(container?.querySelector('[data-assistant-render-key="part:task-1"]')).not.toBeNull();
+  });
+
   it('shows mounted parts immediately, then reveals newly streamed parts once', () => {
     const info = createAssistantMessage({ time: { created: 0 } });
     const initialPart = textPart('text-1', 'Streaming');

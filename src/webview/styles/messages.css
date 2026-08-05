@@ -326,6 +326,71 @@
   min-width: 0;
 }
 
+.assistant-activity-group {
+  min-width: 0;
+}
+
+.assistant-message-flow-item-hidden {
+  display: none;
+}
+
+.assistant-activity-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 0;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-vscode-fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  text-align: left;
+}
+
+.assistant-activity-status-failed {
+  color: color-mix(in srgb, var(--color-vscode-error) 82%, var(--color-vscode-fg));
+}
+
+.assistant-activity-summary:focus-visible {
+  outline: none;
+}
+
+.assistant-activity-summary-text {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-activity-chevron {
+  display: block;
+  flex: 0 0 auto;
+  transition: transform 0.14s ease;
+}
+
+.assistant-activity-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.assistant-activity-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.assistant-activity-detail {
+  min-width: 0;
+}
+
 .assistant-message-flow-item-streamed.measured-entrance-active {
   min-height: 0;
   overflow: clip;

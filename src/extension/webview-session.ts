@@ -69,6 +69,7 @@ export class WebviewSession {
       ensureServerStarted(): Promise<unknown>;
       readConfig(): {
         expandThinkingByDefault: boolean;
+        compactToolOutput: boolean;
         showInlineFileChanges?: boolean;
         showChangedFiles?: boolean;
         desktopSessionPaneSide: 'left' | 'right';
@@ -288,6 +289,7 @@ export class WebviewSession {
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
       expandThinkingByDefault: config.expandThinkingByDefault,
+      compactToolOutput: config.compactToolOutput,
       showInlineFileChanges: config.showInlineFileChanges,
       showChangedFiles: config.showChangedFiles,
       desktopSessionPaneSide: config.desktopSessionPaneSide,

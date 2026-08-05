@@ -1,5 +1,12 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
-import { isLoading, showInlineFileChanges } from '../../lib/state';
+import {
+  formatAssistantActivityCounts,
+  getAssistantActivityStatus,
+  isAssistantActivityPart,
+  type AssistantActivityGroupInfo,
+  type AssistantActivityPart,
+} from '../../lib/assistant-activity';
+import { isLoading, compactToolOutput, showInlineFileChanges } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import { trapModalFocus } from '../../lib/modal-focus';
 import {
@@ -12,6 +19,11 @@ import {
   getToolInlineFileChangesLayoutSignature,
 } from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
+import {
+  getMessageBlockExpanded,
+  setMessageBlockExpanded,
+  trackMessageBlockExpansionState,
+} from '../../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
@@ -20,12 +32,15 @@ export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 
 type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
-  | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] };
+  | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] }
+  | { kind: 'activity-group'; key: string; parts: AssistantActivityPart[] };
 
 // File-edit stacks rekey on every appended edit, so track their reveal by the
 // first part id; otherwise appending an edit replays the whole stack animation.
 function getRevealTrackingKey(item: AssistantRenderItem) {
-  return item.kind === 'file-edit-stack' ? `file-edit-stack:${item.parts[0]!.id}` : item.key;
+  if (item.kind === 'file-edit-stack') return `file-edit-stack:${item.parts[0]!.id}`;
+  if (item.kind === 'activity-group') return `activity-group:${item.parts[0]!.id}`;
+  return item.key;
 }
 
 const COMPACTION_BOUNDARY_RE =
@@ -223,6 +238,7 @@ export function AssistantMessageContent(props: {
   claimItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
+  compactActivityGroups?: readonly AssistantActivityGroupInfo[] | null;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
@@ -237,6 +253,56 @@ export function AssistantMessageContent(props: {
         })
       : dedupedParts()
   );
+  const isLocallyCompactActivityPart = (part: Part): part is AssistantActivityPart =>
+    compactToolOutput() &&
+    isAssistantActivityPart(part) &&
+    (!showInlineFileChanges() || !isFileEditPart(part)) &&
+    (part.type !== 'tool' ||
+      (!props.questionRequestForTool?.(part) && !props.permissionMatchForTool?.(part)));
+  const effectiveCompactActivityGroups = createMemo<readonly AssistantActivityGroupInfo[] | null>(
+    () => {
+      if (props.compactActivityGroups !== undefined) return props.compactActivityGroups;
+      if (!compactToolOutput() || props.info.mode === 'subagent') return null;
+
+      const groups: AssistantActivityGroupInfo[] = [];
+      let activityParts: AssistantActivityPart[] = [];
+      const flush = () => {
+        const ownerPart = activityParts[0];
+        if (!ownerPart) return;
+        groups.push({
+          key: `activity-segment\u0000${props.info.sessionID}\u0000${props.info.id}\u0000${ownerPart.id}`,
+          ownerMessageId: props.info.id,
+          ownerPartId: ownerPart.id,
+          parts: activityParts,
+        });
+        activityParts = [];
+      };
+      for (const part of displayParts()) {
+        if (isLocallyCompactActivityPart(part)) activityParts.push(part);
+        else flush();
+      }
+      flush();
+      return groups.length > 0 ? groups : null;
+    }
+  );
+  const compactActivityGroupByPartKey = createMemo(
+    () =>
+      new Map(
+        effectiveCompactActivityGroups()?.flatMap((group) =>
+          group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
+        ) || []
+      )
+  );
+  const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
+    if (group.ownerMessageId !== props.info.id) return null;
+    return (
+      group.parts.find((part) =>
+        displayParts().some(
+          (displayPart) => displayPart.messageID === part.messageID && displayPart.id === part.id
+        )
+      )?.id ?? null
+    );
+  };
   const finalTextPartId = createMemo(() =>
     getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer, props.textForPart)
   );
@@ -289,6 +355,29 @@ export function AssistantMessageContent(props: {
 
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]!;
+
+      const canGroupActivityPart = (candidate: Part) => {
+        return compactActivityGroupByPartKey().get(`${candidate.messageID}\u0000${candidate.id}`);
+      };
+
+      const activityGroup = canGroupActivityPart(part);
+      if (activityGroup && isAssistantActivityPart(part)) {
+        const activityParts: AssistantActivityPart[] = [part as AssistantActivityPart];
+        while (
+          index + 1 < parts.length &&
+          canGroupActivityPart(parts[index + 1]!)?.key === activityGroup.key
+        ) {
+          activityParts.push(parts[++index]! as AssistantActivityPart);
+        }
+        const key = `activity-group:${activityParts[0]!.id}`;
+        const previous = previousByKey.get(key);
+        if (previous?.kind === 'activity-group' && samePartList(previous.parts, activityParts)) {
+          items.push(previous);
+        } else {
+          items.push({ kind: 'activity-group', key, parts: activityParts });
+        }
+        continue;
+      }
 
       if (isFileEditPart(part)) {
         const fileEditParts: ToolPart[] = [part as ToolPart];
@@ -347,6 +436,45 @@ export function AssistantMessageContent(props: {
 
   const renderAssistantItem = (item: AssistantRenderItem) => {
     const revealClass = getRevealClass(item);
+    if (item.kind === 'activity-group') {
+      const activityGroup = () =>
+        compactActivityGroupByPartKey().get(
+          `${item.parts[0]!.messageID}\u0000${item.parts[0]!.id}`
+        )!;
+      const showSummary = () =>
+        activityGroup().ownerMessageId === props.info.id &&
+        item.parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
+      return (
+        <div
+          ref={(element) => {
+            if (revealClass) {
+              onCleanup(
+                prepareMeasuredEntrance(element, {
+                  animationName: 'streamed-assistant-item-in',
+                  heightProperty: '--streamed-assistant-item-height',
+                  skipWithin: '.interactive-item-entering',
+                })
+              );
+            }
+          }}
+          class={`assistant-message-flow-item${revealClass}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
+          data-assistant-render-key={item.key}
+        >
+          <AssistantActivityGroup
+            info={props.info}
+            parts={item.parts}
+            summaryParts={activityGroup().parts}
+            expansionKey={activityGroup().key}
+            showSummary={showSummary()}
+            textForPart={props.textForPart}
+            lightweight={!!isLightweight()}
+            questionRequestForTool={props.questionRequestForTool}
+            permissionMatchForTool={props.permissionMatchForTool}
+          />
+        </div>
+      );
+    }
+
     return item.kind === 'file-edit-stack' ? (
       <div
         ref={(element) => {
@@ -501,6 +629,106 @@ export function AssistantMessageContent(props: {
       </Show>
     </div>
   );
+}
+
+function AssistantActivityGroup(props: {
+  info: AssistantMessage;
+  parts: AssistantActivityPart[];
+  summaryParts: AssistantActivityPart[];
+  expansionKey: string;
+  showSummary: boolean;
+  textForPart: (part: Part) => string | null;
+  lightweight: boolean;
+  questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
+  permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
+}) {
+  const expanded = () => isActivityGroupExpanded(props.expansionKey);
+  const summary = createMemo(() => formatAssistantActivityCounts(props.summaryParts));
+  const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
+
+  const toggleExpanded = () => {
+    const nextExpanded = !expanded();
+    setMessageBlockExpanded(props.expansionKey, nextExpanded);
+  };
+
+  return (
+    <div class={`assistant-activity-group${activityStatus().running ? ' is-running' : ''}`}>
+      <Show when={props.showSummary}>
+        <button
+          type="button"
+          class="assistant-activity-summary"
+          aria-expanded={expanded()}
+          onClick={toggleExpanded}
+        >
+          <span class="assistant-activity-summary-text" aria-live="polite" aria-atomic="true">
+            <span
+              class={`assistant-activity-summary-main${activityStatus().running ? ' shimmer-progress' : ''}`}
+            >
+              {summary()}
+            </span>
+            <Show when={activityStatus().failed > 0}>
+              <span class="assistant-activity-status-failed">
+                {' · '}
+                {activityStatus().failed}{' '}
+                {activityStatus().failed === 1 ? 'tool failed' : 'tools failed'}
+              </span>
+            </Show>
+            <Show when={activityStatus().aborted > 0}>
+              <span>
+                {' · '}
+                {activityStatus().aborted}{' '}
+                {activityStatus().aborted === 1 ? 'tool aborted' : 'tools aborted'}
+              </span>
+            </Show>
+            <Show when={activityStatus().running}>
+              <span> · working</span>
+            </Show>
+          </span>
+          <svg
+            class={`assistant-activity-chevron${expanded() ? ' expanded' : ''}`}
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="12"
+            height="12"
+            aria-hidden="true"
+          >
+            <path d="M6 4l4 4-4 4" />
+          </svg>
+        </button>
+      </Show>
+      <Show when={expanded()}>
+        <div class="assistant-activity-details">
+          <For each={props.parts}>
+            {(part) => (
+              <div class="assistant-activity-detail">
+                <MessagePart
+                  part={part}
+                  messageInfo={props.info}
+                  streamedText={props.textForPart(part)}
+                  lightweight={props.lightweight}
+                  questionRequest={
+                    part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
+                  }
+                  permissionMatch={
+                    part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
+                  }
+                />
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function isActivityGroupExpanded(key: string) {
+  trackMessageBlockExpansionState();
+  return getMessageBlockExpanded(key) ?? false;
 }
 
 function getAssistantFlowItemClass(

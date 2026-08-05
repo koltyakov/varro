@@ -49,6 +49,9 @@ export function createMountBridgeOperations(deps: {
         },
         setConfig: (payload) => {
           uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
+          if (payload.compactToolOutput !== undefined) {
+            uiStore.setCompactToolOutput(payload.compactToolOutput);
+          }
           if (payload.showInlineFileChanges !== undefined) {
             uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
           }

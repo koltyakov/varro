@@ -5,6 +5,7 @@ import {
   isProviderAuthFailure,
 } from '../../shared/error-classification';
 import { retryMessage } from '../hooks/useOpenCode';
+import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
 import { client } from '../lib/client';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
@@ -14,6 +15,10 @@ import { openProviderSetup } from '../lib/provider-setup';
 import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
 import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
+import {
+  getMessageBlockExpanded,
+  trackMessageBlockExpansionState,
+} from '../lib/tool-call-expansion-state';
 import type {
   AssistantMessage,
   CompactionPart,
@@ -60,6 +65,11 @@ function isManagedSubagentSession() {
   );
 }
 
+function isCompactActivityExpanded(group: AssistantActivityGroupInfo) {
+  trackMessageBlockExpansionState();
+  return getMessageBlockExpanded(group.key) ?? false;
+}
+
 export function Message(props: {
   info: MessageType;
   parts: Part[];
@@ -77,6 +87,7 @@ export function Message(props: {
   claimAssistantItemReveal?: (messageId: string, renderKey: string) => boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
+  compactActivityGroups?: readonly AssistantActivityGroupInfo[] | null;
 }) {
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
   let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
@@ -182,6 +193,21 @@ export function Message(props: {
   const layoutAssistantParts = createMemo(() =>
     assistant() ? deduplicateFileEdits(visibleAssistantParts()) : []
   );
+  const compactActivityPartKeys = createMemo(() => {
+    const groups = props.compactActivityGroups;
+    return new Map(
+      groups?.flatMap((group) =>
+        group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
+      ) || []
+    );
+  });
+  const hasVisibleAssistantOutput = () => {
+    if (!props.compactActivityGroups) return visibleAssistantParts().length > 0;
+    return visibleAssistantParts().some((part) => {
+      const group = compactActivityPartKeys().get(`${part.messageID}\u0000${part.id}`);
+      return !group || group.ownerMessageId === props.info.id || isCompactActivityExpanded(group);
+    });
+  };
   const diffRequest = createMemo(() => {
     if (assistantErrorMessage()) return null;
     const request = getAssistantDiffRequest(props.info, props.isLastAssistant ?? false);
@@ -208,9 +234,7 @@ export function Message(props: {
   const shouldRender = () => {
     if (compactionDivider()) return true;
     if (isUser()) return hasUserContent();
-    return (
-      !!assistantErrorMessage() || visibleAssistantParts().length > 0 || visibleDiffs().length > 0
-    );
+    return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
   const hasStructuredAssistantParts = () =>
     assistant()
@@ -324,6 +348,7 @@ export function Message(props: {
                 claimItemReveal={props.claimAssistantItemReveal}
                 questionRequestForTool={props.questionRequestForTool}
                 permissionMatchForTool={props.permissionMatchForTool}
+                compactActivityGroups={props.compactActivityGroups}
               />
             </Show>
           </div>

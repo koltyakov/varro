@@ -16,6 +16,7 @@ const {
   syncDraftPermissionForWorkspace,
   syncSessionMarkersForWorkspace,
   setExpandThinkingByDefaultPreference,
+  setCompactToolOutput,
   setShowInlineFileChanges,
   setShowChangedFiles,
   setDesktopSessionPaneSide,
@@ -37,6 +38,7 @@ const {
   syncDraftPermissionForWorkspace: vi.fn(),
   syncSessionMarkersForWorkspace: vi.fn(),
   setExpandThinkingByDefaultPreference: vi.fn(),
+  setCompactToolOutput: vi.fn(),
   setShowInlineFileChanges: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock('../lib/state', async () => {
     syncDraftPermissionForWorkspace,
     syncSessionMarkersForWorkspace,
     setExpandThinkingByDefaultPreference,
+    setCompactToolOutput,
     setShowInlineFileChanges,
     setShowChangedFiles,
     setDesktopSessionPaneSide,
@@ -508,6 +511,7 @@ describe('mount bridge helpers', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
+        compactToolOutput: true,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'right',
@@ -529,6 +533,7 @@ describe('mount bridge helpers', () => {
     expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
     expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
+    expect(setCompactToolOutput).toHaveBeenCalledWith(true);
     expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
   });

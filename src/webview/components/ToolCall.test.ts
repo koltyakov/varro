@@ -2312,6 +2312,7 @@ describe('FileChangeCard', () => {
 
   it('keeps failed apply_patch status visible beside proposed inline changes', () => {
     setShowInlineFileChanges(true);
+    const sendSpy = setExtensionSender();
     const part: ToolPart = {
       id: 'tool-failed-patch',
       sessionID: 'session-1',
@@ -2324,6 +2325,18 @@ describe('FileChangeCard', () => {
         input: {
           patchText: `*** Begin Patch
 *** Update File: src/app.ts
+@@
+-old
++proposed
+*** Update File: src/one.ts
+@@
+-old
++proposed
+*** Update File: src/two.ts
+@@
+-old
++proposed
+*** Update File: src/three.ts
 @@
 -old
 +proposed
@@ -2346,9 +2359,10 @@ describe('FileChangeCard', () => {
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.file-edit-error-detail')).toBeNull();
 
-    container?.querySelector<HTMLElement>('.file-change-card-header')?.click();
+    container?.querySelector<HTMLElement>('.file-edit-multi-list')?.click();
 
     expect(errorToggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(sendSpy).not.toHaveBeenCalled();
     const errorDetail = container?.querySelector('.file-edit-error-detail');
     expect(errorDetail?.getAttribute('role')).toBe('alert');
     expect(errorDetail?.textContent).toContain(
@@ -2357,6 +2371,14 @@ describe('FileChangeCard', () => {
     expect(errorDetail?.querySelector('script')).toBeNull();
     expect(container?.querySelector('.diff-view-line-addition')?.textContent).toContain('proposed');
     expect(container?.textContent).not.toContain('Edited');
+
+    container?.querySelector<HTMLElement>('.file-edit-path-link')?.click();
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: 'src/app.ts', kind: 'file', view: 'diff' },
+    });
+    expect(errorToggle?.getAttribute('aria-expanded')).toBe('true');
 
     container?.querySelector<HTMLElement>('.file-change-card-header')?.click();
 

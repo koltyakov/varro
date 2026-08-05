@@ -293,6 +293,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
+        event.affectsConfiguration('varro.chat.compactToolOutput') ||
         event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||

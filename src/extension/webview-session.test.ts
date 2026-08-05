@@ -152,6 +152,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     ensureServerStarted: vi.fn(() => Promise.resolve(undefined)),
     readConfig: vi.fn(() => ({
       expandThinkingByDefault: false,
+      compactToolOutput: true,
       showInlineFileChanges: true,
       showChangedFiles: true,
       desktopSessionPaneSide: 'left' as const,

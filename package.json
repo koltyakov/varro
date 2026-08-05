@@ -262,6 +262,11 @@
           "default": false,
           "description": "Expand thinking blocks by default in the chat view."
         },
+        "varro.chat.compactToolOutput": {
+          "type": "boolean",
+          "default": false,
+          "description": "Group routine tool calls and reasoning into expandable summary rows in the chat view."
+        },
         "varro.chat.showInlineFileChanges": {
           "type": "boolean",
           "default": true,

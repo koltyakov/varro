@@ -29,6 +29,7 @@ export function readExtensionConfigState(
 
   return {
     expandThinkingByDefault: config.get<boolean>('chat.expandThinkingByDefault') ?? false,
+    compactToolOutput: config.get<boolean>('chat.compactToolOutput', false),
     showInlineFileChanges: config.get<boolean>('chat.showInlineFileChanges', false),
     showChangedFiles: config.get<boolean>('chat.showChangedFiles', false),
     desktopSessionPaneSide: config.get<'left' | 'right'>('chat.desktopSessionPaneSide', 'left'),

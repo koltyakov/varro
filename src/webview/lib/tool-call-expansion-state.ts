@@ -1,3 +1,5 @@
+import { createSignal } from 'solid-js';
+
 // Interactive block state is only cleared when the session changes, so a
 // long-running session (e.g. a Ralph loop) would otherwise accumulate entries
 // for the whole run. The cap sits far above what a user can realistically have
@@ -26,6 +28,7 @@ function writeEntry<T>(store: Map<string, T>, key: string, value: T) {
 
 const toolCallExpansionState = new Map<string, boolean>();
 const messageBlockExpansionState = new Map<string, boolean>();
+const [messageBlockExpansionVersion, setMessageBlockExpansionVersion] = createSignal(0);
 const toolDiffPreviewState = new Map<
   string,
   { expanded: boolean; scrollTop: number; scrollLeft: number }
@@ -45,6 +48,11 @@ export function getMessageBlockExpanded(key: string) {
 
 export function setMessageBlockExpanded(key: string, expanded: boolean) {
   writeEntry(messageBlockExpansionState, key, expanded);
+  setMessageBlockExpansionVersion((version) => version + 1);
+}
+
+export function trackMessageBlockExpansionState() {
+  messageBlockExpansionVersion();
 }
 
 export function getToolDiffPreviewState(key: string) {
@@ -62,6 +70,7 @@ export function resetToolCallExpansionState() {
   toolCallExpansionState.clear();
   messageBlockExpansionState.clear();
   toolDiffPreviewState.clear();
+  setMessageBlockExpansionVersion((version) => version + 1);
 }
 
 export function getTrackedToolCallStateSize() {

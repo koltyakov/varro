@@ -437,6 +437,7 @@ describe('parseExtensionMessage', () => {
         type: 'config/update',
         payload: {
           expandThinkingByDefault: true,
+          compactToolOutput: true,
           showInlineFileChanges: true,
           showChangedFiles: true,
           desktopSessionPaneSide: 'left',
@@ -450,6 +451,7 @@ describe('parseExtensionMessage', () => {
       type: 'config/update',
       payload: {
         expandThinkingByDefault: true,
+        compactToolOutput: true,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'left',

@@ -7,6 +7,8 @@ import {
   setMessagesIncremental,
   state,
   setSessions,
+  setCompactToolOutput,
+  setShowInlineFileChanges,
   setShowModelPicker,
   setShowThinkingPreference,
   setState,
@@ -30,6 +32,8 @@ import type {
 import {
   MessageList,
   getChangedInlinePreviewMessageIds,
+  getCompactActivityDisclosureLayoutSignatures,
+  getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
   getNewlyAppendedMessageIds,
   getPromptNumberMap,
@@ -668,6 +672,84 @@ describe('inline preview virtualization signatures', () => {
   });
 });
 
+describe('compact activity virtualization signatures', () => {
+  const activityPart: Part = {
+    id: 'read-1',
+    sessionID: 'session-1',
+    messageID: 'assistant-1',
+    type: 'tool',
+    callID: 'call-1',
+    tool: 'read',
+    state: {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    },
+  };
+
+  it('revises only assistant rows with compactable activity when the mode changes', () => {
+    const messages = [
+      { info: { id: 'user-1', role: 'user' as const }, parts: [textPart('text-1', 'Prompt')] },
+      {
+        info: { id: 'assistant-1', role: 'assistant' as const },
+        parts: [activityPart, textPart('text-2', 'Result')],
+      },
+      {
+        info: { id: 'assistant-2', role: 'assistant' as const },
+        parts: [textPart('text-3', 'Result only')],
+      },
+    ];
+
+    expect(getCompactActivityLayoutSignatures(messages, false)).toEqual(new Map());
+    expect(getCompactActivityLayoutSignatures(messages, true)).toEqual(
+      new Map([['assistant-1', 'read-1']])
+    );
+  });
+
+  it('revises every participating row when the shared disclosure changes', () => {
+    const group = {
+      key: 'activity-turn\u0000session-1\u0000user-1',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: 'read-1',
+      parts: [activityPart],
+    };
+    const groups = new Map([
+      ['assistant-1', [group]],
+      ['assistant-2', [group]],
+    ]);
+    const collapsed = getCompactActivityDisclosureLayoutSignatures(groups, () => false);
+    const expanded = getCompactActivityDisclosureLayoutSignatures(groups, () => true);
+
+    expect(getChangedInlinePreviewMessageIds(collapsed, expanded, new Set(groups.keys()))).toEqual([
+      'assistant-1',
+      'assistant-2',
+    ]);
+
+    const movedOwner = new Map([
+      [
+        'assistant-2',
+        [
+          {
+            ...group,
+            ownerMessageId: 'assistant-2',
+            ownerPartId: 'read-2',
+          },
+        ],
+      ],
+    ]);
+    expect(
+      getChangedInlinePreviewMessageIds(
+        new Map([['assistant-2', collapsed.get('assistant-2')!]]),
+        getCompactActivityDisclosureLayoutSignatures(movedOwner, () => false),
+        new Set(['assistant-2'])
+      )
+    ).toEqual(['assistant-2']);
+  });
+});
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -712,6 +794,8 @@ afterEach(async () => {
   setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
+  setCompactToolOutput(false);
+  setShowInlineFileChanges(false);
   setShowThinkingPreference(true);
   stopLoading();
   resetMessageEditState();
@@ -742,6 +826,143 @@ afterEach(async () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   }
   vi.restoreAllMocks();
+});
+
+describe('MessageList compact activity', () => {
+  it('uses one disclosure for activity across primary assistant messages', async () => {
+    const command = toolPart('command-1', 'assistant-1', 'call-command-1');
+    command.state = {
+      status: 'completed',
+      input: { command: 'npm test' },
+      output: 'passed',
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const thought: Part = {
+      id: 'reasoning-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-2',
+      type: 'reasoning',
+      text: 'Verifying results',
+      time: { start: 3, end: 4 },
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
+      { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [command] },
+      { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
+      {
+        info: assistantMessage('assistant-3', { parentID: 'user-1' }),
+        parts: [
+          {
+            ...textPart('result-1', 'All checks passed.'),
+            messageID: 'assistant-3',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summaries = container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries?.[0]?.textContent).toContain('Explored 1 thought, 1 command');
+    expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(0);
+
+    summaries?.[0]?.click();
+
+    expect(summaries?.[0]?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(2);
+    expect(container?.textContent).toContain('All checks passed.');
+  });
+
+  it('starts a separate disclosure for activity after response text', async () => {
+    const command = toolPart('command-before', 'assistant-1', 'call-command-before');
+    command.state = {
+      status: 'completed',
+      input: { command: 'npm test' },
+      output: 'passed',
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const response = { ...textPart('response-mid', 'Initial response.'), messageID: 'assistant-1' };
+    const thought: Part = {
+      id: 'thought-after',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'reasoning',
+      text: 'Checking after the response',
+      time: { start: 3, end: 4 },
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [command, response, thought],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summaries = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary') || []),
+    ];
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]?.textContent).toContain('Explored 1 command');
+    expect(summaries[1]?.textContent).toContain('Explored 1 thought');
+
+    const renderKeys = [
+      ...(container?.querySelectorAll<HTMLElement>('[data-assistant-render-key]') || []),
+    ].map((element) => element.dataset.assistantRenderKey);
+    expect(renderKeys).toEqual([
+      'activity-group:command-before',
+      'part:response-mid',
+      'activity-group:thought-after',
+    ]);
+  });
+
+  it('keeps inline file previews outside the shared activity disclosure', async () => {
+    const edit: ToolPart = {
+      id: 'edit-inline-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool',
+      callID: 'call-edit-inline-1',
+      tool: 'edit',
+      state: {
+        status: 'completed',
+        input: {
+          filePath: 'src/app.ts',
+          oldString: 'const value = 1;',
+          newString: 'const value = 2;',
+        },
+        output: 'Done',
+        title: 'Edited src/app.ts',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    };
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
+      { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [edit] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.file-change-inline-diffs-unwrapped')).not.toBeNull();
+  });
 });
 
 describe('MessageList history pagination', () => {
@@ -5911,6 +6132,108 @@ describe('MessageList auto-scroll', () => {
       rowObserver as unknown as ResizeObserver
     );
     expect(scrollTopValue).toBe(2010);
+    expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+    animationFrames.restore();
+  });
+
+  it('preserves the visible row when compact activity mode remeasures virtualized rows', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const rowHeights = Array.from({ length: 50 }, () => 100);
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    const totalHeight = () => rowHeights.reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, totalHeight());
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              id: `read-${index}`,
+              sessionID: 'session-1',
+              messageID: messageId,
+              type: 'tool' as const,
+              callID: `call-${index}`,
+              tool: 'read',
+              state: {
+                status: 'completed' as const,
+                input: { filePath: `src/file-${index}.ts` },
+                output: 'source',
+                title: `src/file-${index}.ts`,
+                metadata: {},
+                time: { start: 1, end: 2 },
+              },
+            },
+            { ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId },
+          ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: totalHeight });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    expect(anchor).toBeInstanceOf(HTMLDivElement);
+    const anchorTopBefore = anchor.getBoundingClientRect().top;
+    const mountedRows = [
+      ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
+    ];
+    for (const row of mountedRows) {
+      const index = Number(row.dataset.msgId!.replace('assistant-', ''));
+      rowHeights[index] = 60;
+    }
+
+    setCompactToolOutput(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
     animationFrames.restore();
   });

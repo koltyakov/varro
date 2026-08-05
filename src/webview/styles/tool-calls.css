@@ -1755,7 +1755,7 @@ kbd {
 }
 
 .file-edit-multi-list .file-edit-path-link {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   max-width: none;
 }
 

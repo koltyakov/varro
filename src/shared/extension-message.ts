@@ -160,6 +160,9 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
         type,
         payload: {
           expandThinkingByDefault: payload.expandThinkingByDefault,
+          ...(typeof payload.compactToolOutput === 'boolean'
+            ? { compactToolOutput: payload.compactToolOutput }
+            : {}),
           ...(typeof payload.showInlineFileChanges === 'boolean'
             ? { showInlineFileChanges: payload.showInlineFileChanges }
             : {}),

@@ -1596,6 +1596,7 @@ describe('state helpers', () => {
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
     expect(stateModule.expandThinkingByDefault()).toBe(false);
+    expect(stateModule.compactToolOutput()).toBe(false);
     expect(stateModule.showChangedFiles()).toBe(false);
 
     stateModule.requestComposerFocus();

@@ -6,6 +6,7 @@ export const DEFAULT_PROVIDER_LIMIT_THRESHOLD_PERCENT = 100;
 
 export type ExtensionConfigState = {
   expandThinkingByDefault: boolean;
+  compactToolOutput: boolean;
   showInlineFileChanges?: boolean;
   showChangedFiles?: boolean;
   desktopSessionPaneSide: DesktopSessionPaneSide;
@@ -21,7 +22,9 @@ export type WebviewConfigUpdatePayload = Pick<
   | 'showChangedFiles'
   | 'desktopSessionPaneSide'
   | 'defaultPermissionMode'
->;
+> & {
+  compactToolOutput?: boolean;
+};
 
 export function resolveProviderLimitPollIntervalSeconds(disabled: boolean) {
   return disabled

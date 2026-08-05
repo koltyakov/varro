@@ -166,6 +166,8 @@ export interface AppStateInstance {
   setShowThinking: Setter<boolean>;
   expandThinkingByDefault: Accessor<boolean>;
   setExpandThinkingByDefault: Setter<boolean>;
+  compactToolOutput: Accessor<boolean>;
+  setCompactToolOutput: Setter<boolean>;
   showInlineFileChanges: Accessor<boolean>;
   setShowInlineFileChanges: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
@@ -328,6 +330,9 @@ export function createAppState(): AppStateInstance {
   const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
     readExpandThinkingByDefault(initialWebviewState)
   );
+  const [compactToolOutput, setCompactToolOutput] = createSignal(
+    initialWebviewState.compactToolOutput ?? false
+  );
   const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
     initialWebviewState.showInlineFileChanges ?? false
   );
@@ -410,6 +415,8 @@ export function createAppState(): AppStateInstance {
     setShowThinking,
     expandThinkingByDefault,
     setExpandThinkingByDefault,
+    compactToolOutput,
+    setCompactToolOutput,
     showInlineFileChanges,
     setShowInlineFileChanges,
     showChangedFiles,
@@ -485,6 +492,8 @@ export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
 export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
 export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
+export const compactToolOutput = defaultAppState.compactToolOutput;
+export const setCompactToolOutput = defaultAppState.setCompactToolOutput;
 export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
 export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
 export const showChangedFiles = defaultAppState.showChangedFiles;
@@ -553,6 +562,7 @@ export function resetDefaultAppState() {
   setState(reconcile(next.state));
   setShowThinking(next.showThinking());
   setExpandThinkingByDefault(next.expandThinkingByDefault());
+  setCompactToolOutput(next.compactToolOutput());
   setShowInlineFileChanges(next.showInlineFileChanges());
   setShowChangedFiles(next.showChangedFiles());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
