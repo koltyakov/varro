@@ -1011,7 +1011,7 @@ body.vscode-light
 }
 
 .rendered-markdown p:has(+ :is(ul, ol)) {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .rendered-markdown li {
@@ -1118,7 +1118,7 @@ body.vscode-light
 }
 .rendered-markdown ul:has(+ p),
 .rendered-markdown ol:has(+ p) {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .rendered-markdown ol > li {
   position: relative;
@@ -1131,7 +1131,7 @@ body.vscode-light
   opacity: 0.5;
 }
 .rendered-markdown li {
-  margin: 6px 0;
+  margin: 4px 0;
 }
 .rendered-markdown li > p {
   margin: 0;
