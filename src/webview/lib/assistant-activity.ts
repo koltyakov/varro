@@ -163,7 +163,10 @@ export function getAssistantActivityGroupMap(
   return result;
 }
 
-export function formatAssistantActivityCounts(parts: readonly AssistantActivityPart[]) {
+export function formatAssistantActivityCounts(
+  parts: readonly AssistantActivityPart[],
+  inProgress = false
+) {
   const counts = new Map<ActivityKind, number>();
   for (const part of parts) {
     const kind = getActivityKind(part);
@@ -174,16 +177,15 @@ export function formatAssistantActivityCounts(parts: readonly AssistantActivityP
     const count = counts.get(kind);
     return count ? [formatActivityCount(kind, count)] : [];
   });
-  return `Explored ${labels.join(', ')}`;
+  return `${inProgress ? 'Exploring' : 'Explored'} ${labels.join(', ')}`;
 }
 
 export function formatAssistantActivitySummary(parts: readonly AssistantActivityPart[]) {
-  const counts = formatAssistantActivityCounts(parts);
   const status = getAssistantActivityStatus(parts);
+  const counts = formatAssistantActivityCounts(parts, status.running);
   const statusLabels = [
     ...(status.failed > 0 ? [formatCount(status.failed, 'tool failed', 'tools failed')] : []),
     ...(status.aborted > 0 ? [formatCount(status.aborted, 'tool aborted', 'tools aborted')] : []),
-    ...(status.running ? ['working'] : []),
   ];
   return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
 }

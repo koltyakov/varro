@@ -15,12 +15,15 @@ import {
   shouldShowAssistantPartInHighlightedCard,
 } from '../../lib/part-utils';
 import {
+  getToolFileChanges,
   getToolFileChangeSignature,
   getToolInlineFileChangesLayoutSignature,
 } from '../../lib/tool-file-change';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
+  getFileEditPagerSelection,
   getMessageBlockExpanded,
+  setFileEditPagerSelection,
   setMessageBlockExpanded,
   trackMessageBlockExpansionState,
 } from '../../lib/tool-call-expansion-state';
@@ -219,6 +222,35 @@ export function getFileEditStackRenderKey(
     .filter((signature): signature is string => signature !== null)
     .join('|');
   return inlinePreviewSignature ? `${baseKey}:inline:${inlinePreviewSignature}` : baseKey;
+}
+
+type AssistantFileEditPage = {
+  id: string;
+  label: string;
+  part: ToolPart;
+  inlineFileChangeIndex?: number;
+};
+
+function getAssistantFileEditPages(parts: readonly ToolPart[]): AssistantFileEditPage[] {
+  return parts.flatMap((part) => {
+    const changes = getToolFileChanges(part.tool, part.state).filter((change) => !change.isSummary);
+    const hasInlinePreview = changes.some(
+      (change) =>
+        change.patch !== undefined ||
+        change.before !== undefined ||
+        change.after !== undefined ||
+        change.previewStatus !== undefined
+    );
+    if (!hasInlinePreview || changes.length === 0) {
+      return [{ id: `part:${part.id}`, label: part.tool, part }];
+    }
+    return changes.map((change, index) => ({
+      id: `file:${part.id}:${change.dedupeKey}`,
+      label: change.toPath || change.path,
+      part,
+      inlineFileChangeIndex: index,
+    }));
+  });
 }
 
 export function AssistantMessageContent(props: {
@@ -475,6 +507,18 @@ export function AssistantMessageContent(props: {
       );
     }
 
+    const fileEditPages =
+      item.kind === 'file-edit-stack' ? getAssistantFileEditPages(item.parts) : [];
+    const showFileEditPager =
+      item.kind === 'file-edit-stack' &&
+      compactToolOutput() &&
+      showInlineFileChanges() &&
+      props.info.mode !== 'subagent' &&
+      fileEditPages.length > 1 &&
+      !item.parts.some(
+        (part) => props.questionRequestForTool?.(part) || props.permissionMatchForTool?.(part)
+      );
+
     return item.kind === 'file-edit-stack' ? (
       <div
         ref={(element) => {
@@ -492,26 +536,29 @@ export function AssistantMessageContent(props: {
         data-assistant-render-key={item.key}
       >
         <div class="assistant-file-edit-stack">
-          <For each={item.parts}>
-            {(part) => (
-              <MessagePart
-                part={part}
-                messageInfo={props.info}
-                streamedText={props.textForPart(part)}
-                lightweight={isLightweight()}
-                questionRequest={
-                  part.type === 'tool'
-                    ? props.questionRequestForTool?.(part as ToolPart)
-                    : undefined
-                }
-                permissionMatch={
-                  part.type === 'tool'
-                    ? props.permissionMatchForTool?.(part as ToolPart)
-                    : undefined
-                }
-              />
-            )}
-          </For>
+          <Show
+            when={showFileEditPager}
+            fallback={
+              <For each={item.parts}>
+                {(part) => (
+                  <MessagePart
+                    part={part}
+                    messageInfo={props.info}
+                    streamedText={props.textForPart(part)}
+                    lightweight={isLightweight()}
+                    questionRequest={props.questionRequestForTool?.(part)}
+                    permissionMatch={props.permissionMatchForTool?.(part)}
+                  />
+                )}
+              </For>
+            }
+          >
+            <AssistantFileEditPager
+              info={props.info}
+              pages={fileEditPages}
+              lightweight={!!isLightweight()}
+            />
+          </Show>
         </div>
       </div>
     ) : (
@@ -631,6 +678,64 @@ export function AssistantMessageContent(props: {
   );
 }
 
+function AssistantFileEditPager(props: {
+  info: AssistantMessage;
+  pages: AssistantFileEditPage[];
+  lightweight: boolean;
+}) {
+  const stateKey = () =>
+    `file-edit-pager\u0000${props.info.sessionID}\u0000${props.info.id}\u0000${props.pages[0]!.part.id}`;
+  let currentStateKey = stateKey();
+  const [selectedPageId, setSelectedPageId] = createSignal(
+    getFileEditPagerSelection(currentStateKey)
+  );
+  const selectedPage = createMemo(
+    () => props.pages.find((page) => page.id === selectedPageId()) ?? props.pages.at(-1)!
+  );
+
+  createEffect(() => {
+    const nextStateKey = stateKey();
+    if (nextStateKey === currentStateKey) return;
+    currentStateKey = nextStateKey;
+    setSelectedPageId(getFileEditPagerSelection(nextStateKey));
+  });
+
+  const selectPage = (pageId: string) => {
+    setFileEditPagerSelection(stateKey(), pageId);
+    setSelectedPageId(pageId);
+  };
+
+  return (
+    <div class="assistant-file-edit-pager">
+      <div class="assistant-file-edit-pager-page" data-page-id={selectedPage().id}>
+        <MessagePart
+          part={selectedPage().part}
+          messageInfo={props.info}
+          lightweight={props.lightweight}
+          inlineFileChangeIndex={selectedPage().inlineFileChangeIndex}
+        />
+      </div>
+      <div class="assistant-file-edit-pager-dots" role="group" aria-label="File edit pages">
+        <For each={props.pages}>
+          {(page, index) => {
+            const selected = () => page.id === selectedPage().id;
+            return (
+              <button
+                type="button"
+                class={`assistant-file-edit-pager-dot${selected() ? ' is-active' : ''}`}
+                aria-label={`Show edit ${index() + 1} of ${props.pages.length}: ${page.label}`}
+                aria-pressed={selected()}
+                title={page.label}
+                onClick={() => selectPage(page.id)}
+              />
+            );
+          }}
+        </For>
+      </div>
+    </div>
+  );
+}
+
 function AssistantActivityGroup(props: {
   info: AssistantMessage;
   parts: AssistantActivityPart[];
@@ -643,8 +748,10 @@ function AssistantActivityGroup(props: {
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
 }) {
   const expanded = () => isActivityGroupExpanded(props.expansionKey);
-  const summary = createMemo(() => formatAssistantActivityCounts(props.summaryParts));
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
+  const summary = createMemo(() =>
+    formatAssistantActivityCounts(props.summaryParts, activityStatus().running)
+  );
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -679,9 +786,6 @@ function AssistantActivityGroup(props: {
                 {activityStatus().aborted}{' '}
                 {activityStatus().aborted === 1 ? 'tool aborted' : 'tools aborted'}
               </span>
-            </Show>
-            <Show when={activityStatus().running}>
-              <span> · working</span>
             </Show>
           </span>
           <svg

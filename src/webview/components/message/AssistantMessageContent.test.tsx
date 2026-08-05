@@ -24,6 +24,7 @@ type MockMessagePartProps = {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
+  inlineFileChangeIndex?: number;
 };
 
 const markdownRendererMock = vi.hoisted(() =>
@@ -39,7 +40,12 @@ const markdownRendererMock = vi.hoisted(() =>
 
 const messagePartMock = vi.hoisted(() =>
   vi.fn((props: MockMessagePartProps) => (
-    <div class="message-part-mock" data-part-id={props.part.id} data-part-type={props.part.type}>
+    <div
+      class="message-part-mock"
+      data-part-id={props.part.id}
+      data-part-type={props.part.type}
+      data-inline-file-index={props.inlineFileChangeIndex}
+    >
       {props.streamedText ??
         (props.part.type === 'text' || props.part.type === 'reasoning'
           ? props.part.text
@@ -269,9 +275,7 @@ describe('AssistantMessageContent', () => {
 
     setParts((current) => [...current, toolPart('bash-1', 'bash', { command: 'npm test' })]);
 
-    expect(summary()?.textContent).toContain(
-      'Explored 2 files, 1 thought, 1 search, 1 command'
-    );
+    expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search, 1 command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
@@ -329,6 +333,23 @@ describe('AssistantMessageContent', () => {
     );
     expect(container?.querySelector('.assistant-activity-group')?.classList).not.toContain(
       'has-failure'
+    );
+  });
+
+  it('uses Exploring without a working suffix for active activity', () => {
+    setCompactToolOutput(true);
+    const running = toolPart('grep-running', 'grep', { pattern: 'activity' });
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Search',
+      time: { start: 0 },
+    };
+
+    renderAssistantMessageContent({ parts: [running] });
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toBe(
+      'Exploring 1 search'
     );
   });
 
@@ -495,6 +516,8 @@ describe('AssistantMessageContent', () => {
   });
 
   it('does not re-animate a file-edit stack when another edit is appended', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
     const info = createAssistantMessage({ time: { created: 0 } });
     const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
     const stackSelector = '[data-assistant-render-key^="file-edit-stack:"]';
@@ -522,6 +545,10 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector(stackSelector)?.classList).not.toContain(
       'assistant-message-flow-item-streamed'
     );
+    expect(
+      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock')
+        ?.dataset.partId
+    ).toBe('edit-2');
   });
 
   it('filters highlighted-card meta text using effective text and opens read mode for the final answer while Shift is pressed', async () => {
@@ -595,7 +622,72 @@ describe('AssistantMessageContent', () => {
 
     expect(stack).toBeInstanceOf(HTMLDivElement);
     expect(stack?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+    expect(stack?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
+  });
+
+  it('pages compact inline edits across tool calls and files and preserves selection', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    const multiFilePart: ToolPart = {
+      ...fileEditPart('edit-multi', 'src/one.ts'),
+      tool: 'apply_patch',
+      state: {
+        ...completedToolState({}, 'Edited 2 files'),
+        metadata: {
+          files: [
+            {
+              type: 'update',
+              relativePath: 'src/one.ts',
+              before: 'one',
+              after: 'one updated',
+            },
+            {
+              type: 'update',
+              relativePath: 'src/two.ts',
+              before: 'two',
+              after: 'two updated',
+            },
+          ],
+        },
+      },
+    };
+    const finalPart: ToolPart = {
+      ...fileEditPart('edit-final', 'src/three.ts'),
+      state: completedToolState(
+        {
+          filePath: 'src/three.ts',
+          oldString: 'three',
+          newString: 'three updated',
+        },
+        'Edited src/three.ts'
+      ),
+    };
+    const parts = [multiFilePart, finalPart];
+
+    renderAssistantMessageContent({ parts });
+
+    const dots = () =>
+      container?.querySelectorAll<HTMLButtonElement>('.assistant-file-edit-pager-dot');
+    const selectedPart = () =>
+      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock');
+    expect(dots()).toHaveLength(3);
+    expect(dots()?.[2]?.getAttribute('aria-pressed')).toBe('true');
+    expect(selectedPart()?.dataset.partId).toBe('edit-final');
+    expect(selectedPart()?.dataset.inlineFileIndex).toBe('0');
+
+    dots()?.[1]?.click();
+
+    expect(dots()?.[1]?.getAttribute('aria-pressed')).toBe('true');
+    expect(selectedPart()?.dataset.partId).toBe('edit-multi');
+    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
+
+    cleanup?.();
+    container!.innerHTML = '';
+    renderAssistantMessageContent({ parts });
+
+    expect(selectedPart()?.dataset.partId).toBe('edit-multi');
+    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
   });
 
   it('does not group reads and searches containing edit words as file edits', () => {

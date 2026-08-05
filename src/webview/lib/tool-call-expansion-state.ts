@@ -29,6 +29,7 @@ function writeEntry<T>(store: Map<string, T>, key: string, value: T) {
 const toolCallExpansionState = new Map<string, boolean>();
 const messageBlockExpansionState = new Map<string, boolean>();
 const [messageBlockExpansionVersion, setMessageBlockExpansionVersion] = createSignal(0);
+const fileEditPagerSelectionState = new Map<string, string>();
 const toolDiffPreviewState = new Map<
   string,
   { expanded: boolean; scrollTop: number; scrollLeft: number }
@@ -55,6 +56,14 @@ export function trackMessageBlockExpansionState() {
   messageBlockExpansionVersion();
 }
 
+export function getFileEditPagerSelection(key: string) {
+  return readEntry(fileEditPagerSelectionState, key) ?? null;
+}
+
+export function setFileEditPagerSelection(key: string, pageId: string) {
+  writeEntry(fileEditPagerSelectionState, key, pageId);
+}
+
 export function getToolDiffPreviewState(key: string) {
   return readEntry(toolDiffPreviewState, key) ?? null;
 }
@@ -69,6 +78,7 @@ export function setToolDiffPreviewState(
 export function resetToolCallExpansionState() {
   toolCallExpansionState.clear();
   messageBlockExpansionState.clear();
+  fileEditPagerSelectionState.clear();
   toolDiffPreviewState.clear();
   setMessageBlockExpansionVersion((version) => version + 1);
 }
@@ -77,6 +87,7 @@ export function getTrackedToolCallStateSize() {
   return {
     expansions: toolCallExpansionState.size,
     messageBlocks: messageBlockExpansionState.size,
+    fileEditPages: fileEditPagerSelectionState.size,
     diffPreviews: toolDiffPreviewState.size,
   };
 }

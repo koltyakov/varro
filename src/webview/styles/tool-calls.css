@@ -286,7 +286,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 2px 2px 2px;
+  padding: 10px 0 2px;
   color: var(--color-vscode-muted);
   font-size: 12.5px;
 }

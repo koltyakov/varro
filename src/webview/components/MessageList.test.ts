@@ -949,12 +949,32 @@ describe('MessageList compact activity', () => {
         time: { start: 1, end: 2 },
       },
     };
+    const secondEdit: ToolPart = {
+      ...edit,
+      id: 'edit-inline-2',
+      callID: 'call-edit-inline-2',
+      state: {
+        status: 'completed',
+        input: {
+          filePath: 'src/second.ts',
+          oldString: 'const second = 1;',
+          newString: 'const second = 2;',
+        },
+        output: 'Done',
+        title: 'Edited src/second.ts',
+        metadata: {},
+        time: { start: 3, end: 4 },
+      },
+    };
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
-      { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [edit] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [edit, secondEdit],
+      },
     ]);
 
     cleanup = render(() => MessageList(), container!);
@@ -962,6 +982,13 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.file-change-inline-diffs-unwrapped')).not.toBeNull();
+    expect(container?.querySelectorAll('.assistant-file-edit-pager-dot')).toHaveLength(2);
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
+    expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('second.ts');
+
+    container?.querySelector<HTMLButtonElement>('.assistant-file-edit-pager-dot')?.click();
+
+    expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('app.ts');
   });
 });
 

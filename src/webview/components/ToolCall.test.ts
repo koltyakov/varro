@@ -2529,6 +2529,18 @@ describe('FileChangeCard', () => {
     expect(inlineFiles[2]?.querySelector('.diff-view-preview-unavailable')?.textContent).toContain(
       'Binary file changed'
     );
+
+    cleanup?.();
+    container!.innerHTML = '';
+    cleanup = render(() => ToolCall({ part, inlineFileChangeIndex: 1 }), container!);
+
+    const selectedFiles = Array.from(
+      container?.querySelectorAll('.file-change-inline-diffs .diff-view-file') || []
+    );
+    expect(selectedFiles).toHaveLength(1);
+    expect(selectedFiles[0]?.querySelector('.diff-view-filename')?.textContent).toBe(
+      'old.ts -> renamed.ts'
+    );
   });
 
   it('bounds model patch file cards and shows an overflow summary', () => {

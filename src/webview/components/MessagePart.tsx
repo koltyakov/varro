@@ -21,6 +21,7 @@ export function MessagePart(props: {
   questionRequest?: (typeof state.questions)[number] | null;
   permissionMatch?: ToolCallPermissionMatch | null;
   lightweight?: boolean;
+  inlineFileChangeIndex?: number;
 }) {
   const p = () => props.part;
 
@@ -42,6 +43,7 @@ export function MessagePart(props: {
             questionRequest={props.questionRequest}
             permissionMatch={props.permissionMatch}
             lightweight={props.lightweight}
+            inlineFileChangeIndex={props.inlineFileChangeIndex}
           />
         );
       case 'reasoning':
