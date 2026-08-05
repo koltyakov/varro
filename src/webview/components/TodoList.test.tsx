@@ -23,6 +23,7 @@ describe('TodoList', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     cleanup?.();
     cleanup = undefined;
     container?.remove();
@@ -55,8 +56,22 @@ describe('TodoList', () => {
     expect(container?.textContent).toContain('Todos');
     expect(container?.textContent).toContain('0/0');
     expect(list).toBeInstanceOf(HTMLUListElement);
+    expect(list?.hasAttribute('tabindex')).toBe(false);
     expect(list?.querySelectorAll('li')).toHaveLength(0);
     expect(progressFill?.style.width).toBe('0%');
+  });
+
+  it('makes an overflowing todo list keyboard-scrollable', async () => {
+    vi.spyOn(HTMLUListElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
+    vi.spyOn(HTMLUListElement.prototype, 'clientHeight', 'get').mockReturnValue(100);
+    setState('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('ul.todo-block-list')?.getAttribute('tabindex')).toBe('0');
   });
 
   it('renders pending, in-progress, completed, and cancelled todos and toggles collapse', () => {

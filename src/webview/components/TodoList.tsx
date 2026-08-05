@@ -40,6 +40,7 @@ export function TodoList() {
   };
   const [collapsed, setCollapsed] = createSignal(allDone());
   const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
+  const [listScrollable, setListScrollable] = createSignal(false);
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
   let previousUserMessageCount = userMessageCount();
   let previousAllDone = allDone();
@@ -101,6 +102,15 @@ export function TodoList() {
         (item) => (item as HTMLElement).dataset.todoId === activeTodoId
       );
       activeItem?.scrollIntoView?.({ block: 'nearest' });
+    });
+  });
+
+  createEffect(() => {
+    todos();
+    listMaxHeight();
+    collapsed();
+    queueMicrotask(() => {
+      setListScrollable(!!listRef && listRef.scrollHeight > listRef.clientHeight + 1);
     });
   });
 
@@ -235,6 +245,7 @@ export function TodoList() {
         {!collapsed() && (
           <ul
             class="todo-block-list"
+            tabIndex={listScrollable() ? 0 : undefined}
             ref={(element) => {
               listRef = element;
             }}
