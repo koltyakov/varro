@@ -268,6 +268,44 @@ describe('history prepend reconciliation', () => {
     expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-older', 'msg-current']);
     expect(state.messages[1]).toBe(mountedEntry);
   });
+
+  it('preserves retained session identities when history is inserted after an unrelated row', () => {
+    const childBefore = {
+      info: userMessage('child-before', 'child-1'),
+      parts: [textPart('child-before-text', 'child-before', 'before', 'child-1')],
+    };
+    const parentCurrent = {
+      info: userMessage('parent-current'),
+      parts: [textPart('parent-current-text', 'parent-current', 'current')],
+    };
+    const childAfter = {
+      info: userMessage('child-after', 'child-1'),
+      parts: [textPart('child-after-text', 'child-after', 'after', 'child-1')],
+    };
+    setMessagesIncremental([childBefore, parentCurrent, childAfter]);
+    const retained = new Map(state.messages.map((entry) => [entry.info.id, entry]));
+
+    setMessagesIncremental([
+      state.messages[0]!,
+      {
+        info: userMessage('parent-older'),
+        parts: [textPart('parent-older-text', 'parent-older', 'older')],
+      },
+      state.messages[1]!,
+      state.messages[2]!,
+    ]);
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual([
+      'child-before',
+      'parent-older',
+      'parent-current',
+      'child-after',
+    ]);
+    expect(state.messages[0]).toBe(retained.get('child-before'));
+    expect(state.messages[2]).toBe(retained.get('parent-current'));
+    expect(state.messages[3]).toBe(retained.get('child-after'));
+    expect(state.messages[3]?.parts[0]).toBe(retained.get('child-after')?.parts[0]);
+  });
 });
 
 describe('optimistic image parts carried onto the server message', () => {

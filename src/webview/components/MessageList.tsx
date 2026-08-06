@@ -4481,6 +4481,7 @@ export function MessageList() {
               }}
               canReleaseVirtualPlaceholders={() =>
                 performance.now() >= virtualPlaceholderReleaseBlockedUntil &&
+                !pointerScrollOwnershipActive &&
                 !stickyNavigationOwnsScroll() &&
                 !editingMessage()
               }

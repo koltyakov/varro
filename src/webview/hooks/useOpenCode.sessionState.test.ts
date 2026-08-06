@@ -494,6 +494,37 @@ describe('useOpenCode session state flows', () => {
     });
   });
 
+  it('preserves interleaved child entry identities while loading older parent history', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const childBefore = userEntry('child-before', 'child-1');
+    const parentCurrent = userEntry('parent-current');
+    const childAfter = userEntry('child-after', 'child-1');
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-older')]);
+    stateModule.setState('sessions', [
+      session('session-1'),
+      { ...session('child-1'), parentID: 'session-1' },
+    ]);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [childBefore, parentCurrent, childAfter]);
+    const retained = new Map(
+      stateModule.state.messages.map((entry) => [entry.info.id, entry] as const)
+    );
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+
+    await hookModule.loadOlderSessionHistoryPage('session-1');
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'child-before',
+      'parent-older',
+      'parent-current',
+      'child-after',
+    ]);
+    expect(stateModule.state.messages[0]).toBe(retained.get('child-before'));
+    expect(stateModule.state.messages[2]).toBe(retained.get('parent-current'));
+    expect(stateModule.state.messages[3]).toBe(retained.get('child-after'));
+  });
+
   it('preserves active-session streaming state while prepending older history', async () => {
     const { stateModule, hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');

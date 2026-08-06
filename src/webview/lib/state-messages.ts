@@ -449,9 +449,9 @@ export function setMessagesIncremental(
     return;
   }
 
-  const historyPrependCount = getHistoryPrependCount(current, incoming);
-  if (historyPrependCount > 0) {
-    reconcileHistoryPrepend(incoming, historyPrependCount, options, streamingSnapshot);
+  const insertion = getMessageInsertion(current, incoming);
+  if (insertion) {
+    reconcileMessageInsertion(incoming, insertion, options, streamingSnapshot);
     recordSettledAssistantMarkers(incoming);
     return;
   }
@@ -519,27 +519,30 @@ export function setMessagesIncremental(
   recordSettledAssistantMarkers(incoming);
 }
 
-function getHistoryPrependCount(current: MessageEntry[], incoming: MessageEntry[]) {
-  const prependCount = incoming.length - current.length;
-  if (prependCount <= 0) return 0;
+function getMessageInsertion(current: MessageEntry[], incoming: MessageEntry[]) {
+  const count = incoming.length - current.length;
+  if (count <= 0) return null;
 
-  for (let index = 0; index < current.length; index += 1) {
-    const currentInfo = current[index]!.info;
-    const incomingInfo = incoming[prependCount + index]?.info;
-    if (
-      !incomingInfo ||
-      incomingInfo.id !== currentInfo.id ||
-      incomingInfo.sessionID !== currentInfo.sessionID
-    ) {
-      return 0;
-    }
+  let index = 0;
+  while (index < current.length && sameMessageIdentity(current[index], incoming[index])) index += 1;
+  for (let currentIndex = index; currentIndex < current.length; currentIndex += 1) {
+    if (!sameMessageIdentity(current[currentIndex], incoming[currentIndex + count])) return null;
   }
-  return prependCount;
+  return { count, index };
 }
 
-function reconcileHistoryPrepend(
+function sameMessageIdentity(left: MessageEntry | undefined, right: MessageEntry | undefined) {
+  return (
+    !!left &&
+    !!right &&
+    left.info.id === right.info.id &&
+    left.info.sessionID === right.info.sessionID
+  );
+}
+
+function reconcileMessageInsertion(
   incoming: MessageEntry[],
-  prependCount: number,
+  insertion: { count: number; index: number },
   options: { preserveExtraParts?: boolean } | undefined,
   streamingSnapshot: StreamingTextSnapshot
 ) {
@@ -551,12 +554,13 @@ function reconcileHistoryPrepend(
     setState(
       'messages',
       produce((msgs) => {
-        const prepended = incoming
-          .slice(0, prependCount)
+        const inserted = incoming
+          .slice(insertion.index, insertion.index + insertion.count)
           .map((entry) => mergeMessageEntry(undefined, entry, options, streamingSnapshot));
-        msgs.splice(0, 0, ...prepended);
+        msgs.splice(insertion.index, 0, ...inserted);
 
-        for (let index = prependCount; index < incoming.length; index += 1) {
+        for (let index = 0; index < incoming.length; index += 1) {
+          if (index >= insertion.index && index < insertion.index + insertion.count) continue;
           const currentEntry = msgs[index]!;
           const next = incoming[index]!;
           if (

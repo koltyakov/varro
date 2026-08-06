@@ -1293,6 +1293,31 @@ describe('MessageList history pagination', () => {
     expect(container?.querySelector<HTMLElement>('[data-msg-id="older-30"]')?.style.height).toBe(
       '160px'
     );
+
+    const touchStart = new MouseEvent('pointerdown', { bubbles: true, button: 0 });
+    Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
+    Object.defineProperty(touchStart, 'isPrimary', { value: true });
+    list.dispatchEvent(touchStart);
+    scrollTopValue += 20;
+    list.dispatchEvent(new Event('scroll'));
+    for (let frame = 0; frame < 3; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    const retainedPlaceholder = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
+    expect(retainedPlaceholder?.classList).toContain('interactive-item-virtual-placeholder');
+
+    await vi.advanceTimersByTimeAsync(600);
+    animationFrames.flush(performance.now());
+    await Promise.resolve();
+    expect(retainedPlaceholder?.classList).toContain('interactive-item-virtual-placeholder');
+
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    animationFrames.flush(performance.now());
+    await Promise.resolve();
+    expect(retainedPlaceholder?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(retainedPlaceholder?.childElementCount).toBeGreaterThan(0);
     animationFrames.restore();
   });
 

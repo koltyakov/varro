@@ -338,4 +338,33 @@ describe('state perf guards', () => {
       dispose();
     }
   });
+
+  it('preserves a large retained suffix during an interleaved history insertion', () => {
+    const existingMessages = Array.from({ length: 1000 }, (_, index) => ({
+      info: {
+        ...createAssistantMessage(`message-${index}`),
+        sessionID: index === 0 ? 'child-1' : 'session-1',
+      },
+      parts: [createTextPart(`part-${index}`, `message-${index}`, `Response ${index}`)],
+    }));
+    setMessagesIncremental(existingMessages);
+    const retainedEntries = [...state.messages];
+    const retainedParts = state.messages.map((entry) => entry.parts[0]);
+
+    setMessagesIncremental([
+      state.messages[0]!,
+      {
+        info: createAssistantMessage('message-older'),
+        parts: [createTextPart('part-older', 'message-older', 'Older response')],
+      },
+      ...state.messages.slice(1),
+    ]);
+
+    expect(state.messages).toHaveLength(1001);
+    for (let index = 0; index < retainedEntries.length; index += 1) {
+      const nextIndex = index === 0 ? 0 : index + 1;
+      expect(state.messages[nextIndex]).toBe(retainedEntries[index]);
+      expect(state.messages[nextIndex]?.parts[0]).toBe(retainedParts[index]);
+    }
+  });
 });
