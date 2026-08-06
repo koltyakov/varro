@@ -2,7 +2,7 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../../types';
 import { client } from '../../lib/client';
-import { setState } from '../../lib/state';
+import { setShowSessionPicker, setState, showSessionPicker } from '../../lib/state';
 import { ActiveChatHeader } from './ChatHeader';
 import { SessionActionFeedback } from './SessionActionFeedback';
 
@@ -68,7 +68,9 @@ beforeEach(() => {
   setState('sessions', [session()]);
   setState('activeSessionId', 'session-1');
   setState('pinnedSessionIds', []);
+  setShowSessionPicker(false);
   deleteSessionMock.mockReset();
+  deleteSessionMock.mockResolvedValue(undefined);
   renameSessionMock.mockReset();
   renameSessionMock.mockResolvedValue(true);
 });
@@ -80,6 +82,7 @@ afterEach(() => {
   setState('sessions', []);
   setState('activeSessionId', null);
   setState('pinnedSessionIds', []);
+  setShowSessionPicker(false);
   vi.restoreAllMocks();
 });
 
@@ -123,6 +126,22 @@ describe('ActiveChatHeader', () => {
     expect(menu?.textContent).toContain('Copy session ID');
     expect(menu?.textContent).toContain('Open in OpenCode');
     expect(menu?.textContent).toContain('Share session');
+  });
+
+  it('returns to the sessions list after deleting from the header menu', async () => {
+    renderHeader();
+    container
+      .querySelector<HTMLElement>('.chat-header-session-title')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find((button) => button.textContent?.trim() === 'Move to Recycle Bin')!
+      .click();
+
+    await vi.waitFor(() => {
+      expect(deleteSessionMock).toHaveBeenCalledWith('session-1');
+      expect(showSessionPicker()).toBe(true);
+    });
   });
 
   it('shows the pinned marker and toggles pinning from the context menu', async () => {

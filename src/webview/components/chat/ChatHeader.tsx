@@ -7,7 +7,12 @@ import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
 import { clampPopupToViewport } from '../../lib/popup-position';
 import { shareSession, unshareSession } from '../../lib/session-sharing';
-import { setError, setState, state } from '../../lib/state';
+import {
+  setError,
+  setPersistentShowSessionPicker as setShowSessionPicker,
+  setState,
+  state,
+} from '../../lib/state';
 import { writeClipboard } from '../../lib/write-clipboard';
 import { postMessage } from '../../lib/bridge';
 import {
@@ -296,6 +301,13 @@ export function ActiveChatHeader(props: {
     if (!session || !(await unshareSession(session))) return;
     showSessionActionFeedback('Session unshared');
   };
+  const deleteActionsSession = async () => {
+    const sessionId = actionsSessionId();
+    closeActions();
+    if (!sessionId) return;
+    await deleteSession(sessionId);
+    setShowSessionPicker(true);
+  };
 
   createEffect(() => {
     if (!actionsSessionId()) return;
@@ -492,11 +504,7 @@ export function ActiveChatHeader(props: {
                         type="button"
                         role="menuitem"
                         class="is-destructive"
-                        onClick={() => {
-                          const sessionId = actionsSessionId();
-                          closeActions();
-                          if (sessionId) void deleteSession(sessionId);
-                        }}
+                        onClick={() => void deleteActionsSession()}
                       >
                         Move to Recycle Bin
                       </button>
