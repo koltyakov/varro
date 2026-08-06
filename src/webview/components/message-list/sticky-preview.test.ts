@@ -228,6 +228,15 @@ describe('shouldShowStickyUserMessagePreview', () => {
     expect(shouldShowStickyUserMessagePreview(baseArgs)).toBe(true);
   });
 
+  it('keeps an unmounted prompt that is only inside the overscan range', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        ...baseArgs,
+        visibleRange: { start: 0, end: 20, coreStart: 10 },
+      })
+    ).toBe(true);
+  });
+
   it('returns false when virtualizing but preview is within visible range', () => {
     expect(
       shouldShowStickyUserMessagePreview({

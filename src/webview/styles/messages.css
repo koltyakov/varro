@@ -807,51 +807,6 @@ body.vscode-light
   gap: 12px;
 }
 
-.assistant-file-edit-pager {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.assistant-file-edit-pager-page {
-  min-width: 0;
-}
-
-.assistant-file-edit-pager-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.assistant-file-edit-pager-dots::-webkit-scrollbar {
-  display: none;
-}
-
-.assistant-file-edit-pager-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-fg-muted) 68%, transparent);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  cursor: pointer;
-}
-
-.assistant-file-edit-pager-dot.is-active {
-  border-color: var(--color-vscode-fg-muted);
-  background: var(--color-vscode-fg-muted);
-}
-
-.assistant-file-edit-pager-dot:focus-visible {
-  outline-offset: 2px;
-}
-
 .interactive-item-container.interactive-response.interactive-response-file-edit-group-start {
   padding-bottom: 0;
 }

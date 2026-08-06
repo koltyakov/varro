@@ -38,7 +38,11 @@ import {
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { isAssistantMessage } from '../lib/message-metrics';
-import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
+import {
+  getFinalAssistantTextPartId,
+  isWorkspaceDirectoryText,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
@@ -156,6 +160,13 @@ const EMPTY_VISIBLE_RANGE: VisibleRange = {
   bottomPad: 0,
   coreStart: 0,
   coreEnd: 0,
+};
+
+type VisibleScrollAnchor = {
+  messageId: string;
+  top: number;
+  topPad: number;
+  renderKey?: string;
 };
 
 function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
@@ -364,12 +375,19 @@ export function MessageList() {
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
   let pendingMeasuredAppendScroll = false;
-  let pendingMeasuredAppendAnchor: { messageId: string; top: number; topPad: number } | null = null;
+  let pendingMeasuredAppendAnchor: VisibleScrollAnchor | null = null;
   let pendingScrollToBottomRequest = false;
   let deferredScrollToBottomRequestKey: number | null = null;
   let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
+  let upwardStickyHandoff: {
+    messageId: string;
+    releaseTop: number;
+    sourceEntered: boolean;
+    lastInputAt: number;
+  } | null = null;
+  let upwardStickyHandoffReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let stickyJumpSettleEpoch = 0;
   const [stickyNavigationInProgress, setStickyNavigationInProgress] = createSignal(false);
   let editRevealEpoch = 0;
@@ -404,6 +422,7 @@ export function MessageList() {
   let lastScrollInputAt = Number.NEGATIVE_INFINITY;
   let userScrollOwnershipEpoch = 0;
   let activeSessionGeneration = 0;
+  let historyAnchorSettleOwner: { sessionId: string; generation: number } | null = null;
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
@@ -411,7 +430,7 @@ export function MessageList() {
   const pendingOlderHistoryAnchors = new Map<
     string,
     {
-      anchor: { messageId: string; top: number; topPad: number } | null;
+      anchor: VisibleScrollAnchor | null;
       generation: number;
       invalidated: boolean;
       owner: 'history' | 'edit';
@@ -421,7 +440,7 @@ export function MessageList() {
     }
   >();
   let pendingStructuralScrollAnchor: {
-    anchor: { messageId: string; top: number; topPad: number };
+    anchor: VisibleScrollAnchor;
     sessionId: string | null;
     ownershipEpoch: number;
   } | null = null;
@@ -1084,6 +1103,31 @@ export function MessageList() {
     return !!latest && isAssistantMessage(latest) && !latest.time.completed && !latest.error;
   });
 
+  const trailingFinalResponseReady = createMemo(() => {
+    messageStructureVersion();
+    messageInfoVersion();
+    if (state.streamingPartId || state.streamingText.length > 0) return false;
+
+    const entries = messages();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.info.role === 'user') return false;
+      if (entry.info.mode === 'subagent') continue;
+      if (!entry.info.time.completed) return false;
+
+      const finalTextPartId = getFinalAssistantTextPartId(entry.parts, true);
+      if (!finalTextPartId) return false;
+      const finalTextPartIndex = entry.parts.findIndex((part) => part.id === finalTextPartId);
+      const finalTextPart = entry.parts[finalTextPartIndex];
+      return (
+        finalTextPart?.type === 'text' &&
+        !isWorkspaceDirectoryText(finalTextPart.text.trimStart()) &&
+        !entry.parts.slice(finalTextPartIndex + 1).some((part) => part.type === 'tool')
+      );
+    }
+    return false;
+  });
+
   const loadingRowEligible = createMemo(
     () =>
       !!state.activeSessionId &&
@@ -1175,6 +1219,7 @@ export function MessageList() {
   const visibleRange = createMemo<VisibleRange>(
     () => {
       const msgs = messages();
+      loadingOlderHistorySessionIds();
       if (!shouldVirtualize() || msgs.length === 0) {
         return {
           start: 0,
@@ -1185,11 +1230,32 @@ export function MessageList() {
           coreEnd: msgs.length,
         };
       }
-      return calculateVirtualRangeFromMetrics({
-        metrics: virtualMetrics(),
+      const metrics = virtualMetrics();
+      const range = calculateVirtualRangeFromMetrics({
+        metrics,
         scrollTop: scrollTop(),
         viewportHeight: viewportHeight(),
       });
+      const sessionId = state.activeSessionId;
+      const pendingAnchor = sessionId ? pendingOlderHistoryAnchors.get(sessionId) : undefined;
+      const anchorIndex =
+        pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
+          ? messageIndexById().get(pendingAnchor.anchor.messageId)
+          : undefined;
+      if (anchorIndex === undefined) return range;
+
+      // A prepend can temporarily place the old viewport thousands of provisional pixels away.
+      // Keep its real anchor mounted so exact DOM geometry is available before the next paint.
+      const start = Math.min(range.start, anchorIndex);
+      const end = Math.max(range.end, anchorIndex + 1);
+      return {
+        start,
+        end,
+        coreStart: Math.min(range.coreStart, anchorIndex),
+        coreEnd: Math.max(range.coreEnd, anchorIndex + 1),
+        topPad: metrics.prefix[start] ?? 0,
+        bottomPad: metrics.totalHeight - (metrics.prefix[end] ?? 0),
+      };
     },
     EMPTY_VISIBLE_RANGE,
     { equals: visibleRangesEqual }
@@ -1243,7 +1309,7 @@ export function MessageList() {
   createEffect(() => {
     clearTrailingSummarySettleTimer();
 
-    if (activeSessionWorking()) {
+    if (activeSessionWorking() || !trailingFinalResponseReady()) {
       if (trailingSummarySettled()) setTrailingSummarySettled(false);
       return;
     }
@@ -1252,7 +1318,7 @@ export function MessageList() {
 
     trailingSummarySettleTimer = setTimeout(() => {
       trailingSummarySettleTimer = 0;
-      if (!activeSessionWorking()) {
+      if (!activeSessionWorking() && trailingFinalResponseReady()) {
         batch(() => {
           setTrailingSummarySettled(true);
           if (!loadingRowEligible()) setReserveLoadingRow(false);
@@ -1558,22 +1624,66 @@ export function MessageList() {
     publishMeasurementVersion();
   }
 
-  function captureVisibleScrollAnchor() {
+  function captureMountedVisibleScrollAnchorWithTopPad(
+    topPad: number,
+    preferStableRenderItem = false
+  ) {
     if (!containerRef) return null;
 
     const containerRect = containerRef.getBoundingClientRect();
-    const rows = containerRef.querySelectorAll<HTMLElement>('[data-msg-id]');
-    for (const row of rows) {
+    let firstVisibleRow: VisibleScrollAnchor | null = null;
+    for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
       const rect = row.getBoundingClientRect();
       if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
       const messageId = row.dataset.msgId;
       if (!messageId) continue;
-      return {
+      const rowAnchor = {
         messageId,
         top: rect.top - containerRect.top,
-        topPad: visibleRange().topPad,
+        topPad,
       };
+      if (row.classList.contains('interactive-request')) return rowAnchor;
+      if (!preferStableRenderItem) return rowAnchor;
+      firstVisibleRow ??= rowAnchor;
+
+      // Compact activity summaries can move to an older owner after a prepend. Prefer a part whose
+      // render identity and visual position remain attached to the same transcript content.
+      for (const element of row.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
+        const renderKey = element.dataset.assistantRenderKey;
+        if (
+          !renderKey ||
+          renderKey.startsWith('activity-group:') ||
+          element.getClientRects().length === 0
+        ) {
+          continue;
+        }
+        const elementRect = element.getBoundingClientRect();
+        if (
+          elementRect.bottom <= containerRect.top ||
+          elementRect.top >= containerRect.bottom ||
+          elementRect.height <= 0
+        ) {
+          continue;
+        }
+        return {
+          messageId,
+          renderKey,
+          top: elementRect.top - containerRect.top,
+          topPad,
+        };
+      }
     }
+    return firstVisibleRow;
+  }
+
+  function captureVisibleScrollAnchor(options?: { preferStableRenderItem?: boolean }) {
+    if (!containerRef) return null;
+
+    const mountedAnchor = captureMountedVisibleScrollAnchorWithTopPad(
+      visibleRange().topPad,
+      options?.preferStableRenderItem
+    );
+    if (mountedAnchor) return mountedAnchor;
 
     if (observedVisibleMessageBounds.size > 0) {
       const ids = messageIds();
@@ -1606,16 +1716,7 @@ export function MessageList() {
   }
 
   function captureMountedVisibleScrollAnchor() {
-    if (!containerRef) return null;
-    const containerRect = containerRef.getBoundingClientRect();
-    for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
-      const messageId = row.dataset.msgId;
-      if (!messageId) continue;
-      return { messageId, top: rect.top - containerRect.top, topPad: 0 };
-    }
-    return null;
+    return captureMountedVisibleScrollAnchorWithTopPad(0);
   }
 
   function genericStructuralAnchorCanOwnScroll(sessionId: string | null) {
@@ -1637,7 +1738,7 @@ export function MessageList() {
   }
 
   function scheduleStructuralScrollAnchorRestore(
-    anchor: { messageId: string; top: number; topPad: number },
+    anchor: VisibleScrollAnchor,
     sessionId: string | null
   ) {
     const pending = {
@@ -1699,7 +1800,7 @@ export function MessageList() {
         : undefined);
     const anchor = preferredMessageId
       ? captureMessageScrollAnchor(preferredMessageId)
-      : captureVisibleScrollAnchor();
+      : captureVisibleScrollAnchor({ preferStableRenderItem: true });
     if (!anchor && preferredMessageId) return false;
     pendingAnchor.anchor = anchor;
     pendingAnchor.previousScrollHeight = containerRef.scrollHeight;
@@ -1708,19 +1809,47 @@ export function MessageList() {
     return true;
   }
 
+  function getMountedScrollAnchorElement(anchor: VisibleScrollAnchor) {
+    if (!containerRef) return null;
+    if (anchor.renderKey) {
+      return containerRef.querySelector<HTMLElement>(
+        `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
+      );
+    }
+    return (
+      mountedMessageRows.get(anchor.messageId) ??
+      containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`)
+    );
+  }
+
+  function restorePendingHistoryAnchorIfMounted() {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return false;
+    const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
+    if (
+      !pendingAnchor ||
+      pendingAnchor.invalidated ||
+      pendingAnchor.generation !== activeSessionGeneration ||
+      pendingAnchor.ownershipEpoch !== userScrollOwnershipEpoch ||
+      !pendingAnchor.anchor ||
+      !getMountedScrollAnchorElement(pendingAnchor.anchor)
+    ) {
+      return false;
+    }
+    return restoreVisibleScrollAnchor(pendingAnchor.anchor);
+  }
+
   function restoreVisibleScrollAnchor(
-    anchor: { messageId: string; top: number; topPad: number } | null,
+    anchor: VisibleScrollAnchor | null,
     options?: { useMessageOffsetFallback?: boolean }
   ) {
     if (!containerRef) return false;
     let delta: number | null = null;
     if (anchor) {
-      const row =
-        mountedMessageRows.get(anchor.messageId) ??
-        containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`);
-      if (row) {
+      const element = getMountedScrollAnchorElement(anchor);
+      if (element) {
         const containerRect = containerRef.getBoundingClientRect();
-        delta = row.getBoundingClientRect().top - containerRect.top - anchor.top;
+        delta = element.getBoundingClientRect().top - containerRect.top - anchor.top;
       } else if (shouldVirtualize()) {
         if (options?.useMessageOffsetFallback) {
           const index = messageIndexById().get(anchor.messageId);
@@ -1790,6 +1919,7 @@ export function MessageList() {
     if (!shouldMeasureRows()) return;
 
     measureMountedRow(element, messageId);
+    restorePendingHistoryAnchorIfMounted();
     if (element.isConnected && mountedMessageRows.get(messageId) === element) {
       measuredRowObserver?.observe(element);
     }
@@ -1881,6 +2011,70 @@ export function MessageList() {
   function getStickyUserMessageSourceElement(messageId: string) {
     const row = mountedMessageRows.get(messageId);
     return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
+  }
+
+  function beginUpwardStickyHandoff(messageId: string, sourceEntered: boolean) {
+    const containerRect = containerRef?.getBoundingClientRect();
+    const releaseTop = containerRect
+      ? (getStickyUserMessagePreviewBounds(containerRect)?.bottom ??
+        previousStickyPreviewBounds?.bottom ??
+        0)
+      : 0;
+    if (upwardStickyHandoff?.messageId === messageId) {
+      upwardStickyHandoff.releaseTop = Math.max(upwardStickyHandoff.releaseTop, releaseTop);
+      upwardStickyHandoff.sourceEntered ||= sourceEntered;
+      upwardStickyHandoff.lastInputAt = performance.now();
+      return;
+    }
+    upwardStickyHandoff = {
+      messageId,
+      releaseTop,
+      sourceEntered,
+      lastInputAt: performance.now(),
+    };
+  }
+
+  function clearUpwardStickyHandoff() {
+    upwardStickyHandoff = null;
+    if (!upwardStickyHandoffReleaseTimer) return;
+    clearTimeout(upwardStickyHandoffReleaseTimer);
+    upwardStickyHandoffReleaseTimer = 0;
+  }
+
+  function scheduleUpwardStickyHandoffRelease() {
+    if (upwardStickyHandoffReleaseTimer) clearTimeout(upwardStickyHandoffReleaseTimer);
+    upwardStickyHandoffReleaseTimer = setTimeout(() => {
+      upwardStickyHandoffReleaseTimer = 0;
+      if (upwardStickyHandoff) scheduleStickyPreviewGeometryRefresh({ force: true });
+    }, ACTIVE_WHEEL_WINDOW_MS);
+  }
+
+  function shouldDeferStickyDuringUpwardHandoff() {
+    const handoff = upwardStickyHandoff;
+    if (!handoff || !containerRef) return false;
+    const elapsed = performance.now() - handoff.lastInputAt;
+
+    const source = getStickyUserMessageSourceElement(handoff.messageId);
+    if (!source) {
+      clearUpwardStickyHandoff();
+      return false;
+    }
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const sourceRect = source.getBoundingClientRect();
+    if (sourceRect.top - containerRect.top > handoff.releaseTop) {
+      clearUpwardStickyHandoff();
+      return false;
+    }
+    if (sourceRect.bottom > containerRect.top) {
+      handoff.sourceEntered = true;
+      return true;
+    }
+    if (handoff.sourceEntered || elapsed > ACTIVE_WHEEL_WINDOW_MS) {
+      clearUpwardStickyHandoff();
+      return false;
+    }
+    return true;
   }
 
   function getStickyUserMessageNextUserMessageTop(messageIndex: number, containerRect: DOMRect) {
@@ -2340,16 +2534,21 @@ export function MessageList() {
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
     const scrollDelta = top - lastObservedScrollTop;
+    const historyAnchorSettling =
+      historyAnchorSettleOwner?.sessionId === state.activeSessionId &&
+      historyAnchorSettleOwner.generation === activeSessionGeneration;
     const userScrollInputActive =
       pointerScrollOwnershipActive ||
       now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS ||
       now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS ||
       now - lastUserOwnedScrollMovementAt <= USER_SCROLL_IDLE_MS;
     const actualScrollMovement = !suppressSyncScrollTop && Math.abs(scrollDelta) > 0.5;
-    if (actualScrollMovement) {
+    // Layout-driven scroll events during history settling belong to the history anchor, not the
+    // wheel gesture that originally reached the boundary.
+    if (actualScrollMovement && !historyAnchorSettling) {
       userScrollOwnershipEpoch += 1;
     }
-    if (actualScrollMovement && userScrollInputActive) {
+    if (actualScrollMovement && userScrollInputActive && !historyAnchorSettling) {
       lastUserOwnedScrollMovementAt = now;
       releaseOffscreenBottomReserve();
     }
@@ -2378,6 +2577,8 @@ export function MessageList() {
       currentStickySource &&
       currentStickySource.getBoundingClientRect().bottom > containerRef.getBoundingClientRect().top
     ) {
+      beginUpwardStickyHandoff(currentStickyPreview.id, true);
+      scheduleUpwardStickyHandoffRelease();
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = currentStickyPreview.id;
     }
@@ -2458,9 +2659,27 @@ export function MessageList() {
   function onWheel(event: WheelEvent) {
     if (widthResizeActive) publishPendingWidthMeasurements();
     if (nestedScrollerWillConsumeWheel(event)) return;
+    historyAnchorSettleOwner = null;
     const deltaY = getWheelDeltaPixels(event);
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    if (containerRef && deltaY < -0.5) {
+      const currentStickyPreview = untrack(stickyUserMessagePreview);
+      const currentStickySource = currentStickyPreview
+        ? getStickyUserMessageSourceElement(currentStickyPreview.id)
+        : null;
+      if (
+        currentStickyPreview &&
+        currentStickySource &&
+        currentStickySource.getBoundingClientRect().bottom - deltaY >
+          containerRef.getBoundingClientRect().top
+      ) {
+        beginUpwardStickyHandoff(currentStickyPreview.id, false);
+        setStickyUserMessagePreview(null);
+        previousStickyPreviewId = currentStickyPreview.id;
+      }
+    }
     if (containerRef && deltaY > 0.5) {
+      clearUpwardStickyHandoff();
       const top = containerRef.scrollTop;
       const maxScrollTop = getEditMaxScrollTop(top);
       if (maxScrollTop !== null && top + deltaY >= maxScrollTop - 1) {
@@ -2482,6 +2701,10 @@ export function MessageList() {
     }
     if (deltaY < -0.5) {
       lastWheelUpAt = lastWheelAt;
+      if (upwardStickyHandoff) {
+        upwardStickyHandoff.lastInputAt = lastWheelAt;
+        scheduleUpwardStickyHandoffRelease();
+      }
       if (autoScroll() || pinnedToBottom || followModeLocked) {
         disengageBottomFollow();
         resumeAutoScrollAfterDiffFocus = false;
@@ -2547,6 +2770,7 @@ export function MessageList() {
     ) {
       return;
     }
+    historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (widthResizeActive) publishPendingWidthMeasurements();
     lastScrollInputAt = performance.now();
@@ -2593,6 +2817,7 @@ export function MessageList() {
     }
     if (widthResizeActive) publishPendingWidthMeasurements();
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    historyAnchorSettleOwner = null;
     pointerScrollOwnershipActive = true;
     lastScrollInputAt = performance.now();
   }
@@ -2643,24 +2868,18 @@ export function MessageList() {
       cancelStickyNavigation();
     }
     if (target.closest('.diff-view-filename')) return;
-    const pagerControl = target.closest<HTMLElement>('.assistant-file-edit-pager-dot');
-    if (pagerControl?.getAttribute('aria-pressed') === 'true') return;
-    const control =
-      pagerControl ?? target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
+    const control = target.closest<HTMLElement>('[aria-expanded], .diff-view-item-expandable');
     if (!control || !containerRef.contains(control)) return;
     const isDiffToggle = control.matches('.diff-view-toggle, .diff-view-item-expandable');
-    const changesFileEditPage = control.matches('.assistant-file-edit-pager-dot');
-    const anchor = changesFileEditPage
-      ? (control.closest<HTMLElement>('.assistant-file-edit-pager-dots') ?? control)
-      : isDiffToggle
-        ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
-        : control;
+    const anchor = isDiffToggle
+      ? (control.closest<HTMLElement>('.diff-view-item') ?? control)
+      : control;
     const expandsCompactActivity =
       control.matches('.assistant-activity-summary') &&
       control.getAttribute('aria-expanded') === 'false';
 
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
-    if (isDiffToggle || changesFileEditPage) {
+    if (isDiffToggle) {
       resumeAutoScrollAfterDiffFocus = false;
       disengageBottomFollow();
     } else if (expandsCompactActivity && (autoScroll() || pinnedToBottom || followModeLocked)) {
@@ -2834,6 +3053,7 @@ export function MessageList() {
       mountedMessageRows.clear();
       clearObservedVisibleMessages();
       if (stickyPreviewDebounceTimer) clearTimeout(stickyPreviewDebounceTimer);
+      clearUpwardStickyHandoff();
       clearLoadingRowReappearTimer();
       clearLoadingRowReserveReleaseTimer();
       clearTrailingSummarySettleTimer();
@@ -2916,6 +3136,14 @@ export function MessageList() {
     const candidate = stickyUserMessagePreviewCandidate();
     const current = untrack(stickyUserMessagePreview);
 
+    if (candidate && shouldDeferStickyDuringUpwardHandoff()) {
+      if (current) {
+        setStickyUserMessagePreview(null);
+        previousStickyPreviewId = current.id;
+      }
+      return;
+    }
+
     if (
       current?.id === candidate?.id &&
       current?.index === candidate?.index &&
@@ -2948,6 +3176,18 @@ export function MessageList() {
     if (shouldHideStickyUserMessagePreviewImmediately(current)) {
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = current?.id ?? null;
+      return;
+    }
+
+    // Boundary prompts can be several unloaded pages above an assistant-only window. Keep the
+    // existing overlay while that prompt cache refreshes unless mounted geometry says to hide it.
+    if (
+      current?.index === -1 &&
+      !!state.activeSessionId &&
+      isSessionHistoryTruncated(state.activeSessionId) &&
+      (containerRef?.clientHeight ?? 0) >= STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX &&
+      !getStickyUserMessageSourceElement(current.id)
+    ) {
       return;
     }
 
@@ -3014,6 +3254,7 @@ export function MessageList() {
     setStickyUserMessagePreview(null);
     previousStickyPreviewId = null;
     previousStickyPreviewBounds = null;
+    clearUpwardStickyHandoff();
     setAutoScroll(!editingAtSessionStart);
     if (!editingAtSessionStart) queueMicrotask(() => performScroll());
   });
@@ -3281,6 +3522,7 @@ export function MessageList() {
       activeSessionWorking() ||
       activeStatusType === 'busy' ||
       activeStatusType === 'retry' ||
+      !trailingFinalResponseReady() ||
       !trailingSummarySettled();
     const sessions = state.sessions.map((session) => ({
       id: session.id,
@@ -3559,6 +3801,7 @@ export function MessageList() {
 
   function resetPendingHistoryGeneration() {
     activeSessionGeneration += 1;
+    historyAnchorSettleOwner = null;
     for (const pendingAnchor of pendingOlderHistoryAnchors.values()) {
       pendingAnchor.invalidated = true;
     }
@@ -3601,7 +3844,7 @@ export function MessageList() {
     if (generation !== activeSessionGeneration || state.activeSessionId !== sessionId) return;
     markSessionHistoryLoadFailed(sessionId, false);
     const pendingAnchor = {
-      anchor: captureVisibleScrollAnchor(),
+      anchor: captureVisibleScrollAnchor({ preferStableRenderItem: true }),
       generation,
       invalidated: false,
       owner: 'history' as const,
@@ -3615,32 +3858,42 @@ export function MessageList() {
       const loaded = await loadOlderSessionHistoryPage(sessionId);
       if (!loaded || generation !== activeSessionGeneration || state.activeSessionId !== sessionId)
         return;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      if (
-        generation !== activeSessionGeneration ||
-        state.activeSessionId !== sessionId ||
-        !containerRef
-      )
-        return;
-      if (stickyNavigationOwnsScroll()) return;
-      if (pendingOlderHistoryAnchors.get(sessionId) !== pendingAnchor) return;
-      if (pendingAnchor.invalidated) return;
-      if (userScrollOwnershipEpoch !== pendingAnchor.ownershipEpoch) return;
+      const settleOwner = { sessionId, generation };
+      historyAnchorSettleOwner = settleOwner;
+      // The pinned range contains the old viewport. Replace provisional prefix heights and align
+      // its stable render item synchronously so the browser never paints the estimated position.
+      measureVisibleItems();
+      restorePendingHistoryAnchorIfMounted();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => {
+          measureVisibleItems();
+          restorePendingHistoryAnchorIfMounted();
+          resolve();
+        })
+      );
+      const canRestoreAnchor = () =>
+        generation === activeSessionGeneration &&
+        state.activeSessionId === sessionId &&
+        historyAnchorSettleOwner === settleOwner &&
+        !!containerRef &&
+        !stickyNavigationOwnsScroll() &&
+        pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor &&
+        !pendingAnchor.invalidated &&
+        userScrollOwnershipEpoch === pendingAnchor.ownershipEpoch;
+      if (!canRestoreAnchor()) return;
+      const currentContainer = containerRef;
+      if (!currentContainer) return;
       if (!restoreVisibleScrollAnchor(pendingAnchor.anchor, { useMessageOffsetFallback: true })) {
-        const heightDelta = containerRef.scrollHeight - pendingAnchor.previousScrollHeight;
+        const heightDelta = currentContainer.scrollHeight - pendingAnchor.previousScrollHeight;
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
-      } else if (pendingAnchor.anchor) {
-        queueMicrotask(() => {
-          if (stickyNavigationOwnsScroll()) return;
-          if (generation !== activeSessionGeneration) return;
-          if (state.activeSessionId !== sessionId) return;
-          if (pendingAnchor.invalidated) return;
-          if (userScrollOwnershipEpoch !== pendingAnchor.ownershipEpoch) return;
-          const mountedAnchor = mountedMessageRows.get(pendingAnchor.anchor!.messageId);
-          if (mountedAnchor) restoreVisibleScrollAnchor(pendingAnchor.anchor);
-        });
       }
     } finally {
+      if (
+        historyAnchorSettleOwner?.sessionId === sessionId &&
+        historyAnchorSettleOwner.generation === generation
+      ) {
+        historyAnchorSettleOwner = null;
+      }
       if (pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor) {
         pendingOlderHistoryAnchors.delete(sessionId);
       }

@@ -984,13 +984,13 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.file-change-inline-diffs-unwrapped')).not.toBeNull();
-    expect(container?.querySelectorAll('.assistant-file-edit-pager-dot')).toHaveLength(2);
-    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
-    expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('second.ts');
-
-    container?.querySelector<HTMLButtonElement>('.assistant-file-edit-pager-dot')?.click();
-
-    expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('app.ts');
+    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
+    expect(
+      [...(container?.querySelectorAll('.diff-view-filename') || [])].map(
+        (element) => element.textContent
+      )
+    ).toEqual(['app.ts', 'second.ts']);
   });
 
   it('omits unparsed edit tools from shared activity summaries when inline previews are enabled', async () => {
@@ -1296,76 +1296,6 @@ describe('MessageList history pagination', () => {
     expansionControl.click();
 
     expansionOffset = 100;
-    layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
-    );
-    harness.animationFrames.flush();
-    await Promise.resolve();
-    expect(harness.getScrollTop()).toBe(120);
-    const visibleRow = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
-    const visibleTopBefore =
-      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
-
-    await harness.resolveLoad();
-
-    const visibleTopAfter =
-      visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
-    expect(visibleTopAfter).toBe(visibleTopBefore);
-    expect(harness.getScrollTop()).toBe(320);
-    harness.animationFrames.restore();
-  });
-
-  it('transfers pending history ownership after a file edit page correction', async () => {
-    const observers: Array<{
-      callback: ResizeObserverCallback;
-      targets: Set<Element>;
-    }> = [];
-    class TestResizeObserver {
-      readonly targets = new Set<Element>();
-
-      constructor(readonly callback: ResizeObserverCallback) {
-        observers.push(this);
-      }
-      observe(target: Element) {
-        this.targets.add(target);
-      }
-      unobserve(target: Element) {
-        this.targets.delete(target);
-      }
-      disconnect() {
-        this.targets.clear();
-      }
-    }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
-    let pageOffset = 0;
-    const harness = await mountDeferredHistory(
-      [
-        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
-        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
-        { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
-        { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
-      ],
-      (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? pageOffset : 0)
-    );
-    await harness.startLoad(20);
-    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
-    const layoutObserver = observers.find(
-      (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
-    );
-    const changedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
-    const pagerDots = document.createElement('div');
-    pagerDots.className = 'assistant-file-edit-pager-dots';
-    pagerDots.getBoundingClientRect = () =>
-      new DOMRect(0, 200 + pageOffset - harness.getScrollTop(), 500, 20);
-    const pageControl = document.createElement('button');
-    pageControl.className = 'assistant-file-edit-pager-dot';
-    pageControl.setAttribute('aria-pressed', 'false');
-    pagerDots.append(pageControl);
-    changedRow.append(pagerDots);
-    pageControl.click();
-
-    pageOffset = 100;
     layoutObserver!.callback(
       [{ target: track } as unknown as ResizeObserverEntry],
       layoutObserver as unknown as ResizeObserver
@@ -2427,6 +2357,54 @@ describe('shouldShowStickyUserMessagePreview', () => {
       )
     ).toBeLessThanOrEqual(1);
     expect(scrollIntoView).not.toHaveBeenCalled();
+    animationFrames.restore();
+  });
+
+  it('keeps an unloaded boundary sticky mounted while prompt history refreshes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+          return new DOMRect(0, 10, 500, 74);
+        }
+        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Boundary prompt');
+
+    setSessionHistoryPrompts('session-1', []);
+    await Promise.resolve();
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
+
+    expect(sticky?.isConnected).toBe(true);
+    expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
     animationFrames.restore();
   });
 
@@ -3742,6 +3720,7 @@ describe('MessageList sticky prompt preview', () => {
             type: 'agent',
             name: 'explore',
           },
+          { ...textPart('text-3', 'Final response'), messageID: 'assistant-1' },
         ],
       },
       {
@@ -3805,6 +3784,7 @@ describe('MessageList sticky prompt preview', () => {
             type: 'agent',
             name: 'explore',
           },
+          { ...textPart('text-2', 'Final response'), messageID: 'assistant-1' },
         ],
       },
     ]);
@@ -4144,7 +4124,7 @@ describe('MessageList sticky prompt preview', () => {
     });
   });
 
-  it('updates the cached assistant summary when an existing tool completes', async () => {
+  it('updates the cached assistant summary after a completed tool receives final text', async () => {
     const runningTool = toolPart('tool-1', 'assistant-1');
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -4177,6 +4157,16 @@ describe('MessageList sticky prompt preview', () => {
         time: { start: 1, end: 2 },
       },
     });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-dialog-summary')).toBeNull();
+
+    upsertPart({
+      ...textPart('text-final', 'Done.'),
+      messageID: 'assistant-1',
+    });
+    await Promise.resolve();
+    vi.advanceTimersByTime(700);
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 4s - Tokens ↑ 100 ↓ 10');
@@ -4606,6 +4596,82 @@ describe('MessageList sticky prompt preview', () => {
     const sticky = container?.querySelector('.latest-user-message-sticky');
     expect(sticky?.textContent).toContain('Prompt 19');
 
+    animationFrames.restore();
+  });
+
+  it('hands off to the previous sticky after the next prompt clears the overlay', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let user2Top = -62;
+    let assistant1Top = -600;
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+          return new DOMRect(0, 10, 500, 74);
+        }
+
+        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        if (messageId === 'user-1') return new DOMRect(0, -700, 500, 52);
+        if (messageId === 'assistant-1') return new DOMRect(0, assistant1Top, 500, 90);
+        if (messageId === 'user-2') return new DOMRect(0, user2Top, 500, 52);
+        if (messageId === 'assistant-2') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 2'
+    );
+
+    // A projected crossing that does not move the source must restore the current sticky.
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+    vi.advanceTimersByTime(181);
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 2'
+    );
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    user2Top = 70;
+    assistant1Top = 20;
+    list.scrollTop = 1_180;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    user2Top = 120;
+    list.scrollTop = 1_160;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 1'
+    );
     animationFrames.restore();
   });
 
@@ -5901,6 +5967,77 @@ describe('MessageList loading row', () => {
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
     expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+  });
+
+  it('does not show a trailing worked summary before the final text response', async () => {
+    const prompt = {
+      info: { ...userMessage('user-1'), time: { created: 1_000 } },
+      parts: [{ ...textPart('text-user-1', 'Prompt'), messageID: 'user-1' }],
+    };
+    const completedTool = toolPart('tool-1', 'assistant-1');
+    completedTool.tool = 'todowrite';
+    completedTool.state = {
+      status: 'completed',
+      input: { todos: [{ content: 'Run the checks', status: 'in_progress' }] },
+      output: 'Updated todos',
+      title: 'Updating todos',
+      metadata: {},
+      time: { start: 3_000, end: 10_000 },
+    };
+    const toolStep = {
+      info: assistantMessage('assistant-1', {
+        time: { created: 2_000, completed: 11_000 },
+        tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+      }),
+      parts: [
+        { ...textPart('text-assistant-1', 'Running the checks.'), messageID: 'assistant-1' },
+        completedTool,
+      ],
+    };
+    setState('activeSessionId', 'session-1');
+    replaceMessages([prompt, toolStep]);
+    startLoading(11_000);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    stopLoading();
+    await Promise.resolve();
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Worked for');
+
+    replaceMessages([
+      prompt,
+      toolStep,
+      {
+        info: assistantMessage('assistant-2', {
+          time: { created: 12_000, completed: 13_000 },
+          tokens: { input: 8, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [{ ...textPart('text-assistant-2', 'All checks pass.'), messageID: 'assistant-2' }],
+      },
+    ]);
+    setState('streamingPartId', 'text-assistant-2');
+    setState('streamingText', 'All checks pass.');
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+    expect(container?.textContent).not.toContain('Worked for');
+
+    setState('streamingPartId', null);
+    setState('streamingText', '');
+    await Promise.resolve();
+    vi.advanceTimersByTime(699);
+    await Promise.resolve();
+    expect(container?.textContent).not.toContain('Worked for');
+
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 12s - Tokens ↑ 50 ↓ 10');
   });
 
   it('does not render the loading row in a draft session when stale messages leak in', async () => {

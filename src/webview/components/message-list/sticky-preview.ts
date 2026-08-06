@@ -91,7 +91,7 @@ export function getNextVisibleUserMessageTopMap(
 export function shouldShowStickyUserMessagePreview(args: {
   preview: StickyUserMessagePreview | null;
   shouldVirtualize: boolean;
-  visibleRange: { start: number; end: number };
+  visibleRange: { start: number; end: number; coreStart?: number };
   rowTop: number | null;
   rowBottom: number | null;
   nextUserMessageTop?: number | null;
@@ -111,7 +111,8 @@ export function shouldShowStickyUserMessagePreview(args: {
   // be reconciling after scrolling or measurement updates.
   if (args.rowBottom !== null && args.rowBottom !== undefined && args.rowBottom > 0) return false;
 
-  if (args.shouldVirtualize && preview.index < args.visibleRange.start) {
+  const firstVisibleIndex = args.visibleRange.coreStart ?? args.visibleRange.start;
+  if (args.shouldVirtualize && preview.index < firstVisibleIndex) {
     if (
       isPreviousPreview &&
       args.stickyPreviewBottom !== null &&

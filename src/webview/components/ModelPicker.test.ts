@@ -225,7 +225,7 @@ describe('ModelPicker', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('animates Manage Models on every open while the debug override is enabled', () => {
+  it('animates Manage Models only on the first eligible open', () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         'gpt-5': createModel('gpt-5', 'GPT-5'),
@@ -247,31 +247,26 @@ describe('ModelPicker', () => {
     cleanup();
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
 
-    expect(container?.querySelector('.manage-models-attention')).toBeInstanceOf(HTMLButtonElement);
+    expect(container?.querySelector('.manage-models-attention')).toBeNull();
   });
 
   it.each([
     { hiddenProviders: ['openai'], hiddenModels: [] },
     { hiddenProviders: [], hiddenModels: ['openai:gpt-5'] },
-  ])(
-    'animates Manage Models while debugging even when models or providers are hidden',
-    (visibility) => {
-      setState('providers', [
-        createProvider('openai', 'OpenAI', {
-          'gpt-5': createModel('gpt-5', 'GPT-5'),
-        }),
-      ]);
-      setState('hiddenProviders', visibility.hiddenProviders);
-      setState('hiddenModels', visibility.hiddenModels);
+  ])('does not animate Manage Models when models or providers are hidden', (visibility) => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    setState('hiddenProviders', visibility.hiddenProviders);
+    setState('hiddenModels', visibility.hiddenModels);
 
-      cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
 
-      expect(container?.querySelector('.manage-models-attention')).toBeInstanceOf(
-        HTMLButtonElement
-      );
-      expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
-    }
-  );
+    expect(container?.querySelector('.manage-models-attention')).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
+  });
 
   it('can hide the manage models footer and customize the popup gap', async () => {
     setState('providers', [

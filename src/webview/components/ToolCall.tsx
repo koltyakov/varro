@@ -424,8 +424,6 @@ export function ToolCall(props: {
   questionRequest?: QuestionRequest | null;
   permissionMatch?: ToolCallPermissionMatch | null;
   lightweight?: boolean;
-  inlineFileChangeIndex?: number;
-  inlineFileChangeKey?: string;
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
@@ -558,8 +556,6 @@ export function ToolCall(props: {
           previewStateKey={expansionKey()}
           expanded={expanded()}
           toggleExpand={toggleExpand}
-          inlineFileChangeIndex={props.inlineFileChangeIndex}
-          inlineFileChangeKey={props.inlineFileChangeKey}
         />
       );
     }
@@ -756,8 +752,6 @@ function FileChangeCard(props: {
   previewStateKey: string;
   expanded: boolean;
   toggleExpand: () => void;
-  inlineFileChangeIndex?: number;
-  inlineFileChangeKey?: string;
 }) {
   let moreButtonRef: HTMLButtonElement | undefined;
   let moreMenuRef: HTMLDivElement | undefined;
@@ -794,24 +788,20 @@ function FileChangeCard(props: {
   const showInlinePreview = () => showInlineFileChanges() && hasInlinePreviewContent();
   const showCompactCard = () => !isCompleted() || !showInlinePreview();
   const inlineDiffs = createMemo<DiffViewFile[]>(() =>
-    changes()
-      .filter((_, index) =>
-        props.inlineFileChangeIndex === undefined ? true : index === props.inlineFileChangeIndex
-      )
-      .map((item) => ({
-        file: item.toPath || item.path,
-        fromFile: item.kind === 'moved' ? item.fromPath : undefined,
-        changeKind: item.kind,
-        status: item.kind === 'added' ? 'added' : item.kind === 'removed' ? 'deleted' : 'modified',
-        before: item.before,
-        after: item.after,
-        patch: item.patch,
-        patchFormat: item.patchFormat,
-        previewStatus: item.previewStatus,
-        previewMessage: item.previewMessage,
-        additions: item.additions ?? (item.kind === 'added' ? countContentLines(item.after) : 0),
-        deletions: item.deletions ?? (item.kind === 'removed' ? countContentLines(item.before) : 0),
-      }))
+    changes().map((item) => ({
+      file: item.toPath || item.path,
+      fromFile: item.kind === 'moved' ? item.fromPath : undefined,
+      changeKind: item.kind,
+      status: item.kind === 'added' ? 'added' : item.kind === 'removed' ? 'deleted' : 'modified',
+      before: item.before,
+      after: item.after,
+      patch: item.patch,
+      patchFormat: item.patchFormat,
+      previewStatus: item.previewStatus,
+      previewMessage: item.previewMessage,
+      additions: item.additions ?? (item.kind === 'added' ? countContentLines(item.after) : 0),
+      deletions: item.deletions ?? (item.kind === 'removed' ? countContentLines(item.before) : 0),
+    }))
   );
 
   createEffect(() => {
@@ -1107,15 +1097,7 @@ function FileChangeCard(props: {
       </For>
       <Show when={showInlinePreview()}>
         <div class="file-change-inline-diffs file-change-inline-diffs-unwrapped">
-          <DiffView
-            diffs={inlineDiffs()}
-            showChanges
-            stateKey={
-              props.inlineFileChangeIndex === undefined
-                ? props.previewStateKey
-                : `${props.previewStateKey}\u0000file:${props.inlineFileChangeKey ?? props.inlineFileChangeIndex}`
-            }
-          />
+          <DiffView diffs={inlineDiffs()} showChanges stateKey={props.previewStateKey} />
         </div>
       </Show>
     </>

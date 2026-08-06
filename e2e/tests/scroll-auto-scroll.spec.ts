@@ -524,40 +524,18 @@ test.describe('auto-scroll', () => {
     );
   });
 
-  test('keeps an unequal-height file edit pager fixed while switching pages', async ({ page }) => {
+  test('renders every file diff without paging them', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&pagedDiff=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&multiFileDiff=1'
     );
-    const pager = page.locator('.assistant-file-edit-pager').last();
-    const dots = pager.locator('.assistant-file-edit-pager-dot');
-    const dotGroup = pager.locator('.assistant-file-edit-pager-dots');
+    const finalRow = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-    await expect(dots).toHaveCount(2);
-    await expect(dots.nth(1)).toHaveAttribute('aria-pressed', 'true');
-    await expect
-      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
-      .toBeLessThan(2);
-
-    const topBefore = await dotGroup.evaluate((element) => {
-      const container = element.closest<HTMLElement>('.interactive-list')!;
-      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    });
-    await dots.first().click();
-    await expect(dots.first()).toHaveAttribute('aria-pressed', 'true');
-
-    const samples = await dotGroup.evaluate(async (element) => {
-      const container = element.closest<HTMLElement>('.interactive-list')!;
-      const tops: number[] = [];
-      for (let frame = 0; frame < 12; frame += 1) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
-      }
-      return tops;
-    });
-    expect(
-      samples.every((top) => Math.abs(top - topBefore) <= 1.5),
-      JSON.stringify({ topBefore, samples })
-    ).toBe(true);
+    await expect(finalRow.locator('.assistant-file-edit-pager')).toHaveCount(0);
+    await expect(finalRow.locator('.diff-view-file')).toHaveCount(2);
+    await expect(finalRow.locator('.diff-view-filename')).toHaveText([
+      'report-59.ts',
+      'report-59-details.ts',
+    ]);
   });
 
   test('keeps visible rows stable after prepending heterogeneous history', async ({ page }) => {
@@ -697,6 +675,47 @@ test.describe('auto-scroll', () => {
       { before: 'msg_cursor_0001', limit: '50' },
       { before: 'msg_cursor_0002', limit: '50' },
     ]);
+  });
+
+  test('settles a compact anchor after provisional history heights collapse', async ({ page }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=compact-pagination-anchor&windowed=1&deferHistory=1&compactToolOutput=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    const anchor = page.locator('[data-msg-id="message-compact-pagination-anchor"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(anchor).toBeAttached();
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop = 4;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+    const anchorTop = await anchor.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+
+    const released = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+      };
+      return harness.__varroE2E?.releaseNextHistoryRequest?.() ?? false;
+    });
+    expect(released).toBe(true);
+
+    const samples = await sampleMessageTopAcrossFrames(
+      list,
+      'message-compact-pagination-anchor',
+      8
+    );
+    for (const top of samples) {
+      expect(top).not.toBeNull();
+      expect(Math.abs(top! - anchorTop), JSON.stringify({ anchorTop, samples })).toBeLessThan(1.5);
+    }
   });
 
   test('keeps the incident-equivalent paginated image row stable across delayed loading', async ({

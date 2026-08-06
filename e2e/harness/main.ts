@@ -83,6 +83,7 @@ const SCENARIO_NAMES = [
   'large-transcript',
   'diff-preview-large-transcript',
   'assistant-heavy-history',
+  'compact-pagination-anchor',
   'incident-delayed-image-history',
   'mixed-small-transcript',
   'heterogeneous-large-transcript',
@@ -2806,7 +2807,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500
     );
     const messages: MessageEntry[] = [];
-    const includePagedDiff = new URLSearchParams(window.location.search).get('pagedDiff') === '1';
+    const includeMultiFileDiff =
+      new URLSearchParams(window.location.search).get('multiFileDiff') === '1';
 
     for (let index = 0; index < 60; index += 1) {
       const createdAt = BASE_TIME - (200 - index) * 1000;
@@ -2819,7 +2821,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       const assistantId = `message-diff-preview-assistant-${index}`;
       const patchId = `${assistantId}-patch`;
       const patchText =
-        includePagedDiff && index === 59
+        includeMultiFileDiff && index === 59
           ? [
               '*** Begin Patch',
               '*** Update File: src/report-59.ts',
@@ -2904,6 +2906,133 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           targetUser.info.id,
           `Implementation step ${index}. ${detail}`,
           BASE_TIME - (79_000 - index)
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    return state;
+  }
+
+  if (name === 'compact-pagination-anchor') {
+    const session = makeSession(
+      'session-compact-pagination-anchor',
+      'Compact paginated anchor',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    const firstUser = makeUserMessage(
+      session.id,
+      'message-compact-pagination-first-user',
+      ['Investigate the compact paginated transcript.'],
+      BASE_TIME - 100_000
+    );
+    messages.push(firstUser);
+
+    for (let index = 1; index <= 62; index += 1) {
+      if (index === 1 || index === 10 || index === 20) {
+        messages.push(
+          makeAssistantMessage(
+            session.id,
+            `message-compact-pagination-history-${index}`,
+            firstUser.info.id,
+            `Earlier retained response ${index}. ${'Measured historical detail remains above the visible anchor. '.repeat(5)}`,
+            BASE_TIME - (100_000 - index)
+          )
+        );
+        continue;
+      }
+      const message = makeAssistantMessage(
+        session.id,
+        `message-compact-pagination-reasoning-${index}`,
+        firstUser.info.id,
+        '',
+        BASE_TIME - (100_000 - index)
+      );
+      message.parts = [
+        makeReasoningPart(
+          session.id,
+          message.info.id,
+          `${message.info.id}-part`,
+          `Investigating compact history step ${index}.`,
+          message.info.time.created,
+          message.info.time.created + 1
+        ),
+      ];
+      messages.push(message);
+    }
+
+    messages.push(
+      makeAssistantMessage(
+        session.id,
+        'message-compact-pagination-anchor',
+        firstUser.info.id,
+        'The visible boundary response stays fixed while older compact activity loads.\n\n' +
+          'This row intentionally spans several wrapped lines so a misplaced provisional offset is immediately visible.',
+        BASE_TIME - 37_000
+      )
+    );
+
+    for (let index = 0; index < 2; index += 1) {
+      const message = makeAssistantMessage(
+        session.id,
+        `message-compact-pagination-later-reasoning-${index}`,
+        firstUser.info.id,
+        '',
+        BASE_TIME - (36_000 - index)
+      );
+      message.parts = [
+        makeReasoningPart(
+          session.id,
+          message.info.id,
+          `${message.info.id}-part`,
+          `Preparing the next compact section ${index + 1}.`,
+          message.info.time.created,
+          message.info.time.created + 1
+        ),
+      ];
+      messages.push(message);
+    }
+
+    messages.push(
+      makeAssistantMessage(
+        session.id,
+        'message-compact-pagination-checkpoint',
+        firstUser.info.id,
+        'The first verification checkpoint follows the compact activity summary.',
+        BASE_TIME - 34_000
+      )
+    );
+    for (let index = 0; index < 12; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-compact-pagination-result-${index}`,
+          firstUser.info.id,
+          `Verification result ${index + 1}. ${'Stable viewport detail. '.repeat((index % 3) + 1)}`,
+          BASE_TIME - (33_000 - index)
+        )
+      );
+    }
+
+    const followUp = makeUserMessage(
+      session.id,
+      'message-compact-pagination-follow-up',
+      ['Continue with final verification.'],
+      BASE_TIME - 20_000
+    );
+    messages.push(followUp);
+    for (let index = 0; index < 5; index += 1) {
+      messages.push(
+        makeAssistantMessage(
+          session.id,
+          `message-compact-pagination-final-${index}`,
+          followUp.info.id,
+          `Final verification ${index + 1}. ${'Latest compact transcript detail. '.repeat(3)}`,
+          BASE_TIME - (19_000 - index)
         )
       );
     }

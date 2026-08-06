@@ -24,8 +24,6 @@ type MockMessagePartProps = {
   part: Part;
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
-  inlineFileChangeIndex?: number;
-  inlineFileChangeKey?: string;
 };
 
 const markdownRendererMock = vi.hoisted(() =>
@@ -41,13 +39,7 @@ const markdownRendererMock = vi.hoisted(() =>
 
 const messagePartMock = vi.hoisted(() =>
   vi.fn((props: MockMessagePartProps) => (
-    <div
-      class="message-part-mock"
-      data-part-id={props.part.id}
-      data-part-type={props.part.type}
-      data-inline-file-index={props.inlineFileChangeIndex}
-      data-inline-file-key={props.inlineFileChangeKey}
-    >
+    <div class="message-part-mock" data-part-id={props.part.id} data-part-type={props.part.type}>
       {props.streamedText ??
         (props.part.type === 'text' || props.part.type === 'reasoning'
           ? props.part.text
@@ -586,10 +578,8 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector(stackSelector)?.classList).not.toContain(
       'assistant-message-flow-item-streamed'
     );
-    expect(
-      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock')
-        ?.dataset.partId
-    ).toBe('edit-2');
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
+    expect(container?.querySelector<HTMLElement>('[data-part-id="edit-2"]')).not.toBeNull();
   });
 
   it('filters highlighted-card meta text and opens read mode only while Alt is pressed', async () => {
@@ -732,18 +722,18 @@ describe('AssistantMessageContent', () => {
       inlineChanges: true,
       detailsShown: false,
       summaryCount: 1,
-      pagerCount: 2,
+      pagerCount: 0,
       detailCount: 0,
-      renderedPartCount: 1,
+      renderedPartCount: 2,
     },
     {
       compactOutput: true,
       inlineChanges: true,
       detailsShown: true,
       summaryCount: 1,
-      pagerCount: 2,
+      pagerCount: 0,
       detailCount: 1,
-      renderedPartCount: 2,
+      renderedPartCount: 3,
     },
   ])('renders compact=$compactOutput inline=$inlineChanges details=$detailsShown', (expected) => {
     setCompactToolOutput(expected.compactOutput);
@@ -774,7 +764,7 @@ describe('AssistantMessageContent', () => {
     );
   });
 
-  it('reactively adds and removes the file edit pager when compact output changes', () => {
+  it('keeps every inline edit rendered when compact output changes', () => {
     setShowInlineFileChanges(true);
     renderAssistantMessageContent({
       parts: [
@@ -788,8 +778,8 @@ describe('AssistantMessageContent', () => {
 
     setCompactToolOutput(true);
 
-    expect(container?.querySelectorAll('.assistant-file-edit-pager-dot')).toHaveLength(2);
-    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
 
     setCompactToolOutput(false);
 
@@ -798,7 +788,7 @@ describe('AssistantMessageContent', () => {
   });
 
   it.each(['subagent', 'question'] as const)(
-    'does not page inline edits for %s output',
+    'renders every inline edit for %s output',
     (variant) => {
       setCompactToolOutput(true);
       setShowInlineFileChanges(true);
@@ -826,7 +816,7 @@ describe('AssistantMessageContent', () => {
     }
   );
 
-  it('pages compact inline edits across tool calls and files and preserves selection', () => {
+  it('renders all compact inline edit tool calls without a pager', () => {
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const multiFilePart: ToolPart = {
@@ -867,67 +857,12 @@ describe('AssistantMessageContent', () => {
 
     renderAssistantMessageContent({ parts });
 
-    const dots = () =>
-      container?.querySelectorAll<HTMLButtonElement>('.assistant-file-edit-pager-dot');
-    const selectedPart = () =>
-      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock');
-    expect(dots()).toHaveLength(3);
-    expect(dots()?.[2]?.getAttribute('aria-pressed')).toBe('true');
-    expect(selectedPart()?.dataset.partId).toBe('edit-final');
-    expect(selectedPart()?.dataset.inlineFileIndex).toBe('0');
-
-    dots()?.[1]?.click();
-
-    expect(dots()?.[1]?.getAttribute('aria-pressed')).toBe('true');
-    expect(selectedPart()?.dataset.partId).toBe('edit-multi');
-    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
-
-    cleanup?.();
-    container!.innerHTML = '';
-    renderAssistantMessageContent({ parts });
-
-    expect(selectedPart()?.dataset.partId).toBe('edit-multi');
-    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
-  });
-
-  it('passes stable identities for individual diff pages', () => {
-    setCompactToolOutput(true);
-    setShowInlineFileChanges(true);
-    const files = [
-      {
-        type: 'update',
-        relativePath: 'src/one.ts',
-        before: 'one',
-        after: 'one updated',
-      },
-      {
-        type: 'update',
-        relativePath: 'src/two.ts',
-        before: 'two',
-        after: 'two updated',
-      },
-    ];
-    const initialPart: ToolPart = {
-      ...fileEditPart('edit-multi', 'src/one.ts'),
-      tool: 'apply_patch',
-      state: {
-        ...completedToolState({}, 'Edited 2 files'),
-        metadata: { files },
-      },
-    };
-    renderAssistantMessageContent({ parts: [initialPart] });
-
-    const selectedPart = () =>
-      container?.querySelector<HTMLElement>('.assistant-file-edit-pager-page .message-part-mock');
-    expect(selectedPart()?.dataset.inlineFileIndex).toBe('1');
-    const secondKey = selectedPart()?.dataset.inlineFileKey;
-    expect(secondKey).toBeTruthy();
-
-    container?.querySelector<HTMLButtonElement>('.assistant-file-edit-pager-dot')?.click();
-
-    expect(selectedPart()?.dataset.inlineFileIndex).toBe('0');
-    expect(selectedPart()?.dataset.inlineFileKey).toBeTruthy();
-    expect(selectedPart()?.dataset.inlineFileKey).not.toBe(secondKey);
+    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
+    expect(
+      [...(container?.querySelectorAll<HTMLElement>('.message-part-mock') || [])].map(
+        (element) => element.dataset.partId
+      )
+    ).toEqual(['edit-multi', 'edit-final']);
   });
 
   it('does not group reads and searches containing edit words as file edits', () => {

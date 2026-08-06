@@ -483,6 +483,87 @@ test('image sticky yields after a fractional upward wheel tick reveals its sourc
   expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(0);
 });
 
+test('previous sticky returns during slow upward scrolling after the image prompt clears it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-first-image&windowed=1');
+
+  const list = page.locator('.interactive-list');
+  const sticky = page.locator('.latest-user-message-sticky');
+  await expect(sticky).toContainText('A later image prompt');
+
+  const result = await list.evaluate(async (element) => {
+    const selector = '[data-msg-id="message-sticky-later-image-user"] .user-message-card';
+    let source: HTMLElement | null = null;
+    for (let frame = 0; frame < 200; frame += 1) {
+      source = document.querySelector<HTMLElement>(selector);
+      if (source) break;
+
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 20);
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    if (!source) return null;
+
+    const initialListRect = element.getBoundingClientRect();
+    const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+    if (!overlay) return null;
+    const releaseTop = overlay.getBoundingClientRect().bottom - initialListRect.top;
+
+    element.scrollTop = Math.max(
+      0,
+      element.scrollTop + source.getBoundingClientRect().bottom - initialListRect.top + 4
+    );
+    element.dispatchEvent(new Event('scroll'));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    let safeFrames = 0;
+    let previousStickyFrames = 0;
+    let missingPreviousStickyFrames = 0;
+    let sourceTop = Number.NEGATIVE_INFINITY;
+    for (let frame = 0; frame < 300; frame += 1) {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 4);
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const currentSource = document.querySelector<HTMLElement>(selector);
+      if (!currentSource) return null;
+      sourceTop = currentSource.getBoundingClientRect().top - element.getBoundingClientRect().top;
+      if (sourceTop > releaseTop + 8) {
+        safeFrames += 1;
+        const stickyText = document.querySelector<HTMLElement>(
+          '.latest-user-message-sticky-overlay'
+        )?.textContent;
+        if (stickyText?.includes('Sticky message overlap with message containing image')) {
+          previousStickyFrames += 1;
+        } else if (safeFrames > 2) {
+          missingPreviousStickyFrames += 1;
+        }
+      }
+      if (sourceTop >= releaseTop + 120) break;
+    }
+
+    return {
+      missingPreviousStickyFrames,
+      previousStickyFrames,
+      releaseTop,
+      safeFrames,
+      sourceTop,
+    };
+  });
+
+  expect(result).not.toBeNull();
+  expect(result?.sourceTop).toBeGreaterThan((result?.releaseTop ?? 0) + 100);
+  expect(result?.safeFrames).toBeGreaterThan(20);
+  expect(result?.previousStickyFrames, JSON.stringify(result)).toBeGreaterThan(0);
+  expect(result?.missingPreviousStickyFrames, JSON.stringify(result)).toBe(0);
+  await expect(sticky).toBeVisible();
+  await expect(sticky).toContainText('Sticky message overlap with message containing image');
+});
+
 test('virtualized long sticky preview yields while scrolling at narrow width', async ({ page }) => {
   await page.setViewportSize({ width: 460, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview-large-transcript');

@@ -57,8 +57,6 @@ break another unless the shared invariants below remain true.
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
   stays fixed while its details grow below it.
-- Switching compact file-edit pages takes ownership from bottom-follow and keeps the pager fixed
-  while differently sized diffs replace each other above it.
 
 ### Sticky Prompts
 
@@ -171,7 +169,6 @@ Relevant browser regressions must cover:
 - edit entry while the source row is partially hidden
 - cancellation of navigation settling when the destination is clicked
 - bottom-follow remaining disengaged during manual upward scrolling
-- unequal-height compact file-edit page switches
 
 ## Review Checklist
 
