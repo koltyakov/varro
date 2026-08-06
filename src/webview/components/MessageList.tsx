@@ -2937,6 +2937,14 @@ export function MessageList() {
       (parseFloat(styles.marginBottom) || 0);
     if (collapseHeight <= 0.5) return;
 
+    const existingReserve = untrack(appendBottomReserve);
+    const projectedClientHeight = containerRef.clientHeight + collapseHeight;
+    if (containerRef.scrollHeight - existingReserve <= projectedClientHeight + 0.5) {
+      appendBottomReserveTarget = 0;
+      if (existingReserve > 0.5) setAppendBottomReserve(0);
+      return;
+    }
+
     appendBottomReserveTarget = bottomScrollTop();
     setAppendBottomReserve((reserve) => reserve + collapseHeight);
   }
@@ -3013,8 +3021,17 @@ export function MessageList() {
       const containerHeightDelta = currentContainerClientHeight - lastContainerClientHeight;
       const containerHeightChanged = currentContainerClientHeight !== lastContainerClientHeight;
       lastContainerClientHeight = currentContainerClientHeight;
-      if (containerHeightDelta > 0.5) reserveLostBottomSpace();
-      else if (containerHeightDelta < -0.5) consumeBottomReserve(-containerHeightDelta);
+      if (containerHeightDelta > 0.5) {
+        const reserve = untrack(appendBottomReserve);
+        if (containerRef.scrollHeight - reserve <= currentContainerClientHeight + 0.5) {
+          appendBottomReserveTarget = 0;
+          if (reserve > 0.5) setAppendBottomReserve(0);
+        } else {
+          reserveLostBottomSpace();
+        }
+      } else if (containerHeightDelta < -0.5) {
+        consumeBottomReserve(-containerHeightDelta);
+      }
       if (trackChanged) reconcileAppendBottomReserve();
       if (trackChanged && shouldMeasureRows() && !autoScroll()) {
         setTrackLayoutVersion((version) => version + 1);

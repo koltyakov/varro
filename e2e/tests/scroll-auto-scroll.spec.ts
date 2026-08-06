@@ -288,6 +288,59 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
   });
 
+  test('reuses free transcript space when the todo list collapses', async ({ page }) => {
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=restored-session');
+    await expect(page.locator('[data-msg-id="message-restored-assistant"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'todo.updated',
+            properties: {
+              sessionID: 'session-restored',
+              todos: Array.from({ length: 4 }, (_, index) => ({
+                content: `Remaining work item ${index + 1}`,
+                status: index === 0 ? 'in_progress' : 'pending',
+                priority: 'medium',
+              })),
+            },
+          },
+        },
+        '*'
+      );
+    });
+
+    const todoToggle = page.getByRole('button', { name: /Todos/i });
+    const list = page.locator('.interactive-list');
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    const expandedOverflow = await list.evaluate(async (element) => {
+      const track = element.querySelector<HTMLElement>('.interactive-list-track');
+      if (!track) throw new Error('Message track is missing');
+      track.style.minHeight = `${element.clientHeight + 30}px`;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+      return element.scrollHeight - element.clientHeight;
+    });
+    expect(expandedOverflow).toBeGreaterThan(5);
+    expect(expandedOverflow).toBeLessThan(60);
+
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
+    await waitForAnimationFrames(page, 3);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'true');
+    await todoToggle.click();
+    await expect(todoToggle).toHaveAttribute('aria-expanded', 'false');
+    await waitForAnimationFrames(page, 3);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+  });
+
   test('manual scroll up disengages auto-scroll', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
