@@ -3735,6 +3735,10 @@ describe('ChatInput', () => {
 
     expect(inputText()).toBe('Text from an oversized image paste');
     expect(state.clipboardImages).toEqual([]);
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+      'Images must be 5 MB or smaller',
+      'warning'
+    );
   });
 
   it('keeps mixed-paste text when the clipboard image cannot be read', async () => {
@@ -3758,6 +3762,10 @@ describe('ChatInput', () => {
 
       expect(inputText()).toBe('Text from an unreadable image paste');
       expect(state.clipboardImages).toEqual([]);
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        'Could not read the pasted image',
+        'warning'
+      );
     } finally {
       fileReader.restore();
     }
@@ -3793,6 +3801,10 @@ describe('ChatInput', () => {
 
       expect(inputText()).toBe('Text from a rejected image paste');
       expect(state.clipboardImages.map((image) => image.id)).toEqual(['existing-image']);
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        'This image is already attached',
+        'warning'
+      );
     } finally {
       fileReader.restore();
     }
@@ -3829,6 +3841,10 @@ describe('ChatInput', () => {
 
       expect(inputText()).toBe('Text at image capacity');
       expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        `You can attach up to ${MAX_CLIPBOARD_IMAGES} images`,
+        'warning'
+      );
     } finally {
       fileReader.restore();
     }
@@ -3856,6 +3872,30 @@ describe('ChatInput', () => {
 
     expect(readSpy).not.toHaveBeenCalled();
     expect(state.clipboardImages).toEqual([]);
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+      'Images must be 5 MB or smaller',
+      'warning'
+    );
+  });
+
+  it('combines multiple image paste rejection reasons into one notification', async () => {
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const oversized = new File([new Uint8Array(MAX_CLIPBOARD_IMAGE_SIZE + 1)], 'large.png', {
+      type: 'image/png',
+    });
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+
+    dispatchImagePaste(editor, [oversized, null]);
+    await flushAsyncWork();
+
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledOnce();
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+      'Some images were not pasted: larger than 5 MB, could not be read',
+      'warning'
+    );
   });
 
   it('revalidates the composer owner before committing staged pasted images', async () => {

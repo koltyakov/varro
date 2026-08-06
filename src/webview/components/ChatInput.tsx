@@ -346,6 +346,7 @@ function requestAbortSession() {
 }
 
 type StagedPastedImage = { url: string; mime: string; size: number };
+type PastedImageRejection = 'duplicate' | 'limit' | 'oversized' | 'unreadable';
 
 type PasteTransaction = {
   event: ClipboardEvent;
@@ -359,8 +360,35 @@ type PasteTransaction = {
   end: number;
   historyEntry: number | null;
   images: Array<StagedPastedImage | null> | undefined;
+  imageRejections: Set<PastedImageRejection>;
   mentions: Awaited<ReturnType<typeof resolvePastedMentionContextFiles>> | undefined;
 };
+
+function notifyPastedImageRejections(rejections: Set<PastedImageRejection>) {
+  if (rejections.size === 0) return;
+
+  let message: string;
+  if (rejections.size > 1) {
+    const reasons: string[] = [];
+    if (rejections.has('duplicate')) reasons.push('already attached');
+    if (rejections.has('limit')) reasons.push(`${MAX_CLIPBOARD_IMAGES}-image limit reached`);
+    if (rejections.has('oversized')) {
+      reasons.push(`larger than ${MAX_CLIPBOARD_IMAGE_SIZE / (1024 * 1024)} MB`);
+    }
+    if (rejections.has('unreadable')) reasons.push('could not be read');
+    message = `Some images were not pasted: ${reasons.join(', ')}`;
+  } else if (rejections.has('duplicate')) {
+    message = 'This image is already attached';
+  } else if (rejections.has('limit')) {
+    message = `You can attach up to ${MAX_CLIPBOARD_IMAGES} images`;
+  } else if (rejections.has('oversized')) {
+    message = `Images must be ${MAX_CLIPBOARD_IMAGE_SIZE / (1024 * 1024)} MB or smaller`;
+  } else {
+    message = 'Could not read the pasted image';
+  }
+
+  showSessionActionFeedback(message, 'warning');
+}
 
 function mergeTransactionFiles(files: DroppedFile[], committedFiles: DroppedFile[]) {
   const next = files.map((file) => ({ ...file }));
@@ -1899,7 +1927,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       batch(() => {
         for (const file of contextFiles) addContextFile(file);
         for (const image of transaction.images!) {
-          if (!image || imageFilenames.length >= availableSlots) continue;
+          if (!image) continue;
+          if (imageFilenames.length >= availableSlots) {
+            transaction.imageRejections.add('limit');
+            continue;
+          }
 
           let filename = getPastedImageFilename(imageIndex);
           while (usedFilenames.has(filename)) {
@@ -1908,7 +1940,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }
 
           const id = createAttachmentID();
-          if (!addClipboardImage({ id, ...image, filename })) continue;
+          if (!addClipboardImage({ id, ...image, filename })) {
+            transaction.imageRejections.add('duplicate');
+            continue;
+          }
           committedImageIds.push(id);
           imageFilenames.push(filename);
           usedFilenames.add(filename);
@@ -1953,6 +1988,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     } finally {
       applyingComposerHistory = false;
     }
+    notifyPastedImageRejections(transaction.imageRejections);
 
     const textDelta = inputText().length - previousValue.length;
     if (textDelta !== 0) {
@@ -2027,6 +2063,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       end: caretPosition(),
       historyEntry: null,
       images: undefined,
+      imageRejections: new Set(),
       mentions: undefined,
     };
     pendingPasteTransactions.push(transaction);
@@ -2034,10 +2071,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const imageFiles: File[] = [];
     for (const item of imageItems) {
+      if (imageFiles.length >= MAX_CLIPBOARD_IMAGES) {
+        transaction.imageRejections.add('limit');
+        continue;
+      }
       const file = item.getAsFile();
-      if (!file || file.size > MAX_CLIPBOARD_IMAGE_SIZE) continue;
+      if (!file) {
+        transaction.imageRejections.add('unreadable');
+        continue;
+      }
+      if (file.size > MAX_CLIPBOARD_IMAGE_SIZE) {
+        transaction.imageRejections.add('oversized');
+        continue;
+      }
       imageFiles.push(file);
-      if (imageFiles.length >= MAX_CLIPBOARD_IMAGES) break;
     }
     void Promise.all(
       imageFiles.map(async (file) => {
@@ -2049,6 +2096,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           };
         } catch (err) {
           logError('chat-input:readPastedImage', err);
+          transaction.imageRejections.add('unreadable');
           return null;
         }
       })

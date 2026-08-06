@@ -43,6 +43,7 @@ import {
   state,
 } from './lib/state';
 import { ralphStore } from './lib/stores/ralph-store';
+import { showSessionActionFeedback } from './components/chat/SessionActionFeedback';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -177,6 +178,20 @@ describe('AppRoot', () => {
       ?.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(document.body.querySelector('.session-action-feedback')).toBeNull();
+  });
+
+  it('shows transient warnings with warning semantics', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    mountAppRoot();
+
+    showSessionActionFeedback('This image is already attached', 'warning');
+
+    const warningToast = document.body.querySelector<HTMLElement>('.session-action-feedback');
+    expect(warningToast?.textContent).toContain('This image is already attached');
+    expect(warningToast?.classList.contains('is-warning')).toBe(true);
+    expect(warningToast?.getAttribute('role')).toBe('status');
+    expect(warningToast?.getAttribute('aria-live')).toBe('polite');
   });
 
   it('clears the retry action whenever the error changes', () => {

@@ -8,6 +8,7 @@ const VISIBLE_MS = 1_600;
 const LEAVE_MS = 160;
 
 const [message, setMessage] = createSignal<string | null>(null);
+const [kind, setKind] = createSignal<'success' | 'warning'>('success');
 const [leaving, setLeaving] = createSignal(false);
 let leaveTimeout: ReturnType<typeof setTimeout> | undefined;
 let clearTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -18,8 +19,12 @@ function reset() {
   setLeaving(false);
 }
 
-export function showSessionActionFeedback(nextMessage: string) {
+export function showSessionActionFeedback(
+  nextMessage: string,
+  nextKind: 'success' | 'warning' = 'success'
+) {
   reset();
+  setKind(nextKind);
   setMessage(nextMessage);
   leaveTimeout = setTimeout(() => setLeaving(true), VISIBLE_MS);
   clearTimeoutHandle = setTimeout(() => {
@@ -41,6 +46,7 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
   onCleanup(() => {
     reset();
     setMessage(null);
+    setKind('success');
   });
 
   return (
@@ -48,13 +54,13 @@ export function SessionActionFeedback(props: SessionActionFeedbackProps = {}) {
       {(visibleMessage) => (
         <Portal>
           <div
-            class={`session-action-feedback ${currentError() ? 'is-error' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
+            class={`session-action-feedback ${currentError() ? 'is-error' : kind() === 'warning' ? 'is-warning' : ''} ${!currentError() && leaving() ? 'is-leaving' : ''}`.trim()}
             role={currentError() ? 'alert' : 'status'}
             aria-live={currentError() ? 'assertive' : 'polite'}
           >
             <span class="session-action-feedback-icon" aria-hidden="true">
               <Show
-                when={currentError()}
+                when={currentError() || kind() === 'warning'}
                 fallback={
                   <svg viewBox="0 0 16 16" fill="currentColor">
                     <path d="M13.78 4.22a.75.75 0 010 1.06l-6.5 6.5a.75.75 0 01-1.06 0l-3-3a.75.75 0 111.06-1.06l2.47 2.47 5.97-5.97a.75.75 0 011.06 0z" />

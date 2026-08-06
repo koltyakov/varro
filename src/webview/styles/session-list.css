@@ -516,6 +516,15 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   pointer-events: auto;
 }
 
+.session-action-feedback.is-warning {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 45%, var(--color-vscode-widget-bg));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-vscode-warning) 13%, var(--color-vscode-widget-bg)),
+    color-mix(in srgb, var(--color-vscode-warning) 8%, var(--color-vscode-widget-bg))
+  );
+}
+
 .session-action-feedback.is-leaving {
   animation: session-action-feedback-out 160ms ease-in both;
 }
@@ -535,6 +544,10 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-action-feedback.is-error .session-action-feedback-icon {
   background: var(--color-vscode-error);
+}
+
+.session-action-feedback.is-warning .session-action-feedback-icon {
+  background: var(--color-vscode-warning);
 }
 
 .session-action-feedback-icon svg {
