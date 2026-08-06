@@ -487,7 +487,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   max-width: min(280px, calc(100vw - 24px));
   align-items: center;
   gap: 7px;
-  padding: 5px 3px 5px 6px;
+  padding: 5px 13px 5px 6px;
   transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--color-vscode-fg) 15%, var(--color-vscode-widget-bg));
   border-radius: var(--radius-pill);
@@ -506,6 +506,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-action-feedback.is-error {
+  padding-right: 3px;
   border-color: color-mix(in srgb, var(--color-vscode-error) 45%, var(--color-vscode-widget-bg));
   background: linear-gradient(
     180deg,
