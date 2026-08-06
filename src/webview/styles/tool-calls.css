@@ -572,10 +572,16 @@
 .diff-view-overlay-filename {
   flex: 1;
   min-width: 0;
+  padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-vscode-fg);
+  text-align: left;
+}
+
+.diff-view-overlay-filename:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 .diff-view-overlay-close {

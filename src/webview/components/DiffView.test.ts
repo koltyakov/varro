@@ -297,8 +297,6 @@ describe('DiffView', () => {
     expect(document.activeElement).toBe(viewport);
     viewport?.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
 
-    toggle?.focus();
-    toggle?.click();
     await Promise.resolve();
 
     const overlay = document.querySelector<HTMLElement>('.diff-view-overlay');
@@ -320,6 +318,9 @@ describe('DiffView', () => {
     );
 
     const closeButton = overlay?.querySelector<HTMLButtonElement>('.diff-view-overlay-close');
+    const overlayFilename = overlay?.querySelector<HTMLButtonElement>(
+      '.diff-view-overlay-filename'
+    );
     expect(document.activeElement).toBe(closeButton);
 
     overlayViewport?.focus();
@@ -330,7 +331,7 @@ describe('DiffView', () => {
     });
     overlayViewport?.dispatchEvent(tabEvent);
     expect(tabEvent.defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(closeButton);
+    expect(document.activeElement).toBe(overlayFilename);
 
     closeButton?.click();
     await Promise.resolve();
@@ -948,7 +949,7 @@ describe('DiffView', () => {
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('src/example.ts');
   });
 
-  it('opens a file only when its filename is clicked', () => {
+  it('expands from the code preview and opens from either filename', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
 
@@ -971,25 +972,45 @@ describe('DiffView', () => {
     const header = container?.querySelector('.diff-view-item');
     const filenameSlot = container?.querySelector('.diff-view-filename-slot');
     const filename = container?.querySelector('button.diff-view-filename');
+    const preview = container?.querySelector<HTMLElement>('.diff-view-lines');
     const toggle = container?.querySelector<HTMLButtonElement>('.diff-view-toggle');
     expect(header).toBeInstanceOf(HTMLDivElement);
     expect(filenameSlot).toBeInstanceOf(HTMLSpanElement);
     expect(filename).toBeInstanceOf(HTMLButtonElement);
+    expect(preview).toBeInstanceOf(HTMLDivElement);
     expect(filename?.textContent).toBe('Chat.tsx');
     expect(container?.querySelector('.diff-view-file-type')?.textContent).toBe('TSX');
     expect(filename?.getAttribute('title')).toBe('Open full diff: src/webview/components/Chat.tsx');
     expect(filename?.textContent).not.toContain('src/webview/components/Chat.tsx');
 
-    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-
-    filenameSlot?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-
-    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    preview?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(send).not.toHaveBeenCalled();
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    const overlayFilename = document.querySelector<HTMLButtonElement>(
+      'button.diff-view-overlay-filename'
+    );
+    expect(overlayFilename?.title).toBe('Open full diff: src/webview/components/Chat.tsx');
+
+    overlayFilename?.click();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: 'src/webview/components/Chat.tsx', kind: 'file', view: 'diff' },
+    });
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+
+    filenameSlot?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
 
     filename?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -997,7 +1018,8 @@ describe('DiffView', () => {
       type: 'vscode/open',
       payload: { path: 'src/webview/components/Chat.tsx', kind: 'file', view: 'diff' },
     });
-    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('renders unknown-file diffs without opening a file', () => {

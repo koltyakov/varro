@@ -863,6 +863,11 @@ function DiffItem(props: {
       },
     });
   };
+  const toggleExpandedFromPreview = () => {
+    linesViewport?.focus({ preventScroll: true });
+    if (window.getSelection()?.toString()) return;
+    if (canExpand()) toggleExpanded();
+  };
 
   createEffect(() => {
     const nextFile = file();
@@ -1025,7 +1030,7 @@ function DiffItem(props: {
             role="region"
             tabIndex={0}
             aria-label={`Changes in ${file() || 'file'}`}
-            onClick={() => linesViewport?.focus({ preventScroll: true })}
+            onClick={toggleExpandedFromPreview}
             onFocus={updateScrollThumbs}
             onScroll={updateScrollThumbs}
           >
@@ -1096,9 +1101,22 @@ function DiffItem(props: {
                 <header class="diff-view-overlay-header" onClick={toggleExpanded}>
                   <div class="diff-view-overlay-title">
                     <DiffFileFormatIcon type={fileType()} />
-                    <span class="diff-view-overlay-filename" title={file()}>
+                    <button
+                      type="button"
+                      class="diff-view-overlay-filename"
+                      title={
+                        file()
+                          ? `Open full diff: ${fromFile() ? `${fromFile()} -> ${file()}` : file()}`
+                          : undefined
+                      }
+                      disabled={!file()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openFile();
+                      }}
+                    >
                       {displayName()}
-                    </span>
+                    </button>
                     <Show when={props.diff.additions > 0 || props.diff.deletions > 0}>
                       <span class="diff-view-stats">
                         <Show when={props.diff.additions > 0}>
