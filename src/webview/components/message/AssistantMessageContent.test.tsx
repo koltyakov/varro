@@ -324,6 +324,23 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('[data-part-id="edit-inline"]')).not.toBeNull();
   });
 
+  it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+
+    renderAssistantMessageContent({
+      parts: [toolPart('edit-pending', 'apply_patch'), toolPart('read-1', 'read')],
+    });
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file'
+    );
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'edit'
+    );
+    expect(container?.querySelector('[data-part-id="edit-pending"]')).not.toBeNull();
+  });
+
   it('groups file edits when inline previews are disabled', () => {
     setCompactToolOutput(true);
     setShowInlineFileChanges(false);

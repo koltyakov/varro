@@ -4,6 +4,7 @@ import {
   formatAssistantActivityCounts,
   getAssistantActivityStatus,
   isAssistantActivityPart,
+  isAssistantEditActivityPart,
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
@@ -291,7 +292,7 @@ export function AssistantMessageContent(props: {
   const isLocallyCompactActivityPart = (part: Part): part is AssistantActivityPart =>
     compactToolOutput() &&
     isAssistantActivityPart(part) &&
-    (!showInlineFileChanges() || !isFileEditPart(part)) &&
+    (!showInlineFileChanges() || !isAssistantEditActivityPart(part)) &&
     (part.type !== 'tool' ||
       (!props.questionRequestForTool?.(part) && !props.permissionMatchForTool?.(part)));
   const effectiveCompactActivityGroups = createMemo<readonly AssistantActivityGroupInfo[] | null>(

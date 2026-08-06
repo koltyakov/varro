@@ -993,6 +993,33 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.diff-view-filename')?.textContent).toBe('app.ts');
   });
 
+  it('omits unparsed edit tools from shared activity summaries when inline previews are enabled', async () => {
+    const edit = toolPart('edit-pending', 'assistant-1', 'call-edit-pending');
+    edit.tool = 'apply_patch';
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [edit, read],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      '1 file'
+    );
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'edit'
+    );
+  });
+
   it('keeps an expanded activity group open when history extends it backward', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     const thought: Part = {

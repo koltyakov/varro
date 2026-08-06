@@ -3,6 +3,7 @@ import { render } from 'solid-js/web';
 import type { Provider } from '../types';
 import { ModelPicker } from './ModelPicker';
 import { resetDefaultAppState, setShowSettings, setState, showSettings } from '../lib/state';
+import { STORAGE_KEYS } from '../lib/state-storage';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -43,6 +44,7 @@ async function flushMicrotasks(count = 2) {
 
 beforeEach(() => {
   resetDefaultAppState();
+  window.localStorage.removeItem(STORAGE_KEYS.modelPickerOpened);
   container = document.createElement('div');
   document.body.appendChild(container);
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -223,6 +225,54 @@ describe('ModelPicker', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('animates Manage Models on every open while the debug override is enabled', () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+
+    const manageButton = container?.querySelector('.manage-models-attention');
+    expect(manageButton).toBeInstanceOf(HTMLButtonElement);
+    expect(manageButton?.querySelector('.dropdown-footer-label')?.classList).toContain(
+      'shimmer-progress'
+    );
+    expect(manageButton?.querySelector('.dropdown-footer-icon')?.classList).toContain(
+      'manage-models-attention-icon'
+    );
+    expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
+
+    cleanup();
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+
+    expect(container?.querySelector('.manage-models-attention')).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it.each([
+    { hiddenProviders: ['openai'], hiddenModels: [] },
+    { hiddenProviders: [], hiddenModels: ['openai:gpt-5'] },
+  ])(
+    'animates Manage Models while debugging even when models or providers are hidden',
+    (visibility) => {
+      setState('providers', [
+        createProvider('openai', 'OpenAI', {
+          'gpt-5': createModel('gpt-5', 'GPT-5'),
+        }),
+      ]);
+      setState('hiddenProviders', visibility.hiddenProviders);
+      setState('hiddenModels', visibility.hiddenModels);
+
+      cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+
+      expect(container?.querySelector('.manage-models-attention')).toBeInstanceOf(
+        HTMLButtonElement
+      );
+      expect(window.localStorage.getItem(STORAGE_KEYS.modelPickerOpened)).toBe('true');
+    }
+  );
+
   it('can hide the manage models footer and customize the popup gap', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
@@ -243,7 +293,10 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const anchor = container?.firstElementChild as HTMLDivElement | null;
+    const list = container?.querySelector('.model-picker-list');
     expect(anchor?.style.paddingBottom).toBe('6px');
+    expect(list?.classList.contains('pb-1')).toBe(true);
+    expect(list?.classList.contains('py-1')).toBe(false);
     expect(container?.textContent).not.toContain('Manage Models');
   });
 

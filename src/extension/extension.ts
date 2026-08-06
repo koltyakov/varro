@@ -9,6 +9,7 @@ import { sweepStaleInjectedConfigDirectories, validateServerPort } from './open-
 const DEFAULT_AUTO_COMPACTION_RESERVED_TOKENS = 4096;
 const CONTEXT_RESCOPE_RETRY_MS = 50;
 const CONTEXT_RESTART_GRACE_MS = 3000;
+const INITIAL_SIDEBAR_REVEAL_KEY = 'layout.initialSidebarReveal.v1';
 const PRIMARY_SIDEBAR_MIGRATION_KEY = 'layout.cursorPrimarySidebar.v1';
 const PRIMARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro-primary';
 const SECONDARY_SIDEBAR_CONTAINER = 'workbench.view.extension.varro';
@@ -84,6 +85,32 @@ async function placeViewInPrimarySidebar(context: vscode.ExtensionContext): Prom
   } catch (err) {
     logger.warn(
       `Failed to remember Varro's Primary Sidebar placement: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+async function revealSidebarOnFirstActivation(
+  context: vscode.ExtensionContext,
+  destinationId: string
+): Promise<void> {
+  const globalState = context.globalState;
+  if (!globalState || globalState.get<boolean>(INITIAL_SIDEBAR_REVEAL_KEY)) return;
+
+  try {
+    await vscode.commands.executeCommand(destinationId);
+    await vscode.commands.executeCommand(`${SidebarProvider.viewType}.focus`);
+  } catch (err) {
+    logger.warn(
+      `Failed to reveal Varro after installation: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return;
+  }
+
+  try {
+    await globalState.update(INITIAL_SIDEBAR_REVEAL_KEY, true);
+  } catch (err) {
+    logger.warn(
+      `Failed to remember Varro's initial sidebar reveal: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 }
@@ -219,6 +246,7 @@ export async function activate(context: vscode.ExtensionContext) {
     server!,
     createSidebarRevealer(sidebarDestination)
   );
+  await revealSidebarOnFirstActivation(context, sidebarDestination);
 
   vscode.commands.executeCommand('setContext', 'varro:activated', true);
   sidebarProvider.startProviderFileObservation();

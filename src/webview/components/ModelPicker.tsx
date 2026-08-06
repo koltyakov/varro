@@ -13,12 +13,15 @@ import {
   modelSupportsVision,
 } from '../lib/model-capabilities';
 import { sortProviderModels } from '../lib/model-ordering';
+import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 
 interface ModelSelection {
   providerID?: string;
   modelID?: string;
   variant?: string;
 }
+
+const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage Models" button when opening the model picker
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
@@ -53,6 +56,7 @@ export function ModelPicker(props: {
   };
 
   const [query, setQuery] = createSignal('');
+  const [animateManageModels, setAnimateManageModels] = createSignal(false);
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
 
   const providerEntries = createMemo<ProviderEntry[]>(() =>
@@ -164,6 +168,15 @@ export function ModelPicker(props: {
   }
 
   onMount(() => {
+    if (props.showManageModels ?? true) {
+      const isFirstOpen = readStored<boolean>(STORAGE_KEYS.modelPickerOpened) !== true;
+      if (isFirstOpen) writeStored(STORAGE_KEYS.modelPickerOpened, true);
+      setAnimateManageModels(
+        DEBUG_ANIMATE_MANAGE_MODELS ||
+          (isFirstOpen && state.hiddenProviders.length === 0 && state.hiddenModels.length === 0)
+      );
+    }
+
     const reposition = () => {
       if (anchorRef && menuRef) {
         const editBanner = anchorRef
@@ -243,7 +256,7 @@ export function ModelPicker(props: {
           </div>
         </Show>
 
-        <div class="model-picker-list overflow-y-auto py-1">
+        <div class="model-picker-list overflow-y-auto pb-1">
           <Show
             when={visibleProviders().length > 0}
             fallback={
@@ -350,13 +363,15 @@ export function ModelPicker(props: {
         <Show when={props.showManageModels ?? true}>
           <div class="dropdown-footer">
             <button
-              class="dropdown-item"
+              class={`dropdown-item ${animateManageModels() ? 'manage-models-attention' : ''}`}
               onClick={() => {
                 setShowSettings(true);
                 props.onClose();
               }}
             >
-              <span class="dropdown-footer-icon">
+              <span
+                class={`dropdown-footer-icon ${animateManageModels() ? 'manage-models-attention-icon' : ''}`}
+              >
                 <svg
                   class="block h-[18px] w-[18px] text-vscode-muted"
                   viewBox="0 0 32 32"
@@ -371,7 +386,11 @@ export function ModelPicker(props: {
                   <rect x="15" y="22" width="10" height="2" />
                 </svg>
               </span>
-              <span class="dropdown-footer-label text-vscode-muted">Manage Models</span>
+              <span
+                class={`dropdown-footer-label text-vscode-muted ${animateManageModels() ? 'shimmer-progress' : ''}`}
+              >
+                Manage Models
+              </span>
             </button>
           </div>
         </Show>

@@ -33,15 +33,12 @@ import {
 import {
   getAssistantActivityGroupMap,
   isAssistantActivityPart,
+  isAssistantEditActivityPart,
   preserveAssistantActivityGroupKeys,
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { isAssistantMessage } from '../lib/message-metrics';
-import {
-  isFileEditPart,
-  isWorkspaceDirectoryText,
-  shouldShowAssistantPartInline,
-} from '../lib/part-utils';
+import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import type { AssistantFileEditStackGroup } from './Message';
@@ -3227,7 +3224,7 @@ export function MessageList() {
           normalizedMessages,
           (part) =>
             shouldShowAssistantPartInline(part) &&
-            (!showInlineFileChanges() || !isFileEditPart(part)) &&
+            (!showInlineFileChanges() || !isAssistantEditActivityPart(part)) &&
             (part.type !== 'tool' ||
               (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
           (part) =>

@@ -475,6 +475,50 @@ describe('extension activation', () => {
     );
   });
 
+  it('reveals the secondary sidebar once after installation in VS Code', async () => {
+    const globalState = {
+      get: vi.fn(() => false),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      globalState,
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(executeCommandMock).toHaveBeenCalledWith('workbench.view.extension.varro');
+    expect(executeCommandMock).toHaveBeenCalledWith('varro.chat.focus');
+    expect(executeCommandMock.mock.calls.slice(0, 2)).toEqual([
+      ['workbench.view.extension.varro'],
+      ['varro.chat.focus'],
+    ]);
+    expect(globalState.update).toHaveBeenCalledWith('layout.initialSidebarReveal.v1', true);
+  });
+
+  it('does not reveal the sidebar again after the initial activation', async () => {
+    const globalState = {
+      get: vi.fn((key: string) => key === 'layout.initialSidebarReveal.v1'),
+      update: vi.fn(() => Promise.resolve()),
+    };
+    const { activate } = await import('./extension');
+
+    await activate({
+      extensionUri: {},
+      extension: { id: 'koltyakov.varro' },
+      globalState,
+      workspaceState: {},
+      subscriptions: [],
+    } as never);
+
+    expect(executeCommandMock).not.toHaveBeenCalledWith('workbench.view.extension.varro');
+    expect(executeCommandMock).not.toHaveBeenCalledWith('varro.chat.focus');
+    expect(globalState.update).not.toHaveBeenCalled();
+  });
+
   it('reapplies standard-host placement on every reveal', async () => {
     const { activate } = await import('./extension');
     await activate({

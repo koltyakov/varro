@@ -209,6 +209,15 @@
   white-space: nowrap;
 }
 
+.manage-models-attention .shimmer-progress {
+  animation-duration: 1.25s;
+  animation-iteration-count: 4;
+}
+
+.manage-models-attention-icon {
+  animation: pulse-soft 1.25s ease-in-out 4;
+}
+
 .dropdown-search {
   position: relative;
   padding: 6px 8px;

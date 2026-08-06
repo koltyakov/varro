@@ -96,6 +96,10 @@ export function isAssistantActivityPart(part: Part): part is AssistantActivityPa
   return part.type === 'tool' && normalizeToolName(part.tool) !== 'task';
 }
 
+export function isAssistantEditActivityPart(part: AssistantActivityPart) {
+  return getActivityKind(part) === 'edits';
+}
+
 export function getAssistantActivityGroupMap(
   messages: readonly MessageEntry[],
   includePart: (part: AssistantActivityPart) => boolean = () => true,
