@@ -15,6 +15,9 @@ export type VisibleRange = {
   bottomPad: number;
   coreStart: number;
   coreEnd: number;
+  pinnedIndex?: number;
+  pinnedGapStart?: number;
+  pinnedGapEnd?: number;
 };
 
 export function alignBlockSizeToPixel(blockSize: number) {

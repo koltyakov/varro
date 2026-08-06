@@ -182,7 +182,10 @@ function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
     previous.topPad === next.topPad &&
     previous.bottomPad === next.bottomPad &&
     previous.coreStart === next.coreStart &&
-    previous.coreEnd === next.coreEnd
+    previous.coreEnd === next.coreEnd &&
+    previous.pinnedIndex === next.pinnedIndex &&
+    previous.pinnedGapStart === next.pinnedGapStart &&
+    previous.pinnedGapEnd === next.pinnedGapEnd
   );
 }
 
@@ -484,6 +487,9 @@ export function MessageList() {
   let forceStickyPreviewGeometryRefresh = false;
   let lastScrollbarInset = -1;
   let lastContainerClientHeight = -1;
+  let lastHostViewportWidth = -1;
+  let lastHostViewportHeight = -1;
+  let hostViewportResizeActiveUntil = Number.NEGATIVE_INFINITY;
   let lastContainerFontSize = -1;
   let lastTrackInlineSize = -1;
   let lastAutoScrolledTrackHeight = 0;
@@ -493,6 +499,8 @@ export function MessageList() {
   let lastUserOwnedScrollMovementAt = Number.NEGATIVE_INFINITY;
   let lastWheelUpAt = Number.NEGATIVE_INFINITY;
   let lastScrollInputAt = Number.NEGATIVE_INFINITY;
+  let virtualPlaceholderReleaseBlockedUntil = Number.NEGATIVE_INFINITY;
+  let directScrollInputEpoch = 0;
   let userScrollOwnershipEpoch = 0;
   let activeSessionGeneration = 0;
   let historyAnchorSettleOwner: {
@@ -517,9 +525,11 @@ export function MessageList() {
       previousScrollHeight: number;
       previousScrollTop: number;
       ownershipEpoch: number;
+      inputEpoch: number;
       windowVersion: number;
     }
   >();
+  let restoringPendingHistoryAnchor = false;
   function getCurrentPendingHistoryAnchor(sessionId: string) {
     const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
     return pendingAnchor?.generation === activeSessionGeneration &&
@@ -860,6 +870,7 @@ export function MessageList() {
 
   const measuredHeights = new Map<string, number>();
   const zeroHeightRenderContentSignatures = new Map<string, string>();
+  const forcedVirtualContentMessageIds = new Set<string>();
   const measuredRowInlineSizes = new WeakMap<HTMLElement, number>();
   const appliedRowHeightCorrections = new WeakMap<HTMLElement, number>();
   const pendingRowHeightCorrections = new Map<HTMLElement, number>();
@@ -1138,6 +1149,9 @@ export function MessageList() {
         zeroHeightRenderContentSignatures.delete(messageId);
       }
     }
+    for (const messageId of forcedVirtualContentMessageIds) {
+      if (!currentMessageIdSet.has(messageId)) forcedVirtualContentMessageIds.delete(messageId);
+    }
   });
 
   function scheduleChangedLayoutRowMeasurements(
@@ -1156,7 +1170,7 @@ export function MessageList() {
       const mountedRow = trackRef?.querySelector<HTMLDivElement>(
         `[data-msg-id="${CSS.escape(messageId)}"]`
       );
-      if (!mountedRow) {
+      if (!mountedRow || mountedRow.classList.contains('interactive-item-virtual-placeholder')) {
         if (!measuredHeights.delete(messageId)) continue;
         zeroHeightRenderContentSignatures.delete(messageId);
         markVirtualMetricsDirty(messageId);
@@ -1180,7 +1194,9 @@ export function MessageList() {
       !pendingStructuralScrollAnchor &&
       !diffFocusPauseActive &&
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
-        ? captureVisibleScrollAnchor()
+        ? shouldVirtualize()
+          ? captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)
+          : captureVisibleScrollAnchor()
         : null;
     const publishChangedLayout = () => {
       publishMeasurementVersion();
@@ -1191,7 +1207,7 @@ export function MessageList() {
           !stickyNavigationOwnsScroll() &&
           !pendingExpansionScrollAnchor
         ) {
-          restoreVisibleScrollAnchor(invalidatedAnchor);
+          restoreVisibleScrollAnchor(invalidatedAnchor, { useMessageOffsetFallback: true });
         }
       });
     };
@@ -1250,6 +1266,7 @@ export function MessageList() {
       if (currentSignature === previousSignature) continue;
       measuredHeights.delete(messageId);
       zeroHeightRenderContentSignatures.delete(messageId);
+      forcedVirtualContentMessageIds.add(messageId);
       markVirtualMetricsDirty(messageId);
       changed = true;
     }
@@ -1431,11 +1448,26 @@ export function MessageList() {
       // Keep its real anchor mounted so exact DOM geometry is available before the next paint.
       const start = Math.min(range.start, anchorIndex);
       const end = Math.max(range.end, anchorIndex + 1);
+      const pinnedGapStart =
+        anchorIndex < range.start
+          ? anchorIndex + 1
+          : anchorIndex >= range.end
+            ? range.end
+            : undefined;
+      const pinnedGapEnd =
+        anchorIndex < range.start
+          ? range.start
+          : anchorIndex >= range.end
+            ? anchorIndex
+            : undefined;
       return {
         start,
         end,
-        coreStart: Math.min(range.coreStart, anchorIndex),
-        coreEnd: Math.max(range.coreEnd, anchorIndex + 1),
+        coreStart: range.coreStart,
+        coreEnd: range.coreEnd,
+        pinnedIndex: anchorIndex,
+        pinnedGapStart,
+        pinnedGapEnd,
         topPad: metrics.prefix[start] ?? 0,
         bottomPad: metrics.totalHeight - (metrics.prefix[end] ?? 0),
       };
@@ -1642,6 +1674,9 @@ export function MessageList() {
   function shouldAcceptRowHeight(element: HTMLElement, messageId: string, height: number) {
     if (height !== 0) {
       zeroHeightRenderContentSignatures.delete(messageId);
+      if (!element.classList.contains('interactive-item-virtual-placeholder')) {
+        forcedVirtualContentMessageIds.delete(messageId);
+      }
       return true;
     }
     if (element.childElementCount > 0 || element.textContent?.trim()) return false;
@@ -1728,7 +1763,9 @@ export function MessageList() {
       const previousHeight = measuredHeights.get(messageId);
       if ((previousHeight ?? -1) === height) continue;
 
-      if (height > 0) zeroHeightRenderContentSignatures.delete(messageId);
+      if (height > 0) {
+        zeroHeightRenderContentSignatures.delete(messageId);
+      }
 
       if (firstVisibleIndex !== null) {
         const index = messageIndexById().get(messageId);
@@ -2036,6 +2073,7 @@ export function MessageList() {
   }
 
   function restorePendingHistoryAnchorIfMounted() {
+    if (restoringPendingHistoryAnchor) return false;
     const sessionId = state.activeSessionId;
     if (!sessionId) return false;
     const pendingAnchor = getCurrentPendingHistoryAnchor(sessionId);
@@ -2048,7 +2086,15 @@ export function MessageList() {
     ) {
       return false;
     }
-    return restoreVisibleScrollAnchor(pendingAnchor.anchor);
+    restoringPendingHistoryAnchor = true;
+    try {
+      return restoreVisibleScrollAnchor(pendingAnchor.anchor);
+    } finally {
+      // Solid flushes row mounts after the setter returns, so cover the rest of this update turn.
+      queueMicrotask(() => {
+        restoringPendingHistoryAnchor = false;
+      });
+    }
   }
 
   function restoreVisibleScrollAnchor(
@@ -2489,6 +2535,19 @@ export function MessageList() {
     setPreservedScrollTop(previousBottomTarget);
   }
 
+  function releaseBottomReserveForHostResize() {
+    if (!containerRef) return;
+
+    const reserve = untrack(appendBottomReserve);
+    const nextBottom = Math.max(0, containerRef.scrollHeight - reserve - containerRef.clientHeight);
+    appendBottomReserveTarget = 0;
+    if (reserve > 0.5) setAppendBottomReserve(0);
+    if (!autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll()) return;
+
+    setPreservedScrollTop(nextBottom);
+    lastAutoScrolledBottomScrollTop = nextBottom;
+  }
+
   function consumeBottomReserve(amount: number) {
     if (amount <= 0.5) return;
     const reserve = untrack(appendBottomReserve);
@@ -2927,6 +2986,8 @@ export function MessageList() {
       if (distanceFromBottom() <= 1) return;
     }
     lastWheelAt = performance.now();
+    directScrollInputEpoch += 1;
+    virtualPlaceholderReleaseBlockedUntil = lastWheelAt + USER_SCROLL_IDLE_MS;
     if (deltaY > 0.5) lastWheelUpAt = Number.NEGATIVE_INFINITY;
     if (initialScrollRafId) {
       cancelAnimationFrame(initialScrollRafId);
@@ -3019,6 +3080,8 @@ export function MessageList() {
       widthResizeAnchor = null;
     }
     lastScrollInputAt = performance.now();
+    directScrollInputEpoch += 1;
+    virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
   }
 
   function cancelStickyNavigation() {
@@ -3073,6 +3136,8 @@ export function MessageList() {
     historyAnchorSettleOwner = null;
     pointerScrollOwnershipActive = true;
     lastScrollInputAt = performance.now();
+    directScrollInputEpoch += 1;
+    virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
   }
 
   function releasePointerScrollOwnership() {
@@ -3188,6 +3253,14 @@ export function MessageList() {
     document.addEventListener('pointerup', releasePointerScrollOwnership);
     document.addEventListener('pointercancel', releasePointerScrollOwnership);
     lastContainerClientHeight = containerRef.clientHeight;
+    lastHostViewportWidth = window.innerWidth;
+    lastHostViewportHeight = window.innerHeight;
+    const handleHostViewportResize = () => {
+      lastHostViewportWidth = window.innerWidth;
+      lastHostViewportHeight = window.innerHeight;
+      hostViewportResizeActiveUntil = performance.now() + WIDTH_RESIZE_SETTLE_MS;
+    };
+    window.addEventListener('resize', handleHostViewportResize);
     lastContainerFontSize = parseFloat(getComputedStyle(containerRef).fontSize) || 0;
     updateScrollbarInset();
     setViewportHeight(containerRef.clientHeight);
@@ -3245,11 +3318,21 @@ export function MessageList() {
         entries.length === 0 || entries.some((entry) => entry.target === containerRef);
       const trackChanged =
         entries.length === 0 || entries.some((entry) => entry.target === trackRef);
+      const currentHostViewportWidth = window.innerWidth;
+      const currentHostViewportHeight = window.innerHeight;
+      const hostViewportResizing =
+        performance.now() <= hostViewportResizeActiveUntil ||
+        currentHostViewportWidth !== lastHostViewportWidth ||
+        currentHostViewportHeight !== lastHostViewportHeight;
+      lastHostViewportWidth = currentHostViewportWidth;
+      lastHostViewportHeight = currentHostViewportHeight;
       const currentContainerClientHeight = containerRef.clientHeight;
       const containerHeightDelta = currentContainerClientHeight - lastContainerClientHeight;
       const containerHeightChanged = currentContainerClientHeight !== lastContainerClientHeight;
       lastContainerClientHeight = currentContainerClientHeight;
-      if (containerHeightDelta > 0.5) {
+      if (hostViewportResizing) {
+        releaseBottomReserveForHostResize();
+      } else if (containerHeightDelta > 0.5) {
         const reserve = untrack(appendBottomReserve);
         if (containerRef.scrollHeight - reserve <= currentContainerClientHeight + 0.5) {
           appendBottomReserveTarget = 0;
@@ -3315,6 +3398,7 @@ export function MessageList() {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerup', releasePointerScrollOwnership);
       document.removeEventListener('pointercancel', releasePointerScrollOwnership);
+      window.removeEventListener('resize', handleHostViewportResize);
       observer.disconnect();
       firstVisibleMessageObserver?.disconnect();
       firstVisibleMessageObserver = null;
@@ -3508,6 +3592,7 @@ export function MessageList() {
     lastDetachedVisibleAnchor = null;
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
+    forcedVirtualContentMessageIds.clear();
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     cancelPendingScroll();
@@ -3838,7 +3923,10 @@ export function MessageList() {
     const container = containerRef;
     if (!container) return null;
     const sessionId = state.activeSessionId;
-    const findRow = () => mountedMessageRows.get(preview.id);
+    const findRow = () => {
+      const row = mountedMessageRows.get(preview.id);
+      return row?.classList.contains('interactive-item-virtual-placeholder') ? undefined : row;
+    };
     let previousMeasurementVersion = -1;
     let bootstrapFrames = 0;
     let settleFrames = 0;
@@ -3859,9 +3947,9 @@ export function MessageList() {
         previousMeasurementVersion = -1;
         if (shouldVirtualize()) {
           const metrics = virtualMetrics();
-          const nextScrollTop = getContainerScrollTopForVirtualOffset(
-            metrics.prefix[messageIndex] ?? 0
-          );
+          const nextScrollTop =
+            getContainerScrollTopForVirtualOffset(metrics.prefix[messageIndex] ?? 0) -
+            getMessageJumpTopInset();
           container.scrollTop = nextScrollTop;
           setScrollTop(nextScrollTop);
           setStickyPreviewScrollTop(nextScrollTop);
@@ -3886,7 +3974,7 @@ export function MessageList() {
 
   function alignMountedMessage(preview: StickyUserMessagePreview): boolean {
     const row = mountedMessageRows.get(preview.id);
-    if (!row) return false;
+    if (!row || row.classList.contains('interactive-item-virtual-placeholder')) return false;
     const target = row.querySelector<HTMLElement>('.user-message-card');
     if (containerRef && target) {
       const containerRect = containerRef.getBoundingClientRect();
@@ -4178,14 +4266,16 @@ export function MessageList() {
       getSessionMessageWindowStateVersion(sessionId) === windowVersion;
     if (!isCurrentWindow()) return;
     markSessionHistoryLoadFailed(sessionId, false);
+    const anchor = captureVisibleScrollAnchor({ preferStableRenderItem: true });
     const pendingAnchor = {
-      anchor: captureVisibleScrollAnchor({ preferStableRenderItem: true }),
+      anchor,
       generation,
       invalidated: false,
       owner: 'history' as const,
       previousScrollHeight: container.scrollHeight,
       previousScrollTop: container.scrollTop,
       ownershipEpoch: userScrollOwnershipEpoch,
+      inputEpoch: directScrollInputEpoch,
       windowVersion,
     };
     pendingOlderHistoryAnchors.set(sessionId, pendingAnchor);
@@ -4253,6 +4343,15 @@ export function MessageList() {
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
       }
     } finally {
+      if (
+        settleOwner &&
+        historyAnchorSettleOwner === settleOwner &&
+        userScrollOwnershipEpoch === pendingAnchor.ownershipEpoch &&
+        directScrollInputEpoch === pendingAnchor.inputEpoch &&
+        !pendingAnchor.invalidated
+      ) {
+        virtualPlaceholderReleaseBlockedUntil = Number.NEGATIVE_INFINITY;
+      }
       if (settleOwner && historyAnchorSettleOwner === settleOwner) {
         historyAnchorSettleOwner = null;
       }
@@ -4372,6 +4471,19 @@ export function MessageList() {
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}
+              virtualMetrics={shouldVirtualize() ? virtualMetrics() : undefined}
+              forceVirtualContent={(messageId) => {
+                measurementVersion();
+                return (
+                  forcedVirtualContentMessageIds.has(messageId) ||
+                  displayedStickyUserMessagePreview()?.id === messageId
+                );
+              }}
+              canReleaseVirtualPlaceholders={() =>
+                performance.now() >= virtualPlaceholderReleaseBlockedUntil &&
+                !stickyNavigationOwnsScroll() &&
+                !editingMessage()
+              }
               claimMessageEntrance={claimMessageEntrance}
               claimAssistantItemReveal={claimAssistantItemReveal}
               observeMeasuredRow={observeMeasuredRow}

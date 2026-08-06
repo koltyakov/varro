@@ -367,7 +367,7 @@
 
 .assistant-activity-summary-text {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

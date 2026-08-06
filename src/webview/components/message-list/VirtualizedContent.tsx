@@ -1,12 +1,15 @@
-import { For, Show, createMemo } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import type { MessageEntry } from '../../types';
-import type { VisibleRange } from './virtualization';
+import type { VirtualMetrics, VisibleRange } from './virtualization';
 import { MessageRow, type MessageRowSharedProps } from './MessageRows';
 
 export function VirtualizedContent(
   props: {
     messages: MessageEntry[];
     visibleRange?: Partial<VisibleRange>;
+    virtualMetrics?: VirtualMetrics;
+    forceVirtualContent?: (messageId: string) => boolean;
+    canReleaseVirtualPlaceholders?: () => boolean;
     outerListVirtualized?: boolean;
   } & MessageRowSharedProps
 ) {
@@ -17,11 +20,66 @@ export function VirtualizedContent(
     bottomPad: props.visibleRange?.bottomPad ?? 0,
     coreStart: props.visibleRange?.coreStart ?? 0,
     coreEnd: props.visibleRange?.coreEnd ?? props.messages.length,
+    pinnedIndex: props.visibleRange?.pinnedIndex,
+    pinnedGapStart: props.visibleRange?.pinnedGapStart,
+    pinnedGapEnd: props.visibleRange?.pinnedGapEnd,
   }));
   const visible = createMemo(() => props.messages.slice(visibleRange().start, visibleRange().end));
   const rangeOffset = createMemo(() => visibleRange().start);
   const coreStart = createMemo(() => visibleRange().coreStart);
   const coreEnd = createMemo(() => visibleRange().coreEnd);
+  const pinnedIndex = createMemo(() => visibleRange().pinnedIndex);
+  const pinnedGapStart = createMemo(() => visibleRange().pinnedGapStart);
+  const pinnedGapEnd = createMemo(() => visibleRange().pinnedGapEnd);
+  // Keep the temporary gap inert through pin removal, then hydrate its bounded remainder when input is idle.
+  const retainedPinnedPlaceholderMessageIds = new Set<string>();
+  const [retainedPlaceholderVersion, setRetainedPlaceholderVersion] = createSignal(0);
+  let releaseRetainedPlaceholdersRaf = 0;
+  let releaseRetainedPlaceholdersTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  const cancelRetainedPlaceholderRelease = () => {
+    if (releaseRetainedPlaceholdersRaf) cancelAnimationFrame(releaseRetainedPlaceholdersRaf);
+    if (releaseRetainedPlaceholdersTimer) clearTimeout(releaseRetainedPlaceholdersTimer);
+    releaseRetainedPlaceholdersRaf = 0;
+    releaseRetainedPlaceholdersTimer = 0;
+  };
+  const scheduleRetainedPlaceholderRelease = () => {
+    if (
+      releaseRetainedPlaceholdersRaf ||
+      releaseRetainedPlaceholdersTimer ||
+      retainedPinnedPlaceholderMessageIds.size === 0
+    ) {
+      return;
+    }
+    if (props.canReleaseVirtualPlaceholders && !props.canReleaseVirtualPlaceholders()) {
+      releaseRetainedPlaceholdersTimer = setTimeout(() => {
+        releaseRetainedPlaceholdersTimer = 0;
+        scheduleRetainedPlaceholderRelease();
+      }, 50);
+      return;
+    }
+    releaseRetainedPlaceholdersRaf = requestAnimationFrame(() => {
+      releaseRetainedPlaceholdersRaf = 0;
+      if (props.canReleaseVirtualPlaceholders && !props.canReleaseVirtualPlaceholders()) {
+        scheduleRetainedPlaceholderRelease();
+        return;
+      }
+      retainedPinnedPlaceholderMessageIds.clear();
+      setRetainedPlaceholderVersion((version) => version + 1);
+    });
+  };
+  createEffect(() => {
+    const currentMessageIds = new Set(props.messages.map((message) => message.info.id));
+    for (const messageId of retainedPinnedPlaceholderMessageIds) {
+      if (!currentMessageIds.has(messageId)) retainedPinnedPlaceholderMessageIds.delete(messageId);
+    }
+    const pinnedGapActive = pinnedGapStart() !== undefined && pinnedGapEnd() !== undefined;
+    if (pinnedGapActive) {
+      cancelRetainedPlaceholderRelease();
+      return;
+    }
+    scheduleRetainedPlaceholderRelease();
+  });
+  onCleanup(cancelRetainedPlaceholderRelease);
 
   return (
     <>
@@ -36,12 +94,47 @@ export function VirtualizedContent(
         {(msg, index) => {
           const nearViewport = createMemo(() => {
             const absIndex = index() + rangeOffset();
-            return absIndex >= coreStart() && absIndex < coreEnd();
+            return (absIndex >= coreStart() && absIndex < coreEnd()) || absIndex === pinnedIndex();
+          });
+          const virtualHeight = createMemo(() => {
+            const metrics = props.virtualMetrics;
+            if (!metrics) return undefined;
+            const absIndex = index() + rangeOffset();
+            return metrics.prefix[absIndex + 1]! - metrics.prefix[absIndex]!;
+          });
+          const forceVirtualContent = createMemo(
+            () =>
+              !!props.forceVirtualContent?.(msg.info.id) ||
+              !!props.assistantActivityGroupMap?.has(msg.info.id)
+          );
+          const pinnedGapPlaceholder = createMemo(() => {
+            const absIndex = index() + rangeOffset();
+            const gapStart = pinnedGapStart();
+            const gapEnd = pinnedGapEnd();
+            return (
+              gapStart !== undefined &&
+              gapEnd !== undefined &&
+              absIndex >= gapStart &&
+              absIndex < gapEnd &&
+              !forceVirtualContent()
+            );
+          });
+          const virtualPlaceholder = createMemo(() => {
+            retainedPlaceholderVersion();
+            const messageId = msg.info.id;
+            if (forceVirtualContent()) {
+              retainedPinnedPlaceholderMessageIds.delete(messageId);
+              return false;
+            }
+            if (pinnedGapPlaceholder()) retainedPinnedPlaceholderMessageIds.add(messageId);
+            return retainedPinnedPlaceholderMessageIds.has(messageId);
           });
           return (
             <MessageRow
               msg={msg}
               nearViewport={nearViewport()}
+              virtualHeight={virtualHeight()}
+              virtualPlaceholder={virtualPlaceholder()}
               modelChangeMap={props.modelChangeMap}
               promptNumberMap={props.promptNumberMap}
               showPromptNumbers={props.showPromptNumbers}

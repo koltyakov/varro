@@ -1181,6 +1181,121 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
+  it('keeps prepended rows lightweight while pinning a distant history anchor', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const buildMessages = (prefix: string) =>
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `${prefix}-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [
+            {
+              ...textPart(`${messageId}-text`, `\`\`\`ts\nconst value = ${index};\n\`\`\``),
+              messageID: messageId,
+            },
+          ],
+        };
+      });
+    const currentMessages = buildMessages('current');
+    const olderPage = buildMessages('older') as Awaited<ReturnType<typeof client.session.messages>>;
+    let releasePage: ((page: typeof olderPage) => void) | undefined;
+    vi.spyOn(client.session, 'messages').mockReturnValue(
+      new Promise<typeof olderPage>((resolve) => {
+        releasePage = resolve;
+      })
+    );
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let scrollTopWrites = 0;
+    let rowRectReads = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, -scrollTopValue, 500, state.messages.length * 100);
+        }
+        if (this.classList.contains('message-history-banner')) {
+          return new DOMRect(0, 0, 500, 0);
+        }
+        if (this.dataset.msgId) {
+          rowRectReads += 1;
+          const index = state.messages.findIndex(
+            (message) => message.info.id === this.dataset.msgId
+          );
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-1');
+    replaceMessages(currentMessages);
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => state.messages.length * 100,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        scrollTopWrites += 1;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    expect(container?.querySelector('.interactive-list-track.virtualized')).not.toBeNull();
+    const normalOverscanRow = container?.querySelector<HTMLElement>('.interactive-item-off-core');
+    expect(normalOverscanRow).toBeInstanceOf(HTMLDivElement);
+    expect(normalOverscanRow?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(normalOverscanRow?.childElementCount).toBeGreaterThan(0);
+
+    scrollTopValue = 0;
+    scrollTopWrites = 0;
+    rowRectReads = 0;
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    list.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => expect(client.session.messages).toHaveBeenCalled());
+    expect(rowRectReads).toBeLessThan(80);
+    const anchor = container?.querySelector<HTMLElement>('[data-msg-id="current-0"]');
+    const anchorTopBefore = anchor?.getBoundingClientRect().top;
+    expect(anchor).toBeInstanceOf(HTMLDivElement);
+    releasePage?.(olderPage);
+    await vi.waitFor(() => expect(state.messages).toHaveLength(100));
+    expect(scrollTopWrites).toBeLessThan(30);
+    expect(anchor?.isConnected).toBe(true);
+    expect(anchor?.getBoundingClientRect().top).toBe(anchorTopBefore);
+
+    const offCoreRow = container?.querySelector<HTMLElement>('[data-msg-id="older-30"]');
+    expect(offCoreRow?.classList).toContain('interactive-item-off-core');
+    expect(offCoreRow?.childElementCount).toBe(0);
+    expect(offCoreRow?.style.height).toBe('100px');
+    expect(container?.querySelector('[data-msg-id="current-0"]')?.classList).not.toContain(
+      'interactive-item-off-core'
+    );
+
+    upsertPart({
+      ...reasoningPart('older-30-reasoning', 'New reasoning'),
+      messageID: 'older-30',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(container?.querySelector<HTMLElement>('[data-msg-id="older-30"]')?.style.height).toBe(
+      '160px'
+    );
+    animationFrames.restore();
+  });
+
   it('updates pending history ownership for inertial movement after touch release', async () => {
     const harness = await mountDeferredHistory();
     await harness.startLoad(20);

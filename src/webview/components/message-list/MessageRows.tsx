@@ -82,7 +82,13 @@ function InlineEditComposerSlot() {
   );
 }
 
-export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps) {
+export function MessageRow(
+  props: {
+    msg: MessageEntry;
+    virtualHeight?: number;
+    virtualPlaceholder?: boolean;
+  } & MessageRowSharedProps
+) {
   let rowRef: HTMLDivElement | undefined;
   let disposeEntrance: (() => void) | undefined;
   const claimedEntrance = props.claimMessageEntrance?.(props.msg.info.id) ?? false;
@@ -91,6 +97,8 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
   );
   const animateEntrance = claimedEntrance && !hasImage;
   const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
+  const isOffCore = () => !!props.outerListVirtualized && props.nearViewport === false;
+  const isVirtualPlaceholder = () => isOffCore() && !!props.virtualPlaceholder;
   const [entrancePending, setEntrancePending] = createSignal(animateEntrance);
   const changeLabel = () => props.modelChangeMap.get(props.msg.info.id) ?? null;
   const isEditingThisMessage = () =>
@@ -148,6 +156,7 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
         rowRef = el;
       }}
       data-msg-id={props.msg.info.id}
+      style={{ height: isVirtualPlaceholder() ? `${props.virtualHeight ?? 0}px` : undefined }}
       class={`interactive-item-container ${
         props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
       } ${
@@ -156,62 +165,64 @@ export function MessageRow(props: { msg: MessageEntry } & MessageRowSharedProps)
           : ''
       }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
-      }${props.outerListVirtualized && props.nearViewport === false ? ' interactive-item-off-core' : ''}`}
+      }${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}`}
     >
-      <Show when={changeLabel()}>
-        <div class="model-change-indicator">
-          <span class="model-change-label">Switched to {changeLabel()}</span>
-        </div>
-      </Show>
-      <Show when={!isEditingThisMessage()} fallback={<InlineEditComposerSlot />}>
-        <MessageComponent
-          info={props.msg.info}
-          parts={props.msg.parts}
-          promptNumber={
-            props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
-          }
-          isLastAssistant={props.msg.info.id === props.lastAssistantID}
-          nearViewport={props.nearViewport}
-          outerListVirtualized={props.outerListVirtualized}
-          highlightFinalAnswer={highlightFinalAnswer()}
-          highlightPlanningAnswer={highlightPlanningAnswer()}
-          previousTrailingFileEventSignature={
-            props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
-          }
-          fileEditStackGroup={fileEditStackGroup()}
-          streamingPartId={streamingPartId()}
-          streamingText={streamingText()}
-          allowInitialAssistantItemReveal={allowInitialAssistantItemReveal}
-          claimAssistantItemReveal={props.claimAssistantItemReveal}
-          questionRequestForTool={props.questionRequestForTool}
-          permissionMatchForTool={props.permissionMatchForTool}
-          compactActivityGroups={assistantActivityGroups()}
-        />
-      </Show>
-      <Show when={summary()}>
-        {(assistantSummary) => (
-          <AssistantDialogSummary
-            summary={assistantSummary()}
-            showImplementPlanAction={props.shouldShowPlanImplementationAction({
-              hasBuildAgent: props.hasBuildAgent,
-              info: props.msg.info,
-              latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
-            })}
-            onImplementPlan={() =>
-              void implementPlan(
-                props.buildPlanImplementationPrompt(props.msg.parts),
-                props.msg.info.sessionID
-              )
+      <Show when={!isVirtualPlaceholder()}>
+        <Show when={changeLabel()}>
+          <div class="model-change-indicator">
+            <span class="model-change-label">Switched to {changeLabel()}</span>
+          </div>
+        </Show>
+        <Show when={!isEditingThisMessage()} fallback={<InlineEditComposerSlot />}>
+          <MessageComponent
+            info={props.msg.info}
+            parts={props.msg.parts}
+            promptNumber={
+              props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
             }
-            onOpenPlan={() =>
-              void openPlan(
-                props.buildPlanDocumentContent(props.msg.parts),
-                props.msg.info.sessionID
-              )
+            isLastAssistant={props.msg.info.id === props.lastAssistantID}
+            nearViewport={props.nearViewport}
+            outerListVirtualized={props.outerListVirtualized}
+            highlightFinalAnswer={highlightFinalAnswer()}
+            highlightPlanningAnswer={highlightPlanningAnswer()}
+            previousTrailingFileEventSignature={
+              props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
             }
-            onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
+            fileEditStackGroup={fileEditStackGroup()}
+            streamingPartId={streamingPartId()}
+            streamingText={streamingText()}
+            allowInitialAssistantItemReveal={allowInitialAssistantItemReveal}
+            claimAssistantItemReveal={props.claimAssistantItemReveal}
+            questionRequestForTool={props.questionRequestForTool}
+            permissionMatchForTool={props.permissionMatchForTool}
+            compactActivityGroups={assistantActivityGroups()}
           />
-        )}
+        </Show>
+        <Show when={summary()}>
+          {(assistantSummary) => (
+            <AssistantDialogSummary
+              summary={assistantSummary()}
+              showImplementPlanAction={props.shouldShowPlanImplementationAction({
+                hasBuildAgent: props.hasBuildAgent,
+                info: props.msg.info,
+                latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
+              })}
+              onImplementPlan={() =>
+                void implementPlan(
+                  props.buildPlanImplementationPrompt(props.msg.parts),
+                  props.msg.info.sessionID
+                )
+              }
+              onOpenPlan={() =>
+                void openPlan(
+                  props.buildPlanDocumentContent(props.msg.parts),
+                  props.msg.info.sessionID
+                )
+              }
+              onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
+            />
+          )}
+        </Show>
       </Show>
     </div>
   );

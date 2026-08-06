@@ -31,6 +31,27 @@ async function getBlankBottomArea(list: Locator) {
 }
 
 test.describe('viewport content coverage', () => {
+  test('uses newly available space when the host viewport grows', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 600 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await waitForAnimationFrames(page, 4);
+    const before = await getBlankBottomArea(list);
+
+    await page.setViewportSize({ width: 900, height: 800 });
+    await waitForAnimationFrames(page, 6);
+
+    const after = await getBlankBottomArea(list);
+    expect(after.viewportHeight).toBeGreaterThan(before.viewportHeight + 150);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    expect(after.blankPx).toBeLessThanOrEqual(before.blankPx + 10);
+  });
+
   test('no blank bottom space when scrolled to top of a large transcript', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=large-transcript');
     const list = page.locator('.interactive-list');
