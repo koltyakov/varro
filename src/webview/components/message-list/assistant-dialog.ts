@@ -7,6 +7,7 @@ import type { AssistantDialogSummaryInfo } from './MessageRows';
 
 type AssistantDialogOptions = {
   sessions?: readonly TaskSessionInfo[];
+  primarySessionId?: string;
   suppressTrailingSummary?: boolean;
   collectLeadingSummaryStats?: boolean;
 };
@@ -117,6 +118,9 @@ export function getAssistantDialogSummaryMap(
 
   for (const entry of messages) {
     if (!isAssistantMessage(entry.info)) {
+      if (options?.primarySessionId && entry.info.sessionID !== options.primarySessionId) {
+        continue;
+      }
       flush({
         nextUserRequestCreated: entry.info.role === 'user' ? entry.info.time.created : undefined,
       });

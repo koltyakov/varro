@@ -19,7 +19,9 @@ import { resetSessionStatusSnapshotTracking, sessionStore } from '../../lib/stor
 import { uiStore } from '../../lib/stores/ui-store';
 import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
 import { resetMessageEditState } from '../../lib/message-edit-state';
+import { isWorkspaceDirectoryText } from '../../lib/part-utils';
 import { normalizePermissionEvent } from '../../lib/session-event-reducer';
+import { flushPendingStreamingDeltasFor } from '../../lib/streaming-deltas';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import { applyWebviewTheme } from '../../lib/theme';
 import type { MessageEntry, Permission, Session, SessionStatus } from '../../types';
@@ -293,6 +295,75 @@ function isNotFoundError(err: unknown) {
   return err instanceof Error && /^404\b/.test(err.message);
 }
 
+function mergeSessionMessages(
+  current: MessageEntry[],
+  sessionId: string,
+  incoming: MessageEntry[]
+): MessageEntry[] {
+  const sessionMessages = incoming.filter((entry) => entry.info.sessionID === sessionId);
+  if (!current.some((entry) => entry.info.sessionID !== sessionId)) return incoming;
+
+  const incomingIndexById = new Map(
+    sessionMessages.map((entry, index) => [entry.info.id, index] as const)
+  );
+  const hasOverlap = current.some(
+    (entry) => entry.info.sessionID === sessionId && incomingIndexById.has(entry.info.id)
+  );
+  if (!hasOverlap) {
+    const firstSessionIndex = current.findIndex((entry) => entry.info.sessionID === sessionId);
+    const insertionIndex = firstSessionIndex < 0 ? 0 : firstSessionIndex;
+    return [
+      ...current.slice(0, insertionIndex).filter((entry) => entry.info.sessionID !== sessionId),
+      ...sessionMessages,
+      ...current.slice(insertionIndex).filter((entry) => entry.info.sessionID !== sessionId),
+    ];
+  }
+
+  const merged: MessageEntry[] = [];
+  let incomingIndex = 0;
+  for (const entry of current) {
+    if (entry.info.sessionID !== sessionId) {
+      merged.push(entry);
+      continue;
+    }
+
+    const matchingIndex = incomingIndexById.get(entry.info.id);
+    if (matchingIndex === undefined || matchingIndex < incomingIndex) continue;
+    while (incomingIndex <= matchingIndex) merged.push(sessionMessages[incomingIndex++]!);
+  }
+  while (incomingIndex < sessionMessages.length) merged.push(sessionMessages[incomingIndex++]!);
+  return merged;
+}
+
+function setSessionMessagesIncremental(
+  sessionId: string,
+  messages: MessageEntry[],
+  options?: { preserveExtraParts?: boolean },
+  behavior?: { preserveSessionStreaming?: boolean }
+) {
+  flushPendingStreamingDeltasFor(appStore.defaultAppState);
+  const current = appStore.state.messages;
+  const streamingPartId = appStore.state.streamingPartId;
+  const streamingText = appStore.state.streamingText;
+  const preserveStreamingState =
+    !!streamingPartId &&
+    current.some(
+      (entry) =>
+        (behavior?.preserveSessionStreaming || entry.info.sessionID !== sessionId) &&
+        entry.parts.some((part) => part.id === streamingPartId)
+    );
+  sessionStore.setMessagesIncremental(mergeSessionMessages(current, sessionId, messages), options);
+  if (
+    preserveStreamingState &&
+    appStore.state.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
+  ) {
+    batch(() => {
+      appStore.setState('streamingPartId', streamingPartId);
+      appStore.setState('streamingText', streamingText);
+    });
+  }
+}
+
 async function fetchSessionMessages(
   sessionId: string,
   options?: { resetHistoryWindow?: boolean; isCurrent?: () => boolean }
@@ -325,7 +396,12 @@ async function fetchSessionMessages(
     setSessionHistoryPrompts(sessionId, []);
     setSessionHistoryPromptCursor(sessionId, incoming.nextCursor);
     if (incoming.nextCursor) {
-      void loadSessionBoundaryPrompts(sessionId, incoming.nextCursor, options?.isCurrent);
+      void loadSessionBoundaryPrompts(
+        sessionId,
+        incoming.nextCursor,
+        options?.isCurrent,
+        new Set(incoming.map((entry) => entry.info.id))
+      );
     }
   }
   const messages = resetHistoryWindow ? incoming : mergeWindowedHistory(current, incoming);
@@ -334,11 +410,31 @@ async function fetchSessionMessages(
 }
 
 const promptHistoryLoads = new Map<string, { revision: number; promise: Promise<boolean> }>();
+const promptHistoryPageLoads = new Map<
+  string,
+  { revision: number; cursor: string; promise: ReturnType<typeof client.session.messages> }
+>();
+
+function hasPreviewablePromptContent(entry: MessageEntry) {
+  return entry.parts.some(
+    (part) =>
+      part.type === 'file' ||
+      (part.type === 'text' &&
+        part.text
+          .replace(/\r\n?/g, '\n')
+          .split('\n')
+          .some((line) => {
+            const trimmed = line.trim();
+            return trimmed.length > 0 && !isWorkspaceDirectoryText(trimmed);
+          }))
+  );
+}
 
 function loadOlderSessionPrompts(
   sessionId: string,
   initialCursor?: string,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  knownLoadedMessageIds: ReadonlySet<string> = new Set()
 ): Promise<boolean> {
   const revision = getSessionMessageWindowRevision(sessionId);
   const existing = promptHistoryLoads.get(sessionId);
@@ -347,10 +443,19 @@ function loadOlderSessionPrompts(
   const load = (async () => {
     let cursor = initialCursor ?? getSessionHistoryPromptCursor(sessionId);
     while (cursor) {
-      const page = await client.session.messages(sessionId, {
+      const pageLoad = client.session.messages(sessionId, {
         limit: MESSAGE_HISTORY_WINDOW,
         before: cursor,
       });
+      promptHistoryPageLoads.set(sessionId, { revision, cursor, promise: pageLoad });
+      let page: Awaited<typeof pageLoad>;
+      try {
+        page = await pageLoad;
+      } finally {
+        if (promptHistoryPageLoads.get(sessionId)?.promise === pageLoad) {
+          promptHistoryPageLoads.delete(sessionId);
+        }
+      }
       if (!isCurrent() || getSessionMessageWindowRevision(sessionId) !== revision) {
         return false;
       }
@@ -362,7 +467,19 @@ function loadOlderSessionPrompts(
           sessionId,
           mergeOlderHistory(getSessionHistoryPrompts(sessionId), prompts)
         );
-        return true;
+        const loadedMessageIds = new Set([
+          ...knownLoadedMessageIds,
+          ...appStore.state.messages
+            .filter((entry) => entry.info.sessionID === sessionId)
+            .map((entry) => entry.info.id),
+        ]);
+        if (
+          prompts.some(
+            (entry) => !loadedMessageIds.has(entry.info.id) && hasPreviewablePromptContent(entry)
+          )
+        ) {
+          return true;
+        }
       }
       cursor = nextCursor;
     }
@@ -384,17 +501,22 @@ function loadOlderSessionPrompts(
 function loadSessionBoundaryPrompts(
   sessionId: string,
   initialCursor: string,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  knownLoadedMessageIds: ReadonlySet<string> = new Set()
 ): Promise<void> {
   const revision = getSessionMessageWindowRevision(sessionId);
   const existing = promptHistoryLoads.get(sessionId);
   if (!existing || existing.revision !== revision) {
-    return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent).then(() => {});
+    return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent, knownLoadedMessageIds).then(
+      () => {}
+    );
   }
   return existing.promise.then(() => {
     if (!isCurrent()) return;
     if (getSessionHistoryPromptCursor(sessionId) !== initialCursor) return;
-    return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent).then(() => {});
+    return loadOlderSessionPrompts(sessionId, initialCursor, isCurrent, knownLoadedMessageIds).then(
+      () => {}
+    );
   });
 }
 
@@ -1098,6 +1220,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     fullHistoryLoads.clear();
     historyPageLoads.clear();
     promptHistoryLoads.clear();
+    promptHistoryPageLoads.clear();
     approvedPermissionReferences = [];
   }
 
@@ -1288,7 +1411,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       isCurrentSelectionGeneration: (generation) =>
         isCurrentGeneration(generation, sessionSelectionGeneration),
       upsertSession,
-      setMessagesIncremental: sessionStore.setMessagesIncremental,
+      setMessagesIncremental: (messages, options) => {
+        const sessionId = appStore.state.activeSessionId ?? messages[0]?.info.sessionID;
+        if (!sessionId) {
+          sessionStore.setMessagesIncremental(messages, options);
+          return;
+        }
+        setSessionMessagesIncremental(sessionId, messages, options);
+      },
       syncFailedSessionsFromMessages: sessionStore.syncFailedSessionsFromMessages,
       requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
       deriveSelectedAgentFromMessages,
@@ -1581,9 +1711,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       if (!cursor || !isCurrent()) return false;
       try {
         let page = takeCachedSessionHistoryPage(sessionId, cursor);
-        if (!page) {
-          await promptHistoryLoads.get(sessionId)?.promise;
-          page = takeCachedSessionHistoryPage(sessionId, cursor);
+        const promptPageLoad = promptHistoryPageLoads.get(sessionId);
+        if (!page && promptPageLoad?.revision === revision && promptPageLoad.cursor === cursor) {
+          const prefetchedPage = await promptPageLoad.promise;
+          if (!isCurrent()) return false;
+          page = takeCachedSessionHistoryPage(sessionId, cursor) ?? prefetchedPage;
         }
         page ??= await client.session.messages(sessionId, {
           limit: MESSAGE_HISTORY_WINDOW,
@@ -1593,7 +1725,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         const current = appStore.state.messages.filter(
           (entry) => entry.info.sessionID === sessionId
         );
-        sessionStore.setMessagesIncremental(mergeOlderHistory(current, page));
+        setSessionMessagesIncremental(sessionId, mergeOlderHistory(current, page), undefined, {
+          preserveSessionStreaming: true,
+        });
         const nextCursor = advanceSessionHistoryCursor(sessionId, cursor, page.nextCursor);
         markSessionHistoryLoadFailed(sessionId, false);
         if (nextCursor) void loadSessionBoundaryPrompts(sessionId, nextCursor, isCurrent);

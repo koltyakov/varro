@@ -79,6 +79,40 @@ test('large transcripts keep rendered rows bounded while scrolling', async ({ pa
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 });
 
+test('burst scrolling avoids synchronous mounted-row geometry scans', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  const list = page.locator('.interactive-list');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+    element.scrollTop = element.scrollHeight / 2;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await waitForAnimationFrame(page);
+
+  const rowRectReads = await list.evaluate((element) => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    let reads = 0;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      if (this.hasAttribute('data-msg-id')) reads += 1;
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      const initialTop = element.scrollTop;
+      for (let step = 1; step <= 40; step += 1) {
+        element.scrollTop = initialTop + step * 5;
+        element.dispatchEvent(new Event('scroll'));
+      }
+      return reads;
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  expect(rowRectReads).toBeLessThan(100);
+});
+
 test('appending a message does not remount the full transcript', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -145,7 +179,7 @@ test('appending a message does not remount the full transcript', async ({ page }
   expect(stats.finalMountedRows).toBeLessThan(90);
 });
 
-test('large transcripts keep rendered rows bounded while the chat width changes', async ({
+test('large transcripts keep rendered rows bounded while narrowing a detached chat', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
@@ -154,10 +188,20 @@ test('large transcripts keep rendered rows bounded while the chat width changes'
   await expect.poll(() => getRenderedMessageRowCount(page)).toBeLessThan(90);
 
   const list = page.locator('.interactive-list');
+  const shell = page.locator('.chat-main-column-shell');
+  await shell.evaluate(async (element) => {
+    element.style.maxWidth = 'none';
+    element.style.width = '900px';
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
   await list.evaluate((element) => {
+    // Scroll coordinates only place the fixture; same-row viewport geometry is the jump oracle.
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
     element.scrollTop = Math.floor(element.scrollHeight / 2);
     element.dispatchEvent(new Event('scroll'));
   });
+  await page.waitForTimeout(300);
   await waitForAnimationFrame(page);
   const initialAnchor = await list.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
@@ -165,8 +209,12 @@ test('large transcripts keep rendered rows bounded while the chat width changes'
       const rect = candidate.getBoundingClientRect();
       return rect.bottom > bounds.top && rect.top < bounds.bottom;
     });
-    if (!row) return null;
-    return { id: row.dataset.msgId, top: row.getBoundingClientRect().top - bounds.top };
+    if (!row?.dataset.msgId) return null;
+    return {
+      id: row.dataset.msgId,
+      top: row.getBoundingClientRect().top - bounds.top,
+      width: bounds.width,
+    };
   });
   expect(initialAnchor).not.toBeNull();
 
@@ -218,16 +266,46 @@ test('large transcripts keep rendered rows bounded while the chat width changes'
       observer;
   });
 
-  await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
-    shell.style.maxWidth = 'none';
-    for (let frame = 0; frame <= 120; frame += 1) {
-      const progress = frame <= 60 ? frame / 60 : (120 - frame) / 60;
-      shell.style.width = `${900 - progress * 480}px`;
+  const resizeSamples = await shell.evaluate(async (element, anchorId) => {
+    const listElement = document.querySelector<HTMLElement>('.interactive-list')!;
+    const sample = (stage: string) => {
+      const anchor = listElement.querySelector<HTMLElement>(
+        `[data-msg-id="${CSS.escape(anchorId)}"]`
+      );
+      const rows = [...listElement.querySelectorAll<HTMLElement>('[data-msg-id]')];
+      const anchorIndex = rows.indexOf(anchor!);
+      const previousRow = anchorIndex > 0 ? rows[anchorIndex - 1] : null;
+      return {
+        stage,
+        width: listElement.getBoundingClientRect().width,
+        scrollTop: listElement.scrollTop,
+        topPad: Number.parseFloat(
+          listElement.querySelector<HTMLElement>('.virtual-spacer-top')?.style.height || '0'
+        ),
+        top: anchor?.isConnected
+          ? anchor.getBoundingClientRect().top - listElement.getBoundingClientRect().top
+          : null,
+        height: anchor?.isConnected ? anchor.getBoundingClientRect().height : null,
+        previousId: previousRow?.dataset.msgId ?? null,
+        previousTop: previousRow
+          ? previousRow.getBoundingClientRect().top - listElement.getBoundingClientRect().top
+          : null,
+        previousHeight: previousRow?.getBoundingClientRect().height ?? null,
+      };
+    };
+    const samples = [sample('before')];
+    for (let frame = 1; frame <= 40; frame += 1) {
+      element.style.width = `${900 - frame * 12}px`;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push(sample(`resize-${frame}`));
     }
-  });
-  await page.waitForTimeout(120);
-  await waitForAnimationFrame(page);
+    await new Promise<void>((resolve) => setTimeout(resolve, 180));
+    for (let frame = 1; frame <= 3; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push(sample(`settled-${frame}`));
+    }
+    return samples;
+  }, initialAnchor!.id);
 
   const resizeStats = await list.evaluate((element) => {
     const result = {
@@ -243,45 +321,33 @@ test('large transcripts keep rendered rows bounded while the chat width changes'
   expect(resizeStats.removedRows).toBeLessThan(90);
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
 
-  const finalViewport = await list.evaluate((element, anchorId) => {
-    const bounds = element.getBoundingClientRect();
-    const visibleRows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].filter(
-      (row) => {
-        const rect = row.getBoundingClientRect();
-        return rect.bottom > bounds.top && rect.top < bounds.bottom;
-      }
-    );
-    const anchor = visibleRows.find((row) => row.dataset.msgId === anchorId);
-    return {
-      visibleRows: visibleRows.length,
-      anchorTop: anchor ? anchor.getBoundingClientRect().top - bounds.top : null,
-    };
-  }, initialAnchor!.id);
-  expect(finalViewport.visibleRows).toBeGreaterThan(0);
-  expect(finalViewport.anchorTop).not.toBeNull();
-  expect(Math.abs(finalViewport.anchorTop! - initialAnchor!.top)).toBeLessThanOrEqual(3);
-
-  await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
-    for (let frame = 0; frame <= 40; frame += 1) {
-      shell.style.width = `${900 - frame * 12}px`;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  });
-  await page.waitForTimeout(120);
-  await list.evaluate((element) => {
-    element.scrollTop = Math.floor(element.scrollHeight * 0.75);
-    element.dispatchEvent(new Event('scroll'));
-  });
-  await waitForAnimationFrame(page);
-  const visibleAfterOneWayResize = await list.evaluate((element) => {
+  const finalVisibleRows = await list.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].filter((row) => {
       const rect = row.getBoundingClientRect();
       return rect.bottom > bounds.top && rect.top < bounds.bottom;
     }).length;
   });
-  expect(visibleAfterOneWayResize).toBeGreaterThan(0);
+  expect(finalVisibleRows).toBeGreaterThan(0);
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
+
+  const mountedSamples = resizeSamples.filter(
+    (sample): sample is typeof sample & { top: number } => sample.top !== null
+  );
+  const geometry = {
+    anchorId: initialAnchor!.id,
+    initialTop: initialAnchor!.top,
+    initialWidth: initialAnchor!.width,
+    finalTop: resizeSamples.at(-1)?.top ?? null,
+    finalWidth: resizeSamples.at(-1)?.width ?? null,
+    maxDelta: Math.max(
+      ...mountedSamples.map((sample) => Math.abs(sample.top - initialAnchor!.top))
+    ),
+    samples: resizeSamples,
+  };
+  expect(mountedSamples, JSON.stringify(geometry)).toHaveLength(resizeSamples.length);
+  expect(geometry.finalWidth!, JSON.stringify(geometry)).toBeLessThan(geometry.initialWidth - 400);
+  expect(geometry.maxDelta, JSON.stringify(geometry)).toBeLessThanOrEqual(3);
 });
 
 test('width resizing preserves bottom follow and respects user detachment', async ({ page }) => {

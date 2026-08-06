@@ -34,6 +34,27 @@ break another unless the shared invariants below remain true.
 - Content below the anchor may change `scrollHeight`, but it must not move the anchor.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
+- A view setting that changes rendered row content must participate in height invalidation even when
+  the affected row is unmounted. This includes thinking visibility, compact activity, inline file
+  previews, disclosure state, and any future lightweight rendering mode.
+- An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
+  an exact measurement from the old view.
+- Width reflow owns a stable visible message captured before the first changed-height batch is
+  applied. Deferring prefix publication must not make later resize batches classify rows against an
+  already-adjusted `scrollTop` and stale prefixes.
+
+### Coordinate Spaces
+
+- Virtual prefixes are row-only coordinates. `prefix[0]` is the start of the first message, not the
+  start of the scroll container or track.
+- Container `scrollTop` includes flow content before the first message. Today that content is track
+  top padding plus the optional history banner and its margins.
+- Every range lookup, first-visible lookup, metric fallback, and metric-based navigation target must
+  convert between container coordinates and row-only virtual coordinates explicitly.
+- Derive the row origin from structural chrome. Do not infer it from a row whose measured height or
+  prefix may already be stale.
+- A row can be visible while `scrollTop` is greater than its row-only prefix if pre-message chrome is
+  still in the viewport. Such a row is not "above the anchor" for height correction.
 
 ### Visible Position Is The User-Facing Truth
 
@@ -57,6 +78,27 @@ break another unless the shared invariants below remain true.
   sticky navigation or bottom-follow.
 - Expanding a compact activity disclosure takes ownership from bottom-follow so the clicked summary
   stays fixed while its details grow below it.
+- A structural anchor correction is allowed during a slow user gesture. It preserves the result of
+  that gesture; it does not replace it. An intervening user-owned movement epoch cancels the queued
+  correction.
+- History ownership covers layout-driven movement only. Native keyboard scrolling, scrollbar
+  movement, and trackpad momentum can continue after a prepend without another input event. Actual
+  movement while input is still active immediately transfers ownership back to the user.
+- A downward user movement during an append transition is a new lower bound. A later animation frame
+  must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
+- Width-resize anchoring is established before applying the first resize measurement. Wheel,
+  keyboard, or scrollbar input publishes pending measurements and releases that resize anchor.
+
+The effective ownership order is:
+
+| Owner | Starts from | Must yield to |
+| --- | --- | --- |
+| Direct user movement | wheel, keyboard, touch momentum, scrollbar drag | nothing except bounded geometry compensation for content above the anchor |
+| Sticky navigation | sticky prompt activation | wheel, keyboard, pointer interaction, destination click, or a nested destination scroller |
+| History anchoring | a page request at the upper boundary | actual user movement, session change, edit ownership, or explicit bottom follow |
+| Edit visibility | entering inline edit | direct user movement, edit cancellation, or explicit bottom follow |
+| Expansion anchoring | expanding a disclosure or diff | direct user movement or expiry of its bounded settle window |
+| Bottom follow | initial load, send, or explicit jump to latest | upward user movement, sticky navigation, editing, or expansion ownership |
 
 ### Sticky Prompts
 
@@ -67,6 +109,53 @@ break another unless the shared invariants below remain true.
 - The destination uses the same top gap as the sticky box.
 - Terminal selections, image-only prompts, context-only prompts, and normal text prompts must all
   follow the same navigation path.
+- Boundary prompt selection must consider all cached unloaded prompts in order and skip empty prompts.
+  Prefetch must continue past an empty newest prompt until a previewable prompt or the beginning of
+  history is reached.
+- Wheel input consumed by a nested scroller inside the destination still cancels sticky settling.
+  The outer transcript does not need to move for the user to have taken ownership.
+- Sticky navigation and its loading owner belong to one message-window version. Cancellation releases
+  that owner immediately, and an obsolete request cannot clear a newer owner's loading state.
+- A stale sticky page may retry only while its session, window version, cursor boundary, and
+  non-failed state remain current, using the same bounded policy as ordinary pagination.
+
+### View Scoping
+
+- Row-local actions and adjacency derive from the same visible message collection as the renderer.
+  Hidden child-session messages must not change the visible parent's Retry action, latest plan action,
+  model transition, or preceding file-event context.
+- All-tree messages may be used only by features that intentionally aggregate the tree, such as
+  subagent dialog summaries and token statistics.
+- Switching a view mode must preserve stable message IDs and invalidate only the heights whose
+  rendered content can change.
+
+### Pagination Progress
+
+- A successful HTTP response is not necessarily visible pagination progress. Empty pages,
+  duplicate-only pages, and stale invalidated responses can leave the DOM unchanged while a cursor
+  still points to valid history.
+- If a page advances the cursor without adding rows, ordinary pagination continues automatically.
+  It must not require the user to leave the boundary and scroll back.
+- If the initial window cannot overflow, an upward wheel at `scrollTop === 0` must still request
+  history even though the browser cannot emit a scroll event.
+- A stale response is retried only while the same session, generation, cursor boundary, and
+  non-failed load remain current. Retry loops are bounded for responses that make no progress.
+- Once a page adds rows and the list overflows, ordinary scroll pagination returns to one-page
+  behavior. Full-history and direct navigation are the only paths that intentionally walk all pages.
+- Prompt-boundary prefetch may share the matching in-flight cursor page with scroll pagination, but
+  scroll pagination must not wait for prompt discovery to continue through later cursors.
+- Parent-session pagination and resync replace only that session's message subsequence. Loaded child
+  messages and active parent or child streaming state must survive the operation.
+
+### Prompt Number Readiness
+
+- Absolute prompt numbers are ready only when the prompt cursor is exhausted for the current message
+  window version.
+- A failed or invalidated prompt page leaves counters hidden. A later Alt hold retries the load.
+- Resetting the active session's message window invalidates prior readiness even when the session ID
+  does not change.
+- A reset window is not ready while its replacement fetch is pending. An obsolete prompt request must
+  not block a new request for the replacement window.
 
 ## Incident: Paginated Session Scroll Jumps
 
@@ -134,18 +223,41 @@ Principle: programmatic scrolling requires explicit ownership and cancellation o
 1. Reproduce with the reported session or an exact serialized equivalent.
 2. Match extension pagination: initial 50-message window and `before` page prepends.
 3. Match the reported viewport width because wrapping and image preview height affect rows.
-4. Record, for every scroll step:
+4. Identify the user-facing invariant and its owner before changing code.
+5. Record, for every scroll step:
    - requested wheel delta
    - first visible message ID
    - that same row's viewport top before and after
    - `scrollTop`, `scrollHeight`, top spacer, and bottom spacer
    - mounted row IDs and measured heights
-5. Separate page insertion, row measurement, sticky navigation, and bottom-follow events.
-6. Identify the first frame where the visible-row invariant fails.
-7. Fix the state or geometry that becomes invalid on that frame.
-8. Rerun the exact session from bottom to top.
-9. Add a deterministic regression that fails for the demonstrated reason.
-10. Run the broader scroll and layout suites.
+6. Separate page insertion, row measurement, view invalidation, sticky navigation, and bottom-follow
+   events.
+7. Identify the first frame where the visible-row invariant fails.
+8. Encode that frame and interaction order as a deterministic regression.
+9. Run the new regression against unchanged production code and record the expected failure.
+10. Only after step 9, fix the state or geometry that becomes invalid on that frame.
+11. Rerun the exact session from bottom to top, including every async settle frame.
+12. Run the broader unit, scroll, streaming, layout, and performance suites.
+
+A production fix must not be written first and justified by a passing test afterward. If the problem
+is browser-only, add a Playwright reproduction or a deterministic unit harness for the same event
+ordering, prove it fails, then change production code. A test that fails for a different reason is not
+a valid reproduction.
+
+## Regression Preservation Rule
+
+- Do not weaken, delete, or replace an established geometry assertion to make a new implementation
+  pass unless the user-visible contract intentionally changed.
+- Add the smallest new fixture that reproduces the missing transition. Keep existing fixtures for
+  already-correct behavior.
+- Assert both sides of ownership handoffs: the old owner stops and the new owner's visible position
+  remains stable.
+- Sample every animation frame for width reflow, navigation settling, append transitions, and history
+  settling. A final settled assertion can miss a one-frame jump.
+- Assert the same row ID before and after a transition. "Some row is visible" proves coverage, not
+  stability.
+- Preserve bounded DOM row counts while adding anchor protection. Rendering the full transcript is
+  not an acceptable scroll fix.
 
 ## Required Regression Coverage
 
@@ -154,8 +266,10 @@ attachments, or inline editing should run at least:
 
 ```sh
 npm run test -- src/webview/components/MessageList.test.ts
+npm run test -- src/webview/hooks/useOpenCode.sessionState.test.ts
 npm run test:e2e -- e2e/tests/scroll-auto-scroll.spec.ts
 npm run test:e2e -- e2e/tests/layout.spec.ts
+npm run test:e2e -- e2e/tests/performance.spec.ts
 npm run lint:check
 npm run typecheck
 ```
@@ -169,15 +283,34 @@ Relevant browser regressions must cover:
 - edit entry while the source row is partially hidden
 - cancellation of navigation settling when the destination is clicked
 - bottom-follow remaining disengaged during manual upward scrolling
+- one-way width narrowing while the same detached row remains at the same viewport top
+- structural insertion and removal above the viewport during slow wheel input
+- native movement after a prepend but before its settle frame
+- downward input during append animation without reverse movement on the next frame
+- pre-message chrome when classifying the first visible row
+- non-scrollable initial windows and cursor-only pagination progress
+- active parent and child streaming state during parent pagination
+- offscreen height invalidation for every view mode that changes rendered content
+- hidden child messages not affecting visible parent row actions
+- empty boundary prompts, nested destination scrollers, prompt-load failures, and same-session window
+  resets
 
 ## Review Checklist
 
 - Does every derived index react to message order changes?
 - Does every cache state which ordered ID list produced it?
+- Are container and row-only coordinates converted at every virtual lookup?
 - Can asynchronous content change a mounted row's height after measurement?
+- Can a view setting change an unmounted row while leaving its old height marked exact?
 - Is a visible anchor preserved when height changes occur above it?
+- Was a width anchor captured before the first changed measurement was applied?
 - Is the test checking row viewport geometry rather than only `scrollTop`?
+- Does the test sample intermediate frames rather than only the settled result?
 - Does the test use pagination if production uses pagination?
+- Can an empty, duplicate, stale, or non-scrollable page leave valid history unreachable?
+- Does a session-local response preserve other loaded sessions and their streaming state?
 - Can another scroll owner run at the same time?
+- Can native movement continue without another wheel or key event after ownership was assigned?
 - Does user interaction cancel settling before changing layout?
+- Are visible row actions derived from the rendered thread rather than hidden tree messages?
 - Was the original reported session or an exact equivalent rerun end to end?

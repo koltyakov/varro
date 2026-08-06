@@ -21,6 +21,10 @@ const consumedHistoryPromptCursors = new Map<string, Set<string>>();
 const messageWindowRevisions = new Map<string, number>();
 const pendingMessageWindowResets = new Set<string>();
 let nextMessageWindowRevision = 0;
+const messageWindowStateVersions = new Map<string, number>();
+const [messageWindowStateVersion, setMessageWindowStateVersion] = createSignal(0);
+let defaultMessageWindowStateVersion = 0;
+let nextMessageWindowStateVersion = 0;
 const prefetchedHistoryPages = new Map<string, Map<string, HistoryPage>>();
 const historySessionRecency = new Map<string, true>();
 const historyPageRecency = new Map<string, { sessionId: string; beforeCursor: string }>();
@@ -203,6 +207,11 @@ export function getSessionMessageWindowRevision(sessionId: string): number {
   return messageWindowRevisions.get(sessionId) ?? 0;
 }
 
+export function getSessionMessageWindowStateVersion(sessionId: string): number {
+  messageWindowStateVersion();
+  return messageWindowStateVersions.get(sessionId) ?? defaultMessageWindowStateVersion;
+}
+
 export function invalidateSessionMessageWindowRequests(sessionId: string) {
   messageWindowRevisions.set(sessionId, ++nextMessageWindowRevision);
 }
@@ -215,6 +224,9 @@ export function resetMessageWindowState() {
   messageWindowRevisions.clear();
   pendingMessageWindowResets.clear();
   nextMessageWindowRevision = 0;
+  messageWindowStateVersions.clear();
+  defaultMessageWindowStateVersion = ++nextMessageWindowStateVersion;
+  setMessageWindowStateVersion((version) => version + 1);
   prefetchedHistoryPages.clear();
   historySessionRecency.clear();
   historyPageRecency.clear();
@@ -268,6 +280,8 @@ function pruneHistoryPageCache() {
 
 function clearSessionMessageWindowStateInternal(sessionId: string) {
   invalidateSessionMessageWindowRequests(sessionId);
+  messageWindowStateVersions.set(sessionId, ++nextMessageWindowStateVersion);
+  setMessageWindowStateVersion((version) => version + 1);
   historyCursors.delete(sessionId);
   historyPromptCursors.delete(sessionId);
   consumedHistoryCursors.delete(sessionId);

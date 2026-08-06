@@ -1001,6 +1001,133 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('yields post-prepend settling to continued native user movement', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=assistant-heavy-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    const historyBanner = page.locator('.message-history-banner');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(historyBanner).toHaveClass(/is-loading/);
+
+    await list.evaluate((element) => {
+      element.tabIndex = 0;
+      element.focus();
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      const track = element.querySelector('.interactive-list-track')!;
+      const initialIds = new Set(
+        [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].map((row) => row.dataset.msgId)
+      );
+      const observer = new MutationObserver(() => {
+        const hasPrependedRow = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].some(
+          (row) => !initialIds.has(row.dataset.msgId)
+        );
+        if (!hasPrependedRow) return;
+        observer.disconnect();
+        let restoreFrameAttempts = 0;
+        let restoreMicrotaskAttempts = 0;
+        const moveAfterSynchronousRestore = () => {
+          if (element.scrollTop <= 120) {
+            restoreMicrotaskAttempts += 1;
+            if (restoreMicrotaskAttempts < 10) {
+              queueMicrotask(moveAfterSynchronousRestore);
+              return;
+            }
+            restoreMicrotaskAttempts = 0;
+            restoreFrameAttempts += 1;
+            if (restoreFrameAttempts >= 60) {
+              (
+                window as Window & {
+                  postPrependUserMovementError?: string;
+                }
+              ).postPrependUserMovementError = 'Post-prepend scroll restoration did not settle';
+              return;
+            }
+            requestAnimationFrame(moveAfterSynchronousRestore);
+            return;
+          }
+          const requestedTop = element.scrollTop - 120;
+          element.scrollTop = requestedTop;
+          element.dispatchEvent(new Event('scroll'));
+          const bounds = element.getBoundingClientRect();
+          const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
+            (candidate) => {
+              const rect = candidate.getBoundingClientRect();
+              return rect.bottom > bounds.top && rect.top < bounds.bottom;
+            }
+          );
+          if (!row?.dataset.msgId) throw new Error('Post-prepend user anchor is missing');
+          (
+            window as Window & {
+              postPrependUserMovement?: { id: string; top: number; scrollTop: number };
+            }
+          ).postPrependUserMovement = {
+            id: row.dataset.msgId,
+            top: row.getBoundingClientRect().top - bounds.top,
+            scrollTop: element.scrollTop,
+          };
+        };
+        queueMicrotask(moveAfterSynchronousRestore);
+      });
+      observer.observe(track, { childList: true, subtree: true });
+    });
+
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { releaseNextHistoryRequest?: () => boolean };
+      };
+      if (!harness.__varroE2E?.releaseNextHistoryRequest?.()) {
+        throw new Error('Deferred history page was not pending');
+      }
+    });
+    await expect
+      .poll(async () => {
+        const result = await page.evaluate(() => {
+          const movementWindow = window as Window & {
+            postPrependUserMovement?: { id: string; top: number; scrollTop: number };
+            postPrependUserMovementError?: string;
+          };
+          return {
+            movement: movementWindow.postPrependUserMovement ?? null,
+            error: movementWindow.postPrependUserMovementError ?? null,
+          };
+        });
+        if (result.error) return `error:${result.error}`;
+        return result.movement ? 'ready' : 'pending';
+      })
+      .not.toBe('pending');
+    const movementResult = await page.evaluate(() => {
+      const movementWindow = window as Window & {
+        postPrependUserMovement?: { id: string; top: number; scrollTop: number };
+        postPrependUserMovementError?: string;
+      };
+      return {
+        movement: movementWindow.postPrependUserMovement ?? null,
+        error: movementWindow.postPrependUserMovementError ?? null,
+      };
+    });
+    if (movementResult.error) throw new Error(movementResult.error);
+    if (!movementResult.movement) throw new Error('Post-prepend user movement is missing');
+    const userMovement = movementResult.movement;
+
+    const samples = await sampleMessageTopAcrossFrames(list, userMovement.id, 6);
+    const finalScrollTop = await list.evaluate((element) => element.scrollTop);
+    expect(Math.abs(finalScrollTop - userMovement.scrollTop)).toBeLessThanOrEqual(1.5);
+    for (const top of samples) {
+      expect(top).not.toBeNull();
+      expect(
+        Math.abs(top! - userMovement.top),
+        JSON.stringify({ userMovement, samples })
+      ).toBeLessThan(1.5);
+    }
+  });
+
   test('does not restore a stale history anchor after the user scrolls during the request', async ({
     page,
   }) => {

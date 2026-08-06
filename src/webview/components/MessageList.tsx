@@ -28,6 +28,7 @@ import {
   messageInfoVersion,
   showModelPicker,
   compactToolOutput,
+  showThinking,
   showInlineFileChanges,
 } from '../lib/state';
 import {
@@ -40,6 +41,7 @@ import {
 import { isAssistantMessage } from '../lib/message-metrics';
 import {
   getFinalAssistantTextPartId,
+  hasVisibleReasoningContent,
   isWorkspaceDirectoryText,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
@@ -50,9 +52,13 @@ import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
   getPrefetchedSessionHistory,
+  getSessionHistoryCursor,
+  getSessionHistoryPromptCursor,
   getSessionHistoryPrompts,
+  getSessionMessageWindowStateVersion,
   isSessionHistoryLoadFailed,
   isSessionHistoryTruncated,
+  isSessionMessageWindowResetPending,
   markSessionHistoryLoadFailed,
   mergeOlderHistory,
 } from '../lib/message-window';
@@ -227,6 +233,28 @@ export function getCompactActivityLayoutSignatures(
   return signatures;
 }
 
+function getThinkingLayoutSignatures(
+  messages: readonly {
+    info: { id: string; role: 'user' | 'assistant' };
+    parts: readonly Part[];
+  }[],
+  enabled: boolean
+) {
+  const signatures = new Map<string, string>();
+  if (!enabled) return signatures;
+
+  for (const message of messages) {
+    if (message.info.role !== 'assistant') continue;
+    const reasoningPartIds = message.parts.flatMap((part) =>
+      part.type === 'reasoning' && hasVisibleReasoningContent(part.text) ? [part.id] : []
+    );
+    if (reasoningPartIds.length > 0) {
+      signatures.set(message.info.id, reasoningPartIds.join('\u0000'));
+    }
+  }
+  return signatures;
+}
+
 export function getCompactActivityDisclosureLayoutSignatures(
   groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
   isExpanded: (key: string) => boolean
@@ -276,6 +304,8 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
 }
 
 export function MessageList() {
+  type HistoryLoadingOwner = { windowVersion: number };
+
   // oxlint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   // oxlint-disable-next-line no-unassigned-vars
@@ -285,29 +315,63 @@ export function MessageList() {
   const [promptNumberReadySessionIds, setPromptNumberReadySessionIds] = createSignal<
     ReadonlySet<string>
   >(new Set());
-  const promptNumberLoads = new Map<string, Promise<void>>();
+  const promptNumberLoads = new Map<
+    string,
+    { generation: number; windowVersion: number; promise: Promise<void> }
+  >();
+  const promptNumberReadyWindowVersions = new Map<string, number>();
   let promptNumberSessionId: string | null = null;
+  let promptNumberSessionWindowVersion = 0;
+  let promptNumberHoldGeneration = 0;
   let altHeld = false;
   let disposed = false;
 
-  function ensurePromptNumbersReady(sessionId: string) {
+  function ensurePromptNumbersReady(
+    sessionId: string,
+    generation = promptNumberHoldGeneration
+  ): Promise<void> {
+    const windowVersion = getSessionMessageWindowStateVersion(sessionId);
     const existing = promptNumberLoads.get(sessionId);
-    if (existing) return existing;
+    if (existing?.generation === generation && existing.windowVersion === windowVersion) {
+      return existing.promise;
+    }
 
-    const load = (async () => {
+    const pendingLoad = (async () => {
       while (await loadOlderSessionPrompts(sessionId)) {
         // Continue until the prompt cursor reaches the beginning of the session.
       }
-      if (disposed) return;
+      if (
+        disposed ||
+        generation !== promptNumberHoldGeneration ||
+        state.activeSessionId !== sessionId ||
+        getSessionMessageWindowStateVersion(sessionId) !== windowVersion ||
+        isSessionMessageWindowResetPending(sessionId) ||
+        getSessionHistoryPromptCursor(sessionId)
+      ) {
+        return;
+      }
+      promptNumberReadyWindowVersions.set(sessionId, windowVersion);
       setPromptNumberReadySessionIds((current) => new Set(current).add(sessionId));
-    })().finally(() => promptNumberLoads.delete(sessionId));
-    promptNumberLoads.set(sessionId, load);
+    })();
+    const load = pendingLoad.finally(() => {
+      if (promptNumberLoads.get(sessionId)?.promise === load) promptNumberLoads.delete(sessionId);
+    });
+    promptNumberLoads.set(sessionId, { generation, windowVersion, promise: load });
     return load;
+  }
+
+  function promptNumbersReady(sessionId: string) {
+    return (
+      promptNumberReadySessionIds().has(sessionId) &&
+      promptNumberReadyWindowVersions.get(sessionId) ===
+        getSessionMessageWindowStateVersion(sessionId)
+    );
   }
 
   function showPromptNumbersForAlt() {
     if (altHeld) return;
     altHeld = true;
+    promptNumberHoldGeneration += 1;
     setShowPromptNumbers(true);
     const sessionId = state.activeSessionId;
     if (sessionId) void ensurePromptNumbersReady(sessionId);
@@ -342,9 +406,17 @@ export function MessageList() {
   });
   createEffect(() => {
     const sessionId = state.activeSessionId;
-    if (sessionId !== promptNumberSessionId) {
+    const windowVersion = sessionId ? getSessionMessageWindowStateVersion(sessionId) : 0;
+    if (sessionId !== promptNumberSessionId || windowVersion !== promptNumberSessionWindowVersion) {
+      const sessionChanged = sessionId !== promptNumberSessionId;
       promptNumberSessionId = sessionId;
-      if (sessionId) {
+      promptNumberSessionWindowVersion = windowVersion;
+      if (sessionChanged) {
+        promptNumberLoads.clear();
+        promptNumberReadyWindowVersions.clear();
+        setPromptNumberReadySessionIds(new Set<string>());
+      } else if (sessionId) {
+        promptNumberReadyWindowVersions.delete(sessionId);
         setPromptNumberReadySessionIds((current) => {
           if (!current.has(sessionId)) return current;
           const next = new Set(current);
@@ -353,15 +425,16 @@ export function MessageList() {
         });
       }
     }
-    if (!showPromptNumbers() || !sessionId || promptNumberReadySessionIds().has(sessionId)) return;
+    if (!showPromptNumbers() || !sessionId || promptNumbersReady(sessionId)) return;
     void ensurePromptNumbersReady(sessionId);
   });
   const promptNumbersVisible = createMemo(() => {
     const sessionId = state.activeSessionId;
-    return !!sessionId && showPromptNumbers() && promptNumberReadySessionIds().has(sessionId);
+    return !!sessionId && showPromptNumbers() && promptNumbersReady(sessionId);
   });
   const lastAssistantID = createMemo(() => {
-    const msgs = state.messages;
+    messageStructureVersion();
+    const msgs = getVisibleThreadMessages(state.messages, state.activeSessionId, state.sessions);
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (isAssistantMessage(msgs[i]!.info)) return msgs[i]!.info.id;
     }
@@ -422,11 +495,18 @@ export function MessageList() {
   let lastScrollInputAt = Number.NEGATIVE_INFINITY;
   let userScrollOwnershipEpoch = 0;
   let activeSessionGeneration = 0;
-  let historyAnchorSettleOwner: { sessionId: string; generation: number } | null = null;
+  let historyAnchorSettleOwner: {
+    sessionId: string;
+    generation: number;
+    windowVersion: number;
+  } | null = null;
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
-  const activeOlderHistoryLoads = new Map<string, { generation: number; promise: Promise<void> }>();
+  const activeOlderHistoryLoads = new Map<
+    string,
+    { generation: number; windowVersion: number; promise: Promise<void> }
+  >();
   const pendingOlderHistoryAnchors = new Map<
     string,
     {
@@ -437,8 +517,16 @@ export function MessageList() {
       previousScrollHeight: number;
       previousScrollTop: number;
       ownershipEpoch: number;
+      windowVersion: number;
     }
   >();
+  function getCurrentPendingHistoryAnchor(sessionId: string) {
+    const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
+    return pendingAnchor?.generation === activeSessionGeneration &&
+      pendingAnchor.windowVersion === getSessionMessageWindowStateVersion(sessionId)
+      ? pendingAnchor
+      : undefined;
+  }
   let pendingStructuralScrollAnchor: {
     anchor: VisibleScrollAnchor;
     sessionId: string | null;
@@ -454,6 +542,8 @@ export function MessageList() {
   let pendingWidthMeasurementPublish = false;
   let pendingWidthStickyRefresh = false;
   let pendingWidthFollowCorrection = false;
+  let widthResizeAnchor: VisibleScrollAnchor | null = null;
+  let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
@@ -474,10 +564,22 @@ export function MessageList() {
   const [pendingStickyJump, setPendingStickyJump] = createSignal<{
     sessionId: string;
     preview: StickyUserMessagePreview;
+    windowVersion: number;
+    loadingOwner?: HistoryLoadingOwner;
   } | null>(null);
   const displayedStickyUserMessagePreview = createMemo(
     () => pendingStickyJump()?.preview ?? stickyUserMessagePreview()
   );
+  createEffect(() => {
+    const jump = pendingStickyJump();
+    if (
+      jump &&
+      (state.activeSessionId !== jump.sessionId ||
+        getSessionMessageWindowStateVersion(jump.sessionId) !== jump.windowVersion)
+    ) {
+      cancelStickyNavigation();
+    }
+  });
 
   function stickyNavigationOwnsScroll() {
     return stickyNavigationInProgress() || pendingStickyJump() !== null;
@@ -487,18 +589,18 @@ export function MessageList() {
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
   const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
-  const [loadingOlderHistorySessionIds, setLoadingOlderHistorySessionIds] = createSignal<
-    ReadonlySet<string>
-  >(new Set());
+  const [loadingOlderHistoryOwners, setLoadingOlderHistoryOwners] = createSignal<
+    ReadonlyMap<string, HistoryLoadingOwner>
+  >(new Map());
   const activeUsageLimit = createMemo(() => {
     const notice = getActiveUsageLimitNotice(state.activeSessionId);
     return notice && shouldDisplayUsageLimitNotice(notice) ? notice : null;
   });
   const activeSessionWorking = createMemo(() => isActiveSessionWorking());
   const shouldShowStarterLogo = createMemo(() => {
-    if (state.messages.length > 0) return false;
-
     const sessionId = state.activeSessionId;
+    if (getVisibleThreadMessages(state.messages, sessionId, state.sessions).length > 0)
+      return false;
     if (!sessionId) return true;
 
     const session = state.sessions.find((candidate) => candidate.id === sessionId);
@@ -544,7 +646,8 @@ export function MessageList() {
   });
   const latestPlanImplementationMessageId = createMemo(() => {
     messageInfoVersion();
-    return untrack(() => getLatestPlanImplementationMessageId(state.messages));
+    const visibleMessages = messages();
+    return untrack(() => getLatestPlanImplementationMessageId(visibleMessages));
   });
   const streamingPart = createMemo(() => {
     const streamingPartId = state.streamingPartId;
@@ -669,10 +772,10 @@ export function MessageList() {
     scheduleStickyPreviewFrame();
   }
 
-  function publishPendingWidthMeasurements() {
+  function publishPendingWidthMeasurements(options?: { preserveVisibleAnchor?: boolean }) {
     if (!pendingWidthMeasurementPublish) return false;
     pendingWidthMeasurementPublish = false;
-    publishMeasurementVersion();
+    publishMeasurementVersion(options);
     return true;
   }
 
@@ -687,6 +790,7 @@ export function MessageList() {
     pendingWidthStickyRefresh = false;
     pendingWidthFollowCorrection = false;
     publishPendingWidthMeasurements();
+    widthResizeAnchor = null;
 
     if (refreshStickyPreview) {
       scheduleStickyPreviewGeometryRefresh({ force: true });
@@ -709,6 +813,13 @@ export function MessageList() {
   }
 
   function beginWidthResize(options?: { fontChanged?: boolean }) {
+    if (!widthResizeAnchor && !autoScroll()) {
+      const rememberedAnchor =
+        lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+          ? lastDetachedVisibleAnchor
+          : null;
+      widthResizeAnchor = rememberedAnchor ?? captureMountedVisibleScrollAnchor();
+    }
     widthResizeActive = true;
     widthResizeIncludesFontChange ||= !!options?.fontChanged;
     pendingWidthStickyRefresh = true;
@@ -738,6 +849,7 @@ export function MessageList() {
     pendingWidthMeasurementPublish = false;
     pendingWidthStickyRefresh = false;
     pendingWidthFollowCorrection = false;
+    widthResizeAnchor = null;
   }
 
   function finishWidthResizeNow() {
@@ -756,6 +868,7 @@ export function MessageList() {
   let cachedVirtualMetrics: VirtualMetrics | null = null;
   let cachedVirtualMetricsItemIds: string[] | null = null;
   let dirtyVirtualMetricsFromIndex = Number.POSITIVE_INFINITY;
+  let lastVirtualContentOrigin = 0;
   let previousResizeMessageIds: readonly string[] | null = null;
   let loadingRowReappearTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
@@ -763,6 +876,40 @@ export function MessageList() {
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
+
+  function getVirtualContentOrigin() {
+    if (!containerRef) return lastVirtualContentOrigin;
+    if (!trackRef) return lastVirtualContentOrigin;
+
+    const trackOffset =
+      trackRef.getBoundingClientRect().top -
+      containerRef.getBoundingClientRect().top +
+      containerRef.scrollTop;
+    // Synthetic/no-layout environments often return a fixed track rect while scrollTop changes.
+    // That is not a content origin and must not be allowed to shift every virtual prefix.
+    if (!Number.isFinite(trackOffset) || Math.abs(trackOffset) > 1) return 0;
+
+    const trackStyles = getComputedStyle(trackRef);
+    let origin = trackOffset + (Number.parseFloat(trackStyles.paddingTop) || 0);
+    const historyBanner = trackRef.querySelector<HTMLElement>('.message-history-banner');
+    if (historyBanner) {
+      const bannerStyles = getComputedStyle(historyBanner);
+      origin +=
+        historyBanner.getBoundingClientRect().height +
+        (Number.parseFloat(bannerStyles.marginTop) || 0) +
+        (Number.parseFloat(bannerStyles.marginBottom) || 0);
+    }
+    if (Number.isFinite(origin)) lastVirtualContentOrigin = origin;
+    return lastVirtualContentOrigin;
+  }
+
+  function getVirtualScrollTop(containerScrollTop: number) {
+    return containerScrollTop - getVirtualContentOrigin();
+  }
+
+  function getContainerScrollTopForVirtualOffset(offset: number) {
+    return offset + getVirtualContentOrigin();
+  }
 
   function flushRowHeightCorrections() {
     rowHeightCorrectionScheduled = false;
@@ -937,6 +1084,10 @@ export function MessageList() {
     getCompactActivityLayoutSignatures(messages(), compactToolOutput())
   );
   let previousCompactActivityLayoutSignatures = new Map<string, string>();
+  const thinkingLayoutSignatures = createMemo(() =>
+    getThinkingLayoutSignatures(messages(), showThinking())
+  );
+  let previousThinkingLayoutSignatures = new Map<string, string>();
 
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
@@ -1028,7 +1179,7 @@ export function MessageList() {
       !pendingExpansionScrollAnchor &&
       !pendingStructuralScrollAnchor &&
       !diffFocusPauseActive &&
-      !(activeSessionId && pendingOlderHistoryAnchors.has(activeSessionId))
+      !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? captureVisibleScrollAnchor()
         : null;
     const publishChangedLayout = () => {
@@ -1075,6 +1226,13 @@ export function MessageList() {
     scheduleChangedLayoutRowMeasurements(previousCompactActivityLayoutSignatures, current);
 
     previousCompactActivityLayoutSignatures = new Map(current);
+  });
+
+  createEffect(() => {
+    const current = thinkingLayoutSignatures();
+    scheduleChangedLayoutRowMeasurements(previousThinkingLayoutSignatures, current);
+
+    previousThinkingLayoutSignatures = new Map(current);
   });
 
   createEffect(() => {
@@ -1244,7 +1402,7 @@ export function MessageList() {
   const visibleRange = createMemo<VisibleRange>(
     () => {
       const msgs = messages();
-      loadingOlderHistorySessionIds();
+      loadingOlderHistoryOwners();
       if (!shouldVirtualize() || msgs.length === 0) {
         return {
           start: 0,
@@ -1258,11 +1416,11 @@ export function MessageList() {
       const metrics = virtualMetrics();
       const range = calculateVirtualRangeFromMetrics({
         metrics,
-        scrollTop: scrollTop(),
+        scrollTop: getVirtualScrollTop(scrollTop()),
         viewportHeight: viewportHeight(),
       });
       const sessionId = state.activeSessionId;
-      const pendingAnchor = sessionId ? pendingOlderHistoryAnchors.get(sessionId) : undefined;
+      const pendingAnchor = sessionId ? getCurrentPendingHistoryAnchor(sessionId) : undefined;
       const anchorIndex =
         pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
           ? messageIndexById().get(pendingAnchor.anchor.messageId)
@@ -1385,11 +1543,14 @@ export function MessageList() {
     const virtualized = shouldVirtualize();
     const currentVisibleRange = untrack(() =>
       virtualized
-        ? calculateVirtualRangeFromMetrics({
-            metrics: virtualMetrics(),
-            scrollTop: currentScrollTop,
-            viewportHeight: currentViewportHeight,
-          })
+        ? (() => {
+            const metrics = virtualMetrics();
+            return calculateVirtualRangeFromMetrics({
+              metrics,
+              scrollTop: getVirtualScrollTop(currentScrollTop),
+              viewportHeight: currentViewportHeight,
+            });
+          })()
         : visibleRange()
     );
     const containerRect = containerRef.getBoundingClientRect();
@@ -1411,9 +1572,10 @@ export function MessageList() {
     }
 
     if (firstVisibleMessageIndex === null && virtualized) {
+      const metrics = untrack(virtualMetrics);
       firstVisibleMessageIndex = getFirstVisibleMessageIndexFromVirtualMetrics({
-        metrics: untrack(virtualMetrics),
-        scrollTop: currentScrollTop,
+        metrics,
+        scrollTop: getVirtualScrollTop(currentScrollTop),
       });
     }
 
@@ -1425,13 +1587,13 @@ export function MessageList() {
       visibleMessages[firstVisibleMessageIndex]?.info.role === 'assistant'
     ) {
       const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
-      const boundaryPrompt = getSessionHistoryPrompts(state.activeSessionId)
-        .toReversed()
-        .find((entry) => !loadedMessageIds.has(entry.info.id));
-      if (boundaryPrompt) {
+      const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId).filter(
+        (entry) => !loadedMessageIds.has(entry.info.id)
+      );
+      if (boundaryPrompts.length > 0) {
         const boundaryPreview = getStickyUserMessagePreview(
-          [boundaryPrompt, visibleMessages[firstVisibleMessageIndex]!],
-          1
+          [...boundaryPrompts, visibleMessages[firstVisibleMessageIndex]!],
+          boundaryPrompts.length
         );
         if (boundaryPreview) {
           preview = { ...boundaryPreview, index: -1 };
@@ -1542,17 +1704,23 @@ export function MessageList() {
     return measureMountedRows([{ element, messageId }]);
   }
 
-  function applyRowHeightMeasurements(measurements: Array<{ messageId: string; height: number }>) {
+  function applyRowHeightMeasurements(
+    measurements: Array<{ messageId: string; height: number }>,
+    options?: { widthReflow?: boolean }
+  ) {
     // ResizeObserver reports after layout. Use the old prefix metrics to offset growth above the
     // viewport before paint, including while the user is actively scrolling.
     const metricsBefore = containerRef && shouldVirtualize() ? virtualMetrics() : null;
-    const firstVisibleIndex =
-      metricsBefore && containerRef && !autoScroll()
-        ? getFirstVisibleMessageIndexFromVirtualMetrics({
-            metrics: metricsBefore,
-            scrollTop: containerRef.scrollTop,
-          })
-        : null;
+    let firstVisibleIndex: number | null = null;
+    if (metricsBefore && containerRef && !autoScroll()) {
+      firstVisibleIndex =
+        options?.widthReflow && widthResizeAnchor
+          ? (messageIndexById().get(widthResizeAnchor.messageId) ?? null)
+          : getFirstVisibleMessageIndexFromVirtualMetrics({
+              metrics: metricsBefore,
+              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+            });
+    }
     let scrollAdjustment = 0;
     let changed = false;
 
@@ -1583,6 +1751,9 @@ export function MessageList() {
 
     if (containerRef && Math.abs(scrollAdjustment) > 0.5) {
       setPreservedScrollTop(containerRef.scrollTop + scrollAdjustment);
+    }
+    if (widthResizeActive && widthResizeAnchor) {
+      restoreVisibleScrollAnchor(widthResizeAnchor);
     }
 
     return changed;
@@ -1630,9 +1801,9 @@ export function MessageList() {
       widthReflowOnly = false;
     }
 
-    if (!applyRowHeightMeasurements(measurements)) return;
-
     if (widthReflowOnly) beginWidthResize();
+    if (!applyRowHeightMeasurements(measurements, { widthReflow: widthReflowOnly })) return;
+
     scheduleMeasurementPublish(widthReflowOnly ? 'width' : 'content');
     scheduleStickyPreviewGeometryRefresh({ force: !widthReflowOnly });
     scheduleVisibleMeasurement({ afterResize: true, widthResize: widthReflowOnly });
@@ -1727,13 +1898,15 @@ export function MessageList() {
     const metrics = virtualMetrics();
     const index = getFirstVisibleMessageIndexFromVirtualMetrics({
       metrics,
-      scrollTop: containerRef.scrollTop,
+      scrollTop: getVirtualScrollTop(containerRef.scrollTop),
     });
     const messageId = index === null ? null : messageIds()[index];
     if (index !== null && messageId) {
       return {
         messageId,
-        top: (metrics.prefix[index] ?? 0) - containerRef.scrollTop,
+        top:
+          getContainerScrollTopForVirtualOffset(metrics.prefix[index] ?? 0) -
+          containerRef.scrollTop,
         topPad: visibleRange().topPad,
       };
     }
@@ -1742,6 +1915,23 @@ export function MessageList() {
 
   function captureMountedVisibleScrollAnchor() {
     return captureMountedVisibleScrollAnchorWithTopPad(0);
+  }
+
+  function captureDetachedVisibleScrollAnchor(containerScrollTop: number) {
+    if (!shouldVirtualize()) return captureMountedVisibleScrollAnchor();
+
+    const metrics = virtualMetrics();
+    const index = getFirstVisibleMessageIndexFromVirtualMetrics({
+      metrics,
+      scrollTop: containerScrollTop - lastVirtualContentOrigin,
+    });
+    const messageId = index === null ? null : messageIds()[index];
+    if (index === null || !messageId) return null;
+    return {
+      messageId,
+      top: lastVirtualContentOrigin + (metrics.prefix[index] ?? 0) - containerScrollTop,
+      topPad: 0,
+    };
   }
 
   function genericStructuralAnchorCanOwnScroll(sessionId: string | null) {
@@ -1756,9 +1946,7 @@ export function MessageList() {
       editingMessage() ||
       pendingExpansionScrollAnchor ||
       diffFocusPauseActive ||
-      pointerScrollOwnershipActive ||
-      userScrollRecentlyActive() ||
-      (sessionId && pendingOlderHistoryAnchors.has(sessionId))
+      (sessionId && getCurrentPendingHistoryAnchor(sessionId))
     );
   }
 
@@ -1810,8 +1998,8 @@ export function MessageList() {
   }) {
     const sessionId = options?.sessionId ?? state.activeSessionId;
     if (!sessionId || !containerRef) return false;
-    const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
-    if (!pendingAnchor || pendingAnchor.generation !== activeSessionGeneration) return false;
+    const pendingAnchor = getCurrentPendingHistoryAnchor(sessionId);
+    if (!pendingAnchor) return false;
     if (pendingAnchor.invalidated && options?.owner !== 'edit') return false;
     if (options?.advanceOwnership) userScrollOwnershipEpoch += 1;
     if (options?.owner) pendingAnchor.owner = options.owner;
@@ -1850,11 +2038,10 @@ export function MessageList() {
   function restorePendingHistoryAnchorIfMounted() {
     const sessionId = state.activeSessionId;
     if (!sessionId) return false;
-    const pendingAnchor = pendingOlderHistoryAnchors.get(sessionId);
+    const pendingAnchor = getCurrentPendingHistoryAnchor(sessionId);
     if (
       !pendingAnchor ||
       pendingAnchor.invalidated ||
-      pendingAnchor.generation !== activeSessionGeneration ||
       pendingAnchor.ownershipEpoch !== userScrollOwnershipEpoch ||
       !pendingAnchor.anchor ||
       !getMountedScrollAnchorElement(pendingAnchor.anchor)
@@ -1879,7 +2066,11 @@ export function MessageList() {
         if (options?.useMessageOffsetFallback) {
           const index = messageIndexById().get(anchor.messageId);
           if (index !== undefined) {
-            delta = (virtualMetrics().prefix[index] ?? 0) - containerRef.scrollTop - anchor.top;
+            const metrics = virtualMetrics();
+            delta =
+              getContainerScrollTopForVirtualOffset(metrics.prefix[index] ?? 0) -
+              containerRef.scrollTop -
+              anchor.top;
           }
         } else {
           delta = visibleRange().topPad - anchor.topPad;
@@ -1894,8 +2085,8 @@ export function MessageList() {
     return true;
   }
 
-  function publishMeasurementVersion() {
-    if (!containerRef) {
+  function publishMeasurementVersion(options?: { preserveVisibleAnchor?: boolean }) {
+    if (!containerRef || options?.preserveVisibleAnchor === false) {
       setMeasurementVersion((version) => version + 1);
       return;
     }
@@ -1916,7 +2107,9 @@ export function MessageList() {
     setMeasurementVersion((version) => version + 1);
 
     queueMicrotask(() => {
-      if (!stickyNavigationOwnsScroll()) restoreVisibleScrollAnchor(anchor);
+      if (!stickyNavigationOwnsScroll() && !userScrollRecentlyActive()) {
+        restoreVisibleScrollAnchor(anchor);
+      }
     });
   }
 
@@ -2227,7 +2420,9 @@ export function MessageList() {
   function userScrollRecentlyActive() {
     const now = performance.now();
     return (
-      now - lastWheelAt <= USER_SCROLL_IDLE_MS || now - lastUserScrollAt <= USER_SCROLL_IDLE_MS
+      now - lastWheelAt <= USER_SCROLL_IDLE_MS ||
+      now - lastUserScrollAt <= USER_SCROLL_IDLE_MS ||
+      now - lastScrollInputAt <= USER_SCROLL_IDLE_MS
     );
   }
 
@@ -2364,7 +2559,9 @@ export function MessageList() {
       reconcileAppendBottomReserve();
       const target = bottomScrollTop();
       const progress = Math.min(1, Math.max(0, (now - startedAt) / APPEND_SCROLL_TRANSITION_MS));
-      const nextTop = startTop + (target - startTop) * progress;
+      const interpolatedTop = startTop + (target - startTop) * progress;
+      const nextTop =
+        target >= startTop ? Math.max(container.scrollTop, interpolatedTop) : interpolatedTop;
       suppressSyncScrollTop = true;
       container.scrollTop = nextTop;
       suppressSyncScrollTop = false;
@@ -2559,15 +2756,21 @@ export function MessageList() {
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
     const scrollDelta = top - lastObservedScrollTop;
-    const historyAnchorSettling =
+    let historyAnchorSettling =
       historyAnchorSettleOwner?.sessionId === state.activeSessionId &&
-      historyAnchorSettleOwner.generation === activeSessionGeneration;
+      historyAnchorSettleOwner.generation === activeSessionGeneration &&
+      historyAnchorSettleOwner.windowVersion ===
+        getSessionMessageWindowStateVersion(historyAnchorSettleOwner.sessionId);
     const userScrollInputActive =
       pointerScrollOwnershipActive ||
       now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS ||
       now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS ||
       now - lastUserOwnedScrollMovementAt <= USER_SCROLL_IDLE_MS;
     const actualScrollMovement = !suppressSyncScrollTop && Math.abs(scrollDelta) > 0.5;
+    if (actualScrollMovement && historyAnchorSettling && userScrollInputActive) {
+      historyAnchorSettleOwner = null;
+      historyAnchorSettling = false;
+    }
     // Layout-driven scroll events during history settling belong to the history anchor, not the
     // wheel gesture that originally reached the boundary.
     if (actualScrollMovement && !historyAnchorSettling) {
@@ -2671,6 +2874,9 @@ export function MessageList() {
         if (sessionId) startFollowLoop(sessionId);
       });
     }
+    if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
+      lastDetachedVisibleAnchor = captureDetachedVisibleScrollAnchor(top);
+    }
     if (
       top <= 24 &&
       showTruncatedHistoryBanner() &&
@@ -2682,11 +2888,14 @@ export function MessageList() {
   }
 
   function onWheel(event: WheelEvent) {
-    if (widthResizeActive) publishPendingWidthMeasurements();
+    if (widthResizeActive) {
+      publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
+      widthResizeAnchor = null;
+    }
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (nestedScrollerWillConsumeWheel(event)) return;
     historyAnchorSettleOwner = null;
     const deltaY = getWheelDeltaPixels(event);
-    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (containerRef && deltaY < -0.5) {
       const currentStickyPreview = untrack(stickyUserMessagePreview);
       const currentStickySource = currentStickyPreview
@@ -2733,6 +2942,14 @@ export function MessageList() {
       if (autoScroll() || pinnedToBottom || followModeLocked) {
         disengageBottomFollow();
         resumeAutoScrollAfterDiffFocus = false;
+      }
+      if (
+        containerRef &&
+        containerRef.scrollTop <= 24 &&
+        showTruncatedHistoryBanner() &&
+        !stickyNavigationOwnsScroll()
+      ) {
+        void handleLoadOlderHistory();
       }
     }
   }
@@ -2797,11 +3014,19 @@ export function MessageList() {
     }
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
-    if (widthResizeActive) publishPendingWidthMeasurements();
+    if (widthResizeActive) {
+      publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
+      widthResizeAnchor = null;
+    }
     lastScrollInputAt = performance.now();
   }
 
   function cancelStickyNavigation() {
+    const jump = pendingStickyJump();
+    if (jump?.loadingOwner) {
+      setLoadingOlderHistory(jump.sessionId, false, jump.loadingOwner);
+      delete jump.loadingOwner;
+    }
     deferredScrollToBottomRequestKey = null;
     stickyJumpSettleEpoch += 1;
     setStickyNavigationInProgress(false);
@@ -2840,7 +3065,10 @@ export function MessageList() {
           : event.clientX >= rect.right - gutterWidth && event.clientX <= rect.right;
       if (!inScrollbarGutter) return;
     }
-    if (widthResizeActive) publishPendingWidthMeasurements();
+    if (widthResizeActive) {
+      publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
+      widthResizeAnchor = null;
+    }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     historyAnchorSettleOwner = null;
     pointerScrollOwnershipActive = true;
@@ -3276,6 +3504,8 @@ export function MessageList() {
     setHasBootstrappedVirtualization(false);
     setAppendBottomReserve(0);
     appendBottomReserveTarget = 0;
+    lastVirtualContentOrigin = 0;
+    lastDetachedVisibleAnchor = null;
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
     setMeasurementVersion((version) => version + 1);
@@ -3466,11 +3696,12 @@ export function MessageList() {
 
   const previousTrailingFileEventSignatureMap = createMemo(() => {
     messageStructureVersion();
+    const visibleMessages = messages();
     return untrack(() => {
       const result = new Map<string, string | null>();
       let previousTrailingSignature: string | null = null;
 
-      for (const msg of state.messages) {
+      for (const msg of visibleMessages) {
         result.set(msg.info.id, previousTrailingSignature);
 
         if (!isAssistantMessage(msg.info)) {
@@ -3580,6 +3811,7 @@ export function MessageList() {
     return untrack(() =>
       getAssistantDialogSummaryMap(dialogMessages, undefined, {
         sessions,
+        primarySessionId: state.activeSessionId ?? undefined,
         suppressTrailingSummary,
         collectLeadingSummaryStats,
       })
@@ -3626,7 +3858,10 @@ export function MessageList() {
       if (!row) {
         previousMeasurementVersion = -1;
         if (shouldVirtualize()) {
-          const nextScrollTop = virtualMetrics().prefix[messageIndex] ?? 0;
+          const metrics = virtualMetrics();
+          const nextScrollTop = getContainerScrollTopForVirtualOffset(
+            metrics.prefix[messageIndex] ?? 0
+          );
           container.scrollTop = nextScrollTop;
           setScrollTop(nextScrollTop);
           setStickyPreviewScrollTop(nextScrollTop);
@@ -3704,7 +3939,11 @@ export function MessageList() {
     }
     const sessionId = state.activeSessionId;
     if (sessionId) {
-      const jump = { sessionId, preview };
+      const jump = {
+        sessionId,
+        preview,
+        windowVersion: getSessionMessageWindowStateVersion(sessionId),
+      };
       setPendingStickyJump(jump);
       void loadAndScrollToStickyPreview(jump);
     }
@@ -3774,50 +4013,79 @@ export function MessageList() {
   async function loadAndScrollToStickyPreview(jump: {
     sessionId: string;
     preview: StickyUserMessagePreview;
+    windowVersion: number;
+    loadingOwner?: HistoryLoadingOwner;
   }) {
-    const { sessionId, preview } = jump;
+    const { sessionId, preview, windowVersion } = jump;
+    const releaseLoadingOwner = () => {
+      if (!jump.loadingOwner) return;
+      setLoadingOlderHistory(sessionId, false, jump.loadingOwner);
+      delete jump.loadingOwner;
+    };
     const clearPendingJump = () => {
+      releaseLoadingOwner();
       if (pendingStickyJump() === jump) setPendingStickyJump(null);
     };
+    const isCurrentJump = () =>
+      pendingStickyJump() === jump &&
+      state.activeSessionId === sessionId &&
+      getSessionMessageWindowStateVersion(sessionId) === windowVersion;
     const historyLoad = activeOlderHistoryLoads.get(sessionId);
-    if (historyLoad?.generation === activeSessionGeneration) await historyLoad.promise;
-    if (state.activeSessionId !== sessionId) {
+    if (
+      historyLoad?.generation === activeSessionGeneration &&
+      historyLoad.windowVersion === windowVersion
+    ) {
+      await historyLoad.promise;
+    }
+    if (!isCurrentJump()) {
       clearPendingJump();
       return;
     }
 
     const needsHistory = !messages().some((entry) => entry.info.id === preview.id);
-    const ownsLoadingState = needsHistory && !loadingOlderHistory(sessionId);
-    if (ownsLoadingState) setLoadingOlderHistory(sessionId, true);
+    if (needsHistory && !loadingOlderHistory(sessionId)) {
+      jump.loadingOwner = { windowVersion };
+      setLoadingOlderHistory(sessionId, true, jump.loadingOwner);
+    }
     if (needsHistory) {
       try {
-        while (
-          pendingStickyJump() === jump &&
-          state.activeSessionId === sessionId &&
-          !messages().some((entry) => entry.info.id === preview.id)
-        ) {
-          if (!(await loadOlderSessionHistoryPage(sessionId))) break;
+        let staleRetryCount = 0;
+        while (isCurrentJump() && !messages().some((entry) => entry.info.id === preview.id)) {
+          const cursorBeforeLoad = getSessionHistoryCursor(sessionId);
+          const loaded = await loadOlderSessionHistoryPage(sessionId);
+          if (!isCurrentJump()) break;
+          if (!loaded) {
+            if (
+              staleRetryCount >= 2 ||
+              getSessionHistoryCursor(sessionId) !== cursorBeforeLoad ||
+              !isSessionHistoryTruncated(sessionId) ||
+              isSessionHistoryLoadFailed(sessionId)
+            ) {
+              break;
+            }
+            staleRetryCount += 1;
+            await Promise.resolve();
+            continue;
+          }
+          staleRetryCount = 0;
         }
       } finally {
-        if (ownsLoadingState) setLoadingOlderHistory(sessionId, false);
+        releaseLoadingOwner();
       }
     }
-    if (state.activeSessionId !== sessionId) {
+    if (!isCurrentJump()) {
       clearPendingJump();
       return;
     }
     try {
-      const ready = await waitForMessageRow(preview, () => pendingStickyJump() === jump);
-      if (!ready || state.activeSessionId !== sessionId) return;
+      const ready = await waitForMessageRow(preview, isCurrentJump);
+      if (!ready || !isCurrentJump()) return;
       await waitForAnimationFrame();
-      if (state.activeSessionId === sessionId) {
+      if (isCurrentJump()) {
         const settleEpoch = ++stickyJumpSettleEpoch;
         await waitAndNavigateToMessage(
           preview,
-          () =>
-            pendingStickyJump() === jump &&
-            state.activeSessionId === sessionId &&
-            stickyJumpSettleEpoch === settleEpoch
+          () => isCurrentJump() && stickyJumpSettleEpoch === settleEpoch
         );
       }
     } finally {
@@ -3828,14 +4096,21 @@ export function MessageList() {
   const stickyPreviewTitle = 'Click to scroll to message';
 
   function loadingOlderHistory(sessionId = state.activeSessionId) {
-    return !!sessionId && loadingOlderHistorySessionIds().has(sessionId);
+    return (
+      !!sessionId &&
+      loadingOlderHistoryOwners().get(sessionId)?.windowVersion ===
+        getSessionMessageWindowStateVersion(sessionId)
+    );
   }
 
-  function setLoadingOlderHistory(sessionId: string, loading: boolean) {
-    setLoadingOlderHistorySessionIds((current) => {
-      if (current.has(sessionId) === loading) return current;
-      const next = new Set(current);
-      if (loading) next.add(sessionId);
+  function setLoadingOlderHistory(sessionId: string, loading: boolean, owner: HistoryLoadingOwner) {
+    setLoadingOlderHistoryOwners((current) => {
+      const currentOwner = current.get(sessionId);
+      if (loading ? currentOwner === owner : currentOwner !== owner) {
+        return current;
+      }
+      const next = new Map(current);
+      if (loading) next.set(sessionId, owner);
       else next.delete(sessionId);
       return next;
     });
@@ -3849,7 +4124,7 @@ export function MessageList() {
     }
     pendingOlderHistoryAnchors.clear();
     activeOlderHistoryLoads.clear();
-    setLoadingOlderHistorySessionIds(new Set<string>());
+    setLoadingOlderHistoryOwners(new Map<string, HistoryLoadingOwner>());
   }
 
   function invalidatePendingHistoryRestoration(sessionId = state.activeSessionId) {
@@ -3863,11 +4138,23 @@ export function MessageList() {
     const container = containerRef;
     if (!sessionId || !container) return;
     const generation = activeSessionGeneration;
+    const windowVersion = getSessionMessageWindowStateVersion(sessionId);
     const existing = activeOlderHistoryLoads.get(sessionId);
-    if (existing?.generation === generation) return existing.promise;
-    if (loadingOlderHistory(sessionId)) return;
-    const load = loadOlderHistoryPreservingScroll(sessionId, generation, container);
-    const activeLoad = { generation, promise: load };
+    if (existing?.generation === generation && existing.windowVersion === windowVersion) {
+      return existing.promise;
+    }
+    if (loadingOlderHistory(sessionId) && (!existing || existing.windowVersion === windowVersion)) {
+      return;
+    }
+    const loadingOwner: HistoryLoadingOwner = { windowVersion };
+    const load = loadOlderHistoryPreservingScroll(
+      sessionId,
+      generation,
+      windowVersion,
+      loadingOwner,
+      container
+    );
+    const activeLoad = { generation, windowVersion, promise: load };
     activeOlderHistoryLoads.set(sessionId, activeLoad);
     const clearActiveLoad = () => {
       if (activeOlderHistoryLoads.get(sessionId) === activeLoad) {
@@ -3881,9 +4168,15 @@ export function MessageList() {
   async function loadOlderHistoryPreservingScroll(
     sessionId: string,
     generation: number,
+    windowVersion: number,
+    loadingOwner: HistoryLoadingOwner,
     container: HTMLDivElement
   ): Promise<void> {
-    if (generation !== activeSessionGeneration || state.activeSessionId !== sessionId) return;
+    const isCurrentWindow = () =>
+      generation === activeSessionGeneration &&
+      state.activeSessionId === sessionId &&
+      getSessionMessageWindowStateVersion(sessionId) === windowVersion;
+    if (!isCurrentWindow()) return;
     markSessionHistoryLoadFailed(sessionId, false);
     const pendingAnchor = {
       anchor: captureVisibleScrollAnchor({ preferStableRenderItem: true }),
@@ -3893,14 +4186,45 @@ export function MessageList() {
       previousScrollHeight: container.scrollHeight,
       previousScrollTop: container.scrollTop,
       ownershipEpoch: userScrollOwnershipEpoch,
+      windowVersion,
     };
     pendingOlderHistoryAnchors.set(sessionId, pendingAnchor);
-    setLoadingOlderHistory(sessionId, true);
+    setLoadingOlderHistory(sessionId, true, loadingOwner);
+    let settleOwner: typeof historyAnchorSettleOwner = null;
     try {
-      const loaded = await loadOlderSessionHistoryPage(sessionId);
-      if (!loaded || generation !== activeSessionGeneration || state.activeSessionId !== sessionId)
-        return;
-      const settleOwner = { sessionId, generation };
+      let loadedAnyPage = false;
+      let staleRetryCount = 0;
+      while (true) {
+        if (!isCurrentWindow()) return;
+        const cursorBeforeLoad = getSessionHistoryCursor(sessionId);
+        const idsBefore = messages().map((entry) => entry.info.id);
+        const loaded = await loadOlderSessionHistoryPage(sessionId);
+        if (!isCurrentWindow()) return;
+        if (!loaded) {
+          if (
+            staleRetryCount >= 2 ||
+            getSessionHistoryCursor(sessionId) !== cursorBeforeLoad ||
+            !isSessionHistoryTruncated(sessionId) ||
+            isSessionHistoryLoadFailed(sessionId)
+          ) {
+            return;
+          }
+          staleRetryCount += 1;
+          await Promise.resolve();
+          continue;
+        }
+
+        loadedAnyPage = true;
+        staleRetryCount = 0;
+        const idsAfter = messages().map((entry) => entry.info.id);
+        const structureChanged =
+          idsBefore.length !== idsAfter.length ||
+          idsBefore.some((messageId, index) => messageId !== idsAfter[index]);
+        if (!isSessionHistoryTruncated(sessionId)) break;
+        if (structureChanged && container.scrollHeight > container.clientHeight + 1) break;
+      }
+      if (!loadedAnyPage) return;
+      settleOwner = { sessionId, generation, windowVersion };
       historyAnchorSettleOwner = settleOwner;
       // The pinned range contains the old viewport. Replace provisional prefix heights and align
       // its stable render item synchronously so the browser never paints the estimated position.
@@ -3914,8 +4238,7 @@ export function MessageList() {
         })
       );
       const canRestoreAnchor = () =>
-        generation === activeSessionGeneration &&
-        state.activeSessionId === sessionId &&
+        isCurrentWindow() &&
         historyAnchorSettleOwner === settleOwner &&
         !!containerRef &&
         !stickyNavigationOwnsScroll() &&
@@ -3930,18 +4253,13 @@ export function MessageList() {
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
       }
     } finally {
-      if (
-        historyAnchorSettleOwner?.sessionId === sessionId &&
-        historyAnchorSettleOwner.generation === generation
-      ) {
+      if (settleOwner && historyAnchorSettleOwner === settleOwner) {
         historyAnchorSettleOwner = null;
       }
       if (pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor) {
         pendingOlderHistoryAnchors.delete(sessionId);
       }
-      if (generation === activeSessionGeneration && state.activeSessionId === sessionId) {
-        setLoadingOlderHistory(sessionId, false);
-      }
+      setLoadingOlderHistory(sessionId, false, loadingOwner);
     }
   }
 
@@ -3975,7 +4293,7 @@ export function MessageList() {
             )}
           </Show>
           <Show
-            when={state.messages.length > 0}
+            when={messages().length > 0}
             fallback={
               <Show
                 when={state.messagesLoading}

@@ -2,6 +2,7 @@ import { createRoot } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEventName } from '../../shared/protocol';
 import type { onMessage } from '../lib/bridge';
+import type { Part } from '../types';
 import {
   assistantMessage,
   getBridgeMocks,
@@ -454,6 +455,132 @@ describe('useOpenCode session state flows', () => {
     ]);
   });
 
+  it('preserves child-session messages and streaming state while loading older parent history', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const childInfo = assistantMessage('child-assistant', 'child-user');
+    childInfo.sessionID = 'child-1';
+    const childPart: Part = {
+      id: 'child-text',
+      sessionID: 'child-1',
+      messageID: 'child-assistant',
+      type: 'text',
+      text: '',
+    };
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
+    stateModule.setState('sessions', [
+      session('session-1'),
+      { ...session('child-1'), parentID: 'session-1' },
+    ]);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [
+      userEntry('parent-latest'),
+      { info: childInfo, parts: [childPart] },
+    ]);
+    stateModule.setState('streamingPartId', childPart.id);
+    stateModule.setState('streamingText', 'Child response in progress');
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+
+    await hookModule.loadOlderSessionHistoryPage('session-1');
+
+    expect({
+      messageIds: stateModule.state.messages.map((entry) => entry.info.id),
+      streamingPartId: stateModule.state.streamingPartId,
+      streamingText: stateModule.state.streamingText,
+    }).toEqual({
+      messageIds: ['parent-old', 'parent-latest', 'child-assistant'],
+      streamingPartId: 'child-text',
+      streamingText: 'Child response in progress',
+    });
+  });
+
+  it('preserves active-session streaming state while prepending older history', async () => {
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const currentInfo = assistantMessage('parent-assistant', 'parent-user');
+    currentInfo.time = { created: 1 };
+    const currentPart: Part = {
+      id: 'parent-text',
+      sessionID: 'session-1',
+      messageID: 'parent-assistant',
+      type: 'text',
+      text: '',
+    };
+    clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
+    stateModule.setState('activeSessionId', 'session-1');
+    stateModule.setState('messages', [{ info: currentInfo, parts: [currentPart] }]);
+    stateModule.setState('streamingPartId', currentPart.id);
+    stateModule.setState('streamingText', 'Parent response in progress');
+    messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+
+    await hookModule.loadOlderSessionHistoryPage('session-1');
+
+    expect({
+      messageIds: stateModule.state.messages.map((entry) => entry.info.id),
+      streamingPartId: stateModule.state.streamingPartId,
+      streamingText: stateModule.state.streamingText,
+    }).toEqual({
+      messageIds: ['parent-old', 'parent-assistant'],
+      streamingPartId: 'parent-text',
+      streamingText: 'Parent response in progress',
+    });
+  });
+
+  it('preserves a queued active-session delta while prepending older history', async () => {
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => 1),
+    });
+
+    try {
+      const { stateModule, hookModule } = await loadModules();
+      const messageWindow = await import('../lib/message-window');
+      const currentInfo = assistantMessage('parent-assistant', 'parent-user');
+      currentInfo.time = { created: 1 };
+      const currentPart: Part = {
+        id: 'parent-text',
+        sessionID: 'session-1',
+        messageID: 'parent-assistant',
+        type: 'text',
+        text: '',
+      };
+      clientMocks.sessionMessages.mockResolvedValue([userEntry('parent-old')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [{ info: currentInfo, parts: [currentPart] }]);
+      stateModule.setState('streamingPartId', currentPart.id);
+      stateModule.setState('streamingText', 'Parent response');
+      stateModule.applyMessagePartDelta(
+        currentInfo.id,
+        currentPart.id,
+        ' in progress',
+        'session-1'
+      );
+      messageWindow.setSessionHistoryCursor('session-1', 'cursor-older');
+
+      await hookModule.loadOlderSessionHistoryPage('session-1');
+
+      expect({
+        streamingPartId: stateModule.state.streamingPartId,
+        streamingText: stateModule.state.streamingText,
+      }).toEqual({
+        streamingPartId: 'parent-text',
+        streamingText: 'Parent response in progress',
+      });
+    } finally {
+      if (originalRequestAnimationFrame) {
+        Object.defineProperty(globalThis, 'requestAnimationFrame', {
+          configurable: true,
+          writable: true,
+          value: originalRequestAnimationFrame,
+        });
+      } else {
+        delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
+      }
+    }
+  });
+
   it('returns a detached older-history response after A -> B -> A reselection', async () => {
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const initialA = [{ info: userMessage('user-a-initial'), parts: [] }] as Awaited<
@@ -517,9 +644,20 @@ describe('useOpenCode session state flows', () => {
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-1';
-    const boundary = [{ info: userMessage('user-1'), parts: [] }] as Awaited<
-      ReturnType<typeof clientMocks.sessionMessages>
-    >;
+    const boundary = [
+      {
+        info: userMessage('user-1'),
+        parts: [
+          {
+            id: 'user-1-text',
+            sessionID: 'session-1',
+            messageID: 'user-1',
+            type: 'text' as const,
+            text: 'Boundary prompt',
+          },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     boundary.nextCursor = 'cursor-2';
     const older = [{ info: userMessage('user-0'), parts: [] }];
     clientMocks.sessionGet.mockResolvedValue(session('session-1'));
@@ -563,6 +701,218 @@ describe('useOpenCode session state flows', () => {
       expect(
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
       ).toEqual(['user-0', 'user-1']);
+    });
+  });
+
+  it('does not block scroll pagination on an in-flight prompt prefetch', async () => {
+    const latest = [userEntry('user-current')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-a';
+    const firstPromptPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const laterPromptPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const olderPage = [userEntry('user-older')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    olderPage.nextCursor = 'cursor-b';
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (!options?.before) return latest;
+      if (options.before === 'cursor-a') return firstPromptPage.promise;
+      if (options.before === 'cursor-b') return laterPromptPage.promise;
+      throw new Error(`Unexpected cursor ${options.before}`);
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    await hookModule.selectSession('session-1');
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-a',
+      });
+    });
+
+    const pageLoad = hookModule.loadOlderSessionHistoryPage('session-1');
+    try {
+      firstPromptPage.resolve(olderPage);
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-b',
+        });
+      });
+      await expect(pageLoad).resolves.toBe(true);
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'user-older',
+        'user-current',
+      ]);
+      expect(
+        clientMocks.sessionMessages.mock.calls.filter(
+          ([, options]) => options?.before === 'cursor-a'
+        )
+      ).toHaveLength(1);
+    } finally {
+      laterPromptPage.resolve([]);
+      await laterPromptPage.promise;
+    }
+  });
+
+  it('prefetches past an empty boundary prompt to the nearest previewable prompt', async () => {
+    const latest = [{ info: assistantMessage('assistant-1', 'user-valid'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-empty';
+    const emptyBoundary = [userEntry('user-empty')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    emptyBoundary.nextCursor = 'cursor-valid';
+    const validBoundary = [
+      {
+        info: userMessage('user-valid'),
+        parts: [
+          {
+            id: 'user-valid-text',
+            sessionID: 'session-1',
+            messageID: 'user-valid',
+            type: 'text' as const,
+            text: 'Previewable prompt',
+          },
+        ],
+      },
+    ];
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(emptyBoundary)
+      .mockResolvedValueOnce(validBoundary);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-valid',
+      });
+    });
+    expect(
+      messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+    ).toEqual(['user-valid', 'user-empty']);
+  });
+
+  it('prefetches past a working-directory-only boundary prompt', async () => {
+    const latest = [{ info: assistantMessage('assistant-1', 'user-valid'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-metadata';
+    const metadataBoundary = [
+      {
+        info: userMessage('user-metadata'),
+        parts: [
+          {
+            id: 'user-metadata-text',
+            sessionID: 'session-1',
+            messageID: 'user-metadata',
+            type: 'text' as const,
+            text: '[Working directory: /repo]',
+          },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    metadataBoundary.nextCursor = 'cursor-valid';
+    const validBoundary = [
+      {
+        info: userMessage('user-valid'),
+        parts: [
+          {
+            id: 'user-valid-text',
+            sessionID: 'session-1',
+            messageID: 'user-valid',
+            type: 'text' as const,
+            text: 'Previewable prompt',
+          },
+        ],
+      },
+    ];
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(metadataBoundary)
+      .mockResolvedValueOnce(validBoundary);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-1');
+
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-valid',
+      });
+    });
+    expect(
+      messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+    ).toEqual(['user-valid', 'user-metadata']);
+  });
+
+  it('prefetches past a previewable boundary prompt already in the loaded window', async () => {
+    const latest = [
+      userEntry('user-loaded'),
+      { info: assistantMessage('assistant-1', 'user-loaded'), parts: [] },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    latest.nextCursor = 'cursor-duplicate';
+    const duplicateBoundary = [
+      {
+        info: userMessage('user-loaded'),
+        parts: [
+          {
+            id: 'user-loaded-text',
+            sessionID: 'session-1',
+            messageID: 'user-loaded',
+            type: 'text' as const,
+            text: 'Loaded prompt from the boundary page',
+          },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    duplicateBoundary.nextCursor = 'cursor-older';
+    const olderBoundary = [
+      {
+        info: userMessage('user-older'),
+        parts: [
+          {
+            id: 'user-older-text',
+            sessionID: 'session-1',
+            messageID: 'user-older',
+            type: 'text' as const,
+            text: 'Older previewable prompt',
+          },
+        ],
+      },
+    ];
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages
+      .mockResolvedValueOnce(latest)
+      .mockResolvedValueOnce(duplicateBoundary)
+      .mockResolvedValueOnce(olderBoundary);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { hookModule } = await loadModules();
+    await hookModule.selectSession('session-1');
+
+    await vi.waitFor(() => {
+      expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-older',
+      });
     });
   });
 
@@ -641,6 +991,43 @@ describe('useOpenCode session state flows', () => {
         'message-1',
         'message-2',
         'message-3',
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('preserves child-session messages during active-parent latest-message resync', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const parentMessage = userEntry('parent-message');
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockResolvedValue([parentMessage]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+      ]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [parentMessage, userEntry('child-message', 'child-1')]);
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+        'parent-message',
+        'child-message',
       ]);
     } finally {
       dispose();
@@ -833,9 +1220,20 @@ describe('useOpenCode session state flows', () => {
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     pageA.nextCursor = 'cursor-b';
-    const pageB = [userEntry('message-1')] as Awaited<
-      ReturnType<typeof clientMocks.sessionMessages>
-    >;
+    const pageB = [
+      {
+        info: userMessage('message-1'),
+        parts: [
+          {
+            id: 'message-1-text',
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            type: 'text' as const,
+            text: 'Previewable history prompt',
+          },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     pageB.nextCursor = 'cursor-a';
     clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
       if (options?.before === 'cursor-a') return pageA;

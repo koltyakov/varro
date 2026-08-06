@@ -64,8 +64,11 @@ import {
 } from '../lib/message-edit-state';
 import {
   cacheSessionHistoryPage,
+  clearSessionMessageWindowState,
+  invalidateSessionMessageWindowRequests,
   markSessionHistoryLoadFailed,
   resetMessageWindowState,
+  resetSessionMessageWindowForRefetch,
   setSessionHistoryCursor,
   setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
@@ -1147,14 +1150,21 @@ describe('MessageList history pagination', () => {
         });
       },
       async resolveLoad() {
-        releasePage?.(olderPage);
-        await vi.waitFor(() => {
-          expect(state.messages[0]?.info.id).toBe('older-user');
-        });
+        this.releaseLoad();
+        await this.waitForPrepend();
         for (let frame = 0; frame < 3; frame += 1) {
           await Promise.resolve();
           animationFrames.flush();
         }
+        await Promise.resolve();
+      },
+      releaseLoad() {
+        releasePage?.(olderPage);
+      },
+      async waitForPrepend() {
+        await vi.waitFor(() => {
+          expect(state.messages[0]?.info.id).toBe('older-user');
+        });
         await Promise.resolve();
       },
     };
@@ -1188,6 +1198,29 @@ describe('MessageList history pagination', () => {
     await harness.resolveLoad();
 
     expect(harness.getScrollTop()).toBe(360);
+    harness.animationFrames.restore();
+  });
+
+  it('yields history settling to continued user movement after the prepend', async () => {
+    const harness = await mountDeferredHistory();
+    await harness.startLoad(20);
+
+    harness.list.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageDown' }));
+    harness.setScrollTop(120);
+    harness.list.dispatchEvent(new Event('scroll'));
+    harness.releaseLoad();
+    await harness.waitForPrepend();
+    expect(harness.getScrollTop()).toBe(320);
+
+    // Native key scrolling and trackpad momentum can continue without another input event.
+    harness.setScrollTop(240);
+    harness.list.dispatchEvent(new Event('scroll'));
+    for (let frame = 0; frame < 3; frame += 1) {
+      await Promise.resolve();
+      harness.animationFrames.flush();
+    }
+
+    expect(harness.getScrollTop()).toBe(240);
     harness.animationFrames.restore();
   });
 
@@ -1706,6 +1739,249 @@ describe('MessageList history pagination', () => {
     expect(secondRetryEnabled).toBe(true);
     expect(secondSessionRequested).toBe(true);
   });
+
+  it('loads truncated history from an upward wheel when the initial window cannot scroll', async () => {
+    const olderPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockResolvedValue(olderPage);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-older');
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 180 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+    await Promise.resolve();
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+
+    await vi.waitFor(() => {
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-older',
+      });
+    });
+    expect(state.messages.map((message) => message.info.id)).toEqual([
+      'older-user',
+      'current-user',
+    ]);
+  });
+
+  it('continues ordinary pagination when a page advances the cursor without adding rows', async () => {
+    const emptyPage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    emptyPage.nextCursor = 'cursor-next';
+    const olderPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockResolvedValueOnce(emptyPage)
+      .mockResolvedValueOnce(olderPage);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-empty');
+    markSessionHistoryLoadFailed('session-1', true);
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
+
+    await vi.waitFor(() => {
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-next',
+      });
+    });
+    expect(state.messages.map((message) => message.info.id)).toEqual([
+      'older-user',
+      'current-user',
+    ]);
+  });
+
+  it('retries an invalidated history page while the same boundary remains current', async () => {
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    stalePage.nextCursor = 'cursor-next';
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const freshPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockReturnValueOnce(pendingStalePage)
+      .mockResolvedValueOnce(freshPage);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    markSessionHistoryLoadFailed('session-1', true);
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+    invalidateSessionMessageWindowRequests('session-1');
+    releaseStalePage?.(stalePage);
+
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+    expect(state.messages.map((message) => message.info.id)).toEqual([
+      'older-user',
+      'current-user',
+    ]);
+  });
+
+  it('does not retry an invalidated history page after its cursor boundary advances', async () => {
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockReturnValueOnce(pendingStalePage)
+      .mockResolvedValueOnce([]);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    markSessionHistoryLoadFailed('session-1', true);
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+
+    invalidateSessionMessageWindowRequests('session-1');
+    setSessionHistoryCursor('session-1', 'cursor-current');
+    releaseStalePage?.(stalePage);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(messagesSpy).toHaveBeenCalledTimes(1);
+    expect(messagesSpy).not.toHaveBeenCalledWith('session-1', {
+      limit: 50,
+      before: 'cursor-current',
+    });
+  });
+
+  it('does not retry a stale history page against a replacement message window', async () => {
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockReturnValueOnce(pendingStalePage)
+      .mockResolvedValueOnce([]);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    markSessionHistoryLoadFailed('session-1', true);
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+
+    resetSessionMessageWindowForRefetch('session-1');
+    setSessionHistoryCursor('session-1', 'cursor-current');
+    releaseStalePage?.(stalePage);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(messagesSpy).toHaveBeenCalledTimes(1);
+    expect(messagesSpy).not.toHaveBeenCalledWith('session-1', {
+      limit: 50,
+      before: 'cursor-current',
+    });
+  });
+
+  it('does not pin a stale history anchor after the same-session window resets', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockReturnValue(pendingStalePage);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 6000);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 20;
+    list.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => {
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-stale',
+      });
+    });
+
+    resetSessionMessageWindowForRefetch('session-1');
+    setSessionHistoryCursor('session-1', 'cursor-current');
+    scrollTopValue = 5000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const renderedRows = [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')];
+    releaseStalePage?.(stalePage);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(renderedRows.length).toBeLessThan(40);
+    expect(renderedRows[0]?.dataset.msgId).not.toBe('assistant-0');
+    animationFrames.restore();
+  });
 });
 
 describe('MessageList prompt numbers', () => {
@@ -1827,6 +2103,147 @@ describe('MessageList prompt numbers', () => {
       limit: 50,
       before: 'cursor-6',
     });
+  });
+
+  it('keeps partial prompt numbers hidden after a failed page and retries on the next Alt hold', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-older');
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockRejectedValueOnce(new Error('Prompt history failed'));
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+
+    const olderPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    messagesSpy.mockResolvedValueOnce(olderPage);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(
+        [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
+          (badge) => badge.textContent
+        )
+      ).toEqual(['2']);
+    });
+  });
+
+  it('reloads absolute prompt numbers after the active session window is reset', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt 1')] },
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Older prompt 2')] },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-3'), parts: [textPart('user-text-3', 'Current prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+    });
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+
+    resetSessionMessageWindowForRefetch('session-1');
+    clearSessionMessageWindowState('session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-reloaded');
+    const reloadedPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt 1')] },
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Older prompt 2')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockResolvedValue(reloadedPage);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+    await vi.waitFor(() => {
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-reloaded',
+      });
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+    });
+  });
+
+  it('keeps prompt numbers hidden while a reset window is awaiting its replacement fetch', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt 1')] },
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Older prompt 2')] },
+    ]);
+    replaceMessages([
+      { info: userMessage('user-3'), parts: [textPart('user-text-3', 'Current prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    await vi.waitFor(() => {
+      expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
+    });
+
+    resetSessionMessageWindowForRefetch('session-1');
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+
+    expect(container?.querySelector('.prompt-number-badge')).toBeNull();
+  });
+
+  it('does not wait for an obsolete prompt-number load after a window reset', async () => {
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const currentPage = [
+      { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockImplementation((_id, options) => {
+      if (options?.before === 'cursor-stale') return pendingStalePage;
+      if (options?.before === 'cursor-current') return Promise.resolve(currentPage);
+      throw new Error(`Unexpected cursor ${options?.before}`);
+    });
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryPromptCursor('session-1', 'cursor-stale');
+    replaceMessages([
+      { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Current prompt')] },
+    ]);
+    cleanup = render(() => MessageList(), container!);
+
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+      await vi.waitFor(() => {
+        expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-stale',
+        });
+      });
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+
+      resetSessionMessageWindowForRefetch('session-1');
+      setSessionHistoryPromptCursor('session-1', 'cursor-current');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+
+      await vi.waitFor(() => {
+        expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-current',
+        });
+      });
+    } finally {
+      releaseStalePage?.(stalePage);
+      await vi.advanceTimersByTimeAsync(0);
+    }
   });
 
   it('hides prompt counters when the window loses focus', async () => {
@@ -2360,6 +2777,196 @@ describe('shouldShowStickyUserMessagePreview', () => {
     animationFrames.restore();
   });
 
+  it('retries sticky navigation when its page is invalidated at the same cursor', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const freshPage = [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockReturnValueOnce(pendingStalePage)
+      .mockResolvedValueOnce(freshPage);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    try {
+      const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+      expect(sticky?.textContent).toContain('Boundary prompt');
+      sticky?.click();
+      await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(1));
+
+      invalidateSessionMessageWindowRequests('session-1');
+      releaseStalePage?.(stalePage);
+
+      await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+      expect(messagesSpy).toHaveBeenLastCalledWith('session-1', {
+        limit: 50,
+        before: 'cursor-stale',
+      });
+      await vi.waitFor(() => {
+        expect(state.messages.some((message) => message.info.id === 'boundary-user')).toBe(true);
+      });
+    } finally {
+      releaseStalePage?.(stalePage);
+      await vi.advanceTimersByTimeAsync(0);
+      animationFrames.restore();
+    }
+  });
+
+  it('releases stale sticky loading when the same-session window resets', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
+    const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
+      releaseStalePage = resolve;
+    });
+    const currentPage = [
+      { info: userMessage('current-older'), parts: [textPart('current-text', 'Current history')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi.spyOn(client.session, 'messages').mockImplementation((_id, options) => {
+      if (options?.before === 'cursor-stale') return pendingStalePage;
+      if (options?.before === 'cursor-current') return Promise.resolve(currentPage);
+      throw new Error(`Unexpected cursor ${options?.before}`);
+    });
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-stale');
+    setSessionHistoryPrompts('session-1', [
+      { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    try {
+      const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+      expect(sticky?.textContent).toContain('Boundary prompt');
+      sticky?.click();
+      await vi.waitFor(() => {
+        expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-stale',
+        });
+      });
+      expect(sticky?.classList.contains('is-loading')).toBe(true);
+
+      list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+      expect(sticky?.classList.contains('is-loading')).toBe(false);
+      expect(
+        container?.querySelector('.message-history-banner')?.classList.contains('is-loading')
+      ).toBe(false);
+
+      sticky?.click();
+      expect(sticky?.classList.contains('is-loading')).toBe(true);
+
+      resetSessionMessageWindowForRefetch('session-1');
+      setSessionHistoryCursor('session-1', 'cursor-current');
+      markSessionHistoryLoadFailed('session-1', true);
+      await Promise.resolve();
+
+      expect(sticky?.classList.contains('is-loading')).toBe(false);
+      const retry = container?.querySelector<HTMLButtonElement>('.message-history-banner-retry');
+      expect(retry).toBeInstanceOf(HTMLButtonElement);
+      expect(retry?.disabled).toBe(false);
+      retry?.click();
+      await vi.waitFor(() => {
+        expect(messagesSpy).toHaveBeenCalledWith('session-1', {
+          limit: 50,
+          before: 'cursor-current',
+        });
+      });
+    } finally {
+      releaseStalePage?.(stalePage);
+      await vi.advanceTimersByTimeAsync(0);
+      animationFrames.restore();
+    }
+  });
+
+  it('uses an older previewable boundary prompt when the newest cached prompt is empty', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-older');
+    setSessionHistoryPrompts('session-1', [
+      {
+        info: userMessage('boundary-visible'),
+        parts: [textPart('boundary-visible-text', 'Previewable boundary prompt')],
+      },
+      { info: userMessage('boundary-empty'), parts: [] },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [textPart('assistant-text', 'Visible response')],
+      },
+    ]);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Previewable boundary prompt'
+    );
+    animationFrames.restore();
+  });
+
   it('keeps an unloaded boundary sticky mounted while prompt history refreshes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     setState('activeSessionId', 'session-1');
@@ -2621,6 +3228,32 @@ describe('MessageList empty state', () => {
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
   });
+
+  it('shows the parent starter state when only a hidden child message is retained', () => {
+    setState('emptyStateLogoUri', 'https://example.test/logo.svg');
+    setSessions([
+      session('session-1'),
+      session('child-1', { parentID: 'session-1', time: { created: 2, updated: 3 } }),
+    ]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: assistantMessage('child-assistant', { sessionID: 'child-1' }),
+        parts: [
+          {
+            ...textPart('child-text', 'Hidden child response'),
+            sessionID: 'child-1',
+            messageID: 'child-assistant',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+
+    expect(container?.querySelector('[data-msg-id]')).toBeNull();
+    expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
+  });
 });
 
 describe('MessageList session scoping', () => {
@@ -2837,6 +3470,43 @@ describe('MessageList session scoping', () => {
     expect(container?.textContent).toContain('Root response');
     expect(container?.textContent).not.toContain('Explore Varro codebase structure');
     expect(container?.textContent).not.toContain('Subagent result');
+  });
+
+  it('keeps the visible parent error retryable when a hidden child assistant is newer', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+    replaceMessages([
+      { info: userMessage('user-root-1'), parts: [textPart('text-root-1', 'Root prompt')] },
+      {
+        info: assistantMessage('assistant-root-1', {
+          error: { name: 'APIError', data: { message: 'Root response failed' } },
+          parentID: 'user-root-1',
+        }),
+        parts: [],
+      },
+      {
+        info: assistantMessage('assistant-child-1', {
+          mode: 'subagent',
+          parentID: 'assistant-root-1',
+          sessionID: 'child-1',
+        }),
+        parts: [
+          {
+            ...textPart('text-child-1', 'Hidden child response'),
+            messageID: 'assistant-child-1',
+            sessionID: 'child-1',
+          },
+        ],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const retry = [...(container?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent?.trim() === 'Retry'
+    );
+    expect(retry).toBeInstanceOf(HTMLButtonElement);
   });
 
   it('does not let hidden child-session models create parent-thread switch markers', async () => {
@@ -3566,6 +4236,70 @@ describe('MessageList sticky prompt preview', () => {
 
     expect(summaries.has('assistant-1')).toBe(true);
     expect(summaries.has('assistant-2')).toBe(false);
+  });
+
+  it('does not let a hidden child prompt split the parent worked summary', async () => {
+    setState('activeSessionId', 'session-1');
+    setSessions([
+      session('session-1'),
+      session('child-1', { parentID: 'session-1', time: { created: 2_500, updated: 4_000 } }),
+    ]);
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Review the changes')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          parentID: 'user-1',
+          time: { created: 2_000, completed: 3_000 },
+          tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'I will inspect the runtime.')],
+      },
+      {
+        info: {
+          ...userMessage('child-user-1'),
+          sessionID: 'child-1',
+          time: { created: 2_500 },
+        },
+        parts: [
+          {
+            ...textPart('text-child-user-1', 'Review runtime changes'),
+            sessionID: 'child-1',
+            messageID: 'child-user-1',
+          },
+        ],
+      },
+      {
+        info: assistantMessage('child-assistant-1', {
+          sessionID: 'child-1',
+          mode: 'subagent',
+          parentID: 'assistant-1',
+          time: { created: 2_600, completed: 4_000 },
+          tokens: { input: 200, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [],
+      },
+      {
+        info: assistantMessage('assistant-2', {
+          parentID: 'user-1',
+          time: { created: 4_100, completed: 6_000 },
+          tokens: { input: 300, output: 30, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-2', 'The changed production path continues here.')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-msg-id="assistant-1"] .assistant-dialog-summary')
+    ).toBeNull();
+    expect(
+      container?.querySelector('[data-msg-id="assistant-2"] .assistant-dialog-summary')?.textContent
+    ).toContain('Worked for 5s - Tokens ↑ 600 ↓ 60 - Agents 1');
   });
 
   it('keeps final assistant answers plain when virtualization hides the summary row', async () => {
@@ -5363,6 +6097,20 @@ describe('MessageList sticky prompt preview', () => {
     ).toBeLessThanOrEqual(1);
     expect(outerScrollTop).toBe(60);
 
+    const nestedScroller = document.createElement('div');
+    nestedScroller.style.overflowY = 'auto';
+    Object.defineProperty(nestedScroller, 'clientHeight', { configurable: true, value: 100 });
+    Object.defineProperty(nestedScroller, 'scrollHeight', { configurable: true, value: 300 });
+    Object.defineProperty(nestedScroller, 'scrollTop', { configurable: true, value: 50 });
+    targetCard!.append(nestedScroller);
+    const scrollTopBeforeNestedWheel = scrollTopValue;
+    targetLayoutShift -= 40;
+    nestedScroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 20 }));
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(scrollTopBeforeNestedWheel);
+    targetLayoutShift += 40;
+
     const originalCard = container?.querySelector<HTMLElement>(
       `[data-msg-id="message-${targetIndex}"] .user-message-card`
     );
@@ -6226,7 +6974,7 @@ describe('MessageList auto-scroll', () => {
   });
 
   it.each(['insertion', 'removal'] as const)(
-    'preserves a detached visible row across a generic structural %s',
+    'preserves a detached visible row across a structural %s during active slow scrolling',
     async (mutation) => {
       const animationFrames = installQueuedAnimationFrameMocks();
       const baseMessages = Array.from({ length: 50 }, (_, index) => {
@@ -6300,7 +7048,6 @@ describe('MessageList auto-scroll', () => {
       await Promise.resolve();
       animationFrames.flush();
       await Promise.resolve();
-      vi.advanceTimersByTime(300);
 
       const anchorBefore = container?.querySelector(
         `[data-msg-id="${anchorId}"]`
@@ -6470,6 +7217,251 @@ describe('MessageList auto-scroll', () => {
     );
     expect(scrollTopValue).toBe(2010);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
+    animationFrames.restore();
+  });
+
+  it('yields pending width measurement anchoring to direct user scroll input', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const rowHeights = Array.from({ length: 50 }, () => 100);
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    vi.advanceTimersByTime(600);
+
+    const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    const rowObserver = observers.find((observer) => observer.targets.has(anchor));
+    expect(anchor).toBeInstanceOf(HTMLDivElement);
+    expect(rowObserver).toBeDefined();
+    const publishWidthMeasurement = (height: number, inlineSize: number) => {
+      rowHeights[20] = height;
+      rowObserver!.callback(
+        [
+          {
+            target: anchor,
+            borderBoxSize: [{ blockSize: height, inlineSize }],
+          } as unknown as ResizeObserverEntry,
+        ],
+        rowObserver as unknown as ResizeObserver
+      );
+    };
+
+    publishWidthMeasurement(120, 420);
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+    scrollTopValue += 120;
+    list.dispatchEvent(new Event('scroll'));
+    const wheelOwnedTop = scrollTopValue;
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(wheelOwnedTop);
+
+    vi.advanceTimersByTime(600);
+    publishWidthMeasurement(140, 380);
+    list.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageDown' }));
+    scrollTopValue += 200;
+    list.dispatchEvent(new Event('scroll'));
+    const keyboardOwnedTop = scrollTopValue;
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(keyboardOwnedTop);
+
+    vi.advanceTimersByTime(600);
+    publishWidthMeasurement(160, 340);
+    list.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 495 }));
+    scrollTopValue += 100;
+    list.dispatchEvent(new Event('scroll'));
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    const pointerOwnedTop = scrollTopValue;
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(pointerOwnedTop);
+    animationFrames.restore();
+  });
+
+  it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const chromeHeight = 48;
+    const rowHeights: number[] = Array.from({ length: 50 }, (_, index) => (index === 0 ? 20 : 100));
+    const rowTop = (index: number) =>
+      chromeHeight + rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    const totalHeight = () =>
+      chromeHeight + rowHeights.reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, -scrollTopValue, 500, totalHeight());
+        }
+        if (this.classList.contains('message-history-banner')) {
+          return new DOMRect(0, 14 - scrollTopValue, 500, 22);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-older');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    const historyBanner = container?.querySelector('.message-history-banner') as HTMLDivElement;
+    track.style.paddingTop = '14px';
+    historyBanner.style.marginBottom = '12px';
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: totalHeight });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 30;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
+    const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
+    expect(rowObserver).toBeDefined();
+    const topBefore = firstRow.getBoundingClientRect().top;
+    expect(topBefore).toBe(18);
+
+    rowHeights[0] = 40;
+    rowObserver!.callback(
+      [
+        {
+          target: firstRow,
+          borderBoxSize: [{ blockSize: 40, inlineSize: 500 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+
+    expect(firstRow.getBoundingClientRect().top).toBe(topBefore);
+    expect(scrollTopValue).toBe(30);
     animationFrames.restore();
   });
 
@@ -6654,6 +7646,84 @@ describe('MessageList auto-scroll', () => {
     const bottomPadBefore = bottomSpacer();
 
     setCompactToolOutput(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
+    expect(bottomSpacer() - bottomPadBefore).toBe(600);
+    animationFrames.restore();
+  });
+
+  it('invalidates cached heights for offscreen reasoning rows when thinking visibility changes', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 5000);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts:
+            index < 40
+              ? [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }]
+              : [
+                  {
+                    ...reasoningPart(`reasoning-${index}`, `Reasoning ${index}`),
+                    messageID: messageId,
+                  },
+                ],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 0;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
+    const bottomSpacer = () =>
+      Number.parseFloat(
+        container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height || '0'
+      );
+    const bottomPadBefore = bottomSpacer();
+
+    setShowThinkingPreference(false);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -8371,6 +9441,87 @@ describe('MessageList auto-scroll', () => {
 
     expect(assignedScrollTops.at(-1)).toBe(800);
     expect(scrollTopValue).toBe(760);
+    animationFrames.restore();
+  });
+
+  it('never reverses a downward user scroll during the measured append transition', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const baseMessages = Array.from({ length: 50 }, (_, index) => {
+      const messageId = `assistant-${index}`;
+      return {
+        info: assistantMessage(messageId),
+        parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+      };
+    });
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let scrollHeightValue = 5000;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, scrollHeightValue);
+        }
+        if (this.dataset.msgId) {
+          const index =
+            this.dataset.msgId === 'assistant-appended'
+              ? 50
+              : Number(this.dataset.msgId.replace('assistant-', ''));
+          const height = index === 50 ? 200 : 100;
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(baseMessages);
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    expect(scrollTopValue).toBe(4600);
+
+    scrollHeightValue = 5200;
+    replaceMessages([
+      ...baseMessages,
+      {
+        info: assistantMessage('assistant-appended'),
+        parts: [
+          {
+            ...textPart('text-appended', 'Appended response'),
+            messageID: 'assistant-appended',
+          },
+        ],
+      },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush(30);
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 100 }));
+    scrollTopValue += 100;
+    const userOwnedTop = scrollTopValue;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush(60);
+
+    expect(scrollTopValue).toBeGreaterThanOrEqual(userOwnedTop);
     animationFrames.restore();
   });
 
