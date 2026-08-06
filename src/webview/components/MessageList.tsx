@@ -761,6 +761,7 @@ export function MessageList() {
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let trailingSummarySettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowHiddenByVisibleStream = false;
+  let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
 
   function flushRowHeightCorrections() {
@@ -1143,6 +1144,30 @@ export function MessageList() {
       (!visibleBlockingStreamingPart() || visibleRunningToolPart()) &&
       (!committedTextBlocksReappear() || visibleRunningToolPart())
   );
+
+  createEffect(() => {
+    const loadingMessages = state.messagesLoading;
+    const hasMessages = messages().length > 0;
+    const isReserved = reserveLoadingRow();
+
+    if (loadingMessages && state.activeSessionId && !hasMessages) {
+      loadingRowReservedForMessageHydration = true;
+      if (!isReserved) setReserveLoadingRow(true);
+      return;
+    }
+
+    if (!loadingRowReservedForMessageHydration) return;
+    if (hasMessages) {
+      loadingRowReservedForMessageHydration = false;
+      return;
+    }
+    if (loadingMessages) return;
+
+    loadingRowReservedForMessageHydration = false;
+    if (!loadingRowEligible() && isReserved) {
+      setReserveLoadingRow(false);
+    }
+  });
 
   createEffect(() => {
     const eligible = loadingRowEligible();

@@ -5618,6 +5618,47 @@ describe('MessageList sticky prompt preview', () => {
 });
 
 describe('MessageList loading row', () => {
+  it('reserves the worked summary row while an existing chat loads', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Final response')],
+      },
+    ]);
+    setState('messagesLoading', false);
+    await Promise.resolve();
+
+    expect(container?.textContent).not.toContain('Worked for');
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(true);
+
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+  });
+
   it('marks the loading row as stale after prolonged inactivity', async () => {
     vi.setSystemTime(0);
     setState('activeSessionId', 'session-1');
