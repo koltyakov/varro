@@ -27,6 +27,20 @@ export function isAssistantMessage(message: Message): message is AssistantMessag
   return message.role === 'assistant';
 }
 
+export function isContinuationAssistantFinish(value: string | undefined) {
+  const finish = value?.toLowerCase().replace(/[\s-]+/g, '_');
+  return (
+    finish === 'tool' ||
+    finish === 'tools' ||
+    finish === 'tool_call' ||
+    finish === 'tool_calls' ||
+    finish === 'tool_use' ||
+    finish === 'tool_uses' ||
+    finish === 'function_call' ||
+    finish === 'function_calls'
+  );
+}
+
 const numberFormatter = new Intl.NumberFormat('en-US');
 
 export function formatNumber(value: number | undefined): string {

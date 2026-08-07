@@ -1,5 +1,9 @@
 import { getChildRunsByParentId } from '../../lib/state';
-import { isAssistantMessage, sumAssistantTokens } from '../../lib/message-metrics';
+import {
+  isAssistantMessage,
+  isContinuationAssistantFinish,
+  sumAssistantTokens,
+} from '../../lib/message-metrics';
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry } from '../../types';
@@ -40,6 +44,14 @@ export function getAssistantDialogSummaryMap(
 
     const lastMessage = currentMessages[currentMessages.length - 1];
     if (!lastMessage?.time.completed) {
+      currentMessages = [];
+      currentPrimaryMessageIds = [];
+      currentSubagentHandoffCount = 0;
+      currentUserRequestCreated = null;
+      return;
+    }
+
+    if (isContinuationAssistantFinish(lastMessage.finish)) {
       currentMessages = [];
       currentPrimaryMessageIds = [];
       currentSubagentHandoffCount = 0;

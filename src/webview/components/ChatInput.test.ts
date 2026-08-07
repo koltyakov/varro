@@ -2626,28 +2626,62 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('draft prompt');
   });
 
-  it('does not submit on Enter while an active question blocks the send button', async () => {
+  it('queues on modifier Enter while a question is pending and dispatches after it clears', async () => {
+    vi.useFakeTimers();
     setState('activeSessionId', 'session-1');
     setState('sessions', [session('session-1', 1_000)]);
     setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
     setInputText('Wait for the answer');
+    sendMessageMock.mockResolvedValueOnce(true);
 
     cleanup = render(() => ChatInput(), container!);
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
-    expect(sendButton?.disabled).toBe(true);
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[title="Add to queue (Enter)"]'
+    );
+    expect(queueButton?.disabled).toBe(false);
+    expect(container?.querySelector('[title="More send options"]')).toBeNull();
 
     editor?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
     );
     await flushAsyncWork();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(inputText()).toBe('Wait for the answer');
+    expect(inputText()).toBe('');
+    expect(state.queuedMessages).toEqual([
+      expect.objectContaining({ sessionId: 'session-1', text: 'Wait for the answer' }),
+    ]);
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Send as Steer"]')?.disabled
+    ).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    setState('questions', []);
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Wait for the answer', {
+      queuedAttachments: {
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+      preserveComposer: true,
+    });
+    expect(state.queuedMessages).toEqual([]);
   });
 
-  it('does not submit on Enter while an active permission blocks the send button', async () => {
+  it('queues on Enter while a permission is pending', async () => {
     setState('activeSessionId', 'session-1');
     setState('sessions', [session('session-1', 1_000)]);
     setState('permissions', [
@@ -2667,8 +2701,11 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
-    expect(sendButton?.disabled).toBe(true);
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[title="Add to queue (Enter)"]'
+    );
+    expect(queueButton?.disabled).toBe(false);
+    expect(container?.querySelector('[title="More send options"]')).toBeNull();
 
     editor?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
@@ -2676,7 +2713,10 @@ describe('ChatInput', () => {
     await flushAsyncWork();
 
     expect(sendMessageMock).not.toHaveBeenCalled();
-    expect(inputText()).toBe('Wait for permission');
+    expect(inputText()).toBe('');
+    expect(state.queuedMessages).toEqual([
+      expect.objectContaining({ sessionId: 'session-1', text: 'Wait for permission' }),
+    ]);
   });
 
   it('does not submit on Enter while a workspace switch is pending', async () => {
@@ -2715,7 +2755,7 @@ describe('ChatInput', () => {
     expect(inputText()).toBe('Send after switching');
   });
 
-  it('still selects a completion on Enter while sending is blocked', async () => {
+  it('still selects a completion on Enter before queueing a pending-request message', async () => {
     setState('activeSessionId', 'session-1');
     setState('sessions', [session('session-1', 1_000)]);
     setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);

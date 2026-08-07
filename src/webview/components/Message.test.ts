@@ -1200,6 +1200,44 @@ describe('Message user editing', () => {
 });
 
 describe('Message streamed assistant text rendering', () => {
+  it('keeps a linked pending question visible outside the active activity tray', () => {
+    const questionTool: ToolPart = {
+      ...toolPart('question-tool', {
+        status: 'running',
+        input: { questions: [] },
+        time: { start: 1 },
+      }),
+      tool: 'question',
+    };
+
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('message-1'), time: { created: 0 } },
+          parts: [questionTool],
+          visibleActiveActivityPartKeys: new Set(),
+          questionRequestForTool: (part) =>
+            part.id === questionTool.id
+              ? {
+                  id: 'question-request',
+                  sessionID: 'session-1',
+                  questions: [
+                    {
+                      question: 'Which option?',
+                      header: 'Choose',
+                      options: [{ label: 'One', description: 'First option' }],
+                    },
+                  ],
+                  tool: { messageID: questionTool.messageID, callID: questionTool.callID },
+                }
+              : null,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.question-prompt-card')).toBeInstanceOf(HTMLDivElement);
+  });
+
   it('renders streamed assistant markdown formatting immediately', () => {
     cleanup = render(
       () =>

@@ -214,7 +214,9 @@ export function Message(props: {
       if (
         !props.visibleActiveActivityPartKeys ||
         !isAssistantActivityPart(part) ||
-        !isAssistantActivityPartRunning(part)
+        !isAssistantActivityPartRunning(part) ||
+        (part.type === 'tool' &&
+          (props.questionRequestForTool?.(part) || props.permissionMatchForTool?.(part)))
       ) {
         return true;
       }

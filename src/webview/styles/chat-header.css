@@ -68,7 +68,7 @@
   transition: opacity 0.15s;
 }
 
-.chat-header-session-title:hover ~ .chat-header-session-duration {
+.chat-header-left:hover > .chat-header-session-duration {
   width: max-content;
   margin-left: 0;
   opacity: 1;

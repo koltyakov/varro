@@ -180,7 +180,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
 
   await expect(completedItem).toHaveClass(/is-exiting/);
   const summary = page.locator('.assistant-activity-summary');
-  await expect(summary).toContainText('Explored 1 search');
+  await expect(summary).toContainText('Explored: 1 search');
   expect(Math.abs((await summary.boundingBox())!.y - transition.summaryTop)).toBeLessThanOrEqual(1);
   await page.waitForTimeout(150);
   const finalSummaryBox = (await summary.boundingBox())!;

@@ -1,5 +1,6 @@
 import { appStore } from '../../lib/stores/app-store';
 import { applySessionShareOverride } from '../../lib/session-share-overrides';
+import { isContinuationAssistantFinish } from '../../lib/message-metrics';
 import type {
   AssistantMessage,
   Message,
@@ -85,21 +86,7 @@ export function isContinuationStepEnd(eventName: string, props: Record<string, u
 }
 
 export function isContinuationStepFinish(value: string | undefined) {
-  const finish = normalizeStepFinish(value);
-  return (
-    finish === 'tool' ||
-    finish === 'tools' ||
-    finish === 'tool_call' ||
-    finish === 'tool_calls' ||
-    finish === 'tool_use' ||
-    finish === 'tool_uses' ||
-    finish === 'function_call' ||
-    finish === 'function_calls'
-  );
-}
-
-function normalizeStepFinish(value: string | undefined) {
-  return value?.toLowerCase().replace(/[\s-]+/g, '_');
+  return isContinuationAssistantFinish(value);
 }
 
 export function getPartDeltaQueueKey(messageID: string, partID: string) {

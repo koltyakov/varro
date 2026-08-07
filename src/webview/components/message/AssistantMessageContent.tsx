@@ -967,7 +967,7 @@ function AssistantActivitySummaryText(props: {
         ? [`${props.aborted} ${props.aborted === 1 ? 'tool aborted' : 'tools aborted'}`]
         : []),
     ];
-    const counts = `Explored ${props.items.map((item) => item.label).join(', ')}`;
+    const counts = `Explored: ${props.items.map((item) => item.label).join(', ')}`;
     return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
   };
 
@@ -1066,7 +1066,7 @@ function AssistantActivitySummaryCandidate(props: {
   return (
     <>
       <span class="assistant-activity-summary-main">
-        Explored{' '}
+        Explored:{' '}
         <For each={props.items}>
           {(item, index) => (
             <>

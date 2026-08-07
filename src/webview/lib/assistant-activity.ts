@@ -235,7 +235,7 @@ export function preserveAssistantActivityGroupKeys(
 
 export function formatAssistantActivityCounts(parts: readonly AssistantActivityPart[]) {
   const items = getAssistantActivityCountItems(parts);
-  return `Explored ${items.map((item) => item.label).join(', ')}`;
+  return `Explored: ${items.map((item) => item.label).join(', ')}`;
 }
 
 export function getAssistantActivityCountItems(parts: readonly AssistantActivityPart[]) {

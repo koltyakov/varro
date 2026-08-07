@@ -1226,7 +1226,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       if (!canSend()) return;
-      if ((e.ctrlKey || e.metaKey) && isComposerBusy() && !composerEditingMessage()) {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        isComposerBusy() &&
+        !hasPendingApproval() &&
+        !composerEditingMessage()
+      ) {
         handleSend('steer');
       } else {
         handleSend();
@@ -1372,6 +1377,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     const sendSessionId = composerSessionId();
     const queuedEdit = queuedMessageEdit();
+    const pendingApproval = hasPendingApproval();
+    if (
+      pendingApproval &&
+      (mode === 'steer' || mode === 'after-stop' || composerEditingMessage())
+    ) {
+      return;
+    }
+    const shouldQueue = mode === 'queue' || pendingApproval;
     const sendableText = getSendableInputText(text);
     const hasSendableImages = hasSendableClipboardImages();
     if (
@@ -1440,7 +1453,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
-    if (mode !== 'queue' && !hasQueuedAttachments) {
+    if (!shouldQueue && !hasQueuedAttachments) {
       const ranSlashCommand = await runSlashCommand(text);
       if (ranSlashCommand) {
         if (queuedEdit) removeQueuedMessage(queuedEdit.id);
@@ -1452,9 +1465,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (
       mode !== 'steer' &&
       mode !== 'after-stop' &&
-      (isComposerBusy() || queuedEdit?.sessionId === composerSessionId()) &&
-      !composerHasActiveQuestion() &&
-      !composerHasActivePermission() &&
+      (shouldQueue || isComposerBusy() || queuedEdit?.sessionId === composerSessionId()) &&
       composerSessionId() &&
       (sendableText.trim() || hasQueuedAttachments)
     ) {
@@ -1533,6 +1544,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function handleStopAndSend() {
+    if (hasPendingApproval()) return;
     try {
       await abortSession();
     } catch {
@@ -1543,6 +1555,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
+    if (hasPendingApproval()) return;
     if (dispatchingQueuedMessageId()) return;
     if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
     if (failedQueuedMessageIds().has(item.id) && !retry) return;
@@ -2397,11 +2410,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   }
 
+  const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
   const canSend = () =>
     isAbortSlashCommand(inputText()) ||
     (!pendingWorkspacePath() &&
-      !composerHasActiveQuestion() &&
-      !composerHasActivePermission() &&
+      (!hasPendingApproval() || !composerEditingMessage()) &&
       (getSendableInputText().trim().length > 0 ||
         state.droppedFiles.length > 0 ||
         hasSendableClipboardImages() ||
@@ -2414,8 +2427,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     () => isComposerDisplayBusy() && !composerHasActiveQuestion() && !composerHasActivePermission()
   );
   const showBusySendControls = createMemo(
-    () => isBusyWithoutInterruption() && canSend() && !composerEditingMessage()
+    () =>
+      (isBusyWithoutInterruption() || hasPendingApproval()) &&
+      canSend() &&
+      !composerEditingMessage()
   );
+  const showBusySendOptions = createMemo(() => isBusyWithoutInterruption());
 
   const clipboardImagesDisabled = () =>
     composerClipboardImages().length > 0 && !currentModelSupportsVision();
@@ -2790,8 +2807,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           failedSteerItemIds={failedSteerQueuedMessageIds()}
           editingItemId={queuedMessageEdit()?.id}
           canEdit={canEditQueuedMessage()}
+          canSendImmediately={!hasPendingApproval()}
           onRetryDispatch={(item) => void dispatchQueuedMessage(item, true)}
-          onSendAsSteer={sendQueuedAsSteer}
+          onSendAsSteer={(item) => {
+            if (!hasPendingApproval()) void sendQueuedAsSteer(item);
+          }}
           onSetPaused={(item, paused, allRows) => setQueuedMessagePaused(item.id, paused, allRows)}
           onReorder={reorderQueuedMessage}
           onEdit={editQueuedMessage}
@@ -3209,6 +3229,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             onStop={requestAbortSession}
             showSendControl={showSendControl()}
             showBusySendControls={showBusySendControls()}
+            showBusySendOptions={showBusySendOptions()}
             canSend={canSend()}
             busyToggleRef={(el) => {
               busyToggleRef = el;
@@ -3369,6 +3390,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           onStop={requestAbortSession}
           showSendControl={showSendControl()}
           showBusySendControls={showBusySendControls()}
+          showBusySendOptions={showBusySendOptions()}
           canSend={canSend()}
           busyToggleRef={(el) => {
             busyToggleRef = el;

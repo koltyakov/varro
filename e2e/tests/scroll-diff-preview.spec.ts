@@ -172,7 +172,7 @@ test.describe('diff preview anchoring', () => {
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(15);
-    await expect(summary).toContainText('Explored 1 file');
+    await expect(summary).toContainText('Explored: 1 file');
     await expect(summary).not.toContainText('edit');
     await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
   });

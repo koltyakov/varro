@@ -51,7 +51,7 @@ describe('assistant activity summaries', () => {
     ];
 
     expect(formatAssistantActivitySummary(parts)).toBe(
-      'Explored 2 files, 1 thought, 1 search, 1 command, 1 tool call'
+      'Explored: 2 files, 1 thought, 1 search, 1 command, 1 tool call'
     );
   });
 
@@ -68,7 +68,7 @@ describe('assistant activity summaries', () => {
 *** End Patch`,
     });
 
-    expect(formatAssistantActivitySummary([patch])).toBe('Explored 3 edits');
+    expect(formatAssistantActivitySummary([patch])).toBe('Explored: 3 edits');
   });
 
   it('detects streaming reasoning and pending or running tools', () => {
@@ -80,7 +80,7 @@ describe('assistant activity summaries', () => {
     expect(getAssistantActivityStatus([reasoning('reasoning-1')]).running).toBe(true);
     expect(getAssistantActivityStatus([pending]).running).toBe(true);
     expect(getAssistantActivityStatus([completedTool('read-1', 'read')]).running).toBe(false);
-    expect(formatAssistantActivitySummary([pending])).toBe('Explored 1 search');
+    expect(formatAssistantActivitySummary([pending])).toBe('Explored: 1 search');
   });
 
   it('surfaces failed tools in the collapsed summary', () => {
@@ -95,7 +95,7 @@ describe('assistant activity summaries', () => {
     };
 
     expect(getAssistantActivityStatus([failed])).toEqual({ running: false, failed: 1, aborted: 0 });
-    expect(formatAssistantActivitySummary([failed])).toBe('Explored 1 command · 1 tool failed');
+    expect(formatAssistantActivitySummary([failed])).toBe('Explored: 1 command · 1 tool failed');
   });
 
   it('keeps agent and subtask activity outside compact groups', () => {

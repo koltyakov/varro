@@ -36,6 +36,7 @@ export function QueuedMessages(props: {
   failedSteerItemIds?: ReadonlySet<string>;
   editingItemId?: string | null;
   canEdit: boolean;
+  canSendImmediately: boolean;
   onRetryDispatch: (item: QueuedMessageItem) => void;
   onSendAsSteer: (item: QueuedMessageItem) => void;
   onSetPaused: (item: QueuedMessageItem, paused: boolean, allRows: boolean) => void;
@@ -235,7 +236,7 @@ export function QueuedMessages(props: {
                     onClick={() =>
                       didDispatchFail() ? props.onRetryDispatch(item) : props.onSendAsSteer(item)
                     }
-                    disabled={isLocked()}
+                    disabled={isLocked() || !props.canSendImmediately}
                     hidden={isLocked()}
                     title={
                       isDispatching()
@@ -248,7 +249,9 @@ export function QueuedMessages(props: {
                               ? 'Sending as Steer'
                               : didSteerFail()
                                 ? 'Retry send as Steer'
-                                : 'Send now as Steer'
+                                : !props.canSendImmediately
+                                  ? 'Resolve the pending request before sending immediately'
+                                  : 'Send now as Steer'
                     }
                     aria-label={
                       didDispatchFail()

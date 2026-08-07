@@ -1004,7 +1004,7 @@ describe('MessageList compact activity', () => {
 
     const summaries = container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary');
     expect(summaries).toHaveLength(1);
-    expect(summaries?.[0]?.textContent).toContain('Explored 1 thought, 1 command');
+    expect(summaries?.[0]?.textContent).toContain('Explored: 1 thought, 1 command');
     expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(0);
     expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).toContain(
       'interactive-item-render-empty'
@@ -1051,7 +1051,7 @@ describe('MessageList compact activity', () => {
     await vi.advanceTimersByTimeAsync(1);
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file'
+      'Explored: 1 file'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).not.toBeNull();
     await vi.advanceTimersByTimeAsync(2_400);
@@ -1079,7 +1079,7 @@ describe('MessageList compact activity', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file'
+      'Explored: 1 file'
     );
     expect(
       container?.querySelector('[data-activity-part-id="search-1"].is-completed')
@@ -1096,12 +1096,12 @@ describe('MessageList compact activity', () => {
       container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
     ).not.toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file, 1 search'
+      'Explored: 1 file, 1 search'
     );
 
     await vi.advanceTimersByTimeAsync(420);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file, 1 search'
+      'Explored: 1 file, 1 search'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
   });
@@ -1176,7 +1176,7 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
     expect(followerRow?.classList).toContain('interactive-item-render-empty');
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 2 commands'
+      'Explored: 2 commands'
     );
   });
 
@@ -1232,7 +1232,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file, 1 command'
+      'Explored: 1 file, 1 command'
     );
   });
 
@@ -1315,7 +1315,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('[data-activity-part-id="command-stale"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 command'
+      'Explored: 1 command'
     );
     expect(container?.textContent).toContain('Working on it.');
   });
@@ -1367,7 +1367,7 @@ describe('MessageList compact activity', () => {
     const activeItem = container?.querySelector<HTMLElement>(
       '[data-activity-part-id="command-running"]'
     );
-    expect(summary?.textContent).toContain('Explored 2 commands');
+    expect(summary?.textContent).toContain('Explored: 2 commands');
     expect(summary?.compareDocumentPosition(activeItem!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
@@ -1408,7 +1408,7 @@ describe('MessageList compact activity', () => {
     await vi.advanceTimersByTimeAsync(180);
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 2 commands'
+      'Explored: 2 commands'
     );
 
     const retained = completedCommand('command-2', 'npm run test:e2e', 3);
@@ -1417,7 +1417,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 2 commands'
+      'Explored: 2 commands'
     );
     expect(
       container?.querySelector('[data-activity-part-id="command-2"].is-completed')
@@ -1427,7 +1427,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 3 commands'
+      'Explored: 3 commands'
     );
   });
 
@@ -1492,7 +1492,7 @@ describe('MessageList compact activity', () => {
     const tray = container?.querySelector('.assistant-active-activity-tray');
     expect(tray?.classList).toContain('has-active-summary');
     expect(tray?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 command'
+      'Explored: 1 command'
     );
     expect(tray?.querySelector('button.assistant-activity-summary')).not.toBeNull();
     expect(tray?.querySelector('[data-activity-part-id="command-1"].is-exiting')).not.toBeNull();
@@ -1516,7 +1516,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 command'
+      'Explored: 1 command'
     );
     expect(container?.textContent).toContain('Tests passed.');
   });
@@ -1557,8 +1557,8 @@ describe('MessageList compact activity', () => {
       ...(container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary') || []),
     ];
     expect(summaries).toHaveLength(2);
-    expect(summaries[0]?.textContent).toContain('Explored 1 command');
-    expect(summaries[1]?.textContent).toContain('Explored 1 thought');
+    expect(summaries[0]?.textContent).toContain('Explored: 1 command');
+    expect(summaries[1]?.textContent).toContain('Explored: 1 thought');
 
     const renderKeys = [
       ...(container?.querySelectorAll<HTMLElement>('[data-assistant-render-key]') || []),
@@ -1662,8 +1662,8 @@ describe('MessageList compact activity', () => {
     ];
     expect(summaries()).toHaveLength(2);
     expect(summaries().map((summary) => summary.textContent)).toEqual([
-      expect.stringContaining('Explored 1 edit'),
-      expect.stringContaining('Explored 1 file'),
+      expect.stringContaining('Explored: 1 edit'),
+      expect.stringContaining('Explored: 1 file'),
     ]);
     expect(container?.querySelector('.file-change-inline-diffs-unwrapped')).not.toBeNull();
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
@@ -1706,7 +1706,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
     expect(summaries()).toHaveLength(2);
-    expect(summaries()[1]?.textContent).toContain('Explored 1 file');
+    expect(summaries()[1]?.textContent).toContain('Explored: 1 file');
     expect(summaries()[1]?.textContent).not.toContain('edit');
   });
 
@@ -1753,7 +1753,7 @@ describe('MessageList compact activity', () => {
 
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 edit'
+      'Explored: 1 edit'
     );
   });
 

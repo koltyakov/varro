@@ -108,6 +108,7 @@ type ToolbarSharedProps = {
   onStop: () => void;
   showSendControl: boolean;
   showBusySendControls: boolean;
+  showBusySendOptions: boolean;
   canSend: boolean;
   busyToggleRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   showBusyMenu: boolean;
@@ -216,13 +217,16 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
           <div style={{ position: 'relative' }}>
             <SendControls
               showBusyControls={props.showBusySendControls}
+              showBusyOptions={props.showBusySendOptions}
               canSend={props.canSend}
               busyToggleRef={props.busyToggleRef}
               onSend={props.onSend}
               onToggleBusyMenu={props.onToggleBusyMenu}
             />
 
-            <Show when={props.showBusyMenu && props.showBusySendControls}>
+            <Show
+              when={props.showBusyMenu && props.showBusySendControls && props.showBusySendOptions}
+            >
               <BusySendMenu
                 ref={props.busyMenuRef}
                 onQueue={props.onQueue}

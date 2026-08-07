@@ -282,7 +282,7 @@ describe('AssistantMessageContent', () => {
     const summary = () =>
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     const initialSummary = summary();
-    expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search');
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search');
     expect(summary()?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.assistant-activity-details')).toBeNull();
 
@@ -295,7 +295,7 @@ describe('AssistantMessageContent', () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expect(summary()).toBe(initialSummary);
-    expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search, 1 command');
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search, 1 command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(summary()?.classList).not.toContain('assistant-activity-summary-settling');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
@@ -341,7 +341,7 @@ describe('AssistantMessageContent', () => {
 
     const summary = container?.querySelector('.assistant-activity-summary-text');
     expect(summary?.getAttribute('aria-label')).toBe(
-      'Explored 1 file, 1 thought, 1 search, 1 command'
+      'Explored: 1 file, 1 thought, 1 search, 1 command'
     );
     expect(
       [...(summary?.querySelectorAll('.assistant-activity-kind-icon') || [])].map((icon) =>
@@ -353,7 +353,7 @@ describe('AssistantMessageContent', () => {
     resize?.([{ target: resizeTarget } as unknown as ResizeObserverEntry], {} as ResizeObserver);
 
     expect(summary?.querySelector('.assistant-activity-kind-icon')).toBeNull();
-    expect(summary?.textContent).toBe('Explored 1 file, 1 thought, 1 search, 1 command');
+    expect(summary?.textContent).toBe('Explored: 1 file, 1 thought, 1 search, 1 command');
   });
 
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
@@ -387,7 +387,7 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({ parts: [edit] });
 
     const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
-    expect(summary?.textContent).toContain('Explored 1 edit');
+    expect(summary?.textContent).toContain('Explored: 1 edit');
     expect(container?.querySelector('[data-part-id="edit-history"]')).toBeNull();
 
     summary?.click();
@@ -405,7 +405,7 @@ describe('AssistantMessageContent', () => {
     });
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 file'
+      'Explored: 1 file'
     );
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
       'edit'
@@ -421,7 +421,7 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({ parts: [edit] });
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 edit'
+      'Explored: 1 edit'
     );
     expect(container?.querySelector('[data-part-id="edit-compact"]')).toBeNull();
   });
@@ -439,7 +439,7 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({ parts: [toolPart('read-1', 'read'), failed] });
 
     expect(container?.querySelector('.assistant-activity-summary-main')?.textContent).toBe(
-      'Explored 2 files'
+      'Explored: 2 files'
     );
     expect(container?.querySelector('.assistant-activity-status-failed')?.textContent).toBe(
       '· 1 tool failed'
@@ -485,7 +485,7 @@ describe('AssistantMessageContent', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toBe(
-      'Explored 1 search'
+      'Explored: 1 search'
     );
     expect(container?.querySelector('[data-part-id="grep-running"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-group-settling')).not.toBeNull();
@@ -535,7 +535,7 @@ describe('AssistantMessageContent', () => {
     const tray = container?.querySelector('.assistant-active-activity-tray');
     expect(tray?.classList).toContain('has-active-summary');
     expect(tray?.querySelector('.assistant-activity-summary')?.textContent).toContain(
-      'Explored 1 command'
+      'Explored: 1 command'
     );
     expect(
       tray?.querySelector('[data-activity-part-id="command-exiting"].is-exiting')
