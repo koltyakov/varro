@@ -161,6 +161,17 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('labels the GPT Fast lightning symbol on hover', async () => {
+    setState('providers', 0, 'models', 'gpt-5', 'name', 'GPT-5 Fast');
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const fastSymbol = container?.querySelector(
+      '.settings-model-name [title="Fast (more expensive)"]'
+    );
+    expect(fastSymbol?.textContent).toBe('⚡');
+  });
+
   it('requests a provider reload from the extension', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

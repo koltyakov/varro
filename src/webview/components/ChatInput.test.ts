@@ -1071,6 +1071,7 @@ describe('ChatInput', () => {
 
   it('shows context usage before assistant tokens are available', async () => {
     setupModelState();
+    setState('providers', 0, 'models', 'gpt-4o', 'name', 'GPT-5.6 Fast');
     setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 0, output: 0 })]);
 
@@ -1085,6 +1086,9 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.context-popup-pct')?.textContent).toBe('--');
     expect(container?.querySelector('.context-popup-pct')?.classList).toContain('unavailable');
     expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('--/1,000tokens');
+    expect(container?.querySelector('.context-popup-model')?.textContent).toBe(
+      'OpenAI / GPT-5.6 Fast'
+    );
 
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
     await Promise.resolve();

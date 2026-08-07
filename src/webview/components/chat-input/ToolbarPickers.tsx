@@ -325,7 +325,7 @@ export function ModelPickerButton(props: {
       ref={props.buttonRef}
       class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
       onClick={props.onToggle}
-      title={props.modelName ? `${props.providerName} / ${displayModelName()}` : 'Choose model'}
+      title={props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model'}
     >
       <Show
         when={props.modelName}

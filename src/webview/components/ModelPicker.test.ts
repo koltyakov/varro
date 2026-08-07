@@ -64,6 +64,25 @@ afterEach(() => {
 });
 
 describe('ModelPicker', () => {
+  it('labels the GPT Fast lightning symbol on hover', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        fast: createModel('fast', 'GPT-5.6 Fast'),
+        standard: createModel('standard', 'GPT-5.6'),
+      }),
+    ]);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
+      (item) => item.textContent === 'GPT-5.6 ⚡'
+    );
+    const fastSymbol = fastLabel?.querySelector('[title="Fast (more expensive)"]');
+    expect(fastSymbol?.textContent).toBe('⚡');
+    expect(container?.querySelectorAll('[title="Fast (more expensive)"]')).toHaveLength(1);
+  });
+
   it('renders an inline release date for desktop layouts', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

@@ -365,7 +365,7 @@ describe('ToolbarPickers', () => {
     );
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    expect(button?.title).toBe('OpenAI / GPT-5.6 ⚡');
+    expect(button?.title).toBe('OpenAI / GPT-5.6 Fast');
     expect(container?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 ⚡');
   });
 

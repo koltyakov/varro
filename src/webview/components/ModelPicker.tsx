@@ -3,7 +3,6 @@ import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import {
   formatVariantLabel as formatThinkingLabel,
   formatContextLimit,
-  formatModelName,
   formatModelReleaseDate,
 } from '../lib/format';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
@@ -14,6 +13,7 @@ import {
 } from '../lib/model-capabilities';
 import { sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
+import { FormattedModelName } from './FormattedModelName';
 
 interface ModelSelection {
   providerID?: string;
@@ -298,7 +298,9 @@ export function ModelPicker(props: {
                             onMouseEnter={() => setFocusIndex(myIndex())}
                           >
                             <span class="dropdown-name-wrap">
-                              <span class="dropdown-name">{formatModelName(model.name)}</span>
+                              <span class="dropdown-name">
+                                <FormattedModelName name={model.name} />
+                              </span>
                               <Show when={state.providerDefaults[provider.id] === model.id}>
                                 <span class="model-default-label">(default)</span>
                               </Show>

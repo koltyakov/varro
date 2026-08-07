@@ -8,7 +8,7 @@ import {
   setShowSettings,
   state,
 } from '../lib/state';
-import { formatContextLimit, formatModelName, formatModelReleaseDate } from '../lib/format';
+import { formatContextLimit, formatModelReleaseDate } from '../lib/format';
 import {
   modelSupportsTools,
   modelSupportsVariants,
@@ -21,6 +21,7 @@ import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting } from '../types';
+import { FormattedModelName } from './FormattedModelName';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
@@ -456,7 +457,9 @@ function ProviderSection(props: {
                     }
                   />
                   <span class="settings-model-name-wrap">
-                    <span class="settings-model-name">{formatModelName(model.name)}</span>
+                    <span class="settings-model-name">
+                      <FormattedModelName name={model.name} />
+                    </span>
                     <Show when={state.providerDefaults[props.provider.id] === model.id}>
                       <span class="model-default-label">(default)</span>
                     </Show>
