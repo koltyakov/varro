@@ -216,7 +216,7 @@ describe('SessionListView model details', () => {
     });
   });
 
-  it('shows and opens with a locally redefined model instead of the message summary', async () => {
+  it('shows and opens with the message summary instead of a persisted selection', async () => {
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -256,7 +256,7 @@ describe('SessionListView model details', () => {
 
     await vi.waitFor(() => {
       expect(container.querySelector('.session-item-model-meta')?.textContent).toBe(
-        ' · GPT-5.6 Luna · Max'
+        ' · GPT-5.6 Sol · High'
       );
     });
 
@@ -265,8 +265,8 @@ describe('SessionListView model details', () => {
     expect(selectSession).toHaveBeenCalledWith('session-1', {
       selectedModel: {
         providerID: 'openai',
-        modelID: 'gpt-5.6-luna',
-        variant: 'max',
+        modelID: 'gpt-5.6-sol',
+        variant: 'high',
       },
     });
   });

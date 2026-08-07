@@ -107,7 +107,7 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
-  it('restores a locally redefined model while selecting and loading a session', async () => {
+  it('prefers actual session and message models over a persisted selection', async () => {
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
@@ -128,8 +128,8 @@ describe('session-selection helpers', () => {
     }));
     const deriveSelectedModelFromMessages = vi.fn(() => ({
       providerID: 'openai',
-      modelID: 'gpt-5.6-sol',
-      variant: 'high',
+      modelID: 'gpt-5.6-codex',
+      variant: 'low',
     }));
     const externalSession: Session = {
       id: 'session-1',
@@ -137,7 +137,7 @@ describe('session-selection helpers', () => {
       directory: '/repo',
       title: 'Session 1',
       version: '1',
-      model: { providerID: 'openai', id: 'gpt-5.6-sol', variant: 'high' },
+      model: { providerID: 'openai', id: 'gpt-5.6-luna', variant: 'max' },
       time: { created: 0, updated: 2 },
     };
 
@@ -186,14 +186,7 @@ describe('session-selection helpers', () => {
         setError: vi.fn(),
       },
       { next: () => 1 },
-      'session-1',
-      {
-        selectedModel: {
-          providerID: 'openai',
-          modelID: 'gpt-5.6-luna',
-          variant: 'max',
-        },
-      }
+      'session-1'
     );
 
     expect(activeSession.value).toBe('session-1');
@@ -209,8 +202,8 @@ describe('session-selection helpers', () => {
       1,
       {
         providerID: 'openai',
-        modelID: 'gpt-5.6-sol',
-        variant: 'high',
+        modelID: 'gpt-5.6-luna',
+        variant: 'max',
       },
       'session-1'
     );
@@ -218,14 +211,14 @@ describe('session-selection helpers', () => {
       2,
       {
         providerID: 'openai',
-        modelID: 'gpt-5.6-sol',
-        variant: 'high',
+        modelID: 'gpt-5.6-codex',
+        variant: 'low',
       },
       'session-1'
     );
     expect(resolvePersistedModel).toHaveBeenCalledWith('session-1');
     expect(resolveFallbackModel).not.toHaveBeenCalled();
-    expect(deriveSelectedModelFromMessages).not.toHaveBeenCalled();
+    expect(deriveSelectedModelFromMessages).toHaveBeenCalledTimes(1);
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
   });

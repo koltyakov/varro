@@ -165,9 +165,6 @@ function getSessionDisplayModel(
   session: Session,
   diffSummary: SessionDiffSummary | null
 ): SelectedModel | null {
-  const persistedModel = getSelectedModelForSession(session.id);
-  if (persistedModel) return persistedModel;
-
   const summaryModel = diffSummary?.model;
   if (summaryModel) {
     return {
@@ -176,12 +173,14 @@ function getSessionDisplayModel(
       variant: summaryModel.variant,
     };
   }
-  if (!session.model) return null;
-  return {
-    providerID: session.model.providerID,
-    modelID: session.model.id,
-    variant: session.model.variant,
-  };
+  if (session.model) {
+    return {
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+      variant: session.model.variant,
+    };
+  }
+  return getSelectedModelForSession(session.id);
 }
 
 function openSessionWithDisplayedModel(session: Session, diffSummary: SessionDiffSummary | null) {
