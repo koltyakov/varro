@@ -2689,6 +2689,29 @@ export function MessageList() {
     if (untrack(activityExitBottomReserve) > 0.5) setActivityExitBottomReserve(0);
   }
 
+  function preserveActivityExitReserve() {
+    const target = activityExitBottomTarget;
+    const reserve = untrack(activityExitBottomReserve);
+    activityExitBottomTarget = null;
+    if (
+      target === null ||
+      reserve <= 0.5 ||
+      !containerRef ||
+      !autoScroll() ||
+      !pinnedToBottom ||
+      stickyNavigationOwnsScroll()
+    ) {
+      if (reserve > 0.5) setActivityExitBottomReserve(0);
+      return;
+    }
+
+    appendBottomReserveTarget = Math.max(appendBottomReserveTarget, target);
+    batch(() => {
+      setAppendBottomReserve((current) => current + reserve);
+      setActivityExitBottomReserve(0);
+    });
+  }
+
   function shouldCorrectBottomAfterResize() {
     if (
       !containerRef ||
@@ -4192,7 +4215,7 @@ export function MessageList() {
     ReadonlySet<string>
   >(new Set());
   createEffect(() => {
-    if (exitingActivityPartKeys().size === 0) clearActivityExitReserve();
+    if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
   });
   const activityPartFirstSeenAt = new Map<string, number>();
   const settledActivityPartKeys = new Set<string>();

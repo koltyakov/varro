@@ -594,7 +594,7 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
   });
 
-  test('releases trailing active-tool space after its exit animation', async ({ page }) => {
+  test('keeps trailing active-tool space until streamed content replaces it', async ({ page }) => {
     await page.goto(
       '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
     );
@@ -613,6 +613,7 @@ test.describe('auto-scroll', () => {
       )
       .toBeLessThan(2);
     await page.waitForTimeout(1_250);
+    const anchor = await getVisibleMessageAnchor(page.locator('.interactive-list'));
 
     await page.evaluate(() => {
       const harnessWindow = window as typeof window & {
@@ -638,8 +639,22 @@ test.describe('auto-scroll', () => {
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
     });
 
+    const exitSamples = await sampleMessageTopAcrossFrames(
+      page.locator('.interactive-list'),
+      anchor.id,
+      90
+    );
+    expect(
+      exitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
+      JSON.stringify({ anchor, exitSamples })
+    ).toBe(true);
     await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+    const appendReserve = page.locator('.append-scroll-bottom-reserve');
+    await expect(appendReserve).toBeVisible();
+    expect(
+      await appendReserve.evaluate((element) => element.getBoundingClientRect().height)
+    ).toBeGreaterThan(5);
 
     const settledGap = await page
       .locator('.assistant-activity-summary')
@@ -654,6 +669,48 @@ test.describe('auto-scroll', () => {
       );
     expect(settledGap).toBeGreaterThanOrEqual(5);
     expect(settledGap).toBeLessThanOrEqual(9);
+
+    await page.evaluate(() => {
+      const part = {
+        id: 'message-tool-cards-assistant-69-text-streaming',
+        sessionID: 'session-tool-cards-large-transcript',
+        messageID: 'message-tool-cards-assistant-69',
+        type: 'text' as const,
+        text: '',
+      };
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part } },
+        },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.delta',
+            properties: {
+              sessionID: part.sessionID,
+              messageID: part.messageID,
+              partID: part.id,
+              field: 'text',
+              delta: Array.from(
+                { length: 12 },
+                (_, index) => `Streamed replacement line ${index + 1}.`
+              ).join('\n\n'),
+            },
+          },
+        },
+        '*'
+      );
+    });
+
+    await expect(appendReserve).toHaveCount(0);
   });
 
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({

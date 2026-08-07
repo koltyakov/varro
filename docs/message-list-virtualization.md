@@ -121,6 +121,8 @@ The effective ownership order is:
   exit completes.
 - A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
   chrome, does not become part of row-only virtual prefixes, and is removed when no exit remains.
+- When a bottom-pinned activity exit finishes, hand its disappearing height to the append reserve so
+  the transcript stays fixed until subsequent streamed content consumes that space.
 - Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
   run when the row unmounts, the session changes, compact rendering is disabled, or user input takes
   ownership.
