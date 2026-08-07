@@ -4,12 +4,11 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.24.x - August 2026
 
-- Added paged, compact previews for large file edits, with inline changes enabled by default.
-- Made changed files easier to review by opening files directly from diff previews.
-- Added session cost visibility and clearer fast-model pricing cues for more informed model and spend decisions.
-- Made provider updates non-disruptive by queuing refreshes until active work finishes and clearly showing their status.
-- Improved the stability of long, virtualized conversations and expandable activity summaries.
-- Improved session deletion, session switching, sidebar activation, and image-paste feedback.
+- Made compact tool activity the default, with clearer live progress and responsive expandable summaries.
+- Added reported session cost to context details and identified fast models as more expensive.
+- Made provider and authentication changes non-disruptive by applying queued refreshes after active work finishes and showing pending status.
+- Improved long-conversation scrolling, history loading, sticky prompt navigation, read mode, and session switching.
+- Improved active-session deletion, first-run sidebar reveal, model-management discovery, markdown readability, and rejected image-paste feedback.
 
 ## 0.23.x - July-August 2026
 
