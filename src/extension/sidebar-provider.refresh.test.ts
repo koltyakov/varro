@@ -228,10 +228,12 @@ describe('SidebarProvider provider refresh', () => {
 
     expect(server.restart).not.toHaveBeenCalled();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
 
     await vi.advanceTimersByTimeAsync(6_000);
 
     expect(server.restart).toHaveBeenCalledOnce();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
     expect(
       posted.filter(
         (message) =>
@@ -242,6 +244,104 @@ describe('SidebarProvider provider refresh', () => {
       )
     ).toHaveLength(2);
     await provider.dispose();
+  });
+
+  it('replays a deferred provider refresh after the webview reloads', async () => {
+    vi.useFakeTimers();
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? { active: { type: 'busy' } } : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+
+    await access.refreshProviderState();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+
+    posted.length = 0;
+    await provider.handleMessage({ type: 'ready' });
+
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+    await provider.dispose();
+  });
+
+  it('restores and completes a deferred provider refresh after a window reload', async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, unknown>();
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        values.has(key) ? values.get(key) : fallback
+      ),
+      update: vi.fn(async (key: string, value: unknown) => {
+        if (value === undefined) values.delete(key);
+        else values.set(key, value);
+      }),
+    };
+    const busyServer = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? { active: { type: 'busy' } } : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const first = await createSidebarProviderInstance({
+      server: busyServer,
+      workspaceState: workspaceState as never,
+    });
+    const firstAccess = first.provider as unknown as ProviderRefreshAccess;
+    firstAccess.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await firstAccess.refreshProviderState();
+    expect(values.get('varro.providerRefresh.pending')).toEqual({
+      version: 1,
+      revalidateAuth: false,
+    });
+    await first.provider.dispose();
+
+    let idle = false;
+    const restoredServer = createServer({
+      status: { state: 'stopped' },
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/question') return [];
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return undefined;
+      }),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const second = await createSidebarProviderInstance({
+      server: restoredServer,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(second.provider);
+    const secondAccess = second.provider as unknown as ProviderRefreshAccess;
+    secondAccess.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await second.provider.handleMessage({ type: 'ready' });
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+
+    restoredServer.status = { state: 'running', url: 'http://127.0.0.1:4096' };
+    for (const [, listener] of restoredServer.on.mock.calls.filter(
+      ([event]) => event === 'status'
+    )) {
+      listener(restoredServer.status);
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(restoredServer.restart).not.toHaveBeenCalled();
+
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(restoredServer.restart).toHaveBeenCalledOnce();
+    expect(values.has('varro.providerRefresh.pending')).toBe(false);
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    await second.provider.dispose();
   });
 
   it('invalidates an unmanaged server without restarting during provider refresh', async () => {

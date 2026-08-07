@@ -61,6 +61,18 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses provider refresh status', () => {
+    expect(parseExtensionMessage({ type: 'providers/status', payload: { pending: true } })).toEqual(
+      { type: 'providers/status', payload: { pending: true } }
+    );
+    expect(
+      parseExtensionMessage({ type: 'providers/status', payload: { pending: false } })
+    ).toEqual({ type: 'providers/status', payload: { pending: false } });
+    expect(
+      parseExtensionMessage({ type: 'providers/status', payload: { pending: 'yes' } })
+    ).toBeNull();
+  });
+
   it('parses server/status and rejects malformed variants', () => {
     expect(
       parseExtensionMessage({

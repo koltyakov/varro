@@ -1,6 +1,7 @@
 import { isAbortedToolError } from '../../shared/error-classification';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { isFileEditPart, isFileReadPart } from './part-utils';
+import { getToolFileChanges } from './tool-file-change';
 
 export type AssistantActivityPart = Extract<Part, { type: 'reasoning' | 'tool' }>;
 
@@ -98,6 +99,15 @@ export function isAssistantActivityPart(part: Part): part is AssistantActivityPa
 
 export function isAssistantEditActivityPart(part: AssistantActivityPart) {
   return getActivityKind(part) === 'edits';
+}
+
+export function shouldCompactAssistantActivityPart(
+  part: AssistantActivityPart,
+  options: { showInlineFileChanges: boolean; keepEditInline: boolean }
+) {
+  return (
+    !options.showInlineFileChanges || !isAssistantEditActivityPart(part) || !options.keepEditInline
+  );
 }
 
 export function getAssistantActivityGroupMap(
@@ -219,7 +229,12 @@ export function formatAssistantActivityCounts(
   const counts = new Map<ActivityKind, number>();
   for (const part of parts) {
     const kind = getActivityKind(part);
-    counts.set(kind, (counts.get(kind) || 0) + 1);
+    const count =
+      kind === 'edits' && part.type === 'tool'
+        ? getToolFileChanges(part.tool, part.state).filter((change) => !change.isSummary).length ||
+          1
+        : 1;
+    counts.set(kind, (counts.get(kind) || 0) + count);
   }
 
   const labels = ACTIVITY_KIND_ORDER.flatMap((kind) => {

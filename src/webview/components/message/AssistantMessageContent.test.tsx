@@ -296,7 +296,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
 
-  it('keeps inline file edits outside the compact activity disclosure', () => {
+  it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const edit = fileEditPart('edit-inline', 'src/app.ts');
@@ -309,11 +309,30 @@ describe('AssistantMessageContent', () => {
       'Edited src/app.ts'
     );
 
-    renderAssistantMessageContent({ parts: [edit] });
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [edit],
+    });
 
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
     expect(container?.querySelector('.assistant-file-edit-stack')).not.toBeNull();
     expect(container?.querySelector('[data-part-id="edit-inline"]')).not.toBeNull();
+  });
+
+  it('moves completed inline file edits into compact history', () => {
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    const edit = previewFileEditPart('edit-history', 'src/history.ts');
+
+    renderAssistantMessageContent({ parts: [edit] });
+
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary?.textContent).toContain('Explored 1 edit');
+    expect(container?.querySelector('[data-part-id="edit-history"]')).toBeNull();
+
+    summary?.click();
+
+    expect(container?.querySelector('[data-part-id="edit-history"]')).not.toBeNull();
   });
 
   it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {
@@ -321,6 +340,7 @@ describe('AssistantMessageContent', () => {
     setShowInlineFileChanges(true);
 
     renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
       parts: [toolPart('edit-pending', 'apply_patch'), toolPart('read-1', 'read')],
     });
 
@@ -739,6 +759,7 @@ describe('AssistantMessageContent', () => {
     setCompactToolOutput(expected.compactOutput);
     setShowInlineFileChanges(expected.inlineChanges);
     renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
         toolPart('read-1', 'read'),
         previewFileEditPart('edit-1', 'src/one.ts'),
@@ -767,6 +788,7 @@ describe('AssistantMessageContent', () => {
   it('keeps every inline edit rendered when compact output changes', () => {
     setShowInlineFileChanges(true);
     renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
       parts: [
         previewFileEditPart('edit-1', 'src/one.ts'),
         previewFileEditPart('edit-2', 'src/two.ts'),
@@ -855,7 +877,10 @@ describe('AssistantMessageContent', () => {
     };
     const parts = [multiFilePart, finalPart];
 
-    renderAssistantMessageContent({ parts });
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts,
+    });
 
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(

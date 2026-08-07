@@ -549,6 +549,7 @@ export type ExtensionMessage =
   | { type: 'server/restart-blocked'; payload: RestartBlockedState }
   | { type: 'server/event'; payload: ServerEvent }
   | { type: 'providers/refresh'; payload?: { revalidateAuth: true } }
+  | { type: 'providers/status'; payload: { pending: boolean } }
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }

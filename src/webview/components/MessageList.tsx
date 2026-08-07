@@ -23,6 +23,7 @@ import {
   requestMessageListScrollToBottom,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
+  isSessionTreeStatusWorking,
   getSessionTreeRootId,
   messageStructureVersion,
   messageInfoVersion,
@@ -34,8 +35,8 @@ import {
 import {
   getAssistantActivityGroupMap,
   isAssistantActivityPart,
-  isAssistantEditActivityPart,
   preserveAssistantActivityGroupKeys,
+  shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
 } from '../lib/assistant-activity';
 import { isAssistantMessage } from '../lib/message-metrics';
@@ -206,7 +207,10 @@ export function getInlinePreviewLayoutSignatures(
     for (const part of message.parts) {
       if (part.type !== 'tool') continue;
       const signature = getToolInlineFileChangesLayoutSignature(part.tool, part.state);
-      if (signature) partSignatures.push(`${part.id}:${signature}`);
+      if (signature) {
+        const cardLayout = part.state.status === 'completed' ? 'preview-only' : 'preview-with-card';
+        partSignatures.push(`${part.id}:${cardLayout}:${signature}`);
+      }
     }
     if (partSignatures.length > 0) {
       signatures.set(message.info.id, partSignatures.join('\u0000'));
@@ -267,13 +271,57 @@ export function getCompactActivityDisclosureLayoutSignatures(
     [...groups].map(([messageId, messageGroups]) => [
       messageId,
       messageGroups
-        .map(
-          (group) =>
-            `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}`
-        )
+        .map((group) => {
+          const partSignature = group.parts
+            .map((part) => `${part.messageID}\u0000${part.id}`)
+            .join('\u0002');
+          return `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}\u0000${partSignature}`;
+        })
         .join('\u0001'),
     ])
   );
+}
+
+export function getRenderEmptyAssistantMessageIds(
+  messages: readonly MessageEntry[],
+  groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+  isExpanded: (key: string) => boolean
+) {
+  const result = new Set<string>();
+
+  for (const message of messages) {
+    if (!isAssistantMessage(message.info) || message.info.error) continue;
+    const messageGroups = groups.get(message.info.id) ?? [];
+
+    const groupByPartKey = new Map(
+      messageGroups.flatMap((group) =>
+        group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
+      )
+    );
+    let hasVisibleRowContent = false;
+
+    for (const part of message.parts) {
+      const visible =
+        part.type === 'text'
+          ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
+          : shouldShowAssistantPartInline(part);
+      if (!visible) continue;
+      if (!isAssistantActivityPart(part)) {
+        hasVisibleRowContent = true;
+        break;
+      }
+
+      const group = groupByPartKey.get(`${part.messageID}\u0000${part.id}`);
+      if (!group || group.ownerMessageId === message.info.id || isExpanded(group.key)) {
+        hasVisibleRowContent = true;
+        break;
+      }
+    }
+
+    if (!hasVisibleRowContent) result.add(message.info.id);
+  }
+
+  return result;
 }
 
 export function getChangedInlinePreviewMessageIds(
@@ -909,6 +957,9 @@ export function MessageList() {
   }
 
   const measuredHeights = new Map<string, number>();
+  const [knownZeroHeightMessageIds, setKnownZeroHeightMessageIds] = createSignal<
+    ReadonlySet<string>
+  >(new Set());
   const zeroHeightRenderContentSignatures = new Map<string, string>();
   const forcedVirtualContentMessageIds = new Set<string>();
   const viewportForcedVirtualContentMessageIds = new Set<string>();
@@ -1229,7 +1280,7 @@ export function MessageList() {
     const activeSessionId = state.activeSessionId;
     const invalidatedAnchorOwnershipEpoch = userScrollOwnershipEpoch;
     const invalidatedAnchor =
-      invalidatedUnmountedHeight &&
+      (invalidatedUnmountedHeight || mountedRows.length > 0) &&
       !autoScroll() &&
       !followModeLocked &&
       !pendingScrollToBottomRequest &&
@@ -1241,10 +1292,11 @@ export function MessageList() {
       !diffFocusPauseActive &&
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? shouldVirtualize()
-          ? captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)
+          ? lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+            ? lastDetachedVisibleAnchor
+            : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)
           : captureVisibleScrollAnchor()
         : null;
-
     for (const messageId of unmountedMessageIds) {
       if (!measuredHeights.delete(messageId)) continue;
       zeroHeightRenderContentSignatures.delete(messageId);
@@ -1289,7 +1341,7 @@ export function MessageList() {
           element.isConnected && mountedMessageRows.get(messageId) === element
       );
       const measuredMountedHeight = measureMountedRows(connectedRows, false);
-      if (!measuredMountedHeight && !invalidatedUnmountedHeight) return;
+      if (!measuredMountedHeight && !invalidatedUnmountedHeight && !invalidatedAnchor) return;
       publishChangedLayout();
       scheduleStickyPreviewGeometryRefresh({ force: true });
       scheduleVisibleMeasurement({ afterResize: true });
@@ -1473,6 +1525,7 @@ export function MessageList() {
     const result = buildVirtualMetrics({
       itemIds: ids,
       measuredHeights,
+      knownZeroHeightIds: knownZeroHeightMessageIds(),
       previous,
       dirtyFromIndex: previous ? Math.min(dirtyVirtualMetricsFromIndex, ids.length) : undefined,
     });
@@ -1742,11 +1795,12 @@ export function MessageList() {
   }
 
   function shouldAcceptRowHeight(element: HTMLElement, messageId: string, height: number) {
+    // A placeholder's block size comes from virtual metrics; recording it as a measurement would
+    // promote a provisional estimate to an exact content height.
+    if (element.classList.contains('interactive-item-virtual-placeholder')) return false;
     if (height !== 0) {
       zeroHeightRenderContentSignatures.delete(messageId);
-      if (!element.classList.contains('interactive-item-virtual-placeholder')) {
-        forcedVirtualContentMessageIds.delete(messageId);
-      }
+      forcedVirtualContentMessageIds.delete(messageId);
       return true;
     }
     if (element.childElementCount > 0 || element.textContent?.trim()) return false;
@@ -3908,30 +3962,115 @@ export function MessageList() {
       return result;
     });
   });
+  const trailingAssistantTurn = createMemo(() => {
+    messageInfoVersion();
+    const visibleMessages = messages();
+    let userMessageId: string | null = null;
+
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const info = visibleMessages[index]!.info;
+      if (info.role === 'user') {
+        userMessageId = info.id;
+        break;
+      }
+      if (info.mode !== 'subagent') {
+        userMessageId = info.parentID;
+        break;
+      }
+    }
+
+    if (!userMessageId) return null;
+
+    const assistantMessageIds = new Set<string>();
+    let latestAssistant: AssistantMessage | null = null;
+    for (const entry of visibleMessages) {
+      if (
+        entry.info.role !== 'assistant' ||
+        entry.info.mode === 'subagent' ||
+        entry.info.parentID !== userMessageId
+      ) {
+        continue;
+      }
+      assistantMessageIds.add(entry.info.id);
+      latestAssistant = entry.info;
+    }
+
+    return { userMessageId, assistantMessageIds, latestAssistant };
+  });
+  const trailingTurnInlineEditRetention = createMemo<{
+    sessionId: string | null;
+    userMessageId: string | null;
+    messageIds: ReadonlySet<string>;
+  }>(
+    (previous) => {
+      const sessionId = state.activeSessionId;
+      const turn = trailingAssistantTurn();
+      const empty = {
+        sessionId,
+        userMessageId: turn?.userMessageId ?? null,
+        messageIds: new Set<string>(),
+      };
+      if (!sessionId || !turn || turn.assistantMessageIds.size === 0) return empty;
+
+      const awaitingInput = isSessionAwaitingInput(sessionId);
+      const treeWorking = isSessionTreeStatusWorking(sessionId);
+      const settledWithError = !!turn.latestAssistant?.error && !treeWorking && !awaitingInput;
+      if (settledWithError) return empty;
+      if (activeSessionWorking() || awaitingInput) {
+        return {
+          sessionId,
+          userMessageId: turn.userMessageId,
+          messageIds: turn.assistantMessageIds,
+        };
+      }
+
+      const sameTurnCompletedWhileOpen =
+        previous.sessionId === sessionId &&
+        previous.userMessageId === turn.userMessageId &&
+        previous.messageIds.size > 0 &&
+        !!turn.latestAssistant?.time.completed;
+      return sameTurnCompletedWhileOpen
+        ? {
+            sessionId,
+            userMessageId: turn.userMessageId,
+            messageIds: turn.assistantMessageIds,
+          }
+        : empty;
+    },
+    { sessionId: null, userMessageId: null, messageIds: new Set<string>() }
+  );
+  const keepTrailingTurnEditMessageIds = createMemo(
+    () => trailingTurnInlineEditRetention().messageIds
+  );
+  const compactActivityMessages = createMemo(() => {
+    const previousSignatures = previousTrailingFileEventSignatureMap();
+    return messages().map((message) =>
+      isAssistantMessage(message.info)
+        ? {
+            info: message.info,
+            parts: deduplicateFileEdits(
+              collapseLeadingDuplicateFileEvents(
+                message.parts,
+                previousSignatures.get(message.info.id) ?? null
+              )
+            ),
+          }
+        : message
+    );
+  });
   const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
     (previous) => {
       if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
 
-      const previousSignatures = previousTrailingFileEventSignatureMap();
-      const normalizedMessages = messages().map((message) =>
-        isAssistantMessage(message.info)
-          ? {
-              info: message.info,
-              parts: deduplicateFileEdits(
-                collapseLeadingDuplicateFileEvents(
-                  message.parts,
-                  previousSignatures.get(message.info.id) ?? null
-                )
-              ),
-            }
-          : message
-      );
       return preserveAssistantActivityGroupKeys(
         getAssistantActivityGroupMap(
-          normalizedMessages,
+          compactActivityMessages(),
           (part) =>
             shouldShowAssistantPartInline(part) &&
-            (!showInlineFileChanges() || !isAssistantEditActivityPart(part)) &&
+            shouldCompactAssistantActivityPart(part, {
+              showInlineFileChanges: showInlineFileChanges(),
+              keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
+            }) &&
             (part.type !== 'tool' ||
               (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
           (part) =>
@@ -4009,6 +4148,35 @@ export function MessageList() {
         collectLeadingSummaryStats,
       })
     );
+  });
+  createEffect(() => {
+    trackMessageBlockExpansionState();
+    const previous = knownZeroHeightMessageIds();
+    const candidates = getRenderEmptyAssistantMessageIds(
+      compactActivityMessages(),
+      assistantActivityGroupMap(),
+      (key) => getMessageBlockExpanded(key) ?? false
+    );
+    const modelChanges = modelChangeMap();
+    const dialogSummaries = assistantDialogSummaryMap();
+    const lastAssistantId = lastAssistantID();
+    const next = new Set(
+      [...candidates].filter(
+        (messageId) =>
+          messageId !== lastAssistantId &&
+          !modelChanges.has(messageId) &&
+          !dialogSummaries.has(messageId)
+      )
+    );
+    if (previous.size === next.size && [...next].every((messageId) => previous.has(messageId))) {
+      return;
+    }
+
+    for (const messageId of new Set([...previous, ...next])) {
+      if (previous.has(messageId) === next.has(messageId)) continue;
+      markVirtualMetricsDirty(messageId);
+    }
+    setKnownZeroHeightMessageIds(next);
   });
   const hasBuildAgent = createMemo(() => state.agents.some((agent) => agent.name === 'build'));
   const showJumpToLatest = createMemo(() => {

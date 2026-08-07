@@ -162,6 +162,7 @@ import {
   getLatestAssistantMessageInfo,
   getLatestAssistantMessageInfoWithTokens,
   getMessageEntriesForSession,
+  getSessionCost,
   getSessionTreeTokenBreakdown,
   getUserMessageHistoryText,
   mergeCompleteTokenBreakdown,
@@ -2463,6 +2464,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   });
 
+  const sessionCost = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) return null;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    return getSessionCost(
+      getMessageEntriesForSession(state.messages, rootId),
+      state.sessions.find((session) => session.id === rootId)
+    );
+  });
+
   let tokenBreakdownRequestId = 0;
   onCleanup(() => tokenBreakdownRequestId++);
   async function loadCompleteTokenBreakdown() {
@@ -3183,6 +3194,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             showContextPopup={showContextPopup()}
             sessionTokens={sessionTokenBreakdown().session}
+            sessionCost={sessionCost()}
             subagentTokens={sessionTokenBreakdown().subagents}
             subagentCount={sessionTokenBreakdown().subagentCount}
             contextCompactDisabled={isComposerBusy() || isSessionCompacting()}
@@ -3342,6 +3354,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           showContextPopup={showContextPopup()}
           sessionTokens={sessionTokenBreakdown().session}
+          sessionCost={sessionCost()}
           subagentTokens={sessionTokenBreakdown().subagents}
           subagentCount={sessionTokenBreakdown().subagentCount}
           contextCompactDisabled={isComposerBusy() || isSessionCompacting()}

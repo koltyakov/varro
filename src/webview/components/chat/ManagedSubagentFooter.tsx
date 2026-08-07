@@ -34,6 +34,7 @@ import { ProviderLimitChip } from '../chat-input/ToolbarPickers';
 import {
   getLatestAssistantMessageInfoWithTokens,
   getMessageEntriesForSession,
+  getSessionCost,
   getSessionTreeTokenBreakdown,
 } from '../chat-input/message-usage';
 import { filterCompactProviderLimitForModel } from '../chat-input/toolbar-compact';
@@ -109,6 +110,7 @@ export function ManagedSubagentFooter(props: {
       sessionId
     );
   });
+  const sessionCost = createMemo(() => getSessionCost(currentSessionMessages(), activeSession()));
   const currentProviderLimit = createMemo(() => {
     const current = currentModel();
     return getProviderLimit(current.providerID, current.modelID);
@@ -283,6 +285,7 @@ export function ManagedSubagentFooter(props: {
                         alignTo="right"
                         usage={usage()}
                         tokens={tokenBreakdown().session}
+                        cost={sessionCost()}
                         subagentTokens={tokenBreakdown().subagents}
                         subagentCount={tokenBreakdown().subagentCount}
                         model={currentModel()}

@@ -583,6 +583,10 @@ test.describe('auto-scroll', () => {
     );
     const finalRow = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    const summary = finalRow.locator('.assistant-activity-summary');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await summary.click();
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
     await expect(finalRow.locator('.assistant-file-edit-pager')).toHaveCount(0);
     await expect(finalRow.locator('.diff-view-file')).toHaveCount(2);
     await expect(finalRow.locator('.diff-view-filename')).toHaveText([

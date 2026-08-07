@@ -87,6 +87,7 @@ export interface AppState {
   serverStatus: ServerStatus;
   restartBlocked: RestartBlockedState | null;
   providersLoaded: boolean;
+  providerRefreshPending: boolean;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics: AttachedDiagnostics | null;
@@ -263,6 +264,7 @@ export function createAppState(): AppStateInstance {
     serverStatus: initialWebviewState.serverStatus ?? { state: 'stopped' },
     restartBlocked: null,
     providersLoaded: false,
+    providerRefreshPending: false,
     editorContext: initialWebviewState.editorContext ?? defaultEditorContext,
     terminalSelection: initialWebviewState.terminalSelection ?? null,
     attachedDiagnostics: null,

@@ -1,5 +1,5 @@
 import { For, createSignal, onCleanup, onMount, Show } from 'solid-js';
-import { formatNumber } from '../../lib/message-metrics';
+import { formatCost, formatNumber } from '../../lib/message-metrics';
 import { formatModelName } from '../../lib/format';
 import {
   alignPopupToBoundary,
@@ -37,6 +37,7 @@ export function ContextPopup(props: {
   alignTo?: 'left' | 'right';
   usage: { used: number; limit: number; percent: number };
   tokens: ContextTokens;
+  cost?: number | null;
   subagentTokens: ContextTokens;
   subagentCount: number;
   model: { providerName: string; modelName: string };
@@ -115,6 +116,14 @@ export function ContextPopup(props: {
             {sessionTokensAvailable() ? formatNumber(props.tokens.total) : '--'}
           </span>
         </div>
+        <Show when={formatCost(props.cost ?? undefined)}>
+          {(cost) => (
+            <div class="context-popup-row context-popup-cost-row">
+              <span class="context-popup-row-label">Cost</span>
+              <span class="context-popup-row-value">{cost()}</span>
+            </div>
+          )}
+        </Show>
       </div>
 
       <Show when={props.subagentTokens.total > 0}>

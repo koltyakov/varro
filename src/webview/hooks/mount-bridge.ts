@@ -99,6 +99,8 @@ export function createMountBridgeOperations(deps: {
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
         refreshProviders: deps.refreshProviders,
+        setProviderRefreshPending: (pending) =>
+          appStore.setState('providerRefreshPending', pending),
         revalidateProviderAuth: deps.revalidateProviderAuth,
         openExternal: (url) => postMessage({ type: 'vscode/open-external', payload: { url } }),
         setWorkspaceStatusSummary: (summary) =>
@@ -148,6 +150,7 @@ export function handleExtensionMessageWithDependencies(
     abortSession(): void;
     refreshMcps(): void;
     refreshProviders(): void;
+    setProviderRefreshPending?(pending: boolean): void;
     revalidateProviderAuth?(): void;
     openExternal?(url: string): void;
     setWorkspaceStatusSummary(summary: ReturnType<typeof getWorkspaceStatusEventSummary>): void;
@@ -273,6 +276,9 @@ export function handleExtensionMessageWithDependencies(
     case 'providers/refresh':
       deps.refreshProviders();
       if (msg.payload?.revalidateAuth) deps.revalidateProviderAuth?.();
+      break;
+    case 'providers/status':
+      deps.setProviderRefreshPending?.(msg.payload.pending);
       break;
     case 'ralph/state':
       ralphStore.applyHostState(msg.payload.runs, msg.payload.activeIds);

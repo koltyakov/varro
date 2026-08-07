@@ -29,6 +29,7 @@ import type {
   ToolPart,
   UserMessage,
 } from '../types';
+import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
 import {
   MessageList,
   getChangedInlinePreviewMessageIds,
@@ -37,6 +38,7 @@ import {
   getInlinePreviewLayoutSignatures,
   getNewlyAppendedMessageIds,
   getPromptNumberMap,
+  getRenderEmptyAssistantMessageIds,
 } from './MessageList';
 import {
   getStandalonePermissionPrompts,
@@ -674,6 +676,32 @@ describe('inline preview virtualization signatures', () => {
       getChangedInlinePreviewMessageIds(previewSignatures, new Map(), new Set(['message-1']))
     ).toEqual([]);
   });
+
+  it('revises preview layout when a completed edit drops its active header', () => {
+    const runningMessages = [{ info: { id: 'message-2' }, parts: [previewFileEdit] }];
+    const completedMessages = [
+      {
+        info: { id: 'message-2' },
+        parts: [
+          {
+            ...previewFileEdit,
+            state: {
+              status: 'completed' as const,
+              input: previewFileEdit.state.input,
+              output: 'Done',
+              title: 'apply_patch',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+    ];
+
+    expect(getInlinePreviewLayoutSignatures(completedMessages, true)).not.toEqual(
+      getInlinePreviewLayoutSignatures(runningMessages, true)
+    );
+  });
 });
 
 describe('compact activity virtualization signatures', () => {
@@ -751,6 +779,34 @@ describe('compact activity virtualization signatures', () => {
         new Set(['assistant-2'])
       )
     ).toEqual(['assistant-2']);
+  });
+
+  it('revises a disclosure when an edit joins without changing its owner', () => {
+    const editPart: Part = {
+      ...activityPart,
+      id: 'edit-1',
+      callID: 'call-edit-1',
+      tool: 'edit',
+    };
+    const initialGroup = {
+      key: 'activity-turn\u0000session-1\u0000user-1',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: 'read-1',
+      parts: [activityPart],
+    };
+    const extendedGroup = { ...initialGroup, parts: [activityPart, editPart] };
+    const initial = getCompactActivityDisclosureLayoutSignatures(
+      new Map([['assistant-1', [initialGroup]]]),
+      () => false
+    );
+    const extended = getCompactActivityDisclosureLayoutSignatures(
+      new Map([['assistant-1', [extendedGroup]]]),
+      () => false
+    );
+
+    expect(getChangedInlinePreviewMessageIds(initial, extended, new Set(['assistant-1']))).toEqual([
+      'assistant-1',
+    ]);
   });
 });
 
@@ -834,6 +890,51 @@ afterEach(async () => {
 });
 
 describe('MessageList compact activity', () => {
+  it('classifies render-empty assistant messages as zero-height virtual rows', () => {
+    const ownerPart = toolPart('command-1', 'assistant-owner', 'call-command-1');
+    const followerParts = [
+      toolPart('read-1', 'assistant-follower-1', 'call-read-1'),
+      toolPart('command-2', 'assistant-follower-2', 'call-command-2'),
+      toolPart('read-2', 'assistant-follower-3', 'call-read-2'),
+    ];
+    const messages: MessageEntry[] = [
+      { info: assistantMessage('assistant-owner'), parts: [ownerPart] },
+      ...followerParts.map((part) => ({
+        info: assistantMessage(part.messageID),
+        parts: [part],
+      })),
+      {
+        info: assistantMessage('assistant-result'),
+        parts: [{ ...textPart('result-1', 'Finished.'), messageID: 'assistant-result' }],
+      },
+    ];
+    const hiddenTodo = toolPart('todo-1', 'assistant-hidden-todo', 'call-todo-1');
+    hiddenTodo.tool = 'todowrite';
+    messages.splice(4, 0, {
+      info: assistantMessage('assistant-hidden-todo'),
+      parts: [hiddenTodo],
+    });
+    const group: AssistantActivityGroupInfo = {
+      key: 'activity-group-1',
+      ownerMessageId: 'assistant-owner',
+      ownerPartId: ownerPart.id,
+      parts: [ownerPart, ...followerParts],
+    };
+    const groups = new Map(
+      messages.slice(0, 4).map((message) => [message.info.id, [group]] as const)
+    );
+
+    expect([...getRenderEmptyAssistantMessageIds(messages, groups, () => false)]).toEqual([
+      'assistant-follower-1',
+      'assistant-follower-2',
+      'assistant-follower-3',
+      'assistant-hidden-todo',
+    ]);
+    expect([...getRenderEmptyAssistantMessageIds(messages, groups, () => true)]).toEqual([
+      'assistant-hidden-todo',
+    ]);
+  });
+
   it('uses one disclosure for activity across primary assistant messages', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {
@@ -933,7 +1034,7 @@ describe('MessageList compact activity', () => {
     ]);
   });
 
-  it('keeps inline file previews outside the shared activity disclosure', async () => {
+  it('keeps just-completed trailing-turn diffs inline until the next prompt', async () => {
     const edit: ToolPart = {
       id: 'edit-inline-1',
       sessionID: 'session-1',
@@ -957,6 +1058,7 @@ describe('MessageList compact activity', () => {
     const secondEdit: ToolPart = {
       ...edit,
       id: 'edit-inline-2',
+      messageID: 'assistant-2',
       callID: 'call-edit-inline-2',
       state: {
         status: 'completed',
@@ -971,21 +1073,62 @@ describe('MessageList compact activity', () => {
         time: { start: 3, end: 4 },
       },
     };
+    const historicalEdit: ToolPart = {
+      ...edit,
+      id: 'edit-history',
+      messageID: 'assistant-history',
+      callID: 'call-edit-history',
+      state: {
+        ...edit.state,
+        input: {
+          filePath: 'src/history.ts',
+          oldString: 'const historical = 1;',
+          newString: 'const historical = 2;',
+        },
+      },
+    };
+    const read = toolPart('read-current', 'assistant-1', 'call-read-current');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
+      { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier edit')] },
+      {
+        info: assistantMessage('assistant-history', { parentID: 'user-history' }),
+        parts: [historicalEdit],
+      },
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
       {
         info: assistantMessage('assistant-1', { parentID: 'user-1' }),
-        parts: [edit, secondEdit],
+        parts: [read, edit],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [secondEdit],
       },
     ]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    const summaries = () => [
+      ...(container?.querySelectorAll<HTMLElement>('.assistant-activity-summary') || []),
+    ];
+    expect(summaries()).toHaveLength(2);
+    expect(summaries().map((summary) => summary.textContent)).toEqual([
+      expect.stringContaining('Explored 1 edit'),
+      expect.stringContaining('Explored 1 file'),
+    ]);
     expect(container?.querySelector('.file-change-inline-diffs-unwrapped')).not.toBeNull();
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
@@ -994,6 +1137,87 @@ describe('MessageList compact activity', () => {
         (element) => element.textContent
       )
     ).toEqual(['app.ts', 'second.ts']);
+
+    setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
+
+    setState('questions', []);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
+
+    replaceMessages([
+      { info: userMessage('user-history'), parts: [textPart('prompt-history', 'Earlier edit')] },
+      {
+        info: assistantMessage('assistant-history', { parentID: 'user-history' }),
+        parts: [historicalEdit],
+      },
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [read, edit],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [secondEdit],
+      },
+      { info: userMessage('user-2'), parts: [textPart('prompt-2', 'One more change')] },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
+    expect(summaries()).toHaveLength(2);
+    expect(summaries()[1]?.textContent).toContain('Explored 1 file, 2 edits');
+  });
+
+  it('compacts a just-completed diff when the chat is reopened', async () => {
+    const edit = toolPart('edit-inline-1', 'assistant-1', 'call-edit-inline-1');
+    edit.tool = 'edit';
+    edit.state = {
+      status: 'completed',
+      input: {
+        filePath: 'src/app.ts',
+        oldString: 'const value = 1;',
+        newString: 'const value = 2;',
+      },
+      output: 'Done',
+      title: 'Edited src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const transcript: MessageEntry[] = [
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Edit the file')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [edit],
+      },
+    ];
+    setCompactToolOutput(true);
+    setShowInlineFileChanges(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages(transcript);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
+
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
+    await Promise.resolve();
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(1);
+
+    replaceMessages([]);
+    await Promise.resolve();
+    replaceMessages(transcript);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 edit'
+    );
   });
 
   it('omits unparsed edit tools from shared activity summaries when inline previews are enabled', async () => {
@@ -1004,6 +1228,7 @@ describe('MessageList compact activity', () => {
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
       {
@@ -7825,7 +8050,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    expect(bottomSpacer() - bottomPadBefore).toBe(600);
+    // The disclosure owner and latest diff-capable assistant retain provisional height. The eight
+    // collapsed follower rows are known to render no content and must not add 160px each.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-680);
     animationFrames.restore();
   });
 
@@ -7903,7 +8130,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    expect(bottomSpacer() - bottomPadBefore).toBe(600);
+    // Hidden historical reasoning rows have no rendered block size. Only the latest assistant keeps
+    // a provisional height because it may still receive an asynchronous diff summary.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-840);
     animationFrames.restore();
   });
 

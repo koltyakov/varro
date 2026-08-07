@@ -22,6 +22,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'server/restart-blocked',
   'server/event',
   'providers/refresh',
+  'providers/status',
   'context/update',
   'terminal-selection/update',
   'files/dropped',
@@ -72,6 +73,12 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (payload?.revalidateAuth !== true) return null;
       return { type, payload: { revalidateAuth: true } };
+    }
+
+    case 'providers/status': {
+      const payload = asRecord(record.payload);
+      if (typeof payload?.pending !== 'boolean') return null;
+      return { type, payload: { pending: payload.pending } };
     }
 
     case 'command/switch-session': {

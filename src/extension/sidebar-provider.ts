@@ -234,6 +234,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.providerFileRefresh = new ProviderFileRefreshController(
       {
         server,
+        persistence,
         hasLocallyActiveWork: () =>
           this.sessionState.busy.size > 0 ||
           this.sessionState.pending.size > 0 ||
@@ -245,6 +246,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               ? { type: 'providers/refresh', payload: { revalidateAuth: true } }
               : { type: 'providers/refresh' }
           ),
+        postPendingStatus: (pending) =>
+          this.post({ type: 'providers/status', payload: { pending } }),
       },
       providerSignatureFileSystem
     );
@@ -424,6 +427,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async handleReadyMessage() {
     await this.webviewSession.handleReady();
+    this.providerFileRefresh.postStatus();
   }
 
   private async cleanupExpiredRecycleBin() {

@@ -102,6 +102,8 @@ beforeEach(() => {
   ]);
   setState('providerDefaults', { openai: 'gpt-5' });
   setState('providersLoaded', true);
+  setState('providerRefreshPending', false);
+  setState('sessionStatus', {});
   setState('agents', [
     {
       name: 'build',
@@ -144,6 +146,8 @@ afterEach(() => {
   setState('providers', []);
   setState('providerDefaults', {});
   setState('providersLoaded', false);
+  setState('providerRefreshPending', false);
+  setState('sessionStatus', {});
   setState('agents', []);
   setState('allAgents', []);
   setState('providerAuthMethods', {});
@@ -224,6 +228,37 @@ describe('ModelsPanel', () => {
     expect(reloadButton?.getAttribute('aria-label')).toBe('Reload providers');
     reloadButton?.click();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('explains when provider changes are waiting for active work', () => {
+    setState('providerRefreshPending', true);
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const notice = container?.querySelector<HTMLElement>('.settings-provider-refresh-notice');
+    expect(notice?.getAttribute('role')).toBe('status');
+    expect(notice?.textContent).toContain('Provider update queued.');
+    expect(notice?.textContent).toContain(
+      'Changes will appear automatically when active work finishes.'
+    );
+
+    setState('providerRefreshPending', false);
+    expect(container?.querySelector('.settings-provider-refresh-notice')).toBeNull();
+  });
+
+  it('updates the number of running agents in the queued provider notice', () => {
+    setState('providerRefreshPending', true);
+    setState('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() },
+      'session-3': { type: 'idle' },
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const notice = container?.querySelector<HTMLElement>('.settings-provider-refresh-notice');
+    expect(notice?.textContent).toContain('when 2 running agents finish.');
+
+    setState('sessionStatus', 'session-2', { type: 'idle' });
+    expect(notice?.textContent).toContain('when 1 running agent finishes.');
   });
 
   it('renders an inline release date for desktop layouts', async () => {

@@ -54,6 +54,36 @@
   color: var(--color-vscode-fg);
 }
 
+.settings-provider-refresh-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(
+    calc(100% - 2 * var(--chat-horizontal-padding)),
+    calc(var(--chat-content-max-width) - 2 * var(--chat-horizontal-padding))
+  );
+  margin: 8px auto 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 35%, var(--color-vscode-border));
+  border-radius: var(--radius-inset);
+  background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-warning) 65%, var(--color-vscode-fg));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-provider-refresh-notice svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.settings-provider-refresh-notice strong {
+  color: var(--color-vscode-fg);
+  font-weight: 600;
+}
+
 .settings-toolbar {
   padding: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 10%, transparent);

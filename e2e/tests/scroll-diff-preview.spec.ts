@@ -93,6 +93,85 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
 }
 
 test.describe('diff preview anchoring', () => {
+  test('keeps a detached row anchored and its diff visible when the active turn completes', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&activeTurnCollapse=1'
+    );
+    const list = page.locator('.interactive-list');
+    const editMessageId = 'message-diff-preview-assistant-59';
+    const anchorMessageId = 'message-diff-preview-active-step-5';
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
+
+    const anchorRow = page.locator(`[data-msg-id="${anchorMessageId}"]`);
+    await anchorRow.scrollIntoViewIfNeeded();
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 120);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForTimeout(300);
+    await waitForAnimationFrames(page, 4);
+    const before = await getVisibleMessageAnchor(list, anchorMessageId);
+    const beforeMetrics = await getScrollMetrics(page, '.interactive-list');
+    expect(beforeMetrics.distanceFromBottom).toBeGreaterThan(100);
+
+    await page.evaluate(() => {
+      const sessionId = 'session-diff-preview-large-transcript';
+      const finalMessageId = 'message-diff-preview-active-step-7';
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+          updateMessageInfo?: (info: Record<string, unknown>) => void;
+          updateSessionStatus?: (id: string, status: { type: 'idle' }) => void;
+        };
+      };
+      const info = harnessWindow.__varroE2E
+        ?.getSessionMessages?.(sessionId)
+        .find((message) => message.info.id === finalMessageId)?.info;
+      if (!info) throw new Error('Active turn final assistant is missing');
+      info.time = { ...(info.time as Record<string, unknown>), completed: Date.now() };
+      harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'idle' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID: sessionId, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+    });
+
+    const samples = await sampleMessageTopAcrossFrames(list, before.id, 10);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - before.top) < 1.5),
+      JSON.stringify({ before, beforeMetrics, samples })
+    ).toBe(true);
+    expect(await list.locator('[data-msg-id]').count()).toBeLessThan(50);
+
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 4);
+    const summary = page.locator(`[data-msg-id="${editMessageId}"] .assistant-activity-summary`);
+    await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
+    expect((await getScrollMetrics(page, '.interactive-list')).distanceFromBottom).toBeLessThan(3);
+    expect(await list.locator('[data-msg-id]').count()).toBeLessThan(50);
+
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await composer.fill('Make one more change');
+    await page.getByTitle('Send (Enter)').click();
+
+    await expect(summary).toContainText('Explored 1 file, 1 edit');
+    await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toHaveCount(0);
+  });
+
   test('centers the expanded diff and strongly obscures the transcript', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
     const messageId = 'message-diff-preview-assistant-59';

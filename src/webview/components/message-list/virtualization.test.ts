@@ -49,6 +49,24 @@ describe('buildVirtualMetrics', () => {
     });
   });
 
+  it('uses a known zero height instead of the provisional default before measurement', () => {
+    expect(
+      buildVirtualMetrics({
+        itemIds: ['owner', 'hidden-1', 'hidden-2', 'hidden-3', 'visible'],
+        measuredHeights: new Map([
+          ['owner', 40],
+          ['hidden-1', 160],
+          ['visible', 80],
+        ]),
+        knownZeroHeightIds: new Set(['hidden-1', 'hidden-2', 'hidden-3']),
+      })
+    ).toEqual({
+      prefix: [0, 40, 40, 40, 40, 120],
+      totalHeight: 120,
+      itemCount: 5,
+    });
+  });
+
   it('rebuilds cached downstream offsets when a measured height changes', () => {
     const itemIds = ['a', 'b', 'c'];
     const measuredHeights = new Map([

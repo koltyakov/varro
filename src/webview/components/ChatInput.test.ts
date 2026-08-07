@@ -1246,6 +1246,23 @@ describe('ChatInput', () => {
     });
   });
 
+  it('shows OpenCode session cost as a separate context detail row', async () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000, { cost: 0.01 })]);
+    setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('.chat-context-usage')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const costRow = container?.querySelector('.context-popup-cost-row');
+    expect(costRow?.querySelector('.context-popup-row-label')?.textContent).toBe('Cost');
+    expect(costRow?.querySelector('.context-popup-row-value')?.textContent).toBe('$0.01');
+  });
+
   it('loads tokens for subagent sessions whose messages and snapshots are not loaded', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');

@@ -9,6 +9,7 @@ import xaiIcon from '../assets/provider-icons/xai.svg';
 import qwenIcon from '../assets/provider-icons/qwen.svg';
 import kimiIcon from '../assets/provider-icons/kimi.svg';
 import opencodeIcon from '../assets/provider-icons/opencode.svg';
+import metaIcon from '../assets/provider-icons/meta.svg';
 
 // Provider SVGs sourced from https://uxwing.com
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
@@ -30,6 +31,7 @@ const PROVIDER_ICON_MAP: Record<string, string> = {
   qwen: qwenIcon,
   kimi: kimiIcon,
   'kimi-for-coding': kimiIcon,
+  meta: metaIcon,
 };
 
 export function getProviderIcon(providerID: string | null | undefined) {

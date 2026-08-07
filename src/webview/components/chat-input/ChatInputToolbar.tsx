@@ -95,6 +95,7 @@ type ToolbarSharedProps = {
   contextPopupRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   showContextPopup: boolean;
   sessionTokens: SessionTokensInfo;
+  sessionCost: number | null;
   subagentTokens: SessionTokensInfo;
   subagentCount: number;
   contextCompactDisabled: boolean;
@@ -321,6 +322,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                     alignTo="right"
                     usage={contextUsage()}
                     tokens={props.sessionTokens}
+                    cost={props.sessionCost}
                     subagentTokens={props.subagentTokens}
                     subagentCount={props.subagentCount}
                     model={props.currentModel}

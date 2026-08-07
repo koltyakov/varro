@@ -6,6 +6,7 @@ import {
   getAssistantActivityStatus,
   isAssistantActivityPart,
   preserveAssistantActivityGroupKeys,
+  shouldCompactAssistantActivityPart,
 } from './assistant-activity';
 
 function completedTool(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
@@ -52,6 +53,22 @@ describe('assistant activity summaries', () => {
     expect(formatAssistantActivitySummary(parts)).toBe(
       'Explored 2 files, 1 thought, 1 search, 1 command, 1 tool call'
     );
+  });
+
+  it('counts every modified file in multi-file edit tools', () => {
+    const patch = completedTool('patch-1', 'apply_patch', {
+      patchText: `*** Begin Patch
+*** Add File: src/new.ts
++export const created = true;
+*** Update File: src/app.ts
+@@
+-const value = 1;
++const value = 2;
+*** Delete File: src/old.ts
+*** End Patch`,
+    });
+
+    expect(formatAssistantActivitySummary([patch])).toBe('Explored 3 edits');
   });
 
   it('detects streaming reasoning and pending or running tools', () => {
@@ -113,6 +130,36 @@ describe('assistant activity summaries', () => {
         text: 'Result',
       })
     ).toBe(false);
+  });
+
+  it('keeps only active-turn edits outside compact activity', () => {
+    const edit = completedTool('edit-1', 'edit');
+    const read = completedTool('read-1', 'read');
+
+    expect(
+      shouldCompactAssistantActivityPart(edit, {
+        showInlineFileChanges: true,
+        keepEditInline: true,
+      })
+    ).toBe(false);
+    expect(
+      shouldCompactAssistantActivityPart(edit, {
+        showInlineFileChanges: true,
+        keepEditInline: false,
+      })
+    ).toBe(true);
+    expect(
+      shouldCompactAssistantActivityPart(edit, {
+        showInlineFileChanges: false,
+        keepEditInline: true,
+      })
+    ).toBe(true);
+    expect(
+      shouldCompactAssistantActivityPart(read, {
+        showInlineFileChanges: true,
+        keepEditInline: true,
+      })
+    ).toBe(true);
   });
 
   it('groups routine activity across primary assistant messages in one user turn', () => {

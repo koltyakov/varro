@@ -70,6 +70,21 @@ export function sumAssistantTokensFromMessageEntries(
   return result;
 }
 
+export function getSessionCost(
+  messages: readonly MessageInfoEntry[],
+  session: Session | undefined
+): number | null {
+  let messageCost = 0;
+  for (const entry of messages) {
+    if (!isAssistantMessage(entry.info)) continue;
+    messageCost += entry.info.cost || 0;
+  }
+
+  const sessionCost = session?.cost || 0;
+  const cost = Math.max(messageCost, sessionCost);
+  return cost > 0 ? cost : null;
+}
+
 export function sumSessionTreeTokens(
   messages: readonly MessageInfoEntry[],
   sessions: readonly Session[],

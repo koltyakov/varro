@@ -15,6 +15,7 @@ import {
   modelSupportsVision,
 } from '../lib/model-capabilities';
 import { sortProviderModels } from '../lib/model-ordering';
+import { isRunningSessionStatus } from '../lib/session-event-reducer';
 import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
@@ -51,6 +52,9 @@ export function ModelsPanel() {
 
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
+  );
+  const runningAgentCount = createMemo(
+    () => Object.values(state.sessionStatus).filter(isRunningSessionStatus).length
   );
 
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
@@ -211,6 +215,34 @@ export function ModelsPanel() {
           </div>
         </div>
       </div>
+
+      <Show when={state.providerRefreshPending}>
+        <div class="settings-provider-refresh-notice" role="status">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 7L12 13" />
+            <path d="M12 17.01L12.01 16.9989" />
+            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" />
+          </svg>
+          <span>
+            <strong>Provider update queued.</strong>{' '}
+            <Show
+              when={runningAgentCount() > 0}
+              fallback="Changes will appear automatically when active work finishes."
+            >
+              Changes will appear automatically when {runningAgentCount()} running{' '}
+              {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
+            </Show>
+          </span>
+        </div>
+      </Show>
 
       <Show when={state.workspaceStatuses.length > 0}>
         <div class="settings-toolbar">

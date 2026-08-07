@@ -167,7 +167,9 @@ type HarnessWindow = Window & {
     filePickCount?: number;
     openTargets?: Array<{ path: string; line?: number; kind?: string }>;
     exportSessionIds?: string[];
+    updateMessageInfo?: (info: Message) => void;
     updateMessagePart?: (part: Part) => void;
+    updateSessionStatus?: (sessionId: string, status: SessionStatus) => void;
     releaseHistoryRequests?: () => void;
     releaseNextHistoryRequest?: () => boolean;
     pendingHistoryRequestCount?: () => number;
@@ -2809,6 +2811,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     const messages: MessageEntry[] = [];
     const includeMultiFileDiff =
       new URLSearchParams(window.location.search).get('multiFileDiff') === '1';
+    const includeActiveTurnCollapse =
+      new URLSearchParams(window.location.search).get('activeTurnCollapse') === '1';
 
     for (let index = 0; index < 60; index += 1) {
       const createdAt = BASE_TIME - (200 - index) * 1000;
@@ -2833,15 +2837,58 @@ function createScenarioState(name: ScenarioName): ScenarioState {
               '*** End Patch',
             ].join('\n')
           : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
+      const patchPart = makeApplyPatchToolPart(session.id, assistantId, patchId, patchText);
+      if (includeActiveTurnCollapse && index === 59) {
+        patchPart.state = {
+          status: 'completed',
+          input: patchPart.state.input,
+          output: 'Done',
+          title: 'apply_patch',
+          metadata: {},
+          time: { start: createdAt + 2, end: createdAt + 3 },
+        };
+      }
       const assistant = makeCompletedAssistantMessageWithParts(
         session.id,
         assistantId,
         user.info.id,
         createdAt + 1,
         `Prepared report update ${index}.`,
-        [makeApplyPatchToolPart(session.id, assistantId, patchId, patchText)]
+        [patchPart]
       );
       messages.push(user, assistant);
+
+      if (includeActiveTurnCollapse && index === 59) {
+        const readPart: Extract<Part, { type: 'tool' }> = {
+          id: `${assistantId}-read`,
+          sessionID: session.id,
+          messageID: assistantId,
+          type: 'tool',
+          callID: `${assistantId}-read-call`,
+          tool: 'read',
+          state: {
+            status: 'completed',
+            input: { filePath: 'src/report-59.ts' },
+            output: 'source',
+            title: 'src/report-59.ts',
+            metadata: {},
+            time: { start: createdAt + 1, end: createdAt + 2 },
+          },
+        };
+        assistant.parts = [readPart, patchPart];
+
+        for (let step = 0; step < 8; step += 1) {
+          const stepMessage = makeAssistantMessage(
+            session.id,
+            `message-diff-preview-active-step-${step}`,
+            user.info.id,
+            `Active turn follow-up ${step}. ${'Stable anchor content. '.repeat(18)}`,
+            createdAt + 4 + step * 2
+          );
+          if (step === 7) markAssistantInProgress(stepMessage);
+          messages.push(stepMessage);
+        }
+      }
     }
 
     if (new URLSearchParams(window.location.search).get('boundarySticky') === '1') {
@@ -2856,7 +2903,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     }
 
     state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[session.id] = includeActiveTurnCollapse
+      ? { type: 'busy' }
+      : { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.showInlineFileChanges = true;
@@ -4866,6 +4915,11 @@ function setUpHarness() {
     pendingHistoryRequestCount: () => deferredHistoryRequestResolves.length,
     getSessionMessages: (sessionId) =>
       structuredClone(scenarioState.messagesBySessionId[sessionId] || []),
+    updateMessageInfo: (info) => {
+      const messages = scenarioState.messagesBySessionId[info.sessionID];
+      const message = messages?.find((entry) => entry.info.id === info.id);
+      if (message) message.info = info;
+    },
     updateMessagePart: (part) => {
       const messages = scenarioState.messagesBySessionId[part.sessionID];
       const message = messages?.find((entry) => entry.info.id === part.messageID);
@@ -4874,6 +4928,9 @@ function setUpHarness() {
       const partIndex = message.parts.findIndex((candidate) => candidate.id === part.id);
       if (partIndex === -1) message.parts.push(part);
       else message.parts[partIndex] = part;
+    },
+    updateSessionStatus: (sessionId, status) => {
+      scenarioState.sessionStatuses[sessionId] = status;
     },
   };
   document.body.dataset.vscodeThemeKind = THEME;

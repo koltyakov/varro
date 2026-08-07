@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname } from 'path';
 import * as vscode from 'vscode';
+import type { Persistence } from '../shared/persistence';
+import type { ServerStatus } from '../shared/protocol';
 import { logger } from './logger';
 import { getOpenCodeConfigPaths } from './open-code-process';
 import type { OpenCodeServer } from './server';
@@ -25,13 +27,16 @@ export const nodeProviderSignatureFileSystem: ProviderSignatureFileSystem = {
 };
 
 type ProviderFileRefreshDependencies = {
-  server: Pick<OpenCodeServer, 'status' | 'request' | 'restart' | 'readServerInfo'>;
+  server: Pick<OpenCodeServer, 'status' | 'request' | 'restart' | 'readServerInfo' | 'on' | 'off'>;
+  persistence: Pick<Persistence, 'get' | 'set' | 'remove'>;
   hasLocallyActiveWork(): boolean;
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
+  postPendingStatus(pending: boolean): void;
 };
 
 export class ProviderFileRefreshController {
+  private static readonly PENDING_STATE_KEY = 'varro.providerRefresh.pending';
   private static readonly RETRY_MS = 1_000;
   private static readonly MAX_RETRIES = 5;
   private static readonly SIGNATURE_MAX_BYTES = 1024 * 1024;
@@ -45,13 +50,35 @@ export class ProviderFileRefreshController {
   private restartPending = false;
   private authChangePending = false;
   private authRevalidationPending = false;
+  private pendingStatusPosted = false;
+  private invalidationInFlight = false;
   private unmanagedServerSynchronized = false;
   private disposed = false;
+  private readonly handleServerStatus = (status: ServerStatus) => {
+    if (
+      status.state !== 'running' ||
+      !this.restartPending ||
+      this.invalidationInFlight ||
+      this.refreshTimer
+    ) {
+      return;
+    }
+    void this.maybeRestart(this.refreshGeneration, 0);
+  };
 
   constructor(
     private readonly dependencies: ProviderFileRefreshDependencies,
     private readonly fileSystem: ProviderSignatureFileSystem = nodeProviderSignatureFileSystem
-  ) {}
+  ) {
+    const pendingState = dependencies.persistence.get<unknown>(
+      ProviderFileRefreshController.PENDING_STATE_KEY
+    );
+    if (isPersistedPendingState(pendingState)) {
+      this.restartPending = true;
+      this.authRevalidationPending = pendingState.revalidateAuth;
+    }
+    dependencies.server.on('status', this.handleServerStatus);
+  }
 
   async initializeSignature() {
     const generation = this.refreshGeneration;
@@ -94,7 +121,13 @@ export class ProviderFileRefreshController {
 
   dispose() {
     this.beginDispose();
+    this.dependencies.server.off('status', this.handleServerStatus);
     this.disposeFileWatchers();
+  }
+
+  postStatus() {
+    this.pendingStatusPosted = this.restartPending;
+    this.dependencies.postPendingStatus(this.restartPending);
   }
 
   async refreshState(generation = ++this.refreshGeneration, requireSignatureChange = false) {
@@ -106,7 +139,7 @@ export class ProviderFileRefreshController {
       this.authRevalidationPending ||= this.authChangePending;
       this.authChangePending = false;
       this.dependencies.clearProviderLimitCache();
-      this.restartPending = true;
+      await this.markRestartPending();
       this.dependencies.postRefresh();
       await this.maybeRestart(generation, 0);
       return;
@@ -122,7 +155,7 @@ export class ProviderFileRefreshController {
     this.observedFilesSignature = signature;
     this.authRevalidationPending ||= this.authChangePending;
     this.authChangePending = false;
-    this.restartPending = true;
+    await this.markRestartPending();
     this.dependencies.postRefresh();
     await this.maybeRestart(generation, 0);
   }
@@ -199,14 +232,14 @@ export class ProviderFileRefreshController {
     this.observedFilesSignature = signature;
     if (changed) {
       this.dependencies.clearProviderLimitCache();
-      this.restartPending = true;
+      await this.markRestartPending();
     } else if (
       !this.unmanagedServerSynchronized &&
       this.dependencies.server.status.state === 'running'
     ) {
       const managedProcess = await this.readManagedServerState();
       if (this.disposed || generation !== this.refreshGeneration) return;
-      if (managedProcess === false) this.restartPending = true;
+      if (managedProcess === false) await this.markRestartPending();
     }
     this.dependencies.postRefresh();
     if (this.restartPending) {
@@ -238,6 +271,7 @@ export class ProviderFileRefreshController {
       managedProcessConfirmed = managedProcess;
     }
     if (this.dependencies.hasLocallyActiveWork()) {
+      this.postPendingStatus();
       this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
       return;
     }
@@ -245,6 +279,7 @@ export class ProviderFileRefreshController {
     const idle = await this.isServerIdle();
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
+      this.postPendingStatus();
       this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
       return;
     }
@@ -275,6 +310,7 @@ export class ProviderFileRefreshController {
       return;
     }
 
+    this.invalidationInFlight = true;
     try {
       if (stillManaged) {
         await this.dependencies.server.restart();
@@ -288,16 +324,23 @@ export class ProviderFileRefreshController {
       // by the next activation's signature comparison.
       this.restartPending = false;
       if (this.disposed || generation !== this.refreshGeneration) return;
+      await this.clearPersistedPendingState();
       const revalidateAuth = this.authRevalidationPending;
       this.authRevalidationPending = false;
       this.dependencies.clearProviderLimitCache();
       this.dependencies.postRefresh(revalidateAuth ? { revalidateAuth: true } : undefined);
+      if (this.pendingStatusPosted) {
+        this.pendingStatusPosted = false;
+        this.dependencies.postPendingStatus(false);
+      }
     } catch (err) {
       if (this.disposed || generation !== this.refreshGeneration) return;
       logger.warn(
         `Provider refresh invalidation failed: ${err instanceof Error ? err.message : String(err)}`
       );
       this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+    } finally {
+      this.invalidationInFlight = false;
     }
   }
 
@@ -354,6 +397,36 @@ export class ProviderFileRefreshController {
     }, ProviderFileRefreshController.RETRY_MS);
   }
 
+  private postPendingStatus() {
+    if (this.pendingStatusPosted) return;
+    this.pendingStatusPosted = true;
+    this.dependencies.postPendingStatus(true);
+  }
+
+  private async markRestartPending() {
+    this.restartPending = true;
+    try {
+      await this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, {
+        version: 1,
+        revalidateAuth: this.authRevalidationPending,
+      });
+    } catch (err) {
+      logger.warn(
+        `Failed to persist provider refresh state: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  private async clearPersistedPendingState() {
+    try {
+      await this.dependencies.persistence.remove(ProviderFileRefreshController.PENDING_STATE_KEY);
+    } catch (err) {
+      logger.warn(
+        `Failed to clear provider refresh state: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
   private async withSignatureTimeout<T>(operation: PromiseLike<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -368,4 +441,13 @@ export class ProviderFileRefreshController {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+function isPersistedPendingState(value: unknown): value is {
+  version: 1;
+  revalidateAuth: boolean;
+} {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return record.version === 1 && typeof record.revalidateAuth === 'boolean';
 }
