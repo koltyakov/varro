@@ -269,15 +269,15 @@ input:focus-visible {
 
 /* Fade only the text so the card background remains a single, seamless color. */
 .latest-user-message-sticky-text-clip.has-more-below .latest-user-message-sticky-text {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.35em), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.35em), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.6em), transparent);
 }
 
 .latest-user-message-sticky-text {
   display: block;
   width: auto;
   min-width: 0;
-  max-height: calc(1.35em * 4);
+  max-height: calc(1.6em * 3);
   overflow-x: hidden;
   overflow-y: auto;
   margin-right: -14px;
@@ -287,7 +287,7 @@ input:focus-visible {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: var(--vscode-font-size, 13px);
-  line-height: 1.35;
+  line-height: 1.6;
 }
 
 .latest-user-message-sticky.is-loading {
@@ -493,11 +493,13 @@ input:focus-visible {
 /* An empty message row (no rendered content) must not contribute any
    vertical space - otherwise it inflates the gap between two adjacent
    non-empty rows from the canonical 12px to ~24px. */
-.interactive-item-container:empty {
+.interactive-item-container:empty,
+.interactive-item-container.interactive-item-render-empty {
   padding: 0;
 }
 
-.interactive-item-container:empty::after {
+.interactive-item-container:empty::after,
+.interactive-item-container.interactive-item-render-empty::after {
   display: none;
 }
 

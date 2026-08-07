@@ -1447,6 +1447,7 @@
     var(--color-vscode-muted) 8%,
     var(--color-vscode-surface-soft)
   );
+  border-radius: 0;
   background: var(--chat-queue-row-surface);
 }
 

@@ -2,8 +2,10 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import { Portal } from 'solid-js/web';
 import {
   formatAssistantActivityCounts,
+  getAssistantActivityPartKey,
   getAssistantActivityStatus,
   isAssistantActivityPart,
+  isAssistantActivityPartRunning,
   shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
@@ -35,13 +37,22 @@ export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
 type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
   | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] }
+  | { kind: 'active-activity-tray'; key: string; parts: AssistantActivityPart[] }
   | { kind: 'activity-group'; key: string; parts: AssistantActivityPart[] };
+
+type AssistantRenderEntry = {
+  key: string;
+  item: () => AssistantRenderItem;
+  update: (item: AssistantRenderItem) => void;
+};
 
 // File-edit stacks rekey on every appended edit, so track their reveal by the
 // first part id; otherwise appending an edit replays the whole stack animation.
 function getRevealTrackingKey(item: AssistantRenderItem) {
   if (item.kind === 'file-edit-stack') return `file-edit-stack:${item.parts[0]!.id}`;
-  if (item.kind === 'activity-group') return `activity-group:${item.parts[0]!.id}`;
+  if (item.kind === 'activity-group') {
+    return `activity-group:${item.parts[0]!.id}:${item.parts[item.parts.length - 1]!.id}`;
+  }
   return item.key;
 }
 
@@ -241,6 +252,9 @@ export function AssistantMessageContent(props: {
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
   compactActivityGroups?: readonly AssistantActivityGroupInfo[] | null;
+  retainedActivityPartKeys?: ReadonlySet<string>;
+  exitingActivityPartKeys?: ReadonlySet<string>;
+  visibleActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
@@ -255,7 +269,7 @@ export function AssistantMessageContent(props: {
         })
       : dedupedParts()
   );
-  const isLocallyCompactActivityPart = (part: Part): part is AssistantActivityPart =>
+  const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
     compactToolOutput() &&
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
@@ -264,6 +278,21 @@ export function AssistantMessageContent(props: {
     }) &&
     (part.type !== 'tool' ||
       (!props.questionRequestForTool?.(part) && !props.permissionMatchForTool?.(part)));
+  const isLocallyCompactActivityPart = (part: Part): part is AssistantActivityPart =>
+    isLocallyCompactActivityCandidate(part) &&
+    !isAssistantActivityPartRunning(part) &&
+    !props.retainedActivityPartKeys?.has(getAssistantActivityPartKey(part));
+  const isActiveActivityTrayPart = (part: Part) => {
+    if (!isLocallyCompactActivityCandidate(part)) return false;
+    const key = getAssistantActivityPartKey(part);
+    return (
+      (isAssistantActivityPartRunning(part) &&
+        (!props.visibleActiveActivityPartKeys ||
+          props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part)))) ||
+      !!props.retainedActivityPartKeys?.has(key) ||
+      !!props.exitingActivityPartKeys?.has(key)
+    );
+  };
   const effectiveCompactActivityGroups = createMemo<readonly AssistantActivityGroupInfo[] | null>(
     () => {
       if (props.compactActivityGroups !== undefined) return props.compactActivityGroups;
@@ -294,7 +323,7 @@ export function AssistantMessageContent(props: {
     () =>
       new Map(
         effectiveCompactActivityGroups()?.flatMap((group) =>
-          group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
+          group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
         ) || []
       )
   );
@@ -361,8 +390,40 @@ export function AssistantMessageContent(props: {
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]!;
 
+      if (
+        isLocallyCompactActivityCandidate(part) &&
+        isAssistantActivityPartRunning(part) &&
+        props.visibleActiveActivityPartKeys &&
+        !props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part))
+      ) {
+        continue;
+      }
+
+      if (isAssistantActivityPart(part) && isActiveActivityTrayPart(part)) {
+        const activityParts: AssistantActivityPart[] = [part];
+        while (index + 1 < parts.length) {
+          const nextPart = parts[index + 1]!;
+          if (!isAssistantActivityPart(nextPart) || !isActiveActivityTrayPart(nextPart)) break;
+          activityParts.push(nextPart);
+          index += 1;
+        }
+        const key = `active-activity-tray:${activityParts[0]!.id}`;
+        const previous = previousByKey.get(key);
+        if (
+          previous?.kind === 'active-activity-tray' &&
+          samePartList(previous.parts, activityParts)
+        ) {
+          items.push(previous);
+        } else {
+          items.push({ kind: 'active-activity-tray', key, parts: activityParts });
+        }
+        continue;
+      }
+
       const canGroupActivityPart = (candidate: Part) => {
-        return compactActivityGroupByPartKey().get(`${candidate.messageID}\u0000${candidate.id}`);
+        return compactActivityGroupByPartKey().get(
+          isAssistantActivityPart(candidate) ? getAssistantActivityPartKey(candidate) : ''
+        );
       };
 
       const activityGroup = canGroupActivityPart(part);
@@ -370,6 +431,7 @@ export function AssistantMessageContent(props: {
         const activityParts: AssistantActivityPart[] = [part as AssistantActivityPart];
         while (
           index + 1 < parts.length &&
+          !isActiveActivityTrayPart(parts[index + 1]!) &&
           canGroupActivityPart(parts[index + 1]!)?.key === activityGroup.key
         ) {
           activityParts.push(parts[++index]! as AssistantActivityPart);
@@ -414,6 +476,31 @@ export function AssistantMessageContent(props: {
 
     return items;
   }, []);
+  const renderEntries = createMemo<AssistantRenderEntry[]>((previousEntries) => {
+    const previousByKey = new Map(
+      (previousEntries || []).map((entry) => [entry.key, entry] as const)
+    );
+
+    return renderItems().map((item) => {
+      const previous = previousByKey.get(item.key);
+      if (previous) {
+        previous.update(item);
+        return previous;
+      }
+
+      let currentItem = item;
+      const [readItem, setItem] = createSignal(item, { equals: false });
+      return {
+        key: item.key,
+        item: readItem,
+        update: (nextItem) => {
+          if (nextItem === currentItem) return;
+          currentItem = nextItem;
+          setItem(nextItem);
+        },
+      };
+    });
+  }, []);
   const revealedRenderKeys = new Set<string>();
 
   if (!props.claimItemReveal && !props.allowInitialItemReveal) {
@@ -435,20 +522,142 @@ export function AssistantMessageContent(props: {
   };
 
   const getRevealClass = (item: AssistantRenderItem) => {
-    if (props.info.time.completed !== undefined) return '';
+    if (props.info.time.completed !== undefined && item.kind !== 'activity-group') return '';
     return claimReveal(getRevealTrackingKey(item)) ? ' assistant-message-flow-item-streamed' : '';
   };
 
-  const renderAssistantItem = (item: AssistantRenderItem) => {
-    const revealClass = getRevealClass(item);
-    if (item.kind === 'activity-group') {
+  const renderAssistantItem = (entry: AssistantRenderEntry) => {
+    if (entry.item().kind === 'active-activity-tray') {
+      const item = () =>
+        entry.item() as Extract<AssistantRenderItem, { kind: 'active-activity-tray' }>;
+      const activeSummary = () => {
+        for (const part of item().parts) {
+          const group = compactActivityGroupByPartKey().get(getAssistantActivityPartKey(part));
+          if (group?.ownerMessageId !== props.info.id || group.ownerPartId !== part.id) continue;
+          const summaryParts = group.parts.filter(
+            (groupPart) =>
+              !isAssistantActivityPartRunning(groupPart) &&
+              !props.retainedActivityPartKeys?.has(getAssistantActivityPartKey(groupPart))
+          );
+          return {
+            group,
+            summaryParts,
+          };
+        }
+        return null;
+      };
+      const hasExitingPart = () =>
+        item().parts.some((part) =>
+          props.exitingActivityPartKeys?.has(getAssistantActivityPartKey(part))
+        );
+      return (
+        <div
+          ref={(element) => {
+            queueMicrotask(() => {
+              if (!element.isConnected) return;
+              element.scrollTo?.({ top: element.scrollHeight, behavior: 'smooth' });
+            });
+          }}
+          class={`assistant-active-activity-tray${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary' : ''}`}
+          data-assistant-render-key={entry.key}
+          aria-label="Active tools"
+        >
+          <Show when={activeSummary()}>
+            {(active) => (
+              <div class="assistant-active-activity-summary">
+                <Show
+                  when={active().summaryParts.length > 0}
+                  fallback={
+                    <div class="assistant-activity-summary assistant-activity-summary-placeholder">
+                      <span class="assistant-activity-summary-text">
+                        <span class="assistant-activity-summary-main">Exploring</span>
+                      </span>
+                    </div>
+                  }
+                >
+                  <AssistantActivityGroup
+                    info={props.info}
+                    parts={item().parts}
+                    summaryParts={active().summaryParts}
+                    expansionKey={active().group.key}
+                    showSummary={true}
+                    textForPart={props.textForPart}
+                    lightweight={!!isLightweight()}
+                    questionRequestForTool={props.questionRequestForTool}
+                    permissionMatchForTool={props.permissionMatchForTool}
+                  />
+                </Show>
+              </div>
+            )}
+          </Show>
+          <For each={item().parts}>
+            {(part) => {
+              const partKey = getAssistantActivityPartKey(part);
+              const entering = claimReveal(`active-activity:${part.id}`);
+              return (
+                <div
+                  class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${props.exitingActivityPartKeys?.has(partKey) ? ' is-exiting' : ''}`}
+                  data-activity-part-id={part.id}
+                >
+                  <div class="assistant-active-activity-item-content">
+                    <MessagePart
+                      part={part}
+                      messageInfo={props.info}
+                      streamedText={props.textForPart(part)}
+                      lightweight={isLightweight()}
+                      questionRequest={
+                        part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
+                      }
+                      permissionMatch={
+                        part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            }}
+          </For>
+        </div>
+      );
+    }
+
+    const initialItem = entry.item();
+    const revealClass = getRevealClass(initialItem);
+    if (initialItem.kind === 'activity-group') {
+      const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'activity-group' }>;
       const activityGroup = () =>
         compactActivityGroupByPartKey().get(
-          `${item.parts[0]!.messageID}\u0000${item.parts[0]!.id}`
+          `${item().parts[0]!.messageID}\u0000${item().parts[0]!.id}`
         )!;
       const showSummary = () =>
         activityGroup().ownerMessageId === props.info.id &&
-        item.parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
+        item().parts.some((part) => part.id === getCompactActivitySummaryPartId(activityGroup()));
+      return (
+        <div
+          class={`assistant-message-flow-item${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
+          data-assistant-render-key={entry.key}
+        >
+          <AssistantActivityGroup
+            info={props.info}
+            parts={item().parts}
+            summaryParts={activityGroup().parts.filter(
+              (part) =>
+                !isAssistantActivityPartRunning(part) &&
+                !props.retainedActivityPartKeys?.has(getAssistantActivityPartKey(part))
+            )}
+            expansionKey={activityGroup().key}
+            showSummary={showSummary()}
+            textForPart={props.textForPart}
+            lightweight={!!isLightweight()}
+            questionRequestForTool={props.questionRequestForTool}
+            permissionMatchForTool={props.permissionMatchForTool}
+          />
+        </div>
+      );
+    }
+
+    if (initialItem.kind === 'file-edit-stack') {
+      const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'file-edit-stack' }>;
       return (
         <div
           ref={(element) => {
@@ -462,25 +671,29 @@ export function AssistantMessageContent(props: {
               );
             }
           }}
-          class={`assistant-message-flow-item${revealClass}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
-          data-assistant-render-key={item.key}
+          class={`assistant-message-flow-item${revealClass}`}
+          data-assistant-render-key={entry.key}
         >
-          <AssistantActivityGroup
-            info={props.info}
-            parts={item.parts}
-            summaryParts={activityGroup().parts}
-            expansionKey={activityGroup().key}
-            showSummary={showSummary()}
-            textForPart={props.textForPart}
-            lightweight={!!isLightweight()}
-            questionRequestForTool={props.questionRequestForTool}
-            permissionMatchForTool={props.permissionMatchForTool}
-          />
+          <div class="assistant-file-edit-stack">
+            <For each={item().parts}>
+              {(part) => (
+                <MessagePart
+                  part={part}
+                  messageInfo={props.info}
+                  streamedText={props.textForPart(part)}
+                  lightweight={isLightweight()}
+                  questionRequest={props.questionRequestForTool?.(part)}
+                  permissionMatch={props.permissionMatchForTool?.(part)}
+                />
+              )}
+            </For>
+          </div>
         </div>
       );
     }
 
-    return item.kind === 'file-edit-stack' ? (
+    const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'part' }>;
+    return (
       <div
         ref={(element) => {
           if (revealClass) {
@@ -493,48 +706,17 @@ export function AssistantMessageContent(props: {
             );
           }
         }}
-        class={`assistant-message-flow-item${revealClass}`}
-        data-assistant-render-key={item.key}
-      >
-        <div class="assistant-file-edit-stack">
-          <For each={item.parts}>
-            {(part) => (
-              <MessagePart
-                part={part}
-                messageInfo={props.info}
-                streamedText={props.textForPart(part)}
-                lightweight={isLightweight()}
-                questionRequest={props.questionRequestForTool?.(part)}
-                permissionMatch={props.permissionMatchForTool?.(part)}
-              />
-            )}
-          </For>
-        </div>
-      </div>
-    ) : (
-      <div
-        ref={(element) => {
-          if (revealClass) {
-            onCleanup(
-              prepareMeasuredEntrance(element, {
-                animationName: 'streamed-assistant-item-in',
-                heightProperty: '--streamed-assistant-item-height',
-                skipWithin: '.interactive-item-entering',
-              })
-            );
-          }
-        }}
-        data-assistant-render-key={item.key}
+        data-assistant-render-key={entry.key}
         class={`${getAssistantFlowItemClass(
-          item.part,
+          item().part,
           finalTextPartId(),
           !!props.highlightPlanningAnswer
         )}${revealClass}`}
       >
         <Show
           when={
-            item.part.type === 'text' &&
-            item.part.id === finalTextPartId() &&
+            item().part.type === 'text' &&
+            item().part.id === finalTextPartId() &&
             showReadModeToggle() &&
             readModeAltPressed()
           }
@@ -552,18 +734,18 @@ export function AssistantMessageContent(props: {
           </div>
         </Show>
         <MessagePart
-          part={item.part}
+          part={item().part}
           messageInfo={props.info}
-          streamedText={props.textForPart(item.part)}
+          streamedText={props.textForPart(item().part)}
           lightweight={isLightweight()}
           questionRequest={
-            item.part.type === 'tool'
-              ? props.questionRequestForTool?.(item.part as ToolPart)
+            item().part.type === 'tool'
+              ? props.questionRequestForTool?.(item().part as ToolPart)
               : undefined
           }
           permissionMatch={
-            item.part.type === 'tool'
-              ? props.permissionMatchForTool?.(item.part as ToolPart)
+            item().part.type === 'tool'
+              ? props.permissionMatchForTool?.(item().part as ToolPart)
               : undefined
           }
         />
@@ -573,7 +755,7 @@ export function AssistantMessageContent(props: {
 
   return (
     <div class="assistant-message-flow">
-      <For each={renderItems()}>{renderAssistantItem}</For>
+      <For each={renderEntries()}>{renderAssistantItem}</For>
       <Show when={props.errorMessage}>
         <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
           <p>{props.errorMessage!}</p>
@@ -646,9 +828,7 @@ function AssistantActivityGroup(props: {
 }) {
   const expanded = () => isActivityGroupExpanded(props.expansionKey);
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
-  const summary = createMemo(() =>
-    formatAssistantActivityCounts(props.summaryParts, activityStatus().running)
-  );
+  const summary = createMemo(() => formatAssistantActivityCounts(props.summaryParts));
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -656,7 +836,7 @@ function AssistantActivityGroup(props: {
   };
 
   return (
-    <div class={`assistant-activity-group${activityStatus().running ? ' is-running' : ''}`}>
+    <div class="assistant-activity-group">
       <Show when={props.showSummary}>
         <button
           type="button"
@@ -665,11 +845,7 @@ function AssistantActivityGroup(props: {
           onClick={toggleExpanded}
         >
           <span class="assistant-activity-summary-text" aria-live="polite" aria-atomic="true">
-            <span
-              class={`assistant-activity-summary-main${activityStatus().running ? ' shimmer-progress' : ''}`}
-            >
-              {summary()}
-            </span>
+            <span class="assistant-activity-summary-main">{summary()}</span>
             <Show when={activityStatus().failed > 0}>
               <span class="assistant-activity-status-failed">
                 {'· '}

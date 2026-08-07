@@ -168,8 +168,13 @@ test.describe('diff preview anchoring', () => {
     await composer.fill('Make one more change');
     await page.getByTitle('Send (Enter)').click();
 
-    await expect(summary).toContainText('Explored 1 file, 1 edit');
-    await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toHaveCount(0);
+    await expect(page.locator('.chat-turn-user').last()).toContainText('Make one more change');
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await expect(summary).toContainText('Explored 1 file');
+    await expect(summary).not.toContainText('edit');
+    await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
   });
 
   test('centers the expanded diff and strongly obscures the transcript', async ({ page }) => {

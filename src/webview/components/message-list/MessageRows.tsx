@@ -40,6 +40,9 @@ export type MessageRowSharedProps = {
   fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
   assistantActivityGroupMap?: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>;
+  retainedActivityPartKeys?: ReadonlySet<string>;
+  exitingActivityPartKeys?: ReadonlySet<string>;
+  visibleActiveActivityPartKeys?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   claimMessageEntrance?: (messageId: string) => boolean;
@@ -87,6 +90,7 @@ export function MessageRow(
     msg: MessageEntry;
     virtualHeight?: number;
     virtualPlaceholder?: boolean;
+    renderEmpty?: boolean;
   } & MessageRowSharedProps
 ) {
   let rowRef: HTMLDivElement | undefined;
@@ -165,7 +169,7 @@ export function MessageRow(
           : ''
       }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
-      }${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}`}
+      }${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
       <Show when={!isVirtualPlaceholder()}>
         <Show when={changeLabel()}>
@@ -196,6 +200,9 @@ export function MessageRow(
             questionRequestForTool={props.questionRequestForTool}
             permissionMatchForTool={props.permissionMatchForTool}
             compactActivityGroups={assistantActivityGroups()}
+            retainedActivityPartKeys={props.retainedActivityPartKeys}
+            exitingActivityPartKeys={props.exitingActivityPartKeys}
+            visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
           />
         </Show>
         <Show when={summary()}>

@@ -538,6 +538,124 @@ test.describe('auto-scroll', () => {
     }
   });
 
+  test('keeps a detached anchor stable when an offscreen active tool joins Explored', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => list.evaluate((element) => element.querySelectorAll('[data-msg-id]').length))
+      .toBeLessThan(60);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * 0.7);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 2);
+    const anchor = await getVisibleMessageAnchor(list);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const part = harnessWindow.__varroE2E
+        ?.getSessionMessages?.('session-tool-cards-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((candidate) => candidate.id === 'message-tool-cards-assistant-20-tool');
+      if (!part) throw new Error('Virtualized active tool fixture is missing');
+      const previousState = part.state as Record<string, unknown>;
+      part.state = {
+        status: 'completed',
+        input: previousState.input,
+        output: 'Found matches',
+        title: 'Search virtualized activity',
+        metadata: {},
+        time: { start: Date.now() - 1_000, end: Date.now() },
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    });
+
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 90);
+    expect(
+      samples.every((top) => top !== null),
+      JSON.stringify({ anchor, samples })
+    ).toBe(true);
+    expect(
+      samples.every((top) => Math.abs(top! - anchor.top) < 1.5),
+      JSON.stringify({ anchor, samples })
+    ).toBe(true);
+  });
+
+  test('releases trailing active-tool space after its exit animation', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+    );
+    const activeItem = page.locator(
+      '[data-activity-part-id="message-tool-cards-assistant-69-tool"]'
+    );
+    const loadingRow = page.locator('.interactive-loading-row');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect(activeItem).toBeVisible();
+    await activeItem.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+    await page.waitForTimeout(1_250);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const part = harnessWindow.__varroE2E
+        ?.getSessionMessages?.('session-tool-cards-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((candidate) => candidate.id === 'message-tool-cards-assistant-69-tool');
+      if (!part) throw new Error('Trailing active tool fixture is missing');
+      const previousState = part.state as Record<string, unknown>;
+      part.state = {
+        status: 'completed',
+        input: previousState.input,
+        output: 'Found matches',
+        title: 'Search virtualized activity',
+        metadata: {},
+        time: { start: Date.now() - 1_000, end: Date.now() },
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    });
+
+    await expect(activeItem).toHaveClass(/is-exiting/, { timeout: 5_000 });
+    await expect(activeItem).toHaveCount(0, { timeout: 1_000 });
+    await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+
+    const settledGap = await page
+      .locator('.assistant-activity-summary')
+      .last()
+      .evaluate(
+        (summary, loading) => {
+          const summaryBox = summary.getBoundingClientRect();
+          const loadingBox = (loading as HTMLElement).getBoundingClientRect();
+          return loadingBox.top - summaryBox.bottom;
+        },
+        await loadingRow.elementHandle()
+      );
+    expect(settledGap).toBeGreaterThanOrEqual(5);
+    expect(settledGap).toBeLessThanOrEqual(9);
+  });
+
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({
     page,
   }) => {

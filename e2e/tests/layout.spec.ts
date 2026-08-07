@@ -31,6 +31,165 @@ test('resets padding injected by legacy webview hosts', async ({ page }) => {
   });
 });
 
+test('bounds active tools and eases completed tools into Explored', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1');
+  const tray = page.locator('.assistant-active-activity-tray');
+  await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(12);
+
+  const trayGeometry = await tray.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+  }));
+  expect(trayGeometry.clientHeight).toBeLessThanOrEqual(168);
+  expect(trayGeometry.scrollHeight).toBeGreaterThan(trayGeometry.clientHeight);
+  expect(trayGeometry.scrollbarWidth).toBe('none');
+
+  const activeSpacing = await tray.evaluate(async (element) => {
+    const summary = element.querySelector<HTMLElement>('.assistant-activity-summary')!;
+    const items = [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')];
+    items[1]!.classList.add('is-exiting');
+    element.classList.add('is-exiting');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const summaryBox = summary.getBoundingClientRect();
+    const firstBox = (
+      items[0]!.querySelector<HTMLElement>('button') ?? items[0]!
+    ).getBoundingClientRect();
+    const thirdBox = (
+      items[2]!.querySelector<HTMLElement>('button') ?? items[2]!
+    ).getBoundingClientRect();
+    return {
+      summaryToFirst: firstBox.top - summaryBox.bottom,
+      firstToThird: thirdBox.top - firstBox.bottom,
+    };
+  });
+  expect(activeSpacing.summaryToFirst).toBeGreaterThanOrEqual(10);
+  expect(activeSpacing.summaryToFirst).toBeLessThanOrEqual(14);
+  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(6);
+  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(10);
+
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
+  );
+  const transitionTray = page.locator('.assistant-active-activity-tray');
+  const completedItem = transitionTray.locator('[data-activity-part-id="tool-active-0"]');
+  const placeholder = transitionTray.locator('.assistant-activity-summary-placeholder');
+  await expect(placeholder).toHaveText('Exploring');
+  await expect(transitionTray.locator('button.assistant-activity-summary')).toHaveCount(0);
+  await completedItem.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  const placeholderTop = (await placeholder.boundingBox())!.y;
+  const loadingRow = page.locator('.interactive-loading-row');
+  const loadingTopBefore = await loadingRow.evaluate((element) => {
+    const container = element.closest<HTMLElement>('.interactive-list')!;
+    return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  });
+  await page.waitForTimeout(1_250);
+  await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+        updateMessagePart?: (part: Record<string, unknown>) => void;
+      };
+    };
+    const part = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .flatMap((message) => message.parts)
+      .find((candidate) => candidate.id === 'tool-active-0');
+    if (!part) throw new Error('Active tool fixture is missing');
+    const previousState = part.state as Record<string, unknown>;
+    part.state = {
+      status: 'completed',
+      input: previousState.input,
+      output: 'Found matches',
+      title: 'Search 0',
+      metadata: {},
+      time: { start: Date.now() - 1_000, end: Date.now() },
+    };
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
+  });
+
+  await expect(completedItem).toHaveClass(/is-completed/);
+  const transition = await completedItem.evaluate(async (element) => {
+    await new Promise<void>((resolve) => {
+      if (element.classList.contains('is-exiting')) {
+        resolve();
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (!element.classList.contains('is-exiting')) return;
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['class'] });
+    });
+
+    const summary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+    if (!summary) throw new Error('Explored summary is missing while the tool exits');
+    const summaryMask = document.querySelector<HTMLElement>('.assistant-active-activity-summary');
+    if (!summaryMask) throw new Error('Explored transition mask is missing');
+    const activityTray = element.closest<HTMLElement>('.assistant-active-activity-tray')!;
+    const summaryTop = summary.getBoundingClientRect().top;
+    const summaryMaskWidth = summaryMask.getBoundingClientRect().width;
+    const summaryMaskBackground = getComputedStyle(summaryMask).backgroundColor;
+    const trayWidth = activityTray.getBoundingClientRect().width;
+    const trayGap = getComputedStyle(activityTray).rowGap;
+    const samples = [element.getBoundingClientRect().height];
+    const loadingTops: number[] = [];
+    while (element.isConnected && samples.length < 20) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push(element.getBoundingClientRect().height);
+      const loading = document.querySelector<HTMLElement>('.interactive-loading-row');
+      const container = loading?.closest<HTMLElement>('.interactive-list');
+      if (loading && container) {
+        loadingTops.push(
+          loading.getBoundingClientRect().top - container.getBoundingClientRect().top
+        );
+      }
+    }
+    return {
+      heights: samples,
+      loadingTops,
+      summaryMaskBackground,
+      summaryMaskWidth,
+      summaryTop,
+      trayGap,
+      trayWidth,
+    };
+  });
+  expect(transition.heights[0]).toBeGreaterThan(0);
+  expect(
+    transition.heights.every(
+      (height, index) => index === 0 || height <= transition.heights[index - 1]! + 1
+    )
+  ).toBe(true);
+  expect(transition.heights.at(-1)).toBeLessThan(transition.heights[0]! - 5);
+  expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
+  expect(transition.summaryMaskBackground).not.toBe('rgba(0, 0, 0, 0)');
+  expect(Math.abs(transition.summaryMaskWidth - transition.trayWidth)).toBeLessThanOrEqual(1);
+  expect(transition.trayGap).toBe('0px');
+  expect(
+    transition.loadingTops.every(
+      (top, index) => index === 0 || top <= transition.loadingTops[index - 1]! + 1
+    ),
+    JSON.stringify({ loadingTopBefore, samples: transition.loadingTops })
+  ).toBe(true);
+  expect(transition.loadingTops.at(-1)).toBeLessThan(loadingTopBefore - 5);
+  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(1);
+
+  await expect(completedItem).toHaveClass(/is-exiting/);
+  const summary = page.locator('.assistant-activity-summary');
+  await expect(summary).toContainText('Explored 1 search');
+  expect(Math.abs((await summary.boundingBox())!.y - transition.summaryTop)).toBeLessThanOrEqual(1);
+  await page.waitForTimeout(150);
+  const finalSummaryBox = (await summary.boundingBox())!;
+  const finalLoadingBox = (await loadingRow.boundingBox())!;
+  const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
+  expect(settledGap).toBeGreaterThanOrEqual(5);
+  expect(settledGap).toBeLessThanOrEqual(9);
+});
+
 test('single image messages reserve their preview height before loading', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank');

@@ -97,8 +97,17 @@ export function isAssistantActivityPart(part: Part): part is AssistantActivityPa
   return part.type === 'tool' && normalizeToolName(part.tool) !== 'task';
 }
 
+export function getAssistantActivityPartKey(part: AssistantActivityPart) {
+  return `${part.messageID}\u0000${part.id}`;
+}
+
 export function isAssistantEditActivityPart(part: AssistantActivityPart) {
   return getActivityKind(part) === 'edits';
+}
+
+export function isAssistantActivityPartRunning(part: AssistantActivityPart) {
+  if (part.type === 'reasoning') return part.time.end === undefined;
+  return part.state.status === 'pending' || part.state.status === 'running';
 }
 
 export function shouldCompactAssistantActivityPart(
@@ -222,10 +231,7 @@ export function preserveAssistantActivityGroupKeys(
   );
 }
 
-export function formatAssistantActivityCounts(
-  parts: readonly AssistantActivityPart[],
-  inProgress = false
-) {
+export function formatAssistantActivityCounts(parts: readonly AssistantActivityPart[]) {
   const counts = new Map<ActivityKind, number>();
   for (const part of parts) {
     const kind = getActivityKind(part);
@@ -241,12 +247,12 @@ export function formatAssistantActivityCounts(
     const count = counts.get(kind);
     return count ? [formatActivityCount(kind, count)] : [];
   });
-  return `${inProgress ? 'Exploring' : 'Explored'} ${labels.join(', ')}`;
+  return `Explored ${labels.join(', ')}`;
 }
 
 export function formatAssistantActivitySummary(parts: readonly AssistantActivityPart[]) {
   const status = getAssistantActivityStatus(parts);
-  const counts = formatAssistantActivityCounts(parts, status.running);
+  const counts = formatAssistantActivityCounts(parts);
   const statusLabels = [
     ...(status.failed > 0 ? [formatCount(status.failed, 'tool failed', 'tools failed')] : []),
     ...(status.aborted > 0 ? [formatCount(status.aborted, 'tool aborted', 'tools aborted')] : []),
@@ -260,12 +266,9 @@ export function getAssistantActivityStatus(parts: readonly AssistantActivityPart
   let aborted = 0;
 
   for (const part of parts) {
-    if (part.type === 'reasoning') {
-      running ||= part.time.end === undefined;
-      continue;
-    }
+    running ||= isAssistantActivityPartRunning(part);
+    if (part.type === 'reasoning') continue;
     if (part.type !== 'tool') continue;
-    running ||= part.state.status === 'pending' || part.state.status === 'running';
     if (part.state.status !== 'error') continue;
     if (isAbortedToolError(part.state)) aborted += 1;
     else failed += 1;

@@ -5,7 +5,12 @@ import {
   isProviderAuthFailure,
 } from '../../shared/error-classification';
 import { retryMessage } from '../hooks/useOpenCode';
-import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
+import {
+  getAssistantActivityPartKey,
+  isAssistantActivityPart,
+  isAssistantActivityPartRunning,
+  type AssistantActivityGroupInfo,
+} from '../lib/assistant-activity';
 import { client } from '../lib/client';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
@@ -88,6 +93,9 @@ export function Message(props: {
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
   compactActivityGroups?: readonly AssistantActivityGroupInfo[] | null;
+  retainedActivityPartKeys?: ReadonlySet<string>;
+  exitingActivityPartKeys?: ReadonlySet<string>;
+  visibleActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
   let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
@@ -202,8 +210,15 @@ export function Message(props: {
     );
   });
   const hasVisibleAssistantOutput = () => {
-    if (!props.compactActivityGroups) return visibleAssistantParts().length > 0;
-    return visibleAssistantParts().some((part) => {
+    const visibleParts = visibleAssistantParts().filter(
+      (part) =>
+        !props.visibleActiveActivityPartKeys ||
+        !isAssistantActivityPart(part) ||
+        !isAssistantActivityPartRunning(part) ||
+        props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part))
+    );
+    if (!props.compactActivityGroups) return visibleParts.length > 0;
+    return visibleParts.some((part) => {
       const group = compactActivityPartKeys().get(`${part.messageID}\u0000${part.id}`);
       return !group || group.ownerMessageId === props.info.id || isCompactActivityExpanded(group);
     });
@@ -349,6 +364,9 @@ export function Message(props: {
                 questionRequestForTool={props.questionRequestForTool}
                 permissionMatchForTool={props.permissionMatchForTool}
                 compactActivityGroups={props.compactActivityGroups}
+                retainedActivityPartKeys={props.retainedActivityPartKeys}
+                exitingActivityPartKeys={props.exitingActivityPartKeys}
+                visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
               />
             </Show>
           </div>

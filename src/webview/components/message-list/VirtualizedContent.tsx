@@ -8,6 +8,7 @@ export function VirtualizedContent(
     messages: MessageEntry[];
     visibleRange?: Partial<VisibleRange>;
     virtualMetrics?: VirtualMetrics;
+    renderEmptyMessageIds?: ReadonlySet<string>;
     forceVirtualContent?: (messageId: string) => boolean;
     canReleaseVirtualPlaceholders?: () => boolean;
     outerListVirtualized?: boolean;
@@ -135,6 +136,7 @@ export function VirtualizedContent(
               nearViewport={nearViewport()}
               virtualHeight={virtualHeight()}
               virtualPlaceholder={virtualPlaceholder()}
+              renderEmpty={props.renderEmptyMessageIds?.has(msg.info.id)}
               modelChangeMap={props.modelChangeMap}
               promptNumberMap={props.promptNumberMap}
               showPromptNumbers={props.showPromptNumbers}
@@ -143,6 +145,9 @@ export function VirtualizedContent(
               fileEditStackGroupMap={props.fileEditStackGroupMap}
               assistantDialogSummaryMap={props.assistantDialogSummaryMap}
               assistantActivityGroupMap={props.assistantActivityGroupMap}
+              retainedActivityPartKeys={props.retainedActivityPartKeys}
+              exitingActivityPartKeys={props.exitingActivityPartKeys}
+              visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
               hasBuildAgent={props.hasBuildAgent}
               latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
               outerListVirtualized={props.outerListVirtualized}

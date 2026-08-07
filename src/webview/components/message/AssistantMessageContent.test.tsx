@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
+import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
 import {
   resetDefaultAppState,
   setCompactToolOutput,
@@ -255,7 +256,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(0);
   });
 
-  it('groups consecutive activity, updates counters, and preserves expansion while streaming', () => {
+  it('updates consecutive activity in place without flashing and preserves expansion', async () => {
     setCompactToolOutput(true);
     const initialParts: Part[] = [
       reasoningPart('reasoning-1'),
@@ -280,6 +281,7 @@ describe('AssistantMessageContent', () => {
 
     const summary = () =>
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    const initialSummary = summary();
     expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search');
     expect(summary()?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.assistant-activity-details')).toBeNull();
@@ -290,9 +292,12 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
 
     setParts((current) => [...current, toolPart('bash-1', 'bash', { command: 'npm test' })]);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
+    expect(summary()).toBe(initialSummary);
     expect(summary()?.textContent).toContain('Explored 2 files, 1 thought, 1 search, 1 command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+    expect(summary()?.classList).not.toContain('assistant-activity-summary-settling');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
 
@@ -389,7 +394,7 @@ describe('AssistantMessageContent', () => {
     );
   });
 
-  it('uses Exploring without a working suffix for active activity', () => {
+  it('keeps active activity visible until it moves into Explored', async () => {
     setCompactToolOutput(true);
     const running = toolPart('grep-running', 'grep', { pattern: 'activity' });
     running.state = {
@@ -399,11 +404,87 @@ describe('AssistantMessageContent', () => {
       time: { start: 0 },
     };
 
-    renderAssistantMessageContent({ parts: [running] });
+    const [parts, setParts] = createSignal<Part[]>([running]);
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={createAssistantMessage({ time: { created: 0 } })}
+          parts={parts()}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('[data-part-id="grep-running"]')).not.toBeNull();
+
+    setParts([
+      {
+        ...running,
+        state: completedToolState({ pattern: 'activity' }, 'Found matches'),
+      },
+    ]);
+    await Promise.resolve();
 
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toBe(
-      'Exploring 1 search'
+      'Explored 1 search'
     );
+    expect(container?.querySelector('[data-part-id="grep-running"]')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-group-settling')).not.toBeNull();
+  });
+
+  it('keeps active and briefly completed tools together in one bounded tray', () => {
+    setCompactToolOutput(true);
+    const runningSearch = toolPart('search-running', 'grep', { pattern: 'activity' });
+    runningSearch.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Search',
+      time: { start: 0 },
+    };
+    const completedRead = toolPart('read-completed', 'read', { filePath: 'src/app.ts' });
+    const runningCommand = toolPart('command-running', 'bash', { command: 'npm test' });
+    runningCommand.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 0 },
+    };
+
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [runningSearch, completedRead, runningCommand],
+      retainedActivityPartKeys: new Set([getAssistantActivityPartKey(completedRead)]),
+    });
+
+    expect(container?.querySelectorAll('.assistant-active-activity-tray')).toHaveLength(1);
+    expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(3);
+    expect(
+      container?.querySelector('[data-activity-part-id="read-completed"].is-completed')
+    ).not.toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+  });
+
+  it('renders the first exiting tool behind its new Explored row', () => {
+    setCompactToolOutput(true);
+    const command = toolPart('command-exiting', 'bash', { command: 'npm test' });
+
+    renderAssistantMessageContent({
+      parts: [command],
+      exitingActivityPartKeys: new Set([getAssistantActivityPartKey(command)]),
+    });
+
+    const tray = container?.querySelector('.assistant-active-activity-tray');
+    expect(tray?.classList).toContain('has-active-summary');
+    expect(tray?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 command'
+    );
+    expect(
+      tray?.querySelector('[data-activity-part-id="command-exiting"].is-exiting')
+    ).not.toBeNull();
   });
 
   it('keeps actionable tools outside compact activity groups', () => {

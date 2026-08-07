@@ -2314,8 +2314,49 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
       },
     ];
+    const activeTray = new URLSearchParams(window.location.search).get('activeTray') === '1';
+    const activeTrayCount =
+      Number.parseInt(
+        new URLSearchParams(window.location.search).get('activeTrayCount') || '',
+        10
+      ) || 12;
+    const activeTrayPrefix =
+      new URLSearchParams(window.location.search).get('activeTrayPrefix') === '1';
+    if (activeTray) {
+      markAssistantInProgress(assistant);
+      assistant.parts = [
+        ...(activeTrayPrefix
+          ? [
+              {
+                id: 'tool-active-prefix',
+                sessionID: session.id,
+                messageID: assistant.info.id,
+                type: 'text' as const,
+                text: `\`\`\`ts\n${Array.from({ length: 120 }, (_, index) => `const line${index} = ${index};`).join('\n')}\n\`\`\``,
+              },
+            ]
+          : []),
+        ...Array.from({ length: activeTrayCount }, (_, index) => ({
+          id: `tool-active-${index}`,
+          sessionID: session.id,
+          messageID: assistant.info.id,
+          type: 'tool' as const,
+          callID: `tool-active-call-${index}`,
+          tool: index % 2 === 0 ? 'grep' : 'bash',
+          state: {
+            status: 'running' as const,
+            input:
+              index % 2 === 0
+                ? { pattern: `activity-${index}`, path: 'src/webview' }
+                : { command: `npm run check-${index}` },
+            title: index % 2 === 0 ? `Search ${index}` : `Command ${index}`,
+            time: { start: BASE_TIME - 1_000 + index },
+          },
+        })),
+      ];
+    }
     state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[session.id] = activeTray ? { type: 'busy' } : { type: 'idle' };
     state.messagesBySessionId[session.id] = [user, assistant];
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 300;
@@ -2323,6 +2364,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   }
 
   if (name === 'tool-cards-large-transcript') {
+    const searchParams = new URLSearchParams(window.location.search);
+    const activeTray = searchParams.get('activeTray') === '1';
+    const activeTrayIndex = Number.parseInt(searchParams.get('activeTrayIndex') ?? '20', 10);
     const session = makeSession(
       'session-tool-cards-large-transcript',
       'Tool card virtualization stability',
@@ -2441,11 +2485,27 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           ];
       }
 
+      if (activeTray && index === activeTrayIndex) {
+        markAssistantInProgress(assistant);
+        assistant.parts = [
+          {
+            ...commonToolPart,
+            tool: 'grep',
+            state: {
+              status: 'running',
+              input: { pattern: 'virtualized-activity', path: 'src/webview' },
+              title: 'Search virtualized activity',
+              time: { start: createdAt + 1 },
+            },
+          },
+        ];
+      }
+
       messages.push(user, assistant);
     }
 
     state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[session.id] = activeTray ? { type: 'busy' } : { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 305;
@@ -2838,7 +2898,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             ].join('\n')
           : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
       const patchPart = makeApplyPatchToolPart(session.id, assistantId, patchId, patchText);
-      if (includeActiveTurnCollapse && index === 59) {
+      if ((includeMultiFileDiff || includeActiveTurnCollapse) && index === 59) {
         patchPart.state = {
           status: 'completed',
           input: patchPart.state.input,

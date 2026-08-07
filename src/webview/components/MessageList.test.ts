@@ -977,12 +977,354 @@ describe('MessageList compact activity', () => {
     expect(summaries).toHaveLength(1);
     expect(summaries?.[0]?.textContent).toContain('Explored 1 thought, 1 command');
     expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(0);
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).toContain(
+      'interactive-item-render-empty'
+    );
 
     summaries?.[0]?.click();
 
     expect(summaries?.[0]?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(2);
     expect(container?.textContent).toContain('All checks passed.');
+  });
+
+  it('shows running activity inline before moving it into Explored', async () => {
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
+    const search = toolPart('search-1', 'assistant-1', 'call-search-1');
+    search.tool = 'grep';
+    search.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Searching',
+      time: { start: 1 },
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
+    const info = assistantMessage('assistant-1', { parentID: 'user-1' });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [read, search] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(179);
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file'
+    );
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).not.toBeNull();
+
+    replaceMessages([
+      user,
+      {
+        info,
+        parts: [
+          read,
+          {
+            ...search,
+            state: {
+              status: 'completed',
+              input: { pattern: 'activity' },
+              output: 'Found matches',
+              title: 'Searching',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file'
+    );
+    expect(
+      container?.querySelector('[data-activity-part-id="search-1"].is-completed')
+    ).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(
+      container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
+    ).not.toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file, 1 search'
+    );
+
+    await vi.advanceTimersByTimeAsync(420);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file, 1 search'
+    );
+    expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+  });
+
+  it('does not show active tools that complete inside the display debounce', async () => {
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
+    const command = toolPart('command-fast', 'assistant-1', 'call-command-fast');
+    command.state = {
+      status: 'running',
+      input: { command: 'npm run lint' },
+      title: 'npm run lint',
+      time: { start: 2 },
+    };
+    const completedCommand: ToolPart = {
+      ...command,
+      state: {
+        status: 'completed',
+        input: { command: 'npm run lint' },
+        output: 'passed',
+        title: 'npm run lint',
+        metadata: {},
+        time: { start: 2, end: 3 },
+      },
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] };
+    const info = assistantMessage('assistant-1', {
+      parentID: 'user-1',
+      time: { created: 1 },
+    });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [read] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    replaceMessages([user, { info, parts: [read, command] }]);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
+
+    replaceMessages([user, { info, parts: [read, completedCommand] }]);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(80);
+
+    expect(container?.querySelector('[data-activity-part-id="command-fast"]')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 file, 1 command'
+    );
+  });
+
+  it('keeps active commands below Explored when they precede completed activity', async () => {
+    const running = toolPart('command-running', 'assistant-1', 'call-command-running');
+    running.state = {
+      status: 'running',
+      input: { command: 'npm run test:e2e' },
+      title: 'npm run test:e2e',
+      time: { start: 1 },
+    };
+    const completed = ['command-completed-1', 'command-completed-2'].map((id, index) => {
+      const part = toolPart(id, `assistant-${index + 2}`, `call-${id}`);
+      part.state = {
+        status: 'completed',
+        input: { command: `npm run check:${index + 1}` },
+        output: 'passed',
+        title: `npm run check:${index + 1}`,
+        metadata: {},
+        time: { start: index + 2, end: index + 3 },
+      };
+      return part;
+    });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1', time: { created: 1 } }),
+        parts: [running],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [completed[0]!],
+      },
+      {
+        info: assistantMessage('assistant-3', { parentID: 'user-1' }),
+        parts: [completed[1]!],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+
+    const summary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
+    const activeItem = container?.querySelector<HTMLElement>(
+      '[data-activity-part-id="command-running"]'
+    );
+    expect(summary?.textContent).toContain('Explored 2 commands');
+    expect(summary?.compareDocumentPosition(activeItem!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('keeps one Explored group while a command between completed tools is retained', async () => {
+    const completedCommand = (id: string, command: string, start: number) => {
+      const part = toolPart(id, 'assistant-1', `call-${id}`);
+      part.state = {
+        status: 'completed',
+        input: { command },
+        output: 'passed',
+        title: command,
+        metadata: {},
+        time: { start, end: start + 1 },
+      };
+      return part;
+    };
+    const first = completedCommand('command-1', 'npm run lint', 1);
+    const running = toolPart('command-2', 'assistant-1', 'call-command-2');
+    running.state = {
+      status: 'running',
+      input: { command: 'npm run test:e2e' },
+      title: 'npm run test:e2e',
+      time: { start: 3 },
+    };
+    const last = completedCommand('command-3', 'npm run typecheck', 5);
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] };
+    const info = assistantMessage('assistant-1', {
+      parentID: 'user-1',
+      time: { created: 1 },
+    });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [first, running, last] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 2 commands'
+    );
+
+    const retained = completedCommand('command-2', 'npm run test:e2e', 3);
+    replaceMessages([user, { info, parts: [first, retained, last] }]);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 2 commands'
+    );
+    expect(
+      container?.querySelector('[data-activity-part-id="command-2"].is-completed')
+    ).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_600);
+
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 3 commands'
+    );
+  });
+
+  it('reserves an inert Exploring row before the first tool can be summarized', async () => {
+    const command = toolPart('command-1', 'assistant-1', 'call-command-1');
+    command.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 1 },
+    };
+    const completedCommand: ToolPart = {
+      ...command,
+      state: {
+        status: 'completed',
+        input: { command: 'npm test' },
+        output: 'passed',
+        title: 'npm test',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] };
+    const info = assistantMessage('assistant-1', {
+      parentID: 'user-1',
+      time: { created: 1 },
+    });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [command] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+
+    const placeholder = container?.querySelector<HTMLElement>(
+      '.assistant-activity-summary-placeholder'
+    );
+    const activeItem = container?.querySelector<HTMLElement>('[data-activity-part-id="command-1"]');
+    expect(placeholder?.textContent).toBe('Exploring');
+    expect(placeholder?.querySelector('.assistant-activity-chevron')).toBeNull();
+    expect(placeholder?.getAttribute('aria-expanded')).toBeNull();
+    expect(placeholder?.compareDocumentPosition(activeItem!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    replaceMessages([
+      user,
+      {
+        info,
+        parts: [completedCommand],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary-placeholder')).not.toBeNull();
+    expect(container?.querySelector('button.assistant-activity-summary')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_600);
+
+    const tray = container?.querySelector('.assistant-active-activity-tray');
+    expect(tray?.classList).toContain('has-active-summary');
+    expect(tray?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 command'
+    );
+    expect(tray?.querySelector('button.assistant-activity-summary')).not.toBeNull();
+    expect(tray?.querySelector('[data-activity-part-id="command-1"].is-exiting')).not.toBeNull();
+
+    replaceMessages([
+      user,
+      {
+        info,
+        parts: [
+          completedCommand,
+          { ...textPart('response-1', 'Tests passed.'), messageID: 'assistant-1' },
+        ],
+      },
+    ]);
+    await Promise.resolve();
+    expect(
+      container?.querySelector('[data-activity-part-id="command-1"].is-exiting')
+    ).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(420);
+
+    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 command'
+    );
+    expect(container?.textContent).toContain('Tests passed.');
   });
 
   it('starts a separate disclosure for activity after response text', async () => {
@@ -1034,7 +1376,7 @@ describe('MessageList compact activity', () => {
     ]);
   });
 
-  it('keeps just-completed trailing-turn diffs inline until the next prompt', async () => {
+  it('keeps completed diffs inline across later prompts while the chat stays open', async () => {
     const edit: ToolPart = {
       id: 'edit-inline-1',
       sessionID: 'session-1',
@@ -1168,9 +1510,10 @@ describe('MessageList compact activity', () => {
     ]);
     await Promise.resolve();
 
-    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
     expect(summaries()).toHaveLength(2);
-    expect(summaries()[1]?.textContent).toContain('Explored 1 file, 2 edits');
+    expect(summaries()[1]?.textContent).toContain('Explored 1 file');
+    expect(summaries()[1]?.textContent).not.toContain('edit');
   });
 
   it('compacts a just-completed diff when the chat is reopened', async () => {
@@ -1225,6 +1568,14 @@ describe('MessageList compact activity', () => {
     edit.tool = 'apply_patch';
     const read = toolPart('read-1', 'assistant-1', 'call-read-1');
     read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
@@ -1250,6 +1601,14 @@ describe('MessageList compact activity', () => {
 
   it('keeps an expanded activity group open when history extends it backward', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
+    command.state = {
+      status: 'completed',
+      input: { command: 'npm test' },
+      output: 'passed',
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
     const thought: Part = {
       id: 'reasoning-1',
       sessionID: 'session-1',
@@ -5707,6 +6066,101 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('keeps the sticky prompt mounted while new assistant activity events arrive', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let assistantTop = 20;
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list')) return new DOMRect(0, 0, 500, 500);
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 1_200);
+        }
+        if (this.classList.contains('latest-user-message-sticky-overlay')) {
+          return new DOMRect(0, 10, 500, 74);
+        }
+
+        const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+        if (messageId === 'user-1') return new DOMRect(0, -100, 500, 52);
+        if (messageId === 'assistant-1') return new DOMRect(0, assistantTop, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_200 });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 700 });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('Prompt 1');
+
+    const activity = toolPart('search-1', 'assistant-1', 'call-search-1');
+    activity.tool = 'grep';
+    assistantTop = -600;
+    upsertPart(activity);
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(sticky?.isConnected).toBe(true);
+    expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
+
+    // The row's painted geometry settles before another observer delivery. A stale hide timer from
+    // the event frame must recheck it instead of removing the valid sticky prompt.
+    assistantTop = 20;
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(sticky?.isConnected).toBe(true);
+    expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
+
+    upsertPart({
+      ...activity,
+      state: {
+        status: 'completed',
+        input: { pattern: 'sticky' },
+        output: 'Found matches',
+        title: 'Searching',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    });
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(sticky?.isConnected).toBe(true);
+    expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
+    animationFrames.restore();
+  });
+
   it('hands off to the previous sticky after the next prompt clears the overlay', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let user2Top = -62;
@@ -9055,6 +9509,104 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
 
     expect(scrollTopValue).toBe(1300);
+    animationFrames.restore();
+  });
+
+  it('synchronizes a browser bottom clamp when grouped activity shrinks during follow', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    let scrollHeightValue = 5000;
+    let trackHeight = 5000;
+
+    class TestResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.push(callback);
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, trackHeight);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 400);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts:
+            index === 49
+              ? [toolPart('tool-49', messageId)]
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    expect(scrollTopValue).toBe(4600);
+    for (const callback of resizeCallbacks) {
+      callback([{ target: list } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+
+    trackHeight = 5500;
+    scrollHeightValue = 5500;
+    requestMessageListScrollToBottom();
+    await Promise.resolve();
+    expect(scrollTopValue).toBe(5100);
+
+    trackHeight = 1000;
+    scrollHeightValue = 1000;
+    // Chrome clamps to the new bottom during layout, before it necessarily dispatches scroll.
+    scrollTopValue = 600;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id]')?.getAttribute('data-msg-id')).toBe(
+      'assistant-0'
+    );
     animationFrames.restore();
   });
 

@@ -80,7 +80,7 @@ describe('assistant activity summaries', () => {
     expect(getAssistantActivityStatus([reasoning('reasoning-1')]).running).toBe(true);
     expect(getAssistantActivityStatus([pending]).running).toBe(true);
     expect(getAssistantActivityStatus([completedTool('read-1', 'read')]).running).toBe(false);
-    expect(formatAssistantActivitySummary([pending])).toBe('Exploring 1 search');
+    expect(formatAssistantActivitySummary([pending])).toBe('Explored 1 search');
   });
 
   it('surfaces failed tools in the collapsed summary', () => {
