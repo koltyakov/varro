@@ -45,6 +45,8 @@ export function getStickyUserMessagePreview(
   if (!firstVisibleEntry) return null;
   if (firstVisibleEntry.info.role === 'user') return null;
   const subagentSessionIds = getSubagentSessionIds(messages);
+  const parentUserMessageId = firstVisibleEntry.info.parentID;
+  let fallback: StickyUserMessagePreview | null = null;
 
   for (let i = firstVisibleMessageIndex; i >= 0; i--) {
     const entry = messages[i];
@@ -53,15 +55,17 @@ export function getStickyUserMessagePreview(
     if (subagentSessionIds.has(entry.info.sessionID)) continue;
     const text = getUserMessagePreviewText(entry.parts);
     if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
-    return {
+    const preview = {
       id: entry.info.id,
       index: i,
       text,
       ...getStickyUserMessageCounts(entry.parts),
     };
+    if (entry.info.id === parentUserMessageId) return preview;
+    fallback ??= preview;
   }
 
-  return null;
+  return fallback;
 }
 
 export function getNextVisibleUserMessageTopMap(

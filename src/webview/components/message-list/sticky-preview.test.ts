@@ -42,14 +42,14 @@ function user(id: string, text: string = 'hello'): MessageEntry {
   };
 }
 
-function assistant(id: string): MessageEntry {
+function assistant(id: string, parentID: string = 'u1'): MessageEntry {
   return {
     info: {
       id,
       sessionID: 'session-1',
       role: 'assistant',
       time: { created: 0 },
-      parentID: 'user-1',
+      parentID,
       modelID: 'gpt-5',
       providerID: 'openai',
       mode: 'default',
@@ -85,8 +85,8 @@ describe('getStickyUserMessagePreview', () => {
     expect(getStickyUserMessagePreview(messages, 0)).toBeNull();
   });
 
-  it('finds the preceding user message', () => {
-    const messages = [user('u1', 'my prompt'), assistant('a1')];
+  it('falls back to the preceding user message when the assistant parent is not loaded', () => {
+    const messages = [user('u1', 'my prompt'), assistant('a1', 'unloaded-user')];
     const result = getStickyUserMessagePreview(messages, 1);
     expect(result).toEqual({
       id: 'u1',
@@ -137,12 +137,34 @@ describe('getStickyUserMessagePreview', () => {
   });
 
   it('picks the closest preceding user message', () => {
-    const messages = [user('u1', 'first'), assistant('a1'), user('u2', 'second'), assistant('a2')];
+    const messages = [
+      user('u1', 'first'),
+      assistant('a1'),
+      user('u2', 'second'),
+      assistant('a2', 'u2'),
+    ];
     const result = getStickyUserMessagePreview(messages, 3);
     expect(result).toEqual({
       id: 'u2',
       index: 2,
       text: 'second',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
+  });
+
+  it('keeps the assistant parent prompt when a queued user message is interleaved', () => {
+    const messages = [
+      user('u1', 'active prompt'),
+      assistant('a1'),
+      user('u2', 'queued follow-up'),
+      assistant('a2', 'u1'),
+    ];
+
+    expect(getStickyUserMessagePreview(messages, 3)).toEqual({
+      id: 'u1',
+      index: 0,
+      text: 'active prompt',
       attachmentCount: 0,
       imageCount: 0,
     });
