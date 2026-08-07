@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { getE2EState } from './helpers';
+import { getE2EState, getVisibleMessageAnchor, sampleMessageTopAcrossFrames } from './helpers';
 
 test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
@@ -19,6 +19,39 @@ test('toggling /thinking hides and shows reasoning blocks', async ({ page }) => 
   await page.keyboard.press('Enter');
 
   await expect(thinkingBoxes).toBeVisible();
+});
+
+test('thinking visibility preserves a detached virtualized anchor', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = element.scrollHeight * 0.5;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  const anchor = await getVisibleMessageAnchor(list);
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+
+  for (const expectedThinkingCount of [0, 1]) {
+    await composer.fill('/thinking');
+    await page.keyboard.press('Enter');
+    if (expectedThinkingCount === 0) {
+      await expect(page.locator('.chat-thinking-box')).toHaveCount(0);
+    } else {
+      await expect.poll(() => page.locator('.chat-thinking-box').count()).toBeGreaterThan(0);
+    }
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    for (const top of samples) {
+      expect(top).not.toBeNull();
+      expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+    }
+  }
 });
 
 test('/thinking description reflects current visibility state', async ({ page }) => {

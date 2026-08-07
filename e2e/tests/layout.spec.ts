@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { getE2EState, getStickyMessageAlignment, installOuterScrollSentinel } from './helpers';
+import {
+  getE2EState,
+  getStickyMessageAlignment,
+  getVisibleMessageAnchor,
+  installOuterScrollSentinel,
+  sampleMessageTopAcrossFrames,
+} from './helpers';
 
 test('resets padding injected by legacy webview hosts', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 800 });
@@ -509,8 +515,14 @@ test('previous sticky returns during slow upward scrolling after the image promp
 
     const initialListRect = element.getBoundingClientRect();
     const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
-    if (!overlay) return null;
-    const releaseTop = overlay.getBoundingClientRect().bottom - initialListRect.top;
+    const stickyText = overlay?.querySelector<HTMLElement>('.latest-user-message-sticky-text');
+    if (!overlay || !stickyText) return null;
+    const textHeight = stickyText.getBoundingClientRect().height;
+    const maximumTextHeight = Number.parseFloat(getComputedStyle(stickyText).maxHeight);
+    const releaseTop =
+      overlay.getBoundingClientRect().bottom -
+      initialListRect.top +
+      Math.max(0, maximumTextHeight - textHeight);
 
     element.scrollTop = Math.max(
       0,
@@ -534,10 +546,10 @@ test('previous sticky returns during slow upward scrolling after the image promp
       sourceTop = currentSource.getBoundingClientRect().top - element.getBoundingClientRect().top;
       if (sourceTop > releaseTop + 8) {
         safeFrames += 1;
-        const stickyText = document.querySelector<HTMLElement>(
+        const visibleStickyText = document.querySelector<HTMLElement>(
           '.latest-user-message-sticky-overlay'
         )?.textContent;
-        if (stickyText?.includes('Sticky message overlap with message containing image')) {
+        if (visibleStickyText?.includes('Sticky message overlap with message containing image')) {
           previousStickyFrames += 1;
         } else if (safeFrames > 2) {
           missingPreviousStickyFrames += 1;
@@ -589,8 +601,8 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   const result = await list.evaluate(async (element, selector) => {
     let sawSticky = false;
     let lastSafeGap: number | null = null;
-    for (let frame = 0; frame < 500; frame += 1) {
-      element.scrollTop += 2;
+    for (let frame = 0; frame < 100; frame += 1) {
+      element.scrollTop += 32;
       element.dispatchEvent(new Event('scroll'));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -644,8 +656,213 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   expect(result.sawSticky, JSON.stringify(result)).toBe(true);
   expect(result.stickyHidden, JSON.stringify(result)).toBe(true);
   expect(result.hideGapFromOverlay, JSON.stringify(result)).not.toBeNull();
-  expect(Math.abs(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
+  expect(result.hideGapFromOverlay ?? Number.NEGATIVE_INFINITY).toBeGreaterThan(0);
+  expect(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(33);
   await expect(nextPrompt).toContainText('Continue if you have next steps');
+});
+
+test('sticky preview yields before a synthetic compaction boundary', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-large-transcript');
+
+  const list = page.locator('.interactive-list');
+  const compactionSelector = '[data-msg-id="message-sticky-large-compaction-user"]';
+  await expect(page.locator(compactionSelector)).toBeAttached();
+  await list.evaluate((element, selector) => {
+    const compaction = element.querySelector(selector);
+    if (!compaction) throw new Error('Compaction boundary is not mounted');
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop +=
+      compaction.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      element.clientHeight -
+      100;
+    element.dispatchEvent(new Event('scroll'));
+  }, compactionSelector);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+      )
+  );
+  await expect(page.locator(compactionSelector)).toBeAttached();
+  await list.evaluate(async (element, selector) => {
+    let stableFrames = 0;
+    for (let frame = 0; frame < 30; frame += 1) {
+      const compaction = element.querySelector<HTMLElement>(selector);
+      if (!compaction) throw new Error('Compaction boundary is not mounted');
+      const delta =
+        compaction.getBoundingClientRect().top - element.getBoundingClientRect().top - 140;
+      if (Math.abs(delta) < 1) {
+        stableFrames += 1;
+        if (stableFrames >= 4) return;
+      } else {
+        stableFrames = 0;
+        element.scrollTop += delta;
+        element.dispatchEvent(new Event('scroll'));
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, compactionSelector);
+  const setupGeometry = await list.evaluate((element, selector) => {
+    const compaction = document.querySelector<HTMLElement>(selector);
+    const source = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-sticky-large-user-1"] .user-message-card'
+    );
+    const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+    const listTop = element.getBoundingClientRect().top;
+    return {
+      compactionTop: compaction ? compaction.getBoundingClientRect().top - listTop : null,
+      sourceBottom: source ? source.getBoundingClientRect().bottom - listTop : null,
+      stickyBottom: overlay ? overlay.getBoundingClientRect().bottom - listTop : null,
+    };
+  }, compactionSelector);
+  expect(setupGeometry.stickyBottom, JSON.stringify(setupGeometry)).not.toBeNull();
+
+  const result = await list.evaluate(async (element, selector) => {
+    const initialOverlay = document.querySelector<HTMLElement>(
+      '.latest-user-message-sticky-overlay'
+    );
+    const initialCompaction = document.querySelector<HTMLElement>(selector);
+    let sawSticky = !!initialOverlay;
+    let lastSafeGap =
+      initialOverlay && initialCompaction
+        ? initialCompaction.getBoundingClientRect().top -
+          initialOverlay.getBoundingClientRect().bottom
+        : null;
+    for (let frame = 0; frame < 100; frame += 1) {
+      element.scrollTop += 32;
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+      const compaction = document.querySelector<HTMLElement>(selector);
+      if (!compaction) return { overlap: true, sawSticky, lastSafeGap, reason: 'unmounted' };
+      if (!overlay) {
+        if (sawSticky) return { overlap: false, sawSticky, lastSafeGap };
+        continue;
+      }
+      sawSticky = true;
+      const gap = compaction.getBoundingClientRect().top - overlay.getBoundingClientRect().bottom;
+      if (gap < 0) return { overlap: true, sawSticky, lastSafeGap, gap };
+      lastSafeGap = gap;
+    }
+    return { overlap: false, sawSticky, lastSafeGap, reason: 'sticky remained' };
+  }, compactionSelector);
+
+  expect(result.sawSticky, JSON.stringify(result)).toBe(true);
+  expect(result.overlap, JSON.stringify(result)).toBe(false);
+  expect(result.lastSafeGap, JSON.stringify(result)).not.toBeNull();
+  expect(Math.abs(result.lastSafeGap ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
+});
+
+test('sticky and visible-row geometry survive view modes and width reflow', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&multiFileDiff=1'
+  );
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = element.scrollHeight * 0.55;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  const cases = [
+    { compact: true, inline: true, width: 720 },
+    { compact: true, inline: false, width: 480 },
+    { compact: false, inline: true, width: 360 },
+    { compact: false, inline: false, width: 720 },
+  ];
+  for (const mode of cases) {
+    await page.evaluate((nextMode) => {
+      const initial = (
+        window as Window & {
+          __initialWebviewState?: {
+            desktopSessionPaneSide?: 'left' | 'right';
+            defaultPermissionMode?: 'default' | 'auto' | 'full';
+          };
+        }
+      ).__initialWebviewState;
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'config/update',
+            payload: {
+              expandThinkingByDefault: false,
+              compactToolOutput: nextMode.compact,
+              showInlineFileChanges: nextMode.inline,
+              showChangedFiles: false,
+              desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'right',
+              defaultPermissionMode: initial?.defaultPermissionMode ?? 'auto',
+            },
+          },
+        })
+      );
+      const shell = document.querySelector<HTMLElement>('.chat-main-column-shell');
+      if (!shell) throw new Error('Chat shell is missing');
+      shell.style.maxWidth = 'none';
+      shell.style.width = `${nextMode.width}px`;
+    }, mode);
+
+    const samples = await list.evaluate(async (element) => {
+      const result: Array<{
+        stickyTop: number | null;
+        collisionGap: number | null;
+        mountedRows: number;
+      }> = [];
+      for (let frame = 0; frame < 12; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const listRect = element.getBoundingClientRect();
+        const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+        const nextPrompt = [...element.querySelectorAll<HTMLElement>('.user-message-card')].find(
+          (candidate) => candidate.getBoundingClientRect().top > listRect.top
+        );
+        result.push({
+          stickyTop: overlay ? overlay.getBoundingClientRect().top - listRect.top : null,
+          collisionGap:
+            overlay && nextPrompt
+              ? nextPrompt.getBoundingClientRect().top - overlay.getBoundingClientRect().bottom
+              : null,
+          mountedRows: element.querySelectorAll('[data-msg-id]').length,
+        });
+      }
+      return result;
+    });
+
+    for (const sample of samples) {
+      if (sample.stickyTop !== null) {
+        expect(Math.abs(sample.stickyTop), JSON.stringify({ mode, sample })).toBeLessThan(1);
+      }
+      if (sample.collisionGap !== null) {
+        expect(sample.collisionGap, JSON.stringify({ mode, sample })).toBeGreaterThanOrEqual(-1);
+      }
+      expect(sample.mountedRows).toBeLessThan(120);
+    }
+
+    await page.waitForTimeout(180);
+    const modeAnchor = await getVisibleMessageAnchor(list);
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -32, bubbles: true }));
+      element.scrollTop -= 32;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    const movementSamples = await sampleMessageTopAcrossFrames(list, modeAnchor.id, 6);
+    for (const top of movementSamples) {
+      expect(top, JSON.stringify({ mode, modeAnchor, movementSamples })).not.toBeNull();
+      expect(
+        Math.abs(top! - (modeAnchor.top + 32)),
+        JSON.stringify({ mode, modeAnchor, movementSamples })
+      ).toBeLessThan(2);
+    }
+  }
 });
 
 test('terminal attachment sticky preview navigates to its original message', async ({ page }) => {

@@ -710,6 +710,39 @@ test.describe('auto-scroll', () => {
     await loadPageAtTop();
     await expect(historyBanner).toHaveCount(0);
 
+    const stickyCollision = await list.evaluate(async (element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+      while (element.scrollTop < element.scrollHeight - element.clientHeight - 1) {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: 32, bubbles: true }));
+        element.scrollTop = Math.min(
+          element.scrollHeight - element.clientHeight,
+          element.scrollTop + 32
+        );
+        element.dispatchEvent(new Event('scroll'));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+        if (!overlay) continue;
+        const overlayRect = overlay.getBoundingClientRect();
+        const nextPrompt = [...element.querySelectorAll<HTMLElement>('.user-message-card')]
+          .map((prompt) => ({ prompt, rect: prompt.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.top > element.getBoundingClientRect().top)
+          .toSorted((left, right) => left.rect.top - right.rect.top)[0];
+        if (nextPrompt && nextPrompt.rect.top < overlayRect.bottom - 1) {
+          return {
+            overlap: overlayRect.bottom - nextPrompt.rect.top,
+            prompt: nextPrompt.prompt.textContent,
+            scrollTop: element.scrollTop,
+          };
+        }
+      }
+      return null;
+    });
+    expect(stickyCollision).toBeNull();
+
     const historyRequests = await page.evaluate(() => {
       const harness = window as Window & {
         __varroE2E?: { requests?: Array<{ path: string }> };
@@ -728,6 +761,38 @@ test.describe('auto-scroll', () => {
       { before: 'msg_cursor_0001', limit: '50' },
       { before: 'msg_cursor_0002', limit: '50' },
     ]);
+  });
+
+  test('keeps the sticky fixed across the history-boundary state', async ({ page }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+    const list = page.locator('.interactive-list');
+    const sticky = page.locator('.latest-user-message-sticky');
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await expect(sticky).toBeVisible();
+
+    const positions = await list.evaluate((element) => {
+      const overlay = document.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
+      const track = element.querySelector<HTMLElement>('.interactive-list-track');
+      if (!track) throw new Error('Message track is missing');
+      if (!overlay) throw new Error('Boundary sticky is missing');
+      const listTop = element.getBoundingClientRect().top;
+      const top = () => overlay.getBoundingClientRect().top - listTop;
+      const before = top();
+      track.classList.add('history-boundary-visible');
+      const atBoundary = top();
+      track.classList.remove('history-boundary-visible');
+      return {
+        before,
+        atBoundary,
+        after: top(),
+      };
+    });
+    expect(Math.abs(positions.atBoundary - positions.before)).toBeLessThan(1);
+    expect(Math.abs(positions.after - positions.before)).toBeLessThan(1);
   });
 
   test('settles a compact anchor after provisional history heights collapse', async ({ page }) => {

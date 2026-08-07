@@ -197,10 +197,6 @@ input:focus-visible {
   isolation: isolate;
 }
 
-.interactive-list-track.history-boundary-visible .latest-user-message-sticky-wrap {
-  top: 22px;
-}
-
 .latest-user-message-sticky-overlay {
   position: absolute;
   top: 0;

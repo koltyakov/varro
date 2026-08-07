@@ -90,7 +90,6 @@ import {
 } from './message-list/MessageListChrome';
 import {
   getStickyUserMessagePreview,
-  hasStickyUserMessageContent,
   isMessageHiddenBehindStickyPreview,
   STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX,
   shouldShowStickyUserMessagePreview,
@@ -150,6 +149,8 @@ function historyLoadFailed() {
 const VIRTUALIZE_THRESHOLD = 50;
 
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
+const STICKY_PREVIEW_COLLISION_BUFFER_PX = 8;
+const STICKY_NAVIGATION_SETTLE_FRAME_LIMIT = 32;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
@@ -715,9 +716,48 @@ export function MessageList() {
     stickyPreviewFrameRafId = 0;
   }
 
+  function syncViewportForcedVirtualContent() {
+    if (!containerRef) return;
+    const placeholders = containerRef.querySelectorAll<HTMLElement>(
+      '.interactive-item-virtual-placeholder'
+    );
+    if (placeholders.length === 0 && viewportForcedVirtualContentMessageIds.size === 0) return;
+
+    const containerRect = containerRef.getBoundingClientRect();
+    const nextForcedMessageIds = new Set<string>();
+    const retainIfVisible = (row: HTMLElement) => {
+      const messageId = row.dataset.msgId;
+      if (!messageId) return;
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        nextForcedMessageIds.add(messageId);
+      }
+    };
+    for (const messageId of viewportForcedVirtualContentMessageIds) {
+      const row = mountedMessageRows.get(messageId);
+      if (row) retainIfVisible(row);
+    }
+    for (const row of placeholders) retainIfVisible(row);
+
+    if (
+      nextForcedMessageIds.size === viewportForcedVirtualContentMessageIds.size &&
+      [...nextForcedMessageIds].every((messageId) =>
+        viewportForcedVirtualContentMessageIds.has(messageId)
+      )
+    ) {
+      return;
+    }
+    viewportForcedVirtualContentMessageIds.clear();
+    for (const messageId of nextForcedMessageIds) {
+      viewportForcedVirtualContentMessageIds.add(messageId);
+    }
+    setMeasurementVersion((version) => version + 1);
+  }
+
   function flushStickyPreviewFrame() {
     stickyPreviewFrameScheduled = false;
     stickyPreviewFrameRafId = 0;
+    syncViewportForcedVirtualContent();
     const viewportStatePending = stickyPreviewViewportStatePending;
     stickyPreviewViewportStatePending = false;
     const geometryRefreshPending = stickyPreviewGeometryRefreshPending;
@@ -871,6 +911,7 @@ export function MessageList() {
   const measuredHeights = new Map<string, number>();
   const zeroHeightRenderContentSignatures = new Map<string, string>();
   const forcedVirtualContentMessageIds = new Set<string>();
+  const viewportForcedVirtualContentMessageIds = new Set<string>();
   const measuredRowInlineSizes = new WeakMap<HTMLElement, number>();
   const appliedRowHeightCorrections = new WeakMap<HTMLElement, number>();
   const pendingRowHeightCorrections = new Map<HTMLElement, number>();
@@ -1152,6 +1193,11 @@ export function MessageList() {
     for (const messageId of forcedVirtualContentMessageIds) {
       if (!currentMessageIdSet.has(messageId)) forcedVirtualContentMessageIds.delete(messageId);
     }
+    for (const messageId of viewportForcedVirtualContentMessageIds) {
+      if (!currentMessageIdSet.has(messageId)) {
+        viewportForcedVirtualContentMessageIds.delete(messageId);
+      }
+    }
   });
 
   function scheduleChangedLayoutRowMeasurements(
@@ -1160,7 +1206,7 @@ export function MessageList() {
   ) {
     const currentMessageIds = new Set(messageIds());
     const mountedRows: Array<{ element: HTMLDivElement; messageId: string }> = [];
-    let invalidatedUnmountedHeight = false;
+    const unmountedMessageIds: string[] = [];
 
     for (const messageId of getChangedInlinePreviewMessageIds(
       previous,
@@ -1171,15 +1217,15 @@ export function MessageList() {
         `[data-msg-id="${CSS.escape(messageId)}"]`
       );
       if (!mountedRow || mountedRow.classList.contains('interactive-item-virtual-placeholder')) {
-        if (!measuredHeights.delete(messageId)) continue;
-        zeroHeightRenderContentSignatures.delete(messageId);
-        markVirtualMetricsDirty(messageId);
-        invalidatedUnmountedHeight = true;
+        unmountedMessageIds.push(messageId);
         continue;
       }
       mountedRows.push({ element: mountedRow, messageId });
     }
 
+    const invalidatedUnmountedHeight = unmountedMessageIds.some((messageId) =>
+      measuredHeights.has(messageId)
+    );
     const activeSessionId = state.activeSessionId;
     const invalidatedAnchorOwnershipEpoch = userScrollOwnershipEpoch;
     const invalidatedAnchor =
@@ -1198,6 +1244,13 @@ export function MessageList() {
           ? captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)
           : captureVisibleScrollAnchor()
         : null;
+
+    for (const messageId of unmountedMessageIds) {
+      if (!measuredHeights.delete(messageId)) continue;
+      zeroHeightRenderContentSignatures.delete(messageId);
+      markVirtualMetricsDirty(messageId);
+    }
+
     const publishChangedLayout = () => {
       publishMeasurementVersion();
       if (!invalidatedAnchor) return;
@@ -1208,6 +1261,19 @@ export function MessageList() {
           !pendingExpansionScrollAnchor
         ) {
           restoreVisibleScrollAnchor(invalidatedAnchor, { useMessageOffsetFallback: true });
+          void (async () => {
+            for (let attempt = 0; attempt < 12; attempt += 1) {
+              await waitForAnimationFrame();
+              if (
+                userScrollOwnershipEpoch !== invalidatedAnchorOwnershipEpoch ||
+                stickyNavigationOwnsScroll() ||
+                pendingExpansionScrollAnchor
+              ) {
+                return;
+              }
+              restoreVisibleScrollAnchor(invalidatedAnchor, { useMessageOffsetFallback: true });
+            }
+          })();
         }
       });
     };
@@ -1637,7 +1703,11 @@ export function MessageList() {
 
     const previewElement = getStickyUserMessageSourceElement(preview.id);
     const rowRect = previewElement?.getBoundingClientRect();
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
+    const currentPreviewIndex = messageIndexById().get(preview.id) ?? preview.index;
+    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(
+      currentPreviewIndex,
+      containerRect
+    );
     const stickyPreviewBounds =
       previousStickyPreviewId === preview.id
         ? (getStickyUserMessagePreviewBounds(containerRect) ?? previousStickyPreviewBounds)
@@ -2257,15 +2327,30 @@ export function MessageList() {
 
   function getStickyUserMessagePreviewBounds(containerRect: DOMRect) {
     if (!containerRef) return null;
-    // The solid gap and fade paint below the card, so collision must use the whole overlay.
+    // The solid gap and fade paint below the card. Leave room for a row measurement that settles
+    // between the scroll event and the next paint so the prompt cannot enter the overlay for a frame.
     const sticky = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky-overlay');
     const stickyRect = sticky?.getBoundingClientRect();
     if (!stickyRect) return null;
 
     return {
       top: stickyRect.top - containerRect.top,
-      bottom: stickyRect.bottom - containerRect.top,
+      bottom: stickyRect.bottom - containerRect.top + STICKY_PREVIEW_COLLISION_BUFFER_PX,
     };
+  }
+
+  function getStickyUserMessageHandoffReleaseTop(containerRect: DOMRect) {
+    const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
+    if (!stickyBounds || !containerRef) return null;
+
+    const stickyText = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky-text');
+    if (!stickyText) return stickyBounds.bottom;
+
+    const textHeight = stickyText.getBoundingClientRect().height;
+    const maximumTextHeight = Number.parseFloat(getComputedStyle(stickyText).maxHeight);
+    if (!(textHeight > 0) || !(maximumTextHeight > textHeight)) return stickyBounds.bottom;
+
+    return stickyBounds.bottom + maximumTextHeight - textHeight;
   }
 
   function handleStickyPreviewGeometryChange() {
@@ -2280,7 +2365,7 @@ export function MessageList() {
   function beginUpwardStickyHandoff(messageId: string, sourceEntered: boolean) {
     const containerRect = containerRef?.getBoundingClientRect();
     const releaseTop = containerRect
-      ? (getStickyUserMessagePreviewBounds(containerRect)?.bottom ??
+      ? (getStickyUserMessageHandoffReleaseTop(containerRect) ??
         previousStickyPreviewBounds?.bottom ??
         0)
       : 0;
@@ -2347,7 +2432,6 @@ export function MessageList() {
     for (let index = messageIndex + 1; index < currentMessages.length; index += 1) {
       const nextMessage = currentMessages[index];
       if (nextMessage?.info.role !== 'user') continue;
-      if (!hasStickyUserMessageContent(nextMessage.parts)) continue;
 
       const nextElement = getStickyUserMessageSourceElement(nextMessage.info.id);
       const nextRect = nextElement?.getBoundingClientRect();
@@ -2360,6 +2444,18 @@ export function MessageList() {
       return nextTop;
     }
 
+    return null;
+  }
+
+  function getNextMountedUserMessageTop(messageId: string, containerRect: DOMRect) {
+    if (!containerRef) return null;
+    for (const row of containerRef.querySelectorAll<HTMLElement>('.interactive-request')) {
+      if (row.dataset.msgId === messageId) continue;
+      const source = row.querySelector<HTMLElement>('.user-message-card') ?? row;
+      const rect = source.getBoundingClientRect();
+      if (rect.bottom <= containerRect.top) continue;
+      return rect.top - containerRect.top;
+    }
     return null;
   }
 
@@ -2410,7 +2506,10 @@ export function MessageList() {
     const stickyBounds = geometry?.stickyBounds ?? getStickyUserMessagePreviewBounds(containerRect);
     if (!stickyBounds) return false;
 
-    const nextUserMessageTop = getStickyUserMessageNextUserMessageTop(preview.index, containerRect);
+    const currentPreviewIndex = messageIndexById().get(preview.id) ?? preview.index;
+    const nextUserMessageTop =
+      getNextMountedUserMessageTop(preview.id, containerRect) ??
+      getStickyUserMessageNextUserMessageTop(currentPreviewIndex, containerRect);
     if (
       nextUserMessageTop !== null &&
       nextUserMessageTop !== undefined &&
@@ -2866,6 +2965,14 @@ export function MessageList() {
     ) {
       beginUpwardStickyHandoff(currentStickyPreview.id, true);
       scheduleUpwardStickyHandoffRelease();
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = currentStickyPreview.id;
+    } else if (
+      actualScrollMovement &&
+      scrollDelta > 0.5 &&
+      currentStickyPreview &&
+      shouldHideStickyUserMessagePreviewImmediately(currentStickyPreview)
+    ) {
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = currentStickyPreview.id;
     }
@@ -3593,6 +3700,7 @@ export function MessageList() {
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
     forcedVirtualContentMessageIds.clear();
+    viewportForcedVirtualContentMessageIds.clear();
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
     cancelPendingScroll();
@@ -3955,7 +4063,7 @@ export function MessageList() {
           setStickyPreviewScrollTop(nextScrollTop);
         }
         settleFrames += 1;
-        if (settleFrames >= 12) return null;
+        if (settleFrames >= STICKY_NAVIGATION_SETTLE_FRAME_LIMIT) return null;
         await waitForAnimationFrame();
         continue;
       }
@@ -3963,7 +4071,10 @@ export function MessageList() {
       if (shouldMeasureRows()) alignMountedMessage(preview);
 
       const currentMeasurementVersion = measurementVersion();
-      if (currentMeasurementVersion === previousMeasurementVersion || settleFrames >= 11)
+      if (
+        currentMeasurementVersion === previousMeasurementVersion ||
+        settleFrames >= STICKY_NAVIGATION_SETTLE_FRAME_LIMIT - 1
+      )
         return row;
       previousMeasurementVersion = currentMeasurementVersion;
       settleFrames += 1;
@@ -4043,7 +4154,7 @@ export function MessageList() {
     settleEpoch: number
   ) {
     let stableFrames = 0;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (let attempt = 0; attempt < STICKY_NAVIGATION_SETTLE_FRAME_LIMIT; attempt += 1) {
       await waitForAnimationFrame();
       if (state.activeSessionId !== sessionId || stickyJumpSettleEpoch !== settleEpoch) return;
 
@@ -4375,7 +4486,7 @@ export function MessageList() {
       >
         <div
           ref={trackRef}
-          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}${showTruncatedHistoryBanner() && scrollTop() <= 24 ? ' history-boundary-visible' : ''}`}
+          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}`}
         >
           <Show when={displayedStickyUserMessagePreview()}>
             {(preview) => (
@@ -4476,6 +4587,7 @@ export function MessageList() {
                 measurementVersion();
                 return (
                   forcedVirtualContentMessageIds.has(messageId) ||
+                  viewportForcedVirtualContentMessageIds.has(messageId) ||
                   displayedStickyUserMessagePreview()?.id === messageId
                 );
               }}
@@ -4583,6 +4695,11 @@ function LoadingRow(props: { compacting: boolean; visible: boolean }) {
     const s = elapsedSeconds();
     if (s < 10) return null;
     if (s < 60) return `${s}s`;
+    if (s >= 60 * 60) {
+      const hours = Math.floor(s / (60 * 60));
+      const minutes = Math.floor((s % (60 * 60)) / 60);
+      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+    }
     const m = Math.floor(s / 60);
     const rem = s % 60;
     return `${m}m ${rem.toString().padStart(2, '0')}s`;

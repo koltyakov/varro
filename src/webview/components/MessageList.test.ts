@@ -1312,6 +1312,15 @@ describe('MessageList history pagination', () => {
     await Promise.resolve();
     expect(retainedPlaceholder?.classList).toContain('interactive-item-virtual-placeholder');
 
+    scrollTopValue = 4_950;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush(performance.now());
+    await Promise.resolve();
+    expect(retainedPlaceholder?.getBoundingClientRect().bottom).toBeGreaterThan(0);
+    expect(retainedPlaceholder?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(retainedPlaceholder?.childElementCount).toBeGreaterThan(0);
+
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
     animationFrames.flush(performance.now());
@@ -5491,6 +5500,9 @@ describe('MessageList sticky prompt preview', () => {
         if (this.classList.contains('latest-user-message-sticky-overlay')) {
           return new DOMRect(0, 10, 500, 74);
         }
+        if (this.classList.contains('latest-user-message-sticky-text')) {
+          return new DOMRect(0, 22, 500, 18);
+        }
 
         const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
         if (messageId === 'user-1') return new DOMRect(0, -700, 500, 52);
@@ -5514,7 +5526,6 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
       'Prompt 2'
     );
-
     // A projected crossing that does not move the source must restore the current sticky.
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
     expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
@@ -5525,6 +5536,9 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
       'Prompt 2'
     );
+    const stickyText = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text');
+    expect(stickyText).toBeInstanceOf(HTMLDivElement);
+    stickyText!.style.maxHeight = '72px';
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
     user2Top = 70;
@@ -5543,13 +5557,22 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    user2Top = 150;
+    list.scrollTop = 1_140;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
     expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
       'Prompt 1'
     );
     animationFrames.restore();
   });
 
-  it('hides the previous sticky before the next user row enters its painted overlay', async () => {
+  it('synchronously hides the previous sticky before the next user row enters its painted overlay', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let nextUserTop = 220;
     setState('activeSessionId', 'session-1');
@@ -5592,9 +5615,10 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
     expect(container?.querySelector('.latest-user-message-sticky')).toBeInstanceOf(HTMLDivElement);
 
-    nextUserTop = 72;
-    list!.scrollTop = 1_348;
+    nextUserTop = 90;
+    list!.scrollTop = 1_330;
     list?.dispatchEvent(new Event('scroll'));
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
     animationFrames.flush();
     await Promise.resolve();
 
@@ -6506,6 +6530,17 @@ describe('MessageList sticky prompt preview', () => {
 });
 
 describe('MessageList loading row', () => {
+  it('shows hours and minutes without seconds for hour-long durations', async () => {
+    vi.setSystemTime(69 * 60_000 + 32_000);
+    setState('activeSessionId', 'session-1');
+    startLoading(0);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1h 9m');
+  });
+
   it('reserves the worked summary row while an existing chat loads', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
     setState('activeSessionId', 'session-1');
@@ -7872,7 +7907,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('preserves the visible row while invalidating offscreen heights above it', async () => {
+  it('preserves the visible row while invalidating offscreen thinking heights above it', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const rowHeights = Array.from({ length: 50 }, () => 100);
     let list: HTMLDivElement | null = null;
@@ -7918,21 +7953,16 @@ describe('MessageList auto-scroll', () => {
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
-        const activityPart = toolPart(`read-${index}`, messageId, `call-${index}`);
-        activityPart.tool = 'read';
-        activityPart.state = {
-          status: 'completed',
-          input: { filePath: `src/file-${index}.ts` },
-          output: 'source',
-          title: `src/file-${index}.ts`,
-          metadata: {},
-          time: { start: 1, end: 2 },
-        };
         return {
           info: assistantMessage(messageId, { parentID: 'user-1' }),
           parts:
             index < 5
-              ? [activityPart]
+              ? [
+                  {
+                    ...reasoningPart(`reasoning-${index}`, `Reasoning ${index}`),
+                    messageID: messageId,
+                  },
+                ]
               : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
         };
       })
@@ -7971,7 +8001,7 @@ describe('MessageList auto-scroll', () => {
     rowHeights[0] = 40;
     for (let index = 1; index < 5; index += 1) rowHeights[index] = 0;
 
-    setCompactToolOutput(true);
+    setShowThinkingPreference(false);
     for (let frame = 0; frame < 4; frame += 1) {
       await Promise.resolve();
       animationFrames.flush();
