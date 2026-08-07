@@ -6,8 +6,10 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 - Added paged, compact previews for large file edits, with inline changes enabled by default.
 - Made changed files easier to review by opening files directly from diff previews.
+- Added session cost visibility and clearer fast-model pricing cues for more informed model and spend decisions.
+- Made provider updates non-disruptive by queuing refreshes until active work finishes and clearly showing their status.
 - Improved the stability of long, virtualized conversations and expandable activity summaries.
-- Restored reliable session deletion, session switching, sidebar activation, and image-paste feedback.
+- Improved session deletion, session switching, sidebar activation, and image-paste feedback.
 
 ## 0.23.x - July-August 2026
 
