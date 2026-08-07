@@ -265,6 +265,17 @@ function assistantMessage(
   };
 }
 
+function hasAssistantModelChangeBetween(previousId: string, currentId: string) {
+  const previous = state.messages.find((message) => message.info.id === previousId);
+  const current = state.messages.find((message) => message.info.id === currentId);
+  return (
+    previous?.info.role === 'assistant' &&
+    current?.info.role === 'assistant' &&
+    (previous.info.providerID !== current.info.providerID ||
+      previous.info.modelID !== current.info.modelID)
+  );
+}
+
 function session(id: string, options: Partial<Session> = {}): Session {
   return {
     id,
@@ -808,6 +819,24 @@ describe('compact activity virtualization signatures', () => {
       'assistant-1',
     ]);
   });
+
+  it('revises a disclosure when activity changes transition state', () => {
+    const group: AssistantActivityGroupInfo = {
+      key: 'activity-turn\u0000session-1\u0000user-1',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: activityPart.id,
+      parts: [activityPart],
+    };
+    const groups = new Map([['assistant-1', [group]]]);
+    const signature = (layoutState: string) =>
+      getCompactActivityDisclosureLayoutSignatures(
+        groups,
+        () => false,
+        () => layoutState
+      ).get('assistant-1');
+
+    expect(new Set(['active', 'retained', 'exiting', 'grouped'].map(signature))).toHaveLength(4);
+  });
 });
 
 beforeEach(() => {
@@ -1025,6 +1054,7 @@ describe('MessageList compact activity', () => {
       'Explored 1 file'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(2_400);
 
     replaceMessages([
       user,
@@ -1055,7 +1085,13 @@ describe('MessageList compact activity', () => {
       container?.querySelector('[data-activity-part-id="search-1"].is-completed')
     ).not.toBeNull();
 
-    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(1_599);
+    expect(
+      container?.querySelector('[data-activity-part-id="search-1"].is-completed')
+    ).not.toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-1"].is-exiting')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1);
     expect(
       container?.querySelector('[data-activity-part-id="search-1"].is-exiting')
     ).not.toBeNull();
@@ -1068,6 +1104,80 @@ describe('MessageList compact activity', () => {
       'Explored 1 file, 1 search'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+  });
+
+  it('retains activity while it joins a group owned by an earlier message', async () => {
+    const completed = toolPart('command-completed', 'assistant-1', 'call-command-completed');
+    completed.state = {
+      status: 'completed',
+      input: { command: 'npm run lint' },
+      output: 'passed',
+      title: 'npm run lint',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const running = toolPart('command-running', 'assistant-2', 'call-command-running');
+    running.state = {
+      status: 'running',
+      input: { command: 'npm run test' },
+      title: 'npm run test',
+      time: { start: 3 },
+    };
+    const completedRunning: ToolPart = {
+      ...running,
+      state: {
+        status: 'completed',
+        input: { command: 'npm run test' },
+        output: 'passed',
+        title: 'npm run test',
+        metadata: {},
+        time: { start: 3, end: 4 },
+      },
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] };
+    const first = {
+      info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+      parts: [completed],
+    };
+    const secondInfo = assistantMessage('assistant-2', {
+      parentID: 'user-1',
+      time: { created: 3 },
+    });
+    const response = {
+      info: assistantMessage('assistant-3', { parentID: 'user-1' }),
+      parts: [{ ...textPart('response-1', 'Checks passed.'), messageID: 'assistant-3' }],
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, first, { info: secondInfo, parts: [running] }, response]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+    expect(container?.querySelector('[data-activity-part-id="command-running"]')).not.toBeNull();
+
+    replaceMessages([user, first, { info: secondInfo, parts: [completedRunning] }, response]);
+    await Promise.resolve();
+
+    const followerRow = container?.querySelector('[data-msg-id="assistant-2"]');
+    expect(
+      followerRow?.querySelector('[data-activity-part-id="command-running"].is-completed')
+    ).not.toBeNull();
+    expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
+
+    await vi.advanceTimersByTimeAsync(2_400);
+    expect(
+      followerRow?.querySelector('[data-activity-part-id="command-running"].is-exiting')
+    ).not.toBeNull();
+    expect(followerRow?.classList).not.toContain('interactive-item-render-empty');
+
+    await vi.advanceTimersByTimeAsync(420);
+    expect(container?.querySelector('[data-activity-part-id="command-running"]')).toBeNull();
+    expect(followerRow?.classList).toContain('interactive-item-render-empty');
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 2 commands'
+    );
   });
 
   it('does not show active tools that complete inside the display debounce', async () => {
@@ -1124,6 +1234,90 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored 1 file, 1 command'
     );
+  });
+
+  it('keeps a delayed trailing tool row collapsed below visible reasoning', async () => {
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Investigate')] };
+    const thought = {
+      ...reasoningPart('reasoning-1', '**Ruminating**\n\nInspecting the layout.'),
+      messageID: 'assistant-1',
+    };
+    const running = toolPart('command-1', 'assistant-2', 'call-command-1');
+    running.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 2 },
+    };
+    const reasoningMessage = {
+      info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+      parts: [thought],
+    };
+    const toolMessage = {
+      info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+      parts: [running],
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, reasoningMessage]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+    expect(container?.textContent).toContain('Ruminating');
+
+    replaceMessages([user, reasoningMessage, toolMessage]);
+    await Promise.resolve();
+
+    const toolRow = () => container?.querySelector('[data-msg-id="assistant-2"]');
+    expect(toolRow()?.classList).toContain('interactive-item-render-empty');
+    expect(toolRow()?.classList).not.toContain('measured-entrance-active');
+    expect(container?.querySelector('[data-activity-part-id="command-1"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(179);
+    expect(toolRow()?.classList).toContain('interactive-item-render-empty');
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(toolRow()?.classList).not.toContain('interactive-item-render-empty');
+    expect(container?.querySelector('[data-activity-part-id="command-1"]')).not.toBeNull();
+  });
+
+  it('keeps stale running tools in completed history compact while the latest turn works', async () => {
+    const staleCommand = toolPart('command-stale', 'assistant-1', 'call-command-stale');
+    staleCommand.state = {
+      status: 'running',
+      input: { command: 'npm run old-check' },
+      title: 'npm run old-check',
+      time: { start: 1 },
+    };
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the old check')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [staleCommand],
+      },
+      { info: userMessage('user-2'), parts: [textPart('prompt-2', 'Continue working')] },
+      {
+        info: assistantMessage('assistant-2', {
+          parentID: 'user-2',
+          time: { created: 3 },
+        }),
+        parts: [{ ...textPart('response-2', 'Working on it.'), messageID: 'assistant-2' }],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(180);
+
+    expect(container?.querySelector('[data-activity-part-id="command-stale"]')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored 1 command'
+    );
+    expect(container?.textContent).toContain('Working on it.');
   });
 
   it('keeps active commands below Explored when they precede completed activity', async () => {
@@ -1229,7 +1423,7 @@ describe('MessageList compact activity', () => {
       container?.querySelector('[data-activity-part-id="command-2"].is-completed')
     ).not.toBeNull();
 
-    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(2_400);
 
     expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
@@ -1293,7 +1487,7 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.assistant-activity-summary-placeholder')).not.toBeNull();
     expect(container?.querySelector('button.assistant-activity-summary')).toBeNull();
 
-    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.advanceTimersByTimeAsync(2_400);
 
     const tray = container?.querySelector('.assistant-active-activity-tray');
     expect(tray?.classList).toContain('has-active-summary');
@@ -6131,13 +6325,19 @@ describe('MessageList sticky prompt preview', () => {
     expect(sticky?.isConnected).toBe(true);
     expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
 
-    // The row's painted geometry settles before another observer delivery. A stale hide timer from
-    // the event frame must recheck it instead of removing the valid sticky prompt.
-    assistantTop = 20;
+    // Incoming events can leave the row between painted layouts for longer than the debounce.
+    // Keep the existing prompt until geometry positively says its source is visible or overlapped.
     await vi.advanceTimersByTimeAsync(100);
 
     expect(sticky?.isConnected).toBe(true);
     expect(container?.querySelector('.latest-user-message-sticky')).toBe(sticky);
+
+    assistantTop = 20;
+    for (const callback of resizeCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+    animationFrames.flush();
+    await Promise.resolve();
 
     upsertPart({
       ...activity,
@@ -8960,6 +9160,94 @@ describe('MessageList auto-scroll', () => {
 
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeInstanceOf(HTMLDivElement);
     mutationObserver.disconnect();
+    animationFrames.restore();
+  });
+
+  it('makes a cached zero-height row provisional when it gains model chrome', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        const hasModelChange = hasAssistantModelChangeBetween('assistant-29', 'assistant-30');
+        const trackHeight = hasModelChange ? 5000 : 4900;
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, trackHeight);
+        }
+        if (this.dataset.msgId) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          const height = index === 30 && !hasModelChange ? 0 : 100;
+          const documentTop = index <= 30 ? index * 100 : index * 100 - (hasModelChange ? 0 : 100);
+          return new DOMRect(0, documentTop - scrollTopValue, 500, height);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts:
+            index === 30
+              ? []
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => (hasAssistantModelChangeBetween('assistant-29', 'assistant-30') ? 5000 : 4900),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -50 }));
+    scrollTopValue = 4450;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
+
+    replaceMessages(
+      state.messages.map((message) =>
+        message.info.id === 'assistant-29'
+          ? {
+              ...message,
+              info: assistantMessage('assistant-29', {
+                modelID: 'claude-sonnet-4',
+                providerID: 'anthropic',
+              }),
+            }
+          : message
+      )
+    );
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const remountedRow = container?.querySelector('[data-msg-id="assistant-30"]');
+    expect(remountedRow).toBeInstanceOf(HTMLDivElement);
+    expect(remountedRow?.querySelector('.model-change-indicator')).not.toBeNull();
     animationFrames.restore();
   });
 

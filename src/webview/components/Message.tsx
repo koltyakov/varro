@@ -210,16 +210,29 @@ export function Message(props: {
     );
   });
   const hasVisibleAssistantOutput = () => {
-    const visibleParts = visibleAssistantParts().filter(
-      (part) =>
+    const visibleParts = visibleAssistantParts().filter((part) => {
+      if (
         !props.visibleActiveActivityPartKeys ||
         !isAssistantActivityPart(part) ||
-        !isAssistantActivityPartRunning(part) ||
-        props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part))
-    );
+        !isAssistantActivityPartRunning(part)
+      ) {
+        return true;
+      }
+      const key = getAssistantActivityPartKey(part);
+      return props.visibleActiveActivityPartKeys.has(key) || compactActivityPartKeys().has(key);
+    });
     if (!props.compactActivityGroups) return visibleParts.length > 0;
     return visibleParts.some((part) => {
-      const group = compactActivityPartKeys().get(`${part.messageID}\u0000${part.id}`);
+      if (!isAssistantActivityPart(part)) return true;
+      const partKey = getAssistantActivityPartKey(part);
+      if (
+        props.visibleActiveActivityPartKeys?.has(partKey) ||
+        props.retainedActivityPartKeys?.has(partKey) ||
+        props.exitingActivityPartKeys?.has(partKey)
+      ) {
+        return true;
+      }
+      const group = compactActivityPartKeys().get(partKey);
       return !group || group.ownerMessageId === props.info.id || isCompactActivityExpanded(group);
     });
   };

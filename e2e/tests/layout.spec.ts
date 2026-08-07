@@ -190,6 +190,29 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   expect(settledGap).toBeLessThanOrEqual(9);
 });
 
+test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+  );
+  const row = page.locator('[data-msg-id="message-tool-cards-assistant-69"]');
+  const activeItem = page.locator('[data-activity-part-id="message-tool-cards-assistant-69-tool"]');
+  await expect(row).toHaveClass(/interactive-item-render-empty/);
+  expect((await row.boundingBox())?.height).toBe(0);
+  await expect(activeItem).toHaveCount(0);
+
+  await page.clock.fastForward(179);
+  await expect(row).toHaveClass(/interactive-item-render-empty/);
+  expect((await row.boundingBox())?.height).toBe(0);
+
+  await page.clock.fastForward(1);
+  await expect(row).not.toHaveClass(/interactive-item-render-empty/);
+  await expect(activeItem).toHaveCount(1);
+});
+
 test('single image messages reserve their preview height before loading', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank');

@@ -26,6 +26,12 @@ break another unless the shared invariants below remain true.
 
 - `measuredHeights` is keyed by message ID and contains the current rendered block size for that
   message.
+- `knownZeroHeightMessageIds` may override `measuredHeights` only while the complete row projection is
+  known to render no message content, transition content, model-change chrome, dialog summary, or
+  other row-local UI. The CSS row box and virtual prefix must agree on that zero.
+- Removing a semantic zero-height classification makes any cached zero provisional. Delete the stale
+  measurement, dirty the prefix from that row, and force bounded hydration so newly visible content
+  cannot remain trapped behind a zero-height virtual range.
 - `virtualMetrics.prefix[index]` must describe the same ordered ID list used by the renderer.
 - Cached prefix entries may only be reused while both the ID order and all earlier effective heights
   remain valid.
@@ -42,6 +48,8 @@ break another unless the shared invariants below remain true.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
   applied. Deferring prefix publication must not make later resize batches classify rows against an
   already-adjusted `scrollTop` and stale prefixes.
+- Delayed, retained, and exiting render states are layout inputs. Their transitions must invalidate
+  affected mounted and unmounted heights just like a user-controlled view setting.
 
 ### Coordinate Spaces
 
@@ -88,6 +96,9 @@ break another unless the shared invariants below remain true.
   must never interpolate to a smaller `scrollTop` and visibly reverse the gesture.
 - Width-resize anchoring is established before applying the first resize measurement. Wheel,
   keyboard, or scrollbar input publishes pending measurements and releases that resize anchor.
+- A bottom-pinned activity exit may temporarily reserve the disappearing flow space and freeze its
+  existing bottom target. The reserve is a bounded geometry owner, must not compete with bottom-follow,
+  and yields immediately to direct user movement, session replacement, or transition cancellation.
 
 The effective ownership order is:
 
@@ -98,7 +109,21 @@ The effective ownership order is:
 | History anchoring | a page request at the upper boundary | actual user movement, session change, edit ownership, or explicit bottom follow |
 | Edit visibility | entering inline edit | direct user movement, edit cancellation, or explicit bottom follow |
 | Expansion anchoring | expanding a disclosure or diff | direct user movement or expiry of its bounded settle window |
+| Activity exit reserve | a bottom-pinned compact activity begins exiting | direct user movement, session change, transition cancellation, or completion |
 | Bottom follow | initial load, send, or explicit jump to latest | upward user movement, sticky navigation, editing, or expansion ownership |
+
+### Animated Row Transitions
+
+- A height animation publishes intermediate row heights. If it runs above a detached viewport, every
+  frame must preserve the same visible anchor; checking only the final grouped layout is insufficient.
+- Transition identity is part identity, not the current group owner or array position. Moving an
+  activity part from running to retained, exiting, and grouped must not hide its source row before the
+  exit completes.
+- A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
+  chrome, does not become part of row-only virtual prefixes, and is removed when no exit remains.
+- Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
+  run when the row unmounts, the session changes, compact rendering is disabled, or user input takes
+  ownership.
 
 ### Sticky Prompts
 
@@ -253,7 +278,8 @@ a valid reproduction.
 - Assert both sides of ownership handoffs: the old owner stops and the new owner's visible position
   remains stable.
 - Sample every animation frame for width reflow, navigation settling, append transitions, and history
-  settling. A final settled assertion can miss a one-frame jump.
+  settling, compact activity transitions, and synthetic reserve release. A final settled assertion can
+  miss a one-frame jump.
 - Assert the same row ID before and after a transition. "Some row is visible" proves coverage, not
   stability.
 - Preserve bounded DOM row counts while adding anchor protection. Rendering the full transcript is
@@ -291,6 +317,9 @@ Relevant browser regressions must cover:
 - non-scrollable initial windows and cursor-only pagination progress
 - active parent and child streaming state during parent pagination
 - offscreen height invalidation for every view mode that changes rendered content
+- semantic zero-height rows gaining message content, model-change chrome, or dialog summaries
+- running activity moving through retained and exiting states into a group owned by another message
+- detached anchors and bottom-pinned content across every activity-exit frame and reserve release
 - hidden child messages not affecting visible parent row actions
 - empty boundary prompts, nested destination scrollers, prompt-load failures, and same-session window
   resets
@@ -302,6 +331,8 @@ Relevant browser regressions must cover:
 - Are container and row-only coordinates converted at every virtual lookup?
 - Can asynchronous content change a mounted row's height after measurement?
 - Can a view setting change an unmounted row while leaving its old height marked exact?
+- Can a semantic zero-height row gain any row-local chrome without clearing its cached zero and forcing
+  hydration?
 - Is a visible anchor preserved when height changes occur above it?
 - Was a width anchor captured before the first changed measurement was applied?
 - Is the test checking row viewport geometry rather than only `scrollTop`?
@@ -310,6 +341,8 @@ Relevant browser regressions must cover:
 - Can an empty, duplicate, stale, or non-scrollable page leave valid history unreachable?
 - Does a session-local response preserve other loaded sessions and their streaming state?
 - Can another scroll owner run at the same time?
+- Does a compact activity transition preserve part visibility and release any bottom reserve on every
+  completion, cancellation, and user-ownership path?
 - Can native movement continue without another wheel or key event after ownership was assigned?
 - Does user interaction cancel settling before changing layout?
 - Are visible row actions derived from the rendered thread rather than hidden tree messages?

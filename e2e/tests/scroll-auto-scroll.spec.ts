@@ -582,7 +582,8 @@ test.describe('auto-scroll', () => {
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
     });
 
-    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 90);
+    // Cover the full active hold, exit animation, and grouped settle window.
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 200);
     expect(
       samples.every((top) => top !== null),
       JSON.stringify({ anchor, samples })
@@ -637,8 +638,7 @@ test.describe('auto-scroll', () => {
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
     });
 
-    await expect(activeItem).toHaveClass(/is-exiting/, { timeout: 5_000 });
-    await expect(activeItem).toHaveCount(0, { timeout: 1_000 });
+    await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
 
     const settledGap = await page

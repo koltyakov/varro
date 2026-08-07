@@ -163,8 +163,8 @@ const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
 const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 const ACTIVITY_SHOW_DELAY_MS = 180;
-const ACTIVITY_MIN_VISIBLE_MS = 1_600;
-const ACTIVITY_COMPLETED_HOLD_MS = 1_000;
+const ACTIVITY_MIN_VISIBLE_MS = 2_400;
+const ACTIVITY_COMPLETED_HOLD_MS = 1_600;
 const ACTIVITY_EXIT_MS = 420;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
@@ -192,6 +192,7 @@ type VisibleScrollAnchor = {
   messageId: string;
   top: number;
   topPad: number;
+  activityGroupKey?: string;
   renderKey?: string;
 };
 
@@ -283,7 +284,8 @@ function getThinkingLayoutSignatures(
 
 export function getCompactActivityDisclosureLayoutSignatures(
   groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  isExpanded: (key: string) => boolean
+  isExpanded: (key: string) => boolean,
+  getPartLayoutState?: (part: AssistantActivityPart) => string
 ) {
   return new Map(
     [...groups].map(([messageId, messageGroups]) => [
@@ -291,7 +293,9 @@ export function getCompactActivityDisclosureLayoutSignatures(
       messageGroups
         .map((group) => {
           const partSignature = group.parts
-            .map((part) => `${part.messageID}\u0000${part.id}`)
+            .map(
+              (part) => `${part.messageID}\u0000${part.id}\u0000${getPartLayoutState?.(part) ?? ''}`
+            )
             .join('\u0002');
           return `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}\u0000${partSignature}`;
         })
@@ -303,7 +307,13 @@ export function getCompactActivityDisclosureLayoutSignatures(
 export function getRenderEmptyAssistantMessageIds(
   messages: readonly MessageEntry[],
   groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  isExpanded: (key: string) => boolean
+  isExpanded: (key: string) => boolean,
+  transitionActivityPartKeys?: {
+    delayed: ReadonlySet<string>;
+    visibleActive: ReadonlySet<string>;
+    retained: ReadonlySet<string>;
+    exiting: ReadonlySet<string>;
+  }
 ) {
   const result = new Set<string>();
 
@@ -329,7 +339,18 @@ export function getRenderEmptyAssistantMessageIds(
         break;
       }
 
-      const group = groupByPartKey.get(`${part.messageID}\u0000${part.id}`);
+      const partKey = getAssistantActivityPartKey(part);
+      if (transitionActivityPartKeys?.delayed.has(partKey)) continue;
+      if (
+        transitionActivityPartKeys?.visibleActive.has(partKey) ||
+        transitionActivityPartKeys?.retained.has(partKey) ||
+        transitionActivityPartKeys?.exiting.has(partKey)
+      ) {
+        hasVisibleRowContent = true;
+        break;
+      }
+
+      const group = groupByPartKey.get(partKey);
       if (!group || group.ownerMessageId === message.info.id || isExpanded(group.key)) {
         hasVisibleRowContent = true;
         break;
@@ -2023,17 +2044,11 @@ export function MessageList() {
       if (!preferStableRenderItem) return rowAnchor;
       firstVisibleRow ??= rowAnchor;
 
-      // Compact activity summaries can move to an older owner after a prepend. Prefer a part whose
-      // render identity and visual position remain attached to the same transcript content.
+      // Compact activity summaries can move to an older owner after a prepend. Follow their
+      // preserved group identity across rows; otherwise prefer stable transcript content.
       for (const element of row.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
         const renderKey = element.dataset.assistantRenderKey;
-        if (
-          !renderKey ||
-          renderKey.startsWith('activity-group:') ||
-          element.getClientRects().length === 0
-        ) {
-          continue;
-        }
+        if (!renderKey || element.getClientRects().length === 0) continue;
         const elementRect = element.getBoundingClientRect();
         if (
           elementRect.bottom <= containerRect.top ||
@@ -2041,6 +2056,16 @@ export function MessageList() {
           elementRect.height <= 0
         ) {
           continue;
+        }
+        const activityGroupKey = element.dataset.assistantActivityGroupKey;
+        if (renderKey.startsWith('activity-group:')) {
+          if (!activityGroupKey) continue;
+          return {
+            messageId,
+            activityGroupKey,
+            top: elementRect.top - containerRect.top,
+            topPad,
+          };
         }
         return {
           messageId,
@@ -2205,6 +2230,11 @@ export function MessageList() {
 
   function getMountedScrollAnchorElement(anchor: VisibleScrollAnchor) {
     if (!containerRef) return null;
+    if (anchor.activityGroupKey) {
+      return containerRef.querySelector<HTMLElement>(
+        `[data-assistant-activity-group-key="${CSS.escape(anchor.activityGroupKey)}"]`
+      );
+    }
     if (anchor.renderKey) {
       return containerRef.querySelector<HTMLElement>(
         `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
@@ -3780,6 +3810,15 @@ export function MessageList() {
         clearTimeout(stickyPreviewDebounceTimer);
         stickyPreviewDebounceTimer = 0;
       }
+      const activePreview = untrack(stickyUserMessagePreview);
+      if (!activePreview) return;
+      if (
+        containerRef &&
+        containerRef.clientHeight >= STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX &&
+        !shouldHideStickyUserMessagePreviewImmediately(activePreview)
+      ) {
+        return;
+      }
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = null;
       previousStickyPreviewBounds = null;
@@ -4139,6 +4178,10 @@ export function MessageList() {
         : message
     );
   });
+  const activeActivityMessageIds = createMemo<ReadonlySet<string>>(() => {
+    if (!activeSessionWorking()) return new Set<string>();
+    return trailingAssistantTurn()?.assistantMessageIds ?? new Set<string>();
+  });
   const [retainedActivityPartKeys, setRetainedActivityPartKeys] = createSignal<ReadonlySet<string>>(
     new Set()
   );
@@ -4198,6 +4241,7 @@ export function MessageList() {
     const currentKeys = new Set<string>();
     const now = Date.now();
     const sessionWorking = activeSessionWorking();
+    const activeMessageIds = activeActivityMessageIds();
     const lastVisiblePartKey = getTrailingVisibleAssistantPartKey();
 
     for (const message of activityMessages) {
@@ -4232,6 +4276,16 @@ export function MessageList() {
         setSetMembership(setExitingActivityPartKeys, key, false);
       }
       if (isAssistantActivityPartRunning(part)) {
+        if (!activeMessageIds.has(part.messageID)) {
+          clearActivityCompletionTimer(key);
+          clearActivityShowTimer(key);
+          activityPartFirstSeenAt.delete(key);
+          settledActivityPartKeys.add(key);
+          setSetMembership(setVisibleActiveActivityPartKeys, key, false);
+          setSetMembership(setRetainedActivityPartKeys, key, false);
+          setSetMembership(setExitingActivityPartKeys, key, false);
+          continue;
+        }
         settledActivityPartKeys.delete(key);
         clearActivityCompletionTimer(key);
         setSetMembership(setRetainedActivityPartKeys, key, false);
@@ -4248,7 +4302,13 @@ export function MessageList() {
                   isAssistantActivityPart(candidate) &&
                   getAssistantActivityPartKey(candidate) === key
               );
-            if (!currentPart || !isAssistantActivityPartRunning(currentPart)) return;
+            if (
+              !currentPart ||
+              !isAssistantActivityPartRunning(currentPart) ||
+              !untrack(activeActivityMessageIds).has(currentPart.messageID)
+            ) {
+              return;
+            }
             activityPartFirstSeenAt.set(key, Date.now());
             setSetMembership(setVisibleActiveActivityPartKeys, key, true);
           }, ACTIVITY_SHOW_DELAY_MS);
@@ -4317,13 +4377,16 @@ export function MessageList() {
   const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
     (previous) => {
       if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
+      const activeMessageIds = activeActivityMessageIds();
+      const activityMessages = compactActivityMessages();
 
       return preserveAssistantActivityGroupKeys(
         getAssistantActivityGroupMap(
-          compactActivityMessages(),
+          activityMessages,
           (part) =>
             shouldShowAssistantPartInline(part) &&
             (!isAssistantActivityPartRunning(part) ||
+              !activeMessageIds.has(part.messageID) ||
               visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part))) &&
             shouldCompactAssistantActivityPart(part, {
               showInlineFileChanges: showInlineFileChanges(),
@@ -4345,7 +4408,14 @@ export function MessageList() {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
       assistantActivityGroupMap(),
-      (key) => getMessageBlockExpanded(key) ?? false
+      (key) => getMessageBlockExpanded(key) ?? false,
+      (part) => {
+        const key = getAssistantActivityPartKey(part);
+        if (visibleActiveActivityPartKeys().has(key)) return 'active';
+        if (retainedActivityPartKeys().has(key)) return 'retained';
+        if (exitingActivityPartKeys().has(key)) return 'exiting';
+        return 'grouped';
+      }
     );
   });
   let previousCompactActivityDisclosureLayoutSignatures = new Map<string, string>();
@@ -4410,10 +4480,29 @@ export function MessageList() {
   createEffect(() => {
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
+    const activityMessages = compactActivityMessages();
+    const delayedActivityPartKeys = new Set(activityShowTimers.keys());
     const candidates = getRenderEmptyAssistantMessageIds(
-      compactActivityMessages(),
+      activityMessages,
       assistantActivityGroupMap(),
-      (key) => getMessageBlockExpanded(key) ?? false
+      (key) => getMessageBlockExpanded(key) ?? false,
+      {
+        delayed: delayedActivityPartKeys,
+        visibleActive: visibleActiveActivityPartKeys(),
+        retained: retainedActivityPartKeys(),
+        exiting: exitingActivityPartKeys(),
+      }
+    );
+    const delayedActivityMessageIds = new Set(
+      activityMessages.flatMap((message) =>
+        message.parts.some(
+          (part) =>
+            isAssistantActivityPart(part) &&
+            delayedActivityPartKeys.has(getAssistantActivityPartKey(part))
+        )
+          ? [message.info.id]
+          : []
+      )
     );
     const modelChanges = modelChangeMap();
     const dialogSummaries = assistantDialogSummaryMap();
@@ -4421,7 +4510,7 @@ export function MessageList() {
     const next = new Set(
       [...candidates].filter(
         (messageId) =>
-          messageId !== lastAssistantId &&
+          (messageId !== lastAssistantId || delayedActivityMessageIds.has(messageId)) &&
           !modelChanges.has(messageId) &&
           !dialogSummaries.has(messageId)
       )
@@ -4430,8 +4519,14 @@ export function MessageList() {
       return;
     }
 
+    const currentMessageIds = new Set(messages().map((message) => message.info.id));
     for (const messageId of new Set([...previous, ...next])) {
       if (previous.has(messageId) === next.has(messageId)) continue;
+      if (previous.has(messageId) && currentMessageIds.has(messageId)) {
+        measuredHeights.delete(messageId);
+        zeroHeightRenderContentSignatures.delete(messageId);
+        forcedVirtualContentMessageIds.add(messageId);
+      }
       markVirtualMetricsDirty(messageId);
     }
     setKnownZeroHeightMessageIds(next);

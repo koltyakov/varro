@@ -1,13 +1,14 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import {
-  formatAssistantActivityCounts,
+  getAssistantActivityCountItems,
   getAssistantActivityPartKey,
   getAssistantActivityStatus,
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
   shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
+  type AssistantActivityKind,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
 import { isLoading, compactToolOutput, showInlineFileChanges } from '../../lib/state';
@@ -394,7 +395,8 @@ export function AssistantMessageContent(props: {
         isLocallyCompactActivityCandidate(part) &&
         isAssistantActivityPartRunning(part) &&
         props.visibleActiveActivityPartKeys &&
-        !props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part))
+        !props.visibleActiveActivityPartKeys.has(getAssistantActivityPartKey(part)) &&
+        !compactActivityGroupByPartKey().has(getAssistantActivityPartKey(part))
       ) {
         continue;
       }
@@ -421,9 +423,8 @@ export function AssistantMessageContent(props: {
       }
 
       const canGroupActivityPart = (candidate: Part) => {
-        return compactActivityGroupByPartKey().get(
-          isAssistantActivityPart(candidate) ? getAssistantActivityPartKey(candidate) : ''
-        );
+        if (!isAssistantActivityPart(candidate)) return undefined;
+        return compactActivityGroupByPartKey().get(getAssistantActivityPartKey(candidate));
       };
 
       const activityGroup = canGroupActivityPart(part);
@@ -635,15 +636,23 @@ export function AssistantMessageContent(props: {
       return (
         <div
           class={`assistant-message-flow-item${revealClass ? ' assistant-activity-group-settling' : ''}${!showSummary() && !isActivityGroupExpanded(activityGroup().key) ? ' assistant-message-flow-item-hidden' : ''}`}
+          data-assistant-activity-group-key={
+            showSummary() ? encodeURIComponent(activityGroup().key) : undefined
+          }
           data-assistant-render-key={entry.key}
         >
           <AssistantActivityGroup
             info={props.info}
             parts={item().parts}
             summaryParts={activityGroup().parts.filter(
-              (part) =>
-                !isAssistantActivityPartRunning(part) &&
-                !props.retainedActivityPartKeys?.has(getAssistantActivityPartKey(part))
+              (part) => {
+                const key = getAssistantActivityPartKey(part);
+                return (
+                  (!isAssistantActivityPartRunning(part) ||
+                    !props.visibleActiveActivityPartKeys?.has(key)) &&
+                  !props.retainedActivityPartKeys?.has(key)
+                );
+              }
             )}
             expansionKey={activityGroup().key}
             showSummary={showSummary()}
@@ -828,7 +837,7 @@ function AssistantActivityGroup(props: {
 }) {
   const expanded = () => isActivityGroupExpanded(props.expansionKey);
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
-  const summary = createMemo(() => formatAssistantActivityCounts(props.summaryParts));
+  const activityItems = createMemo(() => getAssistantActivityCountItems(props.summaryParts));
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -844,23 +853,11 @@ function AssistantActivityGroup(props: {
           aria-expanded={expanded()}
           onClick={toggleExpanded}
         >
-          <span class="assistant-activity-summary-text" aria-live="polite" aria-atomic="true">
-            <span class="assistant-activity-summary-main">{summary()}</span>
-            <Show when={activityStatus().failed > 0}>
-              <span class="assistant-activity-status-failed">
-                {'· '}
-                {activityStatus().failed}{' '}
-                {activityStatus().failed === 1 ? 'tool failed' : 'tools failed'}
-              </span>
-            </Show>
-            <Show when={activityStatus().aborted > 0}>
-              <span>
-                {' · '}
-                {activityStatus().aborted}{' '}
-                {activityStatus().aborted === 1 ? 'tool aborted' : 'tools aborted'}
-              </span>
-            </Show>
-          </span>
+          <AssistantActivitySummaryText
+            items={activityItems()}
+            failed={activityStatus().failed}
+            aborted={activityStatus().aborted}
+          />
           <svg
             class={`assistant-activity-chevron${expanded() ? ' expanded' : ''}`}
             viewBox="0 0 16 16"
@@ -900,6 +897,292 @@ function AssistantActivityGroup(props: {
         </div>
       </Show>
     </div>
+  );
+}
+
+type AssistantActivityCountItem = ReturnType<typeof getAssistantActivityCountItems>[number];
+type AssistantActivityResizeMeasurement = () => (() => void) | undefined;
+
+const activitySummaryResizeMeasurements = new WeakMap<
+  Element,
+  Set<AssistantActivityResizeMeasurement>
+>();
+const activitySummaryResizeElements = new Set<Element>();
+let activitySummaryResizeObserver: ResizeObserver | null = null;
+
+function observeActivitySummaryResize(
+  element: Element,
+  measurement: AssistantActivityResizeMeasurement
+) {
+  if (!activitySummaryResizeObserver && typeof ResizeObserver !== 'undefined') {
+    activitySummaryResizeObserver = new ResizeObserver((entries) => {
+      const updates = entries.flatMap((entry) => {
+        const measurements = activitySummaryResizeMeasurements.get(entry.target);
+        if (!measurements) return [];
+        return [...measurements].flatMap((measure) => {
+          const update = measure();
+          return update ? [update] : [];
+        });
+      });
+      for (const update of updates) update();
+    });
+  }
+  let measurements = activitySummaryResizeMeasurements.get(element);
+  if (!measurements) {
+    measurements = new Set();
+    activitySummaryResizeMeasurements.set(element, measurements);
+    activitySummaryResizeElements.add(element);
+    activitySummaryResizeObserver?.observe(element);
+  }
+  measurements.add(measurement);
+
+  return () => {
+    const currentMeasurements = activitySummaryResizeMeasurements.get(element);
+    currentMeasurements?.delete(measurement);
+    if (currentMeasurements && currentMeasurements.size > 0) return;
+    activitySummaryResizeMeasurements.delete(element);
+    activitySummaryResizeElements.delete(element);
+    activitySummaryResizeObserver?.unobserve?.(element);
+    if (activitySummaryResizeElements.size > 0) return;
+    activitySummaryResizeObserver?.disconnect();
+    activitySummaryResizeObserver = null;
+  };
+}
+
+function AssistantActivitySummaryText(props: {
+  items: AssistantActivityCountItem[];
+  failed: number;
+  aborted: number;
+}) {
+  const [compactCount, setCompactCount] = createSignal(0);
+  let textElement: HTMLSpanElement | undefined;
+  let measurementElement: HTMLSpanElement | undefined;
+
+  const fullLabel = () => {
+    const statusLabels = [
+      ...(props.failed > 0
+        ? [`${props.failed} ${props.failed === 1 ? 'tool failed' : 'tools failed'}`]
+        : []),
+      ...(props.aborted > 0
+        ? [`${props.aborted} ${props.aborted === 1 ? 'tool aborted' : 'tools aborted'}`]
+        : []),
+    ];
+    const counts = `Explored ${props.items.map((item) => item.label).join(', ')}`;
+    return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
+  };
+
+  const measure: AssistantActivityResizeMeasurement = () => {
+    const button = textElement?.closest('button');
+    const host = button?.parentElement;
+    const chevron = button?.querySelector<SVGElement>('.assistant-activity-chevron');
+    if (!button || !host || !chevron || !measurementElement || host.clientWidth <= 0) return;
+
+    const buttonStyle = getComputedStyle(button);
+    const gap = Number.parseFloat(buttonStyle.columnGap || buttonStyle.gap) || 0;
+    const availableWidth = host.clientWidth - chevron.getBoundingClientRect().width - gap;
+    const nounWidths = [
+      ...measurementElement.querySelectorAll<HTMLElement>('.assistant-activity-summary-noun'),
+    ].map((element) => element.getBoundingClientRect().width);
+    const iconWidths = [
+      ...measurementElement.querySelectorAll<HTMLElement>('.assistant-activity-kind-icon'),
+    ].map((element) => element.getBoundingClientRect().width);
+    let candidateWidth = measurementElement.getBoundingClientRect().width;
+    if (
+      availableWidth <= 0 ||
+      candidateWidth <= 0 ||
+      nounWidths.length !== props.items.length ||
+      iconWidths.length !== props.items.length ||
+      nounWidths.some((width) => width <= 0) ||
+      iconWidths.some((width) => width <= 0)
+    ) {
+      return;
+    }
+
+    let nextCompactCount = 0;
+    while (candidateWidth > availableWidth && nextCompactCount < props.items.length) {
+      const itemIndex = props.items.length - nextCompactCount - 1;
+      candidateWidth -= nounWidths[itemIndex]! - iconWidths[itemIndex]!;
+      nextCompactCount += 1;
+    }
+    return () => setCompactCount(nextCompactCount);
+  };
+
+  createEffect(() => {
+    fullLabel();
+    queueMicrotask(() => measure()?.());
+  });
+
+  onMount(() => {
+    const host = textElement?.closest('button')?.parentElement;
+    if (!host) return;
+    const resizeTarget = host.closest('.assistant-message-flow') ?? host;
+    onCleanup(observeActivitySummaryResize(resizeTarget, measure));
+  });
+
+  return (
+    <>
+      <span
+        ref={(element) => (textElement = element)}
+        class="assistant-activity-summary-text"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-label={fullLabel()}
+      >
+        <AssistantActivitySummaryCandidate
+          items={props.items}
+          compactCount={compactCount()}
+          failed={props.failed}
+          aborted={props.aborted}
+        />
+      </span>
+      <Portal mount={document.body}>
+        <span
+          ref={(element) => (measurementElement = element)}
+          class="assistant-activity-summary-measure"
+          aria-hidden="true"
+        >
+          <AssistantActivitySummaryCandidate
+            items={props.items}
+            compactCount={0}
+            failed={props.failed}
+            aborted={props.aborted}
+            measureIcons
+          />
+        </span>
+      </Portal>
+    </>
+  );
+}
+
+function AssistantActivitySummaryCandidate(props: {
+  items: AssistantActivityCountItem[];
+  compactCount: number;
+  failed: number;
+  aborted: number;
+  measureIcons?: boolean;
+}) {
+  const compactFrom = () => props.items.length - props.compactCount;
+
+  return (
+    <>
+      <span class="assistant-activity-summary-main">
+        Explored{' '}
+        <For each={props.items}>
+          {(item, index) => (
+            <>
+              <Show when={index() > 0}>, </Show>
+              <span class="assistant-activity-summary-item">
+                {item.count}{' '}
+                <Show
+                  when={index() < compactFrom()}
+                  fallback={<AssistantActivityKindIcon kind={item.kind} />}
+                >
+                  <span class="assistant-activity-summary-noun">
+                    {item.label.slice(String(item.count).length + 1)}
+                  </span>
+                </Show>
+                <Show when={props.measureIcons}>
+                  <AssistantActivityKindIcon kind={item.kind} measure />
+                </Show>
+              </span>
+            </>
+          )}
+        </For>
+      </span>
+      <Show when={props.failed > 0}>
+        <span class="assistant-activity-status-failed">
+          {'· '}
+          {props.failed} {props.failed === 1 ? 'tool failed' : 'tools failed'}
+        </span>
+      </Show>
+      <Show when={props.aborted > 0}>
+        <span>
+          {' · '}
+          {props.aborted} {props.aborted === 1 ? 'tool aborted' : 'tools aborted'}
+        </span>
+      </Show>
+    </>
+  );
+}
+
+function AssistantActivityKindIcon(props: { kind: AssistantActivityKind; measure?: boolean }) {
+  const glyph = () => {
+    switch (props.kind) {
+      case 'files':
+        return (
+          <>
+            <path d="M4 21.4V2.6c0-.331.269-.6.6-.6h11.652c.159 0 .311.063.424.176l3.148 3.148c.113.113.176.265.176.424V21.4c0 .331-.269.6-.6.6H4.6a.6.6 0 0 1-.6-.6Z" />
+            <path d="M16 2v3.4c0 .331.269.6.6.6H20" />
+          </>
+        );
+      case 'reasoning':
+        return (
+          <>
+            <path d="M9 18h6M10 21h4" />
+            <path d="M9 15c0-2-.5-2.5-1.5-3.5A5 5 0 0 1 6 8c0-3 2-5 6-5s6 2 6 5a5 5 0 0 1-1.5 3.5c-1 1-1.5 1.5-1.5 3.5" />
+          </>
+        );
+      case 'searches':
+        return (
+          <>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m16 16 5 5" />
+          </>
+        );
+      case 'edits':
+        return (
+          <>
+            <path d="M4 20h4l11-11-4-4L4 16z" />
+            <path d="m13.5 6.5 4 4" />
+          </>
+        );
+      case 'commands':
+        return (
+          <>
+            <path d="m5 7 5 5-5 5" />
+            <path d="M13 17h7" />
+          </>
+        );
+      case 'web':
+        return (
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+          </>
+        );
+      case 'questions':
+        return (
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7M12 17h.01" />
+          </>
+        );
+      case 'skills':
+        return (
+          <path d="m12 3 1.2 4.2L17 9l-3.8 1.8L12 15l-1.2-4.2L7 9l3.8-1.8zM5 15l.7 2.3L8 18l-2.3.7L5 21l-.7-2.3L2 18l2.3-.7z" />
+        );
+      case 'tools':
+        return <path d="M14 6a4 4 0 0 0-5 5L3 17l4 4 6-6a4 4 0 0 0 5-5l-3 3-4-4z" />;
+    }
+  };
+
+  return (
+    <span
+      class={`assistant-activity-kind-icon${props.measure ? ' is-measurement' : ''}`}
+      data-kind={props.kind}
+      aria-hidden="true"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width={props.kind === 'files' ? '1.6' : '1.8'}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        {glyph()}
+      </svg>
+    </span>
   );
 }
 

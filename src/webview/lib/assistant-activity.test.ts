@@ -164,7 +164,7 @@ describe('assistant activity summaries', () => {
 
   it('groups routine activity across primary assistant messages in one user turn', () => {
     const command = completedTool('bash-1', 'bash');
-    const thought = reasoning('reasoning-1', 2);
+    const thought = { ...reasoning('reasoning-1', 2), messageID: 'assistant-2' };
     const messages = [
       {
         info: {

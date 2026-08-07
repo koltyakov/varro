@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import type { AssistantMessage, TextPart } from '../types';
+import type { AssistantMessage, Part, TextPart, ToolPart } from '../types';
 import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
+import { resetDefaultAppState, setCompactToolOutput } from '../lib/state';
 import { settlePerfEffects } from './harness';
 
 let container: HTMLDivElement | null = null;
@@ -40,6 +41,25 @@ function createTextPart(text: string): TextPart {
   };
 }
 
+function createReadPart(index: number): ToolPart {
+  return {
+    id: `read-${index}`,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'tool',
+    callID: `call-read-${index}`,
+    tool: 'read',
+    state: {
+      status: 'completed',
+      input: { filePath: `src/file-${index}.ts` },
+      output: 'ok',
+      title: 'Read',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    },
+  };
+}
+
 describe('AssistantMessageContent perf guards', () => {
   beforeEach(() => {
     container = document.createElement('div');
@@ -48,6 +68,7 @@ describe('AssistantMessageContent perf guards', () => {
 
     originalGlobalResizeObserver = globalThis.ResizeObserver;
     originalWindowResizeObserver = window.ResizeObserver;
+    resetDefaultAppState();
   });
 
   afterEach(() => {
@@ -55,6 +76,7 @@ describe('AssistantMessageContent perf guards', () => {
     cleanup = undefined;
     container?.remove();
     container = null;
+    resetDefaultAppState();
 
     Object.defineProperty(globalThis, 'ResizeObserver', {
       configurable: true,
@@ -155,5 +177,57 @@ describe('AssistantMessageContent perf guards', () => {
 
     expect(resizeObserverConstructCount).toBe(0);
     expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(100);
+  });
+
+  it('shares one ResizeObserver across compact activity summaries', async () => {
+    let resizeObserverConstructCount = 0;
+    let observedElementCount = 0;
+
+    class ResizeObserverSpy {
+      constructor(_callback: ResizeObserverCallback) {
+        resizeObserverConstructCount += 1;
+      }
+
+      observe() {
+        observedElementCount += 1;
+      }
+
+      unobserve() {}
+
+      disconnect() {}
+    }
+
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverSpy,
+    });
+    Object.defineProperty(window, 'ResizeObserver', {
+      configurable: true,
+      writable: true,
+      value: ResizeObserverSpy,
+    });
+    setCompactToolOutput(true);
+
+    const parts: Part[] = Array.from({ length: 20 }, (_, index) => [
+      createReadPart(index),
+      { ...createTextPart(`Boundary ${index}`), id: `text-${index}` },
+    ]).flat();
+    cleanup = render(
+      () =>
+        AssistantMessageContent({
+          info: createAssistantMessage(),
+          parts,
+          textForPart: (part) => (part.type === 'text' ? part.text : null),
+        }),
+      container!
+    );
+
+    await settlePerfEffects();
+
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(20);
+    expect(document.querySelectorAll('.assistant-activity-summary-measure')).toHaveLength(20);
+    expect(resizeObserverConstructCount).toBe(1);
+    expect(observedElementCount).toBe(1);
   });
 });

@@ -131,6 +131,7 @@ export function getAssistantDialogSummaryMap(
     }
 
     const assistant = entry.info as AssistantMessage;
+    if (options?.primarySessionId && assistant.sessionID !== options.primarySessionId) continue;
     if (assistant.mode === 'subagent') continue;
 
     currentMessages.push(assistant);

@@ -301,6 +301,61 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
 
+  it('replaces activity words with icons from right to left as space narrows', () => {
+    let resize: ResizeObserverCallback | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+    setCompactToolOutput(true);
+    renderAssistantMessageContent({
+      parts: [
+        toolPart('read-1', 'read'),
+        reasoningPart('reasoning-1'),
+        toolPart('grep-1', 'grep'),
+        toolPart('bash-1', 'bash'),
+      ],
+    });
+
+    const host = container?.querySelector<HTMLElement>('.assistant-activity-group');
+    const resizeTarget = container?.querySelector<HTMLElement>('.assistant-message-flow');
+    const measurement = document.querySelector<HTMLElement>('.assistant-activity-summary-measure');
+    const nouns = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-summary-noun');
+    const icons = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-kind-icon');
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 256 });
+    if (measurement) measurement.getBoundingClientRect = () => ({ width: 300 }) as DOMRect;
+    nouns?.forEach((noun) => {
+      noun.getBoundingClientRect = () => ({ width: 35 }) as DOMRect;
+    });
+    icons?.forEach((icon) => {
+      icon.getBoundingClientRect = () => ({ width: 10 }) as DOMRect;
+    });
+
+    resize?.([{ target: resizeTarget } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+
+    const summary = container?.querySelector('.assistant-activity-summary-text');
+    expect(summary?.getAttribute('aria-label')).toBe(
+      'Explored 1 file, 1 thought, 1 search, 1 command'
+    );
+    expect(
+      [...(summary?.querySelectorAll('.assistant-activity-kind-icon') || [])].map((icon) =>
+        icon.getAttribute('data-kind')
+      )
+    ).toEqual(['searches', 'commands']);
+
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 340 });
+    resize?.([{ target: resizeTarget } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+
+    expect(summary?.querySelector('.assistant-activity-kind-icon')).toBeNull();
+    expect(summary?.textContent).toBe('Explored 1 file, 1 thought, 1 search, 1 command');
+  });
+
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
     setCompactToolOutput(true);
     setShowInlineFileChanges(true);

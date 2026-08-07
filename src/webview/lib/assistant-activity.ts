@@ -12,7 +12,7 @@ export type AssistantActivityGroupInfo = {
   parts: AssistantActivityPart[];
 };
 
-type ActivityKind =
+export type AssistantActivityKind =
   | 'files'
   | 'reasoning'
   | 'searches'
@@ -23,7 +23,7 @@ type ActivityKind =
   | 'skills'
   | 'tools';
 
-const ACTIVITY_KIND_ORDER: readonly ActivityKind[] = [
+const ACTIVITY_KIND_ORDER: readonly AssistantActivityKind[] = [
   'files',
   'reasoning',
   'searches',
@@ -51,7 +51,7 @@ function normalizeToolName(toolName: string) {
   return normalized.split('.').at(-1) || normalized;
 }
 
-function getActivityKind(part: AssistantActivityPart): ActivityKind {
+function getActivityKind(part: AssistantActivityPart): AssistantActivityKind {
   if (part.type === 'reasoning') return 'reasoning';
 
   const toolName = normalizeToolName(part.tool);
@@ -69,7 +69,7 @@ function formatCount(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function formatActivityCount(kind: ActivityKind, count: number) {
+function formatActivityCount(kind: AssistantActivityKind, count: number) {
   switch (kind) {
     case 'files':
       return formatCount(count, 'file');
@@ -97,7 +97,9 @@ export function isAssistantActivityPart(part: Part): part is AssistantActivityPa
   return part.type === 'tool' && normalizeToolName(part.tool) !== 'task';
 }
 
-export function getAssistantActivityPartKey(part: AssistantActivityPart) {
+export function getAssistantActivityPartKey(
+  part: AssistantActivityPart
+): `${string}\u0000${string}` {
   return `${part.messageID}\u0000${part.id}`;
 }
 
@@ -232,7 +234,12 @@ export function preserveAssistantActivityGroupKeys(
 }
 
 export function formatAssistantActivityCounts(parts: readonly AssistantActivityPart[]) {
-  const counts = new Map<ActivityKind, number>();
+  const items = getAssistantActivityCountItems(parts);
+  return `Explored ${items.map((item) => item.label).join(', ')}`;
+}
+
+export function getAssistantActivityCountItems(parts: readonly AssistantActivityPart[]) {
+  const counts = new Map<AssistantActivityKind, number>();
   for (const part of parts) {
     const kind = getActivityKind(part);
     const count =
@@ -243,11 +250,10 @@ export function formatAssistantActivityCounts(parts: readonly AssistantActivityP
     counts.set(kind, (counts.get(kind) || 0) + count);
   }
 
-  const labels = ACTIVITY_KIND_ORDER.flatMap((kind) => {
+  return ACTIVITY_KIND_ORDER.flatMap((kind) => {
     const count = counts.get(kind);
-    return count ? [formatActivityCount(kind, count)] : [];
+    return count ? [{ kind, count, label: formatActivityCount(kind, count) }] : [];
   });
-  return `Explored ${labels.join(', ')}`;
 }
 
 export function formatAssistantActivitySummary(parts: readonly AssistantActivityPart[]) {
