@@ -887,6 +887,7 @@ body.vscode-light
   font-variant-numeric: tabular-nums;
   margin-top: 10px;
   margin-bottom: 0;
+  padding-inline: 0;
   height: 24px;
   box-sizing: border-box;
   display: block;
