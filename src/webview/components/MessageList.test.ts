@@ -1475,7 +1475,7 @@ describe('MessageList compact activity', () => {
     expect(container?.textContent).toContain('Working on it.');
   });
 
-  it('keeps active commands below Explored when they precede completed activity', async () => {
+  it('keeps Explored mounted when earlier parallel activity becomes visible', async () => {
     const running = toolPart('command-running', 'assistant-1', 'call-command-running');
     running.state = {
       status: 'running',
@@ -1515,14 +1515,17 @@ describe('MessageList compact activity', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
+    const initialSummary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
+    expect(initialSummary?.textContent).toContain('Explored: 2 commands');
     await vi.advanceTimersByTimeAsync(500);
 
     const summary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
     const activeItem = container?.querySelector<HTMLElement>(
       '[data-activity-part-id="command-running"]'
     );
+    expect(summary).toBe(initialSummary);
     expect(summary?.textContent).toContain('Explored: 2 commands');
-    expect(summary?.compareDocumentPosition(activeItem!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(activeItem?.compareDocumentPosition(summary!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('keeps one Explored group while a command between completed tools is retained', async () => {
@@ -8070,9 +8073,9 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('keeps the loading label visible with a running task tool card', async () => {
+  it('keeps the loading label visible with a namespaced running task tool card', async () => {
     const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
-    tool.tool = 'task';
+    tool.tool = 'opencode.task';
     tool.state = {
       status: 'running',
       input: { command: 'npm test' },

@@ -77,6 +77,7 @@ export type QueuedAttachmentSnapshot = Pick<
 
 type SessionSendOptions = SendFlowOptions & {
   agent?: string;
+  optimisticModel?: SelectedModel;
   queuedAttachments?: QueuedAttachmentSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
@@ -738,10 +739,11 @@ export async function sendMessageWithDependencies(
     messageId,
     sendBody,
     sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
-    effectiveModel
+    effectiveModel,
+    options?.optimisticModel
   );
   batch(() => {
-    deps.beforeOptimisticPublish?.();
+    if (optimisticMessage) deps.beforeOptimisticPublish?.();
     if (expectsAssistantReply) {
       deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
     }
@@ -845,9 +847,10 @@ function createOptimisticUserMessage(
   messageId: string,
   body: SessionSendBody,
   agent: string,
-  effectiveModel: SelectedModel | null
+  effectiveModel: SelectedModel | null,
+  optimisticModelFallback?: SelectedModel
 ): OptimisticMessageEntry | null {
-  const model = body.model ?? effectiveModel;
+  const model = body.model ?? effectiveModel ?? optimisticModelFallback;
   if (!model) return null;
 
   const created = Date.now();

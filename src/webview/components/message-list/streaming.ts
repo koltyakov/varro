@@ -13,8 +13,9 @@ export function hasVisibleBlockingStreamingPart(part: Part | null, streamingText
     return false;
   }
 
-  if (part.type === 'tool' && part.tool.trim().toLowerCase() === 'task') {
-    return false;
+  if (part.type === 'tool') {
+    const normalizedTool = part.tool.trim().toLowerCase();
+    if ((normalizedTool.split('.').at(-1) || normalizedTool) === 'task') return false;
   }
 
   return shouldShowAssistantPartInline(part);

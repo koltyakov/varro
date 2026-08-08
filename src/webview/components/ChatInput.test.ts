@@ -29,6 +29,7 @@ import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-over
 const {
   abortSessionMock,
   continueInterruptedSessionMock,
+  editMessageMock,
   forkSessionMock,
   loadOlderSessionPromptsMock,
   redoSessionMock,
@@ -41,6 +42,7 @@ const {
 } = vi.hoisted(() => ({
   abortSessionMock: vi.fn(async () => {}),
   continueInterruptedSessionMock: vi.fn(async () => {}),
+  editMessageMock: vi.fn<typeof UseOpenCodeModule.editMessage>(async () => true),
   forkSessionMock: vi.fn(async () => 'forked-session'),
   loadOlderSessionPromptsMock: vi.fn(async () => false),
   redoSessionMock: vi.fn(async () => {}),
@@ -70,6 +72,7 @@ vi.mock('../hooks/useOpenCode', async () => {
     ...actual,
     abortSession: abortSessionMock,
     continueInterruptedSession: continueInterruptedSessionMock,
+    editMessage: editMessageMock,
     forkSession: forkSessionMock,
     loadOlderSessionPrompts: loadOlderSessionPromptsMock,
     redoSession: redoSessionMock,
@@ -190,6 +193,8 @@ afterEach(() => {
   runSlashCommandByNameMock.mockResolvedValue(true);
   abortSessionMock.mockReset();
   continueInterruptedSessionMock.mockReset();
+  editMessageMock.mockReset();
+  editMessageMock.mockResolvedValue(true);
   forkSessionMock.mockReset();
   forkSessionMock.mockResolvedValue('forked-session');
   redoSessionMock.mockReset();
@@ -2584,6 +2589,68 @@ describe('ChatInput', () => {
     ]);
     expect(state.clipboardImages).toEqual([
       { id: 'draft-img', url: 'blob:draft', mime: 'image/png', filename: 'draft.png', size: 10 },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
+  });
+
+  it('restores edited text and preserves the prior draft when an optimistic send fails', async () => {
+    setState('activeSessionId', 'session-1');
+    setInputText('original draft');
+    setState('droppedFiles', [{ path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' }]);
+    setState('terminalSelection', { text: 'pwd', terminalName: 'draft-terminal' });
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'gpt-4o' },
+        },
+        parts: [],
+      },
+    ]);
+    editMessageMock.mockImplementationOnce(async (_messageId, _text, options) => {
+      options?.onOptimisticPublish?.();
+      return false;
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    startEditingMessage('message-1', 'session-1', 'corrected prompt', {
+      files: [{ path: '/repo/edit.ts', relativePath: 'edit.ts', type: 'file' }],
+      images: [],
+      terminalSelection: { text: 'npm test', terminalName: 'zsh' },
+    });
+    await Promise.resolve();
+
+    container?.querySelector<HTMLElement>('.rich-composer')?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await flushAsyncWork();
+
+    expect(editMessageMock).toHaveBeenCalledWith(
+      'message-1',
+      'corrected prompt',
+      expect.objectContaining({ onOptimisticPublish: expect.any(Function) })
+    );
+    expect(inputText()).toBe('corrected prompt');
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/edit.ts', relativePath: 'edit.ts', type: 'file' },
+    ]);
+    expect(state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(inputText()).toBe('original draft');
+    expect(state.droppedFiles).toEqual([
+      { path: '/repo/draft.ts', relativePath: 'draft.ts', type: 'file' },
     ]);
     expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
   });

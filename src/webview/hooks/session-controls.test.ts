@@ -188,6 +188,10 @@ describe('session-controls helpers', () => {
       callOrder.push('prune');
       return vi.fn();
     });
+    const deferMessageRemovals = vi.fn((_sessionId: string, _messageIds: string[]) => {
+      callOrder.push('defer-removals');
+      return () => callOrder.push('release-removals');
+    });
 
     await editMessageWithDependencies(
       {
@@ -202,6 +206,7 @@ describe('session-controls helpers', () => {
           callOrder.push('loading');
         }),
         invalidateMessageSync,
+        deferMessageRemovals,
         pruneMessagesFrom,
         deleteMessage,
         syncSessionMessages,
@@ -216,6 +221,7 @@ describe('session-controls helpers', () => {
 
     expect(abortSession).not.toHaveBeenCalled();
     expect(invalidateMessageSync).toHaveBeenCalledTimes(1);
+    expect(deferMessageRemovals).toHaveBeenCalledWith('session-1', ['assistant-1', 'user-1']);
     expect(pruneMessagesFrom).toHaveBeenCalledWith('session-1', 'user-1');
     expect(deleteMessage.mock.calls).toEqual([
       ['session-1', 'assistant-1'],
@@ -226,10 +232,12 @@ describe('session-controls helpers', () => {
     expect(callOrder).toEqual([
       'loading',
       'invalidate-sync',
+      'defer-removals',
       'delete:assistant-1',
       'delete:user-1',
       'prune',
       'publish',
+      'release-removals',
       'send',
     ]);
   });
@@ -237,6 +245,10 @@ describe('session-controls helpers', () => {
   it('keeps the edited history truncated when the replacement send fails', async () => {
     const restorePrunedMessages = vi.fn();
     const stopLoading = vi.fn();
+    const onOptimisticPublish = vi.fn();
+    const releaseRemovals = vi.fn();
+    const pruneMessagesFrom = vi.fn(() => restorePrunedMessages);
+    const prepareEditedMessageSend = vi.fn(() => async () => false);
 
     const result = await editMessageWithDependencies(
       {
@@ -245,19 +257,31 @@ describe('session-controls helpers', () => {
         isSessionWorking: () => false,
         abortSession: vi.fn(async () => {}),
         startLoading: vi.fn(),
-        pruneMessagesFrom: vi.fn(() => restorePrunedMessages),
+        deferMessageRemovals: vi.fn(() => releaseRemovals),
+        pruneMessagesFrom,
         deleteMessage: vi.fn(async () => {}),
         syncSessionMessages: vi.fn(async () => {}),
         sendEditedMessage: vi.fn(async () => false),
+        prepareEditedMessageSend,
         stopLoading,
         setError: vi.fn(),
       },
       'user-1',
-      'updated prompt'
+      'updated prompt',
+      { onOptimisticPublish }
     );
 
     expect(result).toBe(false);
+    expect(prepareEditedMessageSend).toHaveBeenCalledWith(
+      'updated prompt',
+      'session-1',
+      undefined,
+      { providerID: 'openai', modelID: 'gpt-4o' }
+    );
+    expect(pruneMessagesFrom).toHaveBeenCalledWith('session-1', 'user-1');
     expect(restorePrunedMessages).not.toHaveBeenCalled();
+    expect(onOptimisticPublish).not.toHaveBeenCalled();
+    expect(releaseRemovals).toHaveBeenCalledOnce();
     expect(stopLoading).toHaveBeenCalledOnce();
   });
 
@@ -440,6 +464,7 @@ describe('session-controls helpers', () => {
     const setError = vi.fn();
     const sendEditedMessage = vi.fn(async () => true);
     const syncSessionMessages = vi.fn(async () => {});
+    const releaseRemovals = vi.fn();
 
     await editMessageWithDependencies(
       {
@@ -448,6 +473,7 @@ describe('session-controls helpers', () => {
         isSessionWorking: () => false,
         abortSession: vi.fn(async () => {}),
         startLoading: vi.fn(),
+        deferMessageRemovals: vi.fn(() => releaseRemovals),
         pruneMessagesFrom: vi.fn(),
         deleteMessage: vi.fn(async () => {
           throw new Error('delete failed');
@@ -465,6 +491,7 @@ describe('session-controls helpers', () => {
     expect(stopLoading).toHaveBeenCalled();
     expect(setError).toHaveBeenCalledWith('delete failed');
     expect(sendEditedMessage).not.toHaveBeenCalled();
+    expect(releaseRemovals).toHaveBeenCalledOnce();
   });
 
   it('editMessage reports a generic message when a non-Error is thrown', async () => {

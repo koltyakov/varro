@@ -9,6 +9,7 @@ export type AssistantActivityGroupInfo = {
   key: string;
   ownerMessageId: string;
   ownerPartId: string;
+  ownerPinned?: boolean;
   parts: AssistantActivityPart[];
 };
 
@@ -191,7 +192,8 @@ export function getAssistantActivityGroupMap(
 
 export function preserveAssistantActivityGroupKeys(
   current: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  previous: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>
+  previous: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
+  options?: { pinPreviousOwner?: (group: AssistantActivityGroupInfo) => boolean }
 ) {
   const previousGroupByPart = new Map<string, AssistantActivityGroupInfo>();
   for (const groups of previous.values()) {
@@ -221,8 +223,36 @@ export function preserveAssistantActivityGroupKeys(
         previousGroup && !claimedPreviousKeys.has(previousGroup.key)
           ? previousGroup.key
           : group.key;
+      const previousOwnerStillPresent = previousGroup?.parts.some(
+        (part) =>
+          part.messageID === previousGroup.ownerMessageId && part.id === previousGroup.ownerPartId
+      );
+      const ownerChanged =
+        !!previousGroup &&
+        (previousGroup.ownerMessageId !== group.ownerMessageId ||
+          previousGroup.ownerPartId !== group.ownerPartId);
+      const preserveOwner =
+        previousGroup &&
+        previousOwnerStillPresent &&
+        ownerChanged &&
+        (previousGroup.ownerPinned || options?.pinPreviousOwner?.(group));
       claimedPreviousKeys.add(preservedKey);
-      replacements.set(group, preservedKey === group.key ? group : { ...group, key: preservedKey });
+      replacements.set(
+        group,
+        preservedKey === group.key && !preserveOwner
+          ? group
+          : {
+              ...group,
+              key: preservedKey,
+              ...(preserveOwner
+                ? {
+                    ownerMessageId: previousGroup.ownerMessageId,
+                    ownerPartId: previousGroup.ownerPartId,
+                    ownerPinned: true,
+                  }
+                : {}),
+            }
+      );
     }
   }
 

@@ -4924,9 +4924,18 @@ export function MessageList() {
         (!isAssistantActivityPartRunning(part) ||
           !activeMessageIds.has(part.messageID) ||
           visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
+      const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
+        const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
+        return (
+          visibleActiveActivityPartKeys().has(ownerKey) ||
+          retainedActivityPartKeys().has(ownerKey) ||
+          exitingActivityPartKeys().has(ownerKey)
+        );
+      };
       const regularGroupMap = preserveAssistantActivityGroupKeys(
         getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
-        previous.groupMap
+        previous.groupMap,
+        { pinPreviousOwner: ownerIsTransitioning }
       );
       const regularGroupByPartKey = new Map(
         [...regularGroupMap.values()].flatMap((groups) =>
@@ -4983,7 +4992,13 @@ export function MessageList() {
               immediatelyGroupedPartKeys.has(getAssistantActivityPartKey(part)),
             isBoundaryPart
           ),
-          regularGroupMap
+          regularGroupMap,
+          {
+            pinPreviousOwner: (group) => {
+              const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
+              return ownerIsTransitioning(group) || immediatelyGroupedPartKeys.has(ownerKey);
+            },
+          }
         ),
         immediatelyGroupedPartKeys,
       };

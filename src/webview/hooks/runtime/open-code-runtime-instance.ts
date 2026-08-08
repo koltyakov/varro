@@ -796,6 +796,30 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionLifecycleOperations;
   const sessionTitleFallbackAttempts = new Map<string, number>();
   const sessionTitleFallbacks = new Map<string, Promise<void>>();
+  const deferredMessageRemovals = new Map<string, Map<string, number>>();
+
+  function deferMessageRemovals(sessionId: string, messageIds: string[]) {
+    const sessionCounts = deferredMessageRemovals.get(sessionId) ?? new Map<string, number>();
+    deferredMessageRemovals.set(sessionId, sessionCounts);
+    for (const messageId of messageIds) {
+      sessionCounts.set(messageId, (sessionCounts.get(messageId) ?? 0) + 1);
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const messageId of messageIds) {
+        const count = sessionCounts.get(messageId) ?? 0;
+        if (count <= 1) sessionCounts.delete(messageId);
+        else sessionCounts.set(messageId, count - 1);
+      }
+      if (sessionCounts.size === 0) deferredMessageRemovals.delete(sessionId);
+    };
+  }
+
+  function isMessageRemovalDeferred(sessionId: string, messageId: string) {
+    return (deferredMessageRemovals.get(sessionId)?.get(messageId) ?? 0) > 0;
+  }
 
   function repairSessionTitle(sessionId: string): Promise<void> {
     const inFlight = sessionTitleFallbacks.get(sessionId);
@@ -849,6 +873,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       syncPendingPermissions,
       reconcileServerState,
       invalidateMessageSync: messageSyncGenerations.invalidate,
+      isMessageRemovalDeferred,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
       logError,
     });
@@ -1497,6 +1522,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     getMessages: () => appStore.state.messages,
     startLoading: uiStore.startLoading,
     invalidateMessageSync: (sessionId) => messageSyncGenerations.invalidate(sessionId),
+    deferMessageRemovals,
     pruneMessagesFrom: sessionStore.pruneMessagesFrom,
     deleteMessage: (sessionId, messageId) => client.session.deleteMessage(sessionId, messageId),
     revertSession: (sessionId, messageId) => client.session.revert(sessionId, messageId),
@@ -1506,10 +1532,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     isSessionWorking: (sessionId) => isSessionTreeStatusWorking(sessionId),
     sendEditedMessage: (text, sessionId, queuedAttachments) =>
       sessionSendOperations.sendMessage(text, { targetSessionId: sessionId, queuedAttachments }),
-    prepareEditedMessageSend: (text, sessionId, queuedAttachments) =>
+    prepareEditedMessageSend: (text, sessionId, queuedAttachments, optimisticModel) =>
       sessionSendOperations.prepareSendMessage(text, {
         targetSessionId: sessionId,
         queuedAttachments,
+        optimisticModel,
       }),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,

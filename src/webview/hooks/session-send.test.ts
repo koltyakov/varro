@@ -4,6 +4,7 @@ import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { ClipboardImage } from '../lib/app-state-types';
 import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
+import type { SessionSendBody } from './session/session-send';
 import {
   buildSessionSendBody,
   ensureSessionPermissionWithDependencies,
@@ -614,6 +615,7 @@ describe('session-send helpers', () => {
 
   it('publishes the optimistic turn before the session becomes observably busy', async () => {
     const observedStates: Array<{ busy: boolean; trailingUserId: string }> = [];
+    const sendAsync = vi.fn(async (_sessionId: string, _body: SessionSendBody) => {});
     let setBusy: (busy: boolean) => void;
     let setTrailingUserId: (messageId: string) => void;
     const dispose = createRoot((rootDispose) => {
@@ -637,11 +639,8 @@ describe('session-send helpers', () => {
           clearPendingAbort: vi.fn(),
           syncSessionMcps: vi.fn(async () => {}),
           buildSendPayload: () => ({
-            body: {
-              parts: [{ type: 'text', text: 'follow up' }],
-              model: { providerID: 'openai', modelID: 'gpt-4o' },
-            },
-            effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+            body: { parts: [{ type: 'text', text: 'follow up' }] },
+            effectiveModel: null,
           }),
           requestMessageListScrollToBottom: vi.fn(),
           startLoading: vi.fn(),
@@ -653,7 +652,7 @@ describe('session-send helpers', () => {
           beforeOptimisticPublish: () => setTrailingUserId('pruned-user'),
           appendOptimisticMessage: (entry) => setTrailingUserId(entry.info.id),
           removeOptimisticMessage: vi.fn(),
-          sendAsync: vi.fn(async () => {}),
+          sendAsync,
           getMessageCount: () => 1,
           clearDroppedFiles: vi.fn(),
           clearTerminalSelection: vi.fn(),
@@ -667,7 +666,8 @@ describe('session-send helpers', () => {
           stopLoading: vi.fn(),
           shouldClearComposerAfterSend: () => true,
         },
-        'follow up'
+        'follow up',
+        { optimisticModel: { providerID: 'openai', modelID: 'gpt-4o' } }
       );
 
       expect(observedStates).not.toContainEqual({
@@ -675,6 +675,7 @@ describe('session-send helpers', () => {
         trailingUserId: 'completed-user',
       });
       expect(observedStates.every((state) => state.trailingUserId !== 'pruned-user')).toBe(true);
+      expect(sendAsync.mock.calls[0]?.[1]).not.toHaveProperty('model');
     } finally {
       dispose();
     }
@@ -785,6 +786,7 @@ describe('session-send helpers', () => {
   it('bootstraps missing session permissions before sending', async () => {
     const ensureSessionPermission = vi.fn(async () => true);
     const sendAsync = vi.fn(async () => {});
+    const beforeOptimisticPublish = vi.fn();
 
     await sendMessageWithDependencies(
       {
@@ -805,6 +807,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        beforeOptimisticPublish,
         sendAsync,
         getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
@@ -825,6 +828,7 @@ describe('session-send helpers', () => {
     expect(ensureSessionPermission.mock.invocationCallOrder[0]).toBeLessThan(
       sendAsync.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
+    expect(beforeOptimisticPublish).not.toHaveBeenCalled();
   });
 
   it('does not send when permission bootstrap fails', async () => {

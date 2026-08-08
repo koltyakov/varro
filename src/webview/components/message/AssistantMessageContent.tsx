@@ -462,13 +462,7 @@ export function AssistantMessageContent(props: {
   });
   const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
     if (group.ownerMessageId !== props.info.id) return null;
-    return (
-      group.parts.find((part) =>
-        displayParts().some(
-          (displayPart) => displayPart.messageID === part.messageID && displayPart.id === part.id
-        )
-      )?.id ?? null
-    );
+    return displayParts().some((part) => part.id === group.ownerPartId) ? group.ownerPartId : null;
   };
   const finalTextPartId = createMemo(() =>
     getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer, props.textForPart)

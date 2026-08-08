@@ -93,6 +93,7 @@ type EventHandlerDependencies = {
   isSessionTreeStatusWorking(sessionId: string): boolean;
   isSessionInActiveTree?(sessionId: string): boolean;
   getMessages(): MessageEntry[];
+  isMessageRemovalDeferred?(sessionId: string, messageId: string): boolean;
   handoffTodosToMessages(messages?: MessageEntry[]): boolean;
   upsertSession(info: Session): void;
   setSessionCompacting(sessionId: string, compacting: boolean): void;
@@ -163,6 +164,7 @@ type EventHandlerOperationDependencies = {
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   reconcileServerState?: EventHandlerDependencies['reconcileServerState'];
   invalidateMessageSync?: EventHandlerDependencies['invalidateMessageSync'];
+  isMessageRemovalDeferred?: EventHandlerDependencies['isMessageRemovalDeferred'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
   logError: EventHandlerDependencies['logError'];
 };
@@ -185,6 +187,7 @@ export class SessionEventHandlerOperations {
         );
       },
       getMessages: () => appStore.state.messages,
+      isMessageRemovalDeferred: this.deps.isMessageRemovalDeferred,
       handoffTodosToMessages: this.deps.todoSyncOperations.handoffTodosToMessages,
       upsertSession: this.deps.sessionLifecycleOperations.upsertSession,
       setSessionCompacting: sessionStore.setSessionCompacting,
@@ -1297,12 +1300,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sessionId = p.sessionID as string | undefined;
       if (!sessionId) return;
       invalidateMessageLoads(sessionId, true);
+      const messageId = p.messageID as string;
+      if (deps.isMessageRemovalDeferred?.(sessionId, messageId)) return;
       if (isSessionInActiveTree(sessionId)) {
         uiStore.markLoadingActivity();
         sessionStore.clearStreamingState();
-        const nextMessages = deps
-          .getMessages()
-          .filter((m) => m.info.id !== (p.messageID as string));
+        const nextMessages = deps.getMessages().filter((m) => m.info.id !== messageId);
         sessionStore.replaceMessages(nextMessages);
         deps.syncTodosFromMessages(nextMessages);
         scheduleMessageSync(sessionId, true);

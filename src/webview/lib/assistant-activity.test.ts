@@ -242,6 +242,45 @@ describe('assistant activity summaries', () => {
     });
   });
 
+  it('keeps a pinned summary owner while parallel activity continues joining its group', () => {
+    const earlier = completedTool('command-earlier', 'bash');
+    const later = { ...completedTool('command-later', 'bash'), messageID: 'assistant-2' };
+    const previousGroup = {
+      key: 'activity-later',
+      ownerMessageId: 'assistant-2',
+      ownerPartId: later.id,
+      parts: [later],
+    };
+    const currentGroup = {
+      key: 'activity-earlier',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: earlier.id,
+      parts: [earlier, later],
+    };
+    const previous = new Map([['assistant-2', [previousGroup]]]);
+    const current = new Map([
+      ['assistant-1', [currentGroup]],
+      ['assistant-2', [currentGroup]],
+    ]);
+
+    const pinned = preserveAssistantActivityGroupKeys(current, previous, {
+      pinPreviousOwner: () => true,
+    });
+    expect(pinned.get('assistant-1')?.[0]).toMatchObject({
+      key: 'activity-later',
+      ownerMessageId: 'assistant-2',
+      ownerPartId: later.id,
+      ownerPinned: true,
+    });
+
+    const carried = preserveAssistantActivityGroupKeys(current, pinned);
+    expect(carried.get('assistant-1')?.[0]).toMatchObject({
+      ownerMessageId: 'assistant-2',
+      ownerPartId: later.id,
+      ownerPinned: true,
+    });
+  });
+
   it('starts a new activity group after visible response text', () => {
     const command = completedTool('bash-1', 'bash');
     const thought = reasoning('reasoning-1', 2);

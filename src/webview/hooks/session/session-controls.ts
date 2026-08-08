@@ -112,6 +112,7 @@ export async function editMessageWithDependencies(
     abortSession(sessionId: string): Promise<void>;
     startLoading(): void;
     invalidateMessageSync?(sessionId: string): void;
+    deferMessageRemovals?(sessionId: string, messageIds: string[]): () => void;
     pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
     deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
     syncSessionMessages(sessionId: string): Promise<void>;
@@ -123,7 +124,8 @@ export async function editMessageWithDependencies(
     prepareEditedMessageSend?(
       text: string,
       sessionId: string,
-      queuedAttachments?: QueuedAttachmentSnapshot
+      queuedAttachments?: QueuedAttachmentSnapshot,
+      optimisticModel?: ResolvedModel
     ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
     stopLoading(): void;
     setError(message: string): void;
@@ -144,21 +146,35 @@ export async function editMessageWithDependencies(
     (entry) => entry.info.role === 'user' && entry.info.id === messageId
   );
   const target = messages[targetIndex];
-  if (!target || target.info.sessionID !== sessionId) return false;
+  if (!target || target.info.role !== 'user' || target.info.sessionID !== sessionId) return false;
 
   const messagesToDelete = messages.slice(targetIndex).toReversed();
   const sendEditedMessage = deps.prepareEditedMessageSend
-    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments)
+    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, target.info.model)
     : (beforeOptimisticPublish?: () => void) => {
         beforeOptimisticPublish?.();
         return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
       };
+  let historyPruned = false;
+  const pruneHistory = () => {
+    if (historyPruned) return;
+    historyPruned = true;
+    deps.pruneMessagesFrom?.(sessionId, messageId);
+  };
+  let releaseDeferredRemovals: (() => void) | undefined;
+  let removalsReleased = false;
+  const releaseRemovals = () => {
+    if (removalsReleased) return;
+    removalsReleased = true;
+    releaseDeferredRemovals?.();
+  };
   let replacementPublished = false;
   const publishReplacement = () => {
     if (replacementPublished) return;
     replacementPublished = true;
-    deps.pruneMessagesFrom?.(sessionId, messageId);
+    pruneHistory();
     options?.onOptimisticPublish?.();
+    releaseRemovals();
   };
   try {
     deps.startLoading();
@@ -166,11 +182,16 @@ export async function editMessageWithDependencies(
     if (deps.isSessionWorking(sessionId)) {
       await deps.abortSession(sessionId);
     }
+    releaseDeferredRemovals = deps.deferMessageRemovals?.(
+      sessionId,
+      messagesToDelete.map((message) => message.info.id)
+    );
     // Session revert also restores filesystem snapshots; direct history deletion does not.
     for (const message of messagesToDelete) {
       await deps.deleteMessage(sessionId, message.info.id);
     }
   } catch (err) {
+    releaseRemovals();
     await deps.syncSessionMessages(sessionId).catch(() => {});
     if (deps.getActiveSessionId() === sessionId) {
       deps.stopLoading();
@@ -180,13 +201,17 @@ export async function editMessageWithDependencies(
   }
 
   try {
-    if (await sendEditedMessage(publishReplacement)) return true;
+    if (await sendEditedMessage(publishReplacement)) {
+      releaseRemovals();
+      return true;
+    }
   } catch (err) {
     if (deps.getActiveSessionId() === sessionId) {
       deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
     }
   }
-  publishReplacement();
+  pruneHistory();
+  releaseRemovals();
   if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
   return false;
 }
@@ -293,9 +318,11 @@ type SessionControlDependencies = {
   prepareEditedMessageSend?(
     text: string,
     sessionId: string,
-    queuedAttachments?: QueuedAttachmentSnapshot
+    queuedAttachments?: QueuedAttachmentSnapshot,
+    optimisticModel?: ResolvedModel
   ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
   invalidateMessageSync(sessionId: string): void;
+  deferMessageRemovals(sessionId: string, messageIds: string[]): () => void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
   deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
   unrevertSession(sessionId: string): Promise<Session>;
@@ -374,6 +401,7 @@ export class SessionControlOperations {
         abortSession: this.abortSession,
         startLoading: this.deps.startLoading,
         invalidateMessageSync: this.deps.invalidateMessageSync,
+        deferMessageRemovals: this.deps.deferMessageRemovals,
         pruneMessagesFrom: this.deps.pruneMessagesFrom,
         deleteMessage: this.deps.deleteMessage,
         syncSessionMessages: this.deps.syncSessionMessages,

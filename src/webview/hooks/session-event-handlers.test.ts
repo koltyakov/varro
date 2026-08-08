@@ -4398,6 +4398,33 @@ describe('registerSessionEventHandlers', () => {
     expect(syncTodosFromMessages).toHaveBeenLastCalledWith([remainingMessage]);
   });
 
+  it('defers local message removal while an edited replacement is pending', () => {
+    const handlers = installHandlers();
+    const remainingMessage = createUserEntry({ id: 'keep-message' });
+    const removedMessage = createAssistantEntry({ id: 'remove-message' });
+    const syncSessionMessages = vi.fn(async () => {});
+
+    clearStreamingState.mockClear();
+    replaceMessages.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [remainingMessage, removedMessage],
+        isMessageRemovalDeferred: (_sessionId, messageId) => messageId === 'remove-message',
+        syncSessionMessages,
+      })
+    );
+
+    handlers.get('message.removed')?.({
+      properties: { sessionID: 'session-1', messageID: 'remove-message' },
+    });
+
+    expect(clearStreamingState).not.toHaveBeenCalled();
+    expect(replaceMessages).not.toHaveBeenCalled();
+    expect(syncSessionMessages).not.toHaveBeenCalled();
+  });
+
   it('removes a deleted message from cached pages and prompt history', () => {
     const handlers = installHandlers();
     const removedMessage = createUserEntry({ id: 'remove-message' });

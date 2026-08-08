@@ -265,32 +265,67 @@ test.describe('auto-scroll', () => {
           top: number;
           editing: boolean;
           reserveHeight: number;
+          replacementVisible: boolean;
         }>;
       };
       const originalSend = harness.__sendToExtension;
       let delayedDelete = false;
+      let replacementMessageId: string | null = null;
       harness.__sendToExtension = async (message) => {
         const request = message as {
           type?: string;
-          payload?: { method?: string; path?: string };
+          payload?: {
+            method?: string;
+            path?: string;
+            body?: { messageID?: string };
+          };
         };
-        if (
-          !delayedDelete &&
+        const isMessageDelete =
           request.type === 'api/request' &&
           request.payload?.method === 'DELETE' &&
-          request.payload.path?.includes('/message/')
-        ) {
+          request.payload.path?.includes('/message/');
+        if (!delayedDelete && isMessageDelete) {
           delayedDelete = true;
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
+        if (
+          request.type === 'api/request' &&
+          request.payload?.method === 'POST' &&
+          request.payload.path?.endsWith('/prompt_async')
+        ) {
+          replacementMessageId = request.payload.body?.messageID ?? null;
+        }
         await originalSend?.(message);
+        if (isMessageDelete) {
+          const match = request.payload?.path?.match(/^\/session\/([^/]+)\/message\/([^/]+)$/);
+          if (!match) throw new Error('Edited-message delete path is invalid');
+          window.postMessage(
+            {
+              type: 'server/event',
+              payload: {
+                type: 'message.removed',
+                properties: {
+                  sessionID: decodeURIComponent(match[1]!),
+                  messageID: decodeURIComponent(match[2]!),
+                },
+              },
+            },
+            '*'
+          );
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
       };
 
       const container = document.querySelector<HTMLElement>('.interactive-list')!;
       const anchor = container.querySelector<HTMLElement>(
         '[data-msg-id="message-large-assistant-238"]'
       )!;
-      const samples: Array<{ top: number; editing: boolean; reserveHeight: number }> = [];
+      const samples: Array<{
+        top: number;
+        editing: boolean;
+        reserveHeight: number;
+        replacementVisible: boolean;
+      }> = [];
       const sample = () => {
         samples.push({
           top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
@@ -299,6 +334,11 @@ test.describe('auto-scroll', () => {
             container
               .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
               ?.getBoundingClientRect().height ?? 0,
+          replacementVisible:
+            replacementMessageId !== null &&
+            [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].some(
+              (element) => element.dataset.msgId === replacementMessageId
+            ),
         });
         if (samples.length < 50) requestAnimationFrame(sample);
         else harness.editReplacementSamples = samples;
@@ -322,6 +362,7 @@ test.describe('auto-scroll', () => {
               top: number;
               editing: boolean;
               reserveHeight: number;
+              replacementVisible: boolean;
             }>;
           }
         ).editReplacementSamples ?? []
@@ -330,9 +371,20 @@ test.describe('auto-scroll', () => {
       samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
       JSON.stringify(samples)
     ).toBe(true);
+    expect(samples[0]?.editing).toBe(true);
+    expect(
+      samples.every((sample) => sample.editing || sample.replacementVisible),
+      JSON.stringify(samples)
+    ).toBe(true);
+    expect(samples.at(-1)?.reserveHeight).toBe(0);
     await expect(
       page.getByText('Corrected final prompt without a viewport jump.', { exact: true })
     ).toBeVisible();
+    await expect(page.locator('.interactive-list')).not.toHaveClass(/editing-message/);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
   });
 
   test('does not push a full transcript backward when send-time panels collapse', async ({

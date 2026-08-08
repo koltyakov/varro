@@ -520,6 +520,7 @@ test.describe('diff preview anchoring', () => {
     );
     await focusPreview.focus();
     await expect(focusPreview).toBeFocused();
+    await waitForAnimationFrames(page, 2);
     const focusedAnchor = await getVisibleMessageAnchor(list);
 
     await updateDiffPreview(page, messageId, 12);

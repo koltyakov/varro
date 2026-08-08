@@ -193,6 +193,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const loadingTops = [initialLoadingTop, getLoadingTop()].filter(
       (top): top is number => top !== null
     );
+    let summaryMissingFrames = 0;
     for (const animation of exitAnimations) animation.play();
     let framesAfterRemoval = 0;
     for (let frame = 0; frame < 80 && framesAfterRemoval < 4; frame += 1) {
@@ -200,6 +201,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       samples.push(element.isConnected ? element.getBoundingClientRect().height : 0);
       const currentSummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
       if (currentSummary) summaryTops.push(currentSummary.getBoundingClientRect().top);
+      else summaryMissingFrames += 1;
       const loadingTop = getLoadingTop();
       if (loadingTop !== null) loadingTops.push(loadingTop);
       if (!element.isConnected) framesAfterRemoval += 1;
@@ -211,6 +213,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       synchronizedExitAnimationCount: exitAnimations.length,
       summaryMaskBackground,
       summaryMaskWidth,
+      summaryMissingFrames,
       summaryTop,
       summaryTops,
       trayGap,
@@ -228,6 +231,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   await expect(loadingIndicator).toBeVisible();
   expect(transition.synchronizedExitAnimationCount).toBeGreaterThanOrEqual(2);
   expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
+  expect(transition.summaryMissingFrames).toBe(0);
   expect(
     Math.max(...transition.summaryTops) - Math.min(...transition.summaryTops),
     JSON.stringify(transition.summaryTops)

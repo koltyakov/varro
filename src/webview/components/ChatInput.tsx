@@ -86,6 +86,7 @@ import {
   getMessageEditDraftBackup,
   resetMessageEditState,
   setMessageEditDraftBackup,
+  startEditingMessage,
   type MessageEditContext,
 } from '../lib/message-edit-state';
 import { ralphStore } from '../lib/stores/ralph-store';
@@ -1414,6 +1415,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const editing = composerEditingMessage();
     if (editing) {
+      const submittedEdit = captureEditDraftBackup();
+      const previousDraft = getMessageEditDraftBackup();
       const hasEditableAttachments =
         state.droppedFiles.length > 0 ||
         hasSendableImages ||
@@ -1445,14 +1448,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         clearUsageLimitsForSessionTree(composerSessionId());
         sent = await sendMessage(text);
       }
-      if (sent && !optimisticPublished) {
-        resetMessageEditState();
+      if (sent) {
+        if (!optimisticPublished) resetMessageEditState();
       } else if (
-        !optimisticPublished &&
         composerSessionId() === sendSessionId &&
         inputTextMutationVersion() === clearedInputVersion &&
         inputText() === ''
       ) {
+        if (optimisticPublished) {
+          startEditingMessage(editing.messageId, editing.sessionId, text, submittedEdit);
+          if (previousDraft) setMessageEditDraftBackup(previousDraft);
+        }
         setInputText(text);
       }
       return;
