@@ -3,6 +3,7 @@ import {
   attachTestView,
   createServer,
   createSidebarProviderInstance,
+  getConfigurationValue,
   getVscodeMock,
 } from './sidebar-provider.test-support';
 
@@ -46,6 +47,8 @@ describe('SidebarProvider local config routing', () => {
             build: { providerID: 'openai', modelID: 'gpt-5' },
             review: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
           },
+          commitMessageModel: null,
+          autoApproveModel: null,
         },
       },
     });
@@ -80,6 +83,8 @@ describe('SidebarProvider local config routing', () => {
         data: {
           smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
           agentModels: {},
+          commitMessageModel: null,
+          autoApproveModel: null,
         },
       },
     });
@@ -124,7 +129,40 @@ describe('SidebarProvider local config routing', () => {
         data: {
           smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
           agentModels: {},
+          commitMessageModel: null,
+          autoApproveModel: null,
         },
+      },
+    });
+  });
+
+  it.each([
+    ['commit_message', 'commitMessage.model', 'commitMessageModel'],
+    ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
+  ] as const)('writes %s routing to VS Code user settings', async (target, key, responseKey) => {
+    vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 20,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target, providerID: 'openai', modelID: 'gpt-5-mini' },
+      },
+    });
+
+    expect(getConfigurationValue(key)).toBe('openai/gpt-5-mini');
+    expect(vscodeMock.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 20,
+        data: expect.objectContaining({
+          [responseKey]: { providerID: 'openai', modelID: 'gpt-5-mini' },
+        }),
       },
     });
   });
@@ -299,6 +337,8 @@ describe('SidebarProvider local config routing', () => {
         data: {
           smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
           agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
+          commitMessageModel: null,
+          autoApproveModel: null,
         },
       },
     });

@@ -573,7 +573,7 @@ describe('AutoApproveJudge', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('keeps a deleted judge session hidden until its deletion event', async () => {
+  it('uses the VS Code model setting and keeps the deleted session hidden', async () => {
     const hiddenSessions = new HiddenSessionManager();
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
@@ -588,7 +588,12 @@ describe('AutoApproveJudge', () => {
       if (method === 'DELETE' && path === '/session/judge-session-1') return true;
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
-    const judge = new AutoApproveJudge({ request } as never, hiddenSessions);
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      hiddenSessions,
+      async () => false,
+      () => 'openai/gpt-5-mini'
+    );
 
     const result = await judge.judge({
       permission: {
@@ -631,6 +636,7 @@ describe('AutoApproveJudge', () => {
       })
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
+    expect(request).not.toHaveBeenCalledWith('GET', '/config');
   });
 
   it('prefers GPT Luna from a connected provider when small_model is absent', async () => {
@@ -947,14 +953,13 @@ describe('AutoApproveJudge', () => {
 
   it('does not reuse an allow verdict across resolved model contexts', async () => {
     let sessionCount = 0;
-    let smallModel = 'openai/model-one';
+    let configuredModel = 'openai/model-one';
     const messageModels: unknown[] = [];
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === 'POST' && path === '/session') {
         sessionCount += 1;
         return { id: `judge-session-${sessionCount}` };
       }
-      if (method === 'GET' && path === '/config') return { small_model: smallModel };
       if (method === 'POST' && path.endsWith('/message')) {
         messageModels.push((body as { model?: unknown }).model);
         return { info: { structured: { decision: 'allow', reason: 'Local build.' } } };
@@ -962,10 +967,15 @@ describe('AutoApproveJudge', () => {
       if (method === 'DELETE') return true;
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
-    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      new HiddenSessionManager(),
+      async () => false,
+      () => configuredModel
+    );
 
     await judge.judge({ permission: cargoBuildPermission('perm-model-1') });
-    smallModel = 'openai/model-two';
+    configuredModel = 'openai/model-two';
     await judge.judge({ permission: cargoBuildPermission('perm-model-2') });
 
     expect(sessionCount).toBe(2);

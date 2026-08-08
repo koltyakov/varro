@@ -288,7 +288,7 @@ export const client = {
       return apiCall('GET', VARRO_API_ENDPOINTS.openCodeConfig);
     },
     async saveModelRouting(body: {
-      target: 'small_model' | 'agent';
+      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
       providerID: string;
       modelID: string;
       agentName?: string;

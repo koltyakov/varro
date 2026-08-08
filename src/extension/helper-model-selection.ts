@@ -3,37 +3,45 @@ import { asRecord } from '../shared/type-utils';
 import { parseModelRoute } from './sidebar-provider-utils';
 
 type HelperModelSelectionOptions = {
-  smallModel: unknown;
+  configuredModel: unknown;
+  loadSmallModel: () => Promise<unknown>;
   loadProviderConfig: () => Promise<unknown>;
   fallbackModel: ChatModelSelection | null;
   isOpenAIPro: () => Promise<boolean>;
 };
 
 export async function resolveHelperModel({
-  smallModel,
+  configuredModel,
+  loadSmallModel,
   loadProviderConfig,
   fallbackModel,
   isOpenAIPro,
 }: HelperModelSelectionOptions): Promise<ChatModelSelection | null> {
-  const configuredModel = parseModelRoute(smallModel);
-  if (configuredModel) return configuredModel;
+  const route = parseModelRoute(configuredModel);
+  if (route) return route;
+
+  const smallModel = parseModelRoute(await loadSmallModel().catch(() => null));
+  if (smallModel) return smallModel;
 
   const providerConfig = await loadProviderConfig().catch(() => null);
   const luna = findGptLunaModels(providerConfig);
-  if (luna.fast && (await isOpenAIPro().catch(() => false))) return luna.fast;
-  if (luna.standard) return luna.standard;
+  if (luna.openAIFast && (await isOpenAIPro().catch(() => false))) return luna.openAIFast;
+  if (luna.openAI) return luna.openAI;
+  if (luna.copilot) return luna.copilot;
 
   return resolveFallbackModel(providerConfig, fallbackModel);
 }
 
 function findGptLunaModels(value: unknown): {
-  standard: ChatModelSelection | null;
-  fast: ChatModelSelection | null;
+  openAI: ChatModelSelection | null;
+  openAIFast: ChatModelSelection | null;
+  copilot: ChatModelSelection | null;
 } {
   const providers = asRecord(value)?.providers;
-  if (!Array.isArray(providers)) return { standard: null, fast: null };
-  let standard: ChatModelSelection | null = null;
-  let fast: ChatModelSelection | null = null;
+  if (!Array.isArray(providers)) return { openAI: null, openAIFast: null, copilot: null };
+  let openAI: ChatModelSelection | null = null;
+  let openAIFast: ChatModelSelection | null = null;
+  let copilot: ChatModelSelection | null = null;
 
   for (const rawProvider of providers) {
     const provider = asRecord(rawProvider);
@@ -53,14 +61,16 @@ function findGptLunaModels(value: unknown): {
 
       const options = asRecord(model?.options);
       const isFast = /\bfast\b/.test(identity) || options?.serviceTier === 'priority';
-      if (isFast && providerID === 'openai' && !fast) {
-        fast = { providerID, modelID };
-      } else if (!isFast && !/\bpro\b/.test(identity) && !standard) {
-        standard = { providerID, modelID };
+      if (providerID === 'openai' && isFast && !openAIFast) {
+        openAIFast = { providerID, modelID };
+      } else if (providerID === 'openai' && !isFast && !/\bpro\b/.test(identity) && !openAI) {
+        openAI = { providerID, modelID };
+      } else if (providerID === 'github-copilot' && !/\bpro\b/.test(identity) && !copilot) {
+        copilot = { providerID, modelID };
       }
     }
   }
-  return { standard, fast };
+  return { openAI, openAIFast, copilot };
 }
 
 function resolveFallbackModel(

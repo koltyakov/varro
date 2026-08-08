@@ -126,7 +126,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.pinnedSessions = new PinnedSessionManager(persistence);
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
-    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro);
+    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
+      vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveModel', '')
+    );
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
       vscode.workspace
         .getConfiguration('varro')
@@ -160,7 +162,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.runtime.ensureServerStarted(),
       () => this.contextProvider.context.workspacePath || undefined,
       () => this.activeChatModel,
-      isOpenAIPro
+      isOpenAIPro,
+      () => vscode.workspace.getConfiguration('varro').get<string>('commitMessage.model', '')
     );
 
     this.serverEventBridge = new ServerEventBridge(

@@ -207,7 +207,8 @@ function createService(
   hiddenSessions = createHiddenSessions(),
   workspacePath?: string,
   activeModel: { providerID: string; modelID: string; variant?: string } | null = null,
-  openAIPro = false
+  openAIPro = false,
+  configuredModel: unknown = null
 ) {
   const ensureServerStarted = vi.fn(() => Promise.resolve());
   const isOpenAIPro = vi.fn(() => Promise.resolve(openAIPro));
@@ -217,7 +218,8 @@ function createService(
     ensureServerStarted,
     () => workspacePath,
     () => activeModel,
-    isOpenAIPro
+    isOpenAIPro,
+    () => configuredModel
   );
   return { service, request, hiddenSessions, ensureServerStarted, isOpenAIPro };
 }
@@ -262,7 +264,7 @@ beforeEach(() => {
 });
 
 describe('CommitMessageService', () => {
-  it('generates a scoped staged-only message with the small model and deny-all permissions', async () => {
+  it('generates a scoped staged-only message with the VS Code model setting', async () => {
     const patch = `${'x'.repeat(100_005)}SECRET_TAIL`;
     const repository = createRepository('/repo with spaces', patch);
     repository.state.indexChanges.push({ uri: uri('/repo with spaces/docs/complete path.md') });
@@ -281,7 +283,14 @@ describe('CommitMessageService', () => {
         },
       },
     });
-    const { service, hiddenSessions, ensureServerStarted, isOpenAIPro } = createService(request);
+    const { service, hiddenSessions, ensureServerStarted, isOpenAIPro } = createService(
+      request,
+      createHiddenSessions(),
+      undefined,
+      null,
+      false,
+      'anthropic/claude-haiku'
+    );
 
     await service.generate();
 
@@ -308,7 +317,6 @@ describe('CommitMessageService', () => {
     const directory = 'directory=%2Frepo%20with%20spaces';
     expect(request.mock.calls.map(([method, path]) => [method, path])).toEqual([
       ['POST', `/session?${directory}`],
-      ['GET', `/config?${directory}`],
       ['POST', `/session/helper-1/message?${directory}`],
       ['DELETE', `/session/helper-1?${directory}`],
     ]);
@@ -325,7 +333,7 @@ describe('CommitMessageService', () => {
 
     const messageBody = requestBody(request, '/message?');
     expect(messageBody).toMatchObject({
-      model: { providerID: 'openai', modelID: 'gpt-4o-mini' },
+      model: { providerID: 'anthropic', modelID: 'claude-haiku' },
       format: {
         type: 'json_schema',
         retryCount: 1,

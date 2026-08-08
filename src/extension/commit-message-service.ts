@@ -103,7 +103,8 @@ export class CommitMessageService {
     private readonly ensureServerStarted: () => Promise<unknown>,
     private readonly getWorkspacePath: () => string | undefined,
     private readonly getActiveChatModel: () => ChatModelSelection | null = () => null,
-    private readonly isOpenAIPro: () => Promise<boolean> = async () => false
+    private readonly isOpenAIPro: () => Promise<boolean> = async () => false,
+    private readonly getConfiguredModel: () => unknown = () => null
   ) {}
 
   async generate(sourceControl?: vscode.SourceControl): Promise<void> {
@@ -351,11 +352,7 @@ export class CommitMessageService {
       if (!attempt.sessionID) throw new Error('OpenCode did not create a helper session.');
       throwIfCancelled(attempt);
 
-      const config = asRecord(
-        await this.server.request('GET', scopedPath('/config', attempt.directory)).catch(() => null)
-      );
-      throwIfCancelled(attempt);
-      const route = await this.resolveCommitModel(config, attempt.directory);
+      const route = await this.resolveCommitModel(attempt.directory);
       throwIfCancelled(attempt);
       const response = await this.server.request(
         'POST',
@@ -384,12 +381,13 @@ export class CommitMessageService {
     }
   }
 
-  private async resolveCommitModel(
-    config: Record<string, unknown> | null,
-    directory: string
-  ): Promise<ChatModelSelection | null> {
+  private async resolveCommitModel(directory: string): Promise<ChatModelSelection | null> {
     return resolveHelperModel({
-      smallModel: config?.small_model,
+      configuredModel: this.getConfiguredModel(),
+      loadSmallModel: async () => {
+        const config = asRecord(await this.server.request('GET', scopedPath('/config', directory)));
+        return config?.small_model;
+      },
       loadProviderConfig: () =>
         this.server.request('GET', scopedPath('/config/providers', directory)),
       fallbackModel: this.getActiveChatModel(),

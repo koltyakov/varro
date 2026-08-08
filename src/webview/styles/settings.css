@@ -491,6 +491,7 @@
 }
 
 .settings-route-tag {
+  padding: 0 4px;
   background: color-mix(in srgb, var(--color-vscode-accent) 20%, transparent);
   color: var(--color-vscode-accent);
 }
@@ -526,6 +527,10 @@
   font-size: 12px;
   color: var(--color-vscode-fg);
   cursor: pointer;
+}
+
+.settings-context-menu-item strong {
+  font-weight: 600;
 }
 
 .settings-context-menu-item:hover,

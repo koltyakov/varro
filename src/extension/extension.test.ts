@@ -865,4 +865,20 @@ describe('extension manifest', () => {
       maximum: 65_535,
     });
   });
+
+  it('contributes user-scoped helper model settings', () => {
+    const properties = packageJson.contributes.configuration.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    for (const key of ['varro.commitMessage.model', 'varro.chat.autoApproveModel']) {
+      expect(properties[key]).toMatchObject({
+        type: 'string',
+        scope: 'application',
+        default: '',
+        pattern: '^$|^[^/\\s]+/[^\\s]+$',
+      });
+    }
+  });
 });

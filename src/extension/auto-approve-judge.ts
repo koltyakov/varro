@@ -64,7 +64,8 @@ export class AutoApproveJudge {
   constructor(
     private readonly server: OpenCodeRequest,
     private readonly hiddenSessions: HiddenSessionManager,
-    private readonly isOpenAIPro: () => Promise<boolean> = async () => false
+    private readonly isOpenAIPro: () => Promise<boolean> = async () => false,
+    private readonly getConfiguredModel: () => unknown = () => null
   ) {}
 
   async judge(request: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
@@ -217,9 +218,12 @@ export class AutoApproveJudge {
   private async resolveJudgeModel(
     fallbackModel: AutoApproveJudgeRequest['model']
   ): Promise<JudgeModel | null> {
-    const config = asRecord(await this.server.request('GET', '/config').catch(() => null));
     return resolveHelperModel({
-      smallModel: config?.small_model,
+      configuredModel: this.getConfiguredModel(),
+      loadSmallModel: async () => {
+        const config = asRecord(await this.server.request('GET', '/config'));
+        return config?.small_model;
+      },
       loadProviderConfig: () => this.server.request('GET', '/config/providers'),
       fallbackModel: normalizeModel(fallbackModel),
       isOpenAIPro: this.isOpenAIPro,

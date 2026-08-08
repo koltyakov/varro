@@ -31,6 +31,10 @@ type ModelContextMenuState = {
   providerID: string;
   modelID: string;
 };
+type ModelRouteTag = {
+  text: string;
+  label: string;
+};
 
 const MIN_RELOAD_INDICATOR_MS = 500;
 
@@ -100,7 +104,7 @@ export function ModelsPanel() {
   }
 
   async function saveRouting(body: {
-    target: 'small_model' | 'agent';
+    target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
     providerID: string;
     modelID: string;
     agentName?: string;
@@ -332,7 +336,35 @@ export function ModelsPanel() {
                   })
                 }
               >
-                Use for small_model
+                Use as <strong>small</strong> model
+              </button>
+              <button
+                type="button"
+                class="settings-context-menu-item"
+                disabled={isSaving()}
+                onClick={() =>
+                  void saveRouting({
+                    target: 'commit_message',
+                    providerID: menu.providerID,
+                    modelID: menu.modelID,
+                  })
+                }
+              >
+                Use for <strong>commit messages</strong>
+              </button>
+              <button
+                type="button"
+                class="settings-context-menu-item"
+                disabled={isSaving()}
+                onClick={() =>
+                  void saveRouting({
+                    target: 'auto_approve',
+                    providerID: menu.providerID,
+                    modelID: menu.modelID,
+                  })
+                }
+              >
+                Use for <strong>auto-approve</strong>
               </button>
               <For each={routableAgents()}>
                 {(agent) => (
@@ -349,7 +381,7 @@ export function ModelsPanel() {
                       })
                     }
                   >
-                    Use for agent: {agent.name}
+                    Use for <strong>{agent.name}</strong> agent
                   </button>
                 )}
               </For>
@@ -479,11 +511,7 @@ function ProviderSection(props: {
                         <Show when={releaseDate()}>{(date) => date()}</Show>
                       </span>
                       <span class="settings-model-badges">
-                        <For each={routeTags()}>
-                          {(tag) => (
-                            <span class="model-capability-tag settings-route-tag">{tag}</span>
-                          )}
-                        </For>
+                        <For each={routeTags()}>{(tag) => <ModelRouteBadge tag={tag} />}</For>
                         <Show when={supportsTools()}>
                           <span class="model-capability-tag model-capability-tag-tools">Tools</span>
                         </Show>
@@ -516,25 +544,53 @@ function ProviderSection(props: {
 }
 
 function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, modelID: string) {
-  const tags: string[] = [];
+  const tags: ModelRouteTag[] = [];
 
   if (routing.smallModel?.providerID === providerID && routing.smallModel.modelID === modelID) {
-    tags.push('small_model');
+    tags.push({ text: 'small', label: 'Small model' });
+  }
+
+  if (
+    routing.commitMessageModel?.providerID === providerID &&
+    routing.commitMessageModel.modelID === modelID
+  ) {
+    tags.push({ text: 'commit', label: 'Commit message model' });
+  }
+
+  if (
+    routing.autoApproveModel?.providerID === providerID &&
+    routing.autoApproveModel.modelID === modelID
+  ) {
+    tags.push({ text: 'auto', label: 'Auto-approve model' });
   }
 
   for (const [agentName, route] of Object.entries(routing.agentModels ?? {})) {
     if (route.providerID === providerID && route.modelID === modelID) {
-      tags.push(`agent: ${agentName}`);
+      tags.push({ text: agentName, label: `Agent model: ${agentName}` });
     }
   }
 
   return tags;
 }
 
+function ModelRouteBadge(props: { tag: ModelRouteTag }) {
+  return (
+    <span
+      class="model-capability-tag settings-route-tag"
+      title={props.tag.label}
+      aria-label={props.tag.label}
+    >
+      {props.tag.text}
+    </span>
+  );
+}
+
 function createEmptyRouting(): OpenCodeModelRouting {
   return {
     smallModel: null,
     agentModels: {},
+    commitMessageModel: null,
+    autoApproveModel: null,
   };
 }
 
@@ -544,6 +600,8 @@ function normalizeModelRouting(value: unknown): OpenCodeModelRouting {
 
   // preview.html proxies directly to OpenCode, which may expose raw opencode.json keys.
   const smallModel = parseModelRoute(record.smallModel) ?? parseModelRoute(record.small_model);
+  const commitMessageModel = parseModelRoute(record.commitMessageModel);
+  const autoApproveModel = parseModelRoute(record.autoApproveModel);
   const agentModels: OpenCodeModelRouting['agentModels'] = {};
   const rawAgents = asRecord(record.agent);
 
@@ -563,7 +621,7 @@ function normalizeModelRouting(value: unknown): OpenCodeModelRouting {
     }
   }
 
-  return { smallModel, agentModels };
+  return { smallModel, agentModels, commitMessageModel, autoApproveModel };
 }
 
 function parseModelRoute(value: unknown): OpenCodeModelRouting['smallModel'] {

@@ -58,7 +58,7 @@ type OpenCodeConfigRequest =
   | { kind: 'get' }
   | {
       kind: 'update';
-      target: 'small_model' | 'agent';
+      target: 'small_model' | 'agent' | 'commit_message' | 'auto_approve';
       providerID: string;
       modelID: string;
       agentName?: string;
@@ -206,7 +206,7 @@ export class RestProxy {
         const data =
           openCodeConfigRequest.kind === 'get'
             ? await this.readOpenCodeModelRouting()
-            : await this.updateOpenCodeModelRouting(openCodeConfigRequest);
+            : await this.updateModelRouting(openCodeConfigRequest);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -1210,6 +1210,10 @@ export class RestProxy {
       return { kind: 'update', target, providerID, modelID };
     }
 
+    if (target === 'commit_message' || target === 'auto_approve') {
+      return { kind: 'update', target, providerID, modelID };
+    }
+
     if (target === 'agent') {
       const agentName = typeof payload?.agentName === 'string' ? payload.agentName.trim() : '';
       if (!agentName) {
@@ -1326,7 +1330,13 @@ export class RestProxy {
       }
     }
 
-    return { smallModel, agentModels };
+    const extensionConfig = vscode.workspace.getConfiguration('varro');
+    return {
+      smallModel,
+      agentModels,
+      commitMessageModel: parseModelRoute(extensionConfig.get('commitMessage.model')),
+      autoApproveModel: parseModelRoute(extensionConfig.get('chat.autoApproveModel')),
+    };
   }
 
   private async readOpenCodeModelRouting(): Promise<OpenCodeModelRouting> {
@@ -1334,9 +1344,26 @@ export class RestProxy {
     return this.normalizeOpenCodeModelRouting(config);
   }
 
+  private async updateModelRouting(
+    request: Extract<OpenCodeConfigRequest, { kind: 'update' }>
+  ): Promise<OpenCodeModelRouting> {
+    if (request.target === 'commit_message' || request.target === 'auto_approve') {
+      const key =
+        request.target === 'commit_message' ? 'commitMessage.model' : 'chat.autoApproveModel';
+      await vscode.workspace
+        .getConfiguration('varro')
+        .update(key, `${request.providerID}/${request.modelID}`, vscode.ConfigurationTarget.Global);
+      return this.readOpenCodeModelRouting();
+    }
+    return this.updateOpenCodeModelRouting(request);
+  }
+
   private async updateOpenCodeModelRouting(
     request: Extract<OpenCodeConfigRequest, { kind: 'update' }>
   ): Promise<OpenCodeModelRouting> {
+    if (request.target !== 'small_model' && request.target !== 'agent') {
+      throw new Error('Unsupported OpenCode model routing target');
+    }
     const { files, target } = await this.readOpenCodeConfigObject();
     const { uri } = target;
     const dirtyDocument = vscode.workspace.textDocuments.find(

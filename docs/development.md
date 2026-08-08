@@ -314,7 +314,7 @@ The implementation in `src/extension/provider-limit-service.ts` and `src/extensi
 
 Results are cached briefly in the extension host before being shown in the composer toolbar.
 
-Adapters may read OpenCode and provider-specific local credentials, inspect local provider metadata, and make authenticated quota requests. The Anthropic adapter can refresh and atomically update `~/.claude/.credentials.json` when credentials from that file are rejected. Commit-message generation can also make a one-off OpenAI quota lookup for GPT Luna Fast eligibility when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available. See [Provider-Limit Polling And Credentials](usage.md#provider-limit-polling-and-credentials) for the user-facing disclosure.
+Adapters may read OpenCode and provider-specific local credentials, inspect local provider metadata, and make authenticated quota requests. The Anthropic adapter can refresh and atomically update `~/.claude/.credentials.json` when credentials from that file are rejected. Commit-message generation and the auto-approve judge can also make a one-off OpenAI quota lookup for GPT Luna Fast eligibility when neither their VS Code model setting nor a valid `small_model` is configured and an OpenAI GPT Luna Fast model is available. See [Provider-Limit Polling And Credentials](usage.md#provider-limit-polling-and-credentials) for the user-facing disclosure.
 
 ## MCP And Plan Flows
 

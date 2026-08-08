@@ -35,6 +35,8 @@ export type OpenCodeModelRoute = {
 export type OpenCodeModelRouting = {
   smallModel: OpenCodeModelRoute | null;
   agentModels: Record<string, OpenCodeModelRoute>;
+  commitMessageModel: OpenCodeModelRoute | null;
+  autoApproveModel: OpenCodeModelRoute | null;
 };
 
 export type ProviderAuthError = {

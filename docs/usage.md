@@ -181,7 +181,7 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Choose a reasoning variant when the selected model exposes variants.
 - Open the MCP picker to connect or disconnect session MCPs.
 - Open the model picker footer to hide or show providers and individual models.
-- In the model settings view, right-click a model to assign it to project `small_model` or to an available sub-agent. Varro updates the project OpenCode configuration after checking for unsaved or concurrent changes.
+- In the model settings view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
 
 The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
 
@@ -208,7 +208,7 @@ To retrieve quota metadata, the extension host can:
 - Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
 - Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
 
-When no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation and the auto-approve judge can also make a one-off OpenAI quota lookup to determine whether that model is eligible.
+When neither the corresponding VS Code model setting nor a valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation and the auto-approve judge can also make a one-off OpenAI quota lookup to determine whether that model is eligible.
 
 ### Recommended OpenCode Configuration
 
@@ -298,6 +298,8 @@ OpenCode approval flows stay inside the chat UI.
 
 `Auto approve` is the first-run mode. It applies conservative local rules to eligible workspace edits and commands. Requests that cannot be decided locally may be sent, with their command, path, metadata, and recent approval examples, to the configured model in a temporary hidden judge session. Allowed verdicts are cached briefly for identical permission context. Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
 
+The judge uses `varro.chat.autoApproveModel` first, then OpenCode's `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, and the selected Varro session model. Right-click a model in the Models view to set the VS Code user setting.
+
 `Full access` updates the session permission rules and auto-approves pending permission prompts for that session. Select it only when the session can operate without confirmation.
 
 ## Generate Commit Messages
@@ -312,11 +314,13 @@ Generation is staged-only. Unstaged changes are not sent to the model or describ
 
 The model is selected in this order:
 
-1. OpenCode's repository-scoped `small_model`, when configured
-2. OpenAI GPT Luna Fast when the connected account is confirmed as a Pro plan
-3. A standard GPT Luna model exposed by a connected provider
-4. The active Varro chat model, using an available low-reasoning variant instead of the selected high or max variant
-5. OpenCode's default model when none of the preceding routes is available
+1. The `varro.commitMessage.model` VS Code user setting
+2. OpenCode's repository-scoped `small_model`, when configured
+3. OpenAI GPT Luna, preferring Luna Fast when the connected account is confirmed as a Pro plan
+4. GitHub Copilot GPT Luna
+5. The active Varro chat model, using an available low-reasoning variant instead of the selected high or max variant
+
+When no explicit route is available, the helper request omits its model and OpenCode uses its default. Right-click a model in the Models view to update the VS Code user setting.
 
 All staged paths, up to the first 100,000 characters of the staged patch, and up to ten recent commit subjects are treated as untrusted input in a temporary tool-disabled session. Split larger staged diffs into smaller commits for the most accurate result. Varro never logs the patch, stages files, or executes the commit. It also rechecks the staged diff and commit input before applying a result, so a slow generation cannot silently overwrite newer work.
 
@@ -352,7 +356,7 @@ Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal 
 - `Varro: About`
 - `Varro: Show Output`
 - `Varro: Open Source Control`
-- `Varro: Generate Commit Message` generates from staged changes with OpenCode's configured `small_model`; otherwise it prefers GPT Luna Fast for a confirmed OpenAI Pro account, standard GPT Luna, the active chat model at low reasoning, and finally OpenCode's default model. It fills the selected Git repository's commit input without committing
+- `Varro: Generate Commit Message` generates from staged changes using the configured VS Code commit-message model, OpenCode `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, or the active chat model at low reasoning, in that order. It fills the selected Git repository's commit input without committing
 - `Varro: Open Global AGENTS.md`
 - `Varro: Initialize Project AGENTS.md`
 - `Varro: Add to Context` from Explorer, from the Command Palette (adds the active file), or `Cmd+Shift+K` / `Ctrl+Shift+K` when focus is outside the editor and terminal
@@ -371,12 +375,17 @@ Server:
 Chat view:
 
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
+- `varro.chat.autoApproveModel` - provider/model used by the auto-approve judge; stored in VS Code user settings and selected from Varro's Models view
 - `varro.chat.showInlineFileChanges` - show line-by-line edits in file-change tool cards; defaults to `true`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`
 - `varro.chat.autoRenameUntitledSessions` - generate a fallback title when OpenCode leaves a session untitled; defaults to `false`
 - `varro.chat.autoCompact` - enable automatic OpenCode session compaction when context is full unless project `opencode.json` overrides it; defaults to `true`
 - `varro.chat.autoCompactionReservedTokens` - reserved token headroom before automatic compaction triggers; defaults to `4096`, or set it to `null` to use OpenCode defaults
+
+Commit messages:
+
+- `varro.commitMessage.model` - provider/model used to generate commit messages; stored in VS Code user settings and selected from Varro's Models view
 
 There are also deprecated debug-only settings used for development and recovery testing:
 

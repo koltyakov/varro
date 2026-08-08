@@ -61,6 +61,8 @@ beforeEach(() => {
   clientMocks.openCodeConfig.mockResolvedValue({
     smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
     agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
+    commitMessageModel: { providerID: 'openai', modelID: 'gpt-5' },
+    autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
   });
   clientMocks.saveModelRouting.mockResolvedValue({
     small_model: 'openai/gpt-5',
@@ -288,8 +290,22 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('small_model');
-    expect(container?.textContent).toContain('agent: build');
+    const tags = Array.from(container?.querySelectorAll('.settings-route-tag') ?? []);
+    const labels = tags.map((tag) => tag.getAttribute('aria-label'));
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'Small model',
+        'Agent model: build',
+        'Commit message model',
+        'Auto-approve model',
+      ])
+    );
+    expect(tags.every((tag) => tag.getAttribute('title') === tag.getAttribute('aria-label'))).toBe(
+      true
+    );
+    expect(tags.map((tag) => tag.textContent)).toEqual(
+      expect.arrayContaining(['small', 'commit', 'auto', 'build'])
+    );
   });
 
   it('accepts preview routing payloads without normalized agentModels', async () => {
@@ -301,8 +317,8 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
-    expect(container?.textContent).toContain('small_model');
-    expect(container?.textContent).toContain('agent: review');
+    expect(container?.querySelector('[aria-label="Small model"]')).toBeTruthy();
+    expect(container?.querySelector('[aria-label="Agent model: review"]')).toBeTruthy();
   });
 
   it('opens the model context menu and saves a routing assignment', async () => {
@@ -324,15 +340,18 @@ describe('ModelsPanel', () => {
     );
 
     const menuItems = Array.from(document.querySelectorAll('.settings-context-menu-item'));
-    expect(menuItems.some((item) => item.textContent?.includes('Use for agent: build'))).toBe(
-      false
+    expect(menuItems.map((item) => item.querySelector('strong')?.textContent)).toEqual(
+      expect.arrayContaining(['small', 'commit messages', 'auto-approve', 'review'])
     );
-    expect(menuItems.some((item) => item.textContent?.includes('Use for agent: review'))).toBe(
+    expect(menuItems.some((item) => item.textContent?.includes('Use for build agent'))).toBe(false);
+    expect(menuItems.some((item) => item.textContent?.includes('Use for review agent'))).toBe(true);
+    expect(menuItems.some((item) => item.textContent?.includes('Use for commit messages'))).toBe(
       true
     );
+    expect(menuItems.some((item) => item.textContent?.includes('Use for auto-approve'))).toBe(true);
 
     const button = menuItems.find((item) =>
-      item.textContent?.includes('Use for small_model')
+      item.textContent?.includes('Use as small model')
     ) as HTMLButtonElement;
     expect(button).toBeTruthy();
     button.click();

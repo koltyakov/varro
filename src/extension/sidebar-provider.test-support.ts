@@ -2,6 +2,7 @@ import { beforeEach, vi } from 'vitest';
 import type * as FsPromises from 'fs/promises';
 
 const mocks = vi.hoisted(() => ({
+  configurationValues: new Map<string, unknown>(),
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -43,7 +44,10 @@ const mocks = vi.hoisted(() => ({
     },
     workspace: {
       asRelativePath: vi.fn((uri: { fsPath: string }) => uri.fsPath),
-      textDocuments: [] as Array<{ isDirty: boolean; uri: { fsPath: string; toString(): string } }>,
+      textDocuments: [] as Array<{
+        isDirty: boolean;
+        uri: { fsPath: string; toString(): string };
+      }>,
       createFileSystemWatcher: vi.fn(() => ({
         onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
         onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
@@ -54,10 +58,7 @@ const mocks = vi.hoisted(() => ({
       registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
       onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       getWorkspaceFolder: vi.fn(() => undefined),
-      getConfiguration: vi.fn(() => ({
-        get: vi.fn((_key: string, fallback?: unknown) => fallback),
-        update: vi.fn(() => Promise.resolve()),
-      })),
+      getConfiguration: vi.fn(),
       fs: {
         readFile: vi.fn(),
         stat: vi.fn(),
@@ -87,6 +88,7 @@ const mocks = vi.hoisted(() => ({
       Directory: 2,
       SymbolicLink: 64,
     },
+    ConfigurationTarget: { Global: 1 },
     Uri: {
       joinPath: vi.fn(() => ({ toString: () => 'vscode-resource://icon.png' })),
       file: vi.fn((fsPath: string) => ({ fsPath, toString: () => fsPath })),
@@ -112,6 +114,10 @@ export function getProviderSignatureFileSystemMock() {
 
 export function getVscodeMock() {
   return mocks.vscode;
+}
+
+export function getConfigurationValue(key: string) {
+  return mocks.configurationValues.get(key);
 }
 
 vi.mock('vscode', () => mocks.vscode);
@@ -253,6 +259,18 @@ export async function createSidebarProviderInstance(
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  mocks.configurationValues.clear();
+  mocks.vscode.workspace.getConfiguration.mockReset();
+  mocks.vscode.workspace.getConfiguration.mockImplementation(() => ({
+    get: vi.fn((key: string, fallback?: unknown) =>
+      mocks.configurationValues.has(key) ? mocks.configurationValues.get(key) : fallback
+    ),
+    update: vi.fn((key: string, value: unknown) => {
+      if (value === undefined) mocks.configurationValues.delete(key);
+      else mocks.configurationValues.set(key, value);
+      return Promise.resolve();
+    }),
+  }));
 
   mocks.spawn.mockReset();
   mocks.mkdtemp.mockReset();

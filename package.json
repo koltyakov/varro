@@ -287,6 +287,14 @@
           "default": "auto",
           "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` asks before state-changing actions, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
         },
+        "varro.chat.autoApproveModel": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+          "markdownDescription": "Provider/model used by the auto-approve judge. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
+        },
         "varro.chat.autoRenameUntitledSessions": {
           "type": "boolean",
           "default": false,
@@ -305,6 +313,14 @@
           "minimum": 0,
           "default": 4096,
           "description": "Reserved token headroom before automatic OpenCode compaction triggers. Lower values compact later. Set to null to use OpenCode defaults. Project opencode.json overrides this setting."
+        },
+        "varro.commitMessage.model": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "pattern": "^$|^[^/\\s]+/[^\\s]+$",
+          "patternErrorMessage": "Use provider/model, or leave the setting empty.",
+          "markdownDescription": "Provider/model used to generate commit messages. Leave empty to let Varro select a suitable model automatically. Select a configured model from Varro's Models view."
         },
         "varro.debug.simulateMissingCli": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",
