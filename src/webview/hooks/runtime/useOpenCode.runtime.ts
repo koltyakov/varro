@@ -1,6 +1,6 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
 import type { PermissionMode } from '../../../shared/protocol';
-import type { QueuedMessage, SessionSelectionOptions } from '../../lib/app-state-types';
+import type { SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
@@ -101,12 +101,9 @@ export async function sendMessage(
     agent?: string;
     noReply?: boolean;
     delivery?: 'steer' | 'queue';
-    queuedAttachments?: {
-      droppedFiles?: QueuedMessage['droppedFiles'];
-      clipboardImages?: QueuedMessage['clipboardImages'];
-      terminalSelection?: QueuedMessage['terminalSelection'];
-    };
+    queuedAttachments?: QueuedAttachmentSnapshot;
     preserveComposer?: boolean;
+    targetSessionId?: string;
   }
 ): Promise<boolean> {
   return await getCurrentOpenCodeRuntime().sendMessage(text, options);

@@ -250,8 +250,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   const finalSummaryBox = (await summary.boundingBox())!;
   const finalLoadingBox = (await loadingRow.locator('.loading-verb').boundingBox())!;
   const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
-  expect(settledGap).toBeGreaterThanOrEqual(5);
-  expect(settledGap).toBeLessThanOrEqual(8.5);
+  expect(settledGap).toBeGreaterThanOrEqual(10);
+  expect(settledGap).toBeLessThanOrEqual(14.5);
 });
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
@@ -1052,10 +1052,10 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
       if (!loadingVerb) throw new Error('Thinking indicator is missing');
       return loadingVerb.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
     });
-  expect(await measureGap()).toBe(6);
+  expect(await measureGap()).toBe(12);
   expect(
     await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
-  ).toBe(16);
+  ).toBe(21);
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {
@@ -1089,7 +1089,7 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
   await expect(emptyRow).toBeAttached();
   await expect(emptyRow).toHaveClass(/interactive-item-render-empty/);
   expect((await emptyRow.boundingBox())?.height).toBe(0);
-  expect(await measureGap()).toBe(6);
+  expect(await measureGap()).toBe(12);
 });
 
 test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({

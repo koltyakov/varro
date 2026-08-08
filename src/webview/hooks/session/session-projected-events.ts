@@ -8,6 +8,7 @@ import {
   getToolErrorMessage,
   getToolStartTime,
   getToolStateInput,
+  latestAssistantMessageForSession,
   parseToolInput,
   toolOutputToString,
 } from './session-event-utils';
@@ -94,13 +95,16 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
   ) => {
     const assistantMessageID = getEventString(props, 'assistantMessageID');
     const callID = getEventString(props, 'callID');
-    if (!assistantMessageID || !callID) return false;
-    const message = ctx.findAssistantMessage(sessionId, assistantMessageID);
+    if (!callID) return false;
+    const message =
+      ctx.findAssistantMessage(sessionId, assistantMessageID) ||
+      latestAssistantMessageForSession(ctx.getMessages(), sessionId);
     if (!message) {
       ctx.scheduleActiveMessageSync(sessionId);
       return false;
     }
-    const existing = findPart(assistantMessageID, callID);
+    const messageID = message.info.id;
+    const existing = findPart(messageID, callID);
     const existingTool = existing?.type === 'tool' ? existing : null;
     const timestamp = getEventTimestamp(props);
     const toolName =
@@ -121,7 +125,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
-        messageID: assistantMessageID,
+        messageID,
         type: 'tool',
         callID,
         tool: toolName,
@@ -134,7 +138,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
-        messageID: assistantMessageID,
+        messageID,
         type: 'tool',
         callID,
         tool: toolName,
@@ -148,7 +152,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
-        messageID: assistantMessageID,
+        messageID,
         type: 'tool',
         callID,
         tool: toolName,
@@ -187,7 +191,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
-        messageID: assistantMessageID,
+        messageID,
         type: 'tool',
         callID,
         tool: toolName,
@@ -214,7 +218,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
-        messageID: assistantMessageID,
+        messageID,
         type: 'tool',
         callID,
         tool: toolName,

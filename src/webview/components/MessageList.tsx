@@ -156,6 +156,7 @@ const VIRTUALIZE_THRESHOLD = 50;
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_COLLISION_BUFFER_PX = 8;
 const STICKY_NAVIGATION_SETTLE_FRAME_LIMIT = 32;
+const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
@@ -621,6 +622,8 @@ export function MessageList() {
   let previousAutoScrollEnabled = true;
   let pinnedToBottom = true;
   let activeFollowLoopSessionId: string | null = null;
+  let bottomFollowSettleFrames = 0;
+  let bottomFollowObservedStreaming = false;
   const activeOlderHistoryLoads = new Map<
     string,
     { generation: number; windowVersion: number; promise: Promise<void> }
@@ -664,6 +667,7 @@ export function MessageList() {
   let pendingWidthFollowCorrection = false;
   let widthResizeAnchor: VisibleScrollAnchor | null = null;
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
+  let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
@@ -1990,11 +1994,17 @@ export function MessageList() {
     // ResizeObserver reports after layout. Use the old prefix metrics to offset growth above the
     // viewport before paint, including while the user is actively scrolling.
     const metricsBefore = containerRef && shouldVirtualize() ? virtualMetrics() : null;
+    const activeSessionId = state.activeSessionId;
+    const historyOwnsAnchor = !!(
+      activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId)?.anchor
+    );
     let firstVisibleIndex: number | null = null;
-    if (metricsBefore && containerRef && !autoScroll()) {
+    if (metricsBefore && containerRef && !autoScroll() && !historyOwnsAnchor) {
       firstVisibleIndex =
         options?.widthReflow && widthResizeAnchor
           ? (messageIndexById().get(widthResizeAnchor.messageId) ?? null)
+          : lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+            ? (messageIndexById().get(lastDetachedVisibleAnchor.messageId) ?? null)
           : getFirstVisibleMessageIndexFromVirtualMetrics({
               metrics: metricsBefore,
               scrollTop: getVirtualScrollTop(containerRef.scrollTop),
@@ -3263,10 +3273,17 @@ export function MessageList() {
       activeFollowLoopSessionId = null;
       return;
     }
-    if (activeFollowLoopSessionId === sessionId) return;
+    bottomFollowSettleFrames = 0;
+    const currentlyStreaming =
+      state.streamingText.length > 0 || !!state.streamingPartId || !!visibleRunningToolPart();
+    if (activeFollowLoopSessionId === sessionId) {
+      if (currentlyStreaming) bottomFollowObservedStreaming = true;
+      return;
+    }
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
+    bottomFollowObservedStreaming = currentlyStreaming;
 
     if (options?.immediate) {
       tick();
@@ -3310,12 +3327,19 @@ export function MessageList() {
 
       const isStreaming =
         state.streamingText.length > 0 || state.streamingPartId || visibleRunningToolPart();
+      if (isStreaming) bottomFollowObservedStreaming = true;
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
         Math.abs(currentBottomScrollTop - lastAutoScrolledBottomScrollTop) <= 1 &&
         distanceFromBottom() <= 1;
+      if (stable && !isStreaming && !belowBottomTarget && !trackGrew) {
+        bottomFollowSettleFrames += 1;
+      } else {
+        bottomFollowSettleFrames = 0;
+      }
 
-      if (stable && !isStreaming) {
+      const settleFrameCount = bottomFollowObservedStreaming ? BOTTOM_FOLLOW_SETTLE_FRAME_COUNT : 1;
+      if (bottomFollowSettleFrames >= settleFrameCount) {
         const shouldFillInitialViewport =
           pendingInitialHistoryFillSessionId === sessionId &&
           isSessionHistoryTruncated(sessionId) &&
@@ -3407,9 +3431,42 @@ export function MessageList() {
     const now = performance.now();
     const top = clampEditScrollTop(containerRef.scrollTop);
     const currentViewportHeight = containerRef.clientHeight;
+    const scrollDelta = top - lastObservedScrollTop;
+    const mountedDetachedAnchor = (() => {
+      if (suppressSyncScrollTop || Math.abs(scrollDelta) <= 0.5) return null;
+      if (widthResizeActive || stickyNavigationOwnsScroll() || editingMessage()) return null;
+      if (directMovementAnchor) {
+        const movement = directMovementAnchor.scrollTop - top;
+        const anchor = {
+          ...directMovementAnchor.anchor,
+          top: directMovementAnchor.anchor.top + movement,
+          ...(directMovementAnchor.anchor.messageTop !== undefined
+            ? { messageTop: directMovementAnchor.anchor.messageTop + movement }
+            : {}),
+        };
+        directMovementAnchor = { anchor, scrollTop: top };
+        return anchor;
+      }
+      const remembered = lastDetachedVisibleAnchor;
+      const rememberedElement = remembered ? getMountedScrollAnchorElement(remembered) : null;
+      const containerRect = containerRef!.getBoundingClientRect();
+      if (remembered && rememberedElement) {
+        const rect = rememberedElement.getBoundingClientRect();
+        if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+          const row = mountedMessageRows.get(remembered.messageId);
+          return {
+            ...remembered,
+            top: rect.top - containerRect.top,
+            ...(remembered.messageTop !== undefined && row
+              ? { messageTop: row.getBoundingClientRect().top - containerRect.top }
+              : {}),
+          };
+        }
+      }
+      return captureMountedVisibleScrollAnchor();
+    })();
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
-    const scrollDelta = top - lastObservedScrollTop;
     let historyAnchorSettling =
       historyAnchorSettleOwner?.sessionId === state.activeSessionId &&
       historyAnchorSettleOwner.generation === activeSessionGeneration &&
@@ -3537,7 +3594,14 @@ export function MessageList() {
       });
     }
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
-      lastDetachedVisibleAnchor = captureDetachedVisibleScrollAnchor(top);
+      if (mountedDetachedAnchor) {
+        lastDetachedVisibleAnchor = mountedDetachedAnchor;
+      } else if (
+        !lastDetachedVisibleAnchor ||
+        !getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+      ) {
+        lastDetachedVisibleAnchor = captureDetachedVisibleScrollAnchor(top);
+      }
     }
     if (
       top <= 24 &&
@@ -3556,6 +3620,28 @@ export function MessageList() {
     }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (nestedScrollerWillConsumeWheel(event)) return;
+    directMovementAnchor = null;
+    if (containerRef && !editingMessage()) {
+      const metrics = shouldVirtualize() ? virtualMetrics() : null;
+      const index = metrics
+        ? getFirstVisibleMessageIndexFromVirtualMetrics({
+            metrics,
+            scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+          })
+        : null;
+      const messageId = index === null ? null : messageIds()[index];
+      const row = messageId ? mountedMessageRows.get(messageId) : null;
+      if (messageId && row) {
+        const containerRect = containerRef.getBoundingClientRect();
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+          directMovementAnchor = {
+            anchor: { messageId, top: rect.top - containerRect.top, topPad: 0 },
+            scrollTop: containerRef.scrollTop,
+          };
+        }
+      }
+    }
     clearActivityExitReserve();
     historyAnchorSettleOwner = null;
     const deltaY = getWheelDeltaPixels(event);
@@ -4210,6 +4296,7 @@ export function MessageList() {
     appendBottomReserveTarget = 0;
     lastVirtualContentOrigin = 0;
     lastDetachedVisibleAnchor = null;
+    directMovementAnchor = null;
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
     forcedVirtualContentMessageIds.clear();

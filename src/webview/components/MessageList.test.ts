@@ -10018,6 +10018,79 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('keeps following delayed layout growth after final parts arrive in one batch', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let trackHeight = 1200;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, trackHeight);
+        }
+        return new DOMRect(0, 0, 500, 400);
+      }
+    );
+
+    const userEntry = {
+      info: userMessage('user-1'),
+      parts: [textPart('text-1', 'Explain the result')],
+    };
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      userEntry,
+      {
+        info: assistantMessage('assistant-1'),
+        parts: [{ ...textPart('text-2', 'Initial response'), messageID: 'assistant-1' }],
+      },
+    ]);
+    setState('streamingPartId', 'text-2');
+    setState('streamingText', 'Initial response');
+    cleanup = render(() => MessageList(), container!);
+
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    let scrollHeightValue = 1200;
+    let scrollTopValue = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeightValue,
+    });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    animationFrames.flush();
+    expect(scrollTopValue).toBe(800);
+
+    setMessagesIncremental([
+      userEntry,
+      {
+        info: assistantMessage('assistant-1'),
+        parts: Array.from({ length: 20 }, (_, index) => ({
+          ...textPart(`text-${index + 2}`, `Final response section ${index + 1}`),
+          messageID: 'assistant-1',
+        })),
+      },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The first post-stream frame runs before deferred markdown and entrance layout settles.
+    animationFrames.flush();
+    trackHeight = 1800;
+    scrollHeightValue = 1800;
+    animationFrames.flush();
+
+    expect(scrollTopValue).toBe(1400);
+    animationFrames.restore();
+  });
+
   it('synchronizes a browser bottom clamp when grouped activity shrinks during follow', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const resizeCallbacks: ResizeObserverCallback[] = [];

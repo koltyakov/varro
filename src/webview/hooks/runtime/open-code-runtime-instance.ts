@@ -10,7 +10,7 @@ import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/pr
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
 import * as clientModule from '../../lib/client';
-import type { QueuedMessage, SessionSelectionOptions } from '../../lib/app-state-types';
+import type { SessionSelectionOptions } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -140,12 +140,9 @@ export interface OpenCodeRuntime {
       agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
-      queuedAttachments?: {
-        droppedFiles?: QueuedMessage['droppedFiles'];
-        clipboardImages?: QueuedMessage['clipboardImages'];
-        terminalSelection?: QueuedMessage['terminalSelection'];
-      };
+      queuedAttachments?: QueuedAttachmentSnapshot;
       preserveComposer?: boolean;
+      targetSessionId?: string;
     }
   ): Promise<boolean>;
   retryMessage(messageId: string, sessionId?: string | null): Promise<void>;
@@ -1808,12 +1805,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       agent?: string;
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
-      queuedAttachments?: {
-        droppedFiles?: QueuedMessage['droppedFiles'];
-        clipboardImages?: QueuedMessage['clipboardImages'];
-        terminalSelection?: QueuedMessage['terminalSelection'];
-      };
+      queuedAttachments?: QueuedAttachmentSnapshot;
       preserveComposer?: boolean;
+      targetSessionId?: string;
     }
   ): Promise<boolean> {
     return await sessionSendOperations.sendMessage(text, options);

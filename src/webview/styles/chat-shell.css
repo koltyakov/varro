@@ -182,6 +182,10 @@ input:focus-visible {
     var(--chat-horizontal-padding);
 }
 
+.interactive-list-track:has(> .interactive-loading-row) {
+  padding-bottom: 8px;
+}
+
 .latest-user-message-sticky-wrap {
   --latest-user-message-sticky-bottom-solid-gap: var(--latest-user-message-sticky-gap);
   --latest-user-message-sticky-bottom-gap: calc(var(--latest-user-message-sticky-gap) * 2);

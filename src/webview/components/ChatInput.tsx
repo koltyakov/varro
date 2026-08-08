@@ -56,6 +56,8 @@ import {
   getStoredVariantForModel,
   setSessionUsageLimit,
   isSessionCompacting,
+  isSessionAwaitingInput,
+  isSessionTreeStatusWorking,
   replaceClipboardImages,
   stripClipboardImagePlaceholders,
   replaceContextFiles,
@@ -1552,7 +1554,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }
 
   async function dispatchQueuedMessage(item: (typeof state.queuedMessages)[number], retry = false) {
-    if (hasPendingApproval()) return;
+    if (isSessionAwaitingInput(item.sessionId)) return;
     if (dispatchingQueuedMessageId()) return;
     if (!retry && state.queuedMessages.find((queued) => queued.id === item.id)?.paused) return;
     if (failedQueuedMessageIds().has(item.id) && !retry) return;
@@ -1569,6 +1571,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
         },
         preserveComposer: true,
+        targetSessionId: item.sessionId,
       });
     } catch {
       sent = false;
@@ -1581,75 +1584,56 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setDispatchingQueuedMessageId(null);
   }
 
-  let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
-  createEffect(() => {
-    const sessionId = composerSessionId();
-    const initialized = connectionInitialized();
-    const loading = isComposerBusy();
-    const activeQuestion = composerHasActiveQuestion();
-    const activePermission = composerHasActivePermission();
+  function findNextQueuedMessageForDispatch() {
     const steeringIds = steeringQueuedMessageIds();
     const failedSteerIds = failedSteerQueuedMessageIds();
-    const dispatchingId = dispatchingQueuedMessageId();
     const failedIds = failedQueuedMessageIds();
-    const queuedEdit = queuedMessageEdit();
-    const hasSteeringQueued = state.queuedMessages.some(
-      (item) => item.sessionId === sessionId && steeringIds.has(item.id)
+    const editingSessionId = queuedMessageEdit()?.sessionId;
+    const steeringSessionIds = new Set(
+      state.queuedMessages.filter((item) => steeringIds.has(item.id)).map((item) => item.sessionId)
     );
-    const next = state.queuedMessages.find(
-      (item) =>
-        item.sessionId === sessionId &&
-        !item.paused &&
-        !steeringIds.has(item.id) &&
-        !failedSteerIds.has(item.id)
-    );
+    const blockedSessionIds = new Set<string>();
+
+    for (const item of state.queuedMessages) {
+      if (item.paused || steeringIds.has(item.id) || failedSteerIds.has(item.id)) continue;
+      if (blockedSessionIds.has(item.sessionId)) continue;
+      if (failedIds.has(item.id)) {
+        blockedSessionIds.add(item.sessionId);
+        continue;
+      }
+      if (
+        steeringSessionIds.has(item.sessionId) ||
+        editingSessionId === item.sessionId ||
+        isSessionAwaitingInput(item.sessionId) ||
+        (item.sessionId === state.activeSessionId
+          ? isActiveSessionWorking()
+          : isSessionTreeStatusWorking(item.sessionId))
+      ) {
+        blockedSessionIds.add(item.sessionId);
+        continue;
+      }
+      return item;
+    }
+
+    return undefined;
+  }
+
+  let queueDispatchTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  createEffect(() => {
+    const initialized = connectionInitialized();
+    const dispatchingId = dispatchingQueuedMessageId();
+    const next = findNextQueuedMessageForDispatch();
     if (queueDispatchTimer) {
       clearTimeout(queueDispatchTimer);
       queueDispatchTimer = 0;
     }
-    if (
-      !initialized ||
-      !sessionId ||
-      loading ||
-      activeQuestion ||
-      activePermission ||
-      queuedEdit?.sessionId === sessionId ||
-      hasSteeringQueued ||
-      dispatchingId ||
-      !next ||
-      failedIds.has(next.id)
-    )
-      return;
+    if (!initialized || dispatchingId || !next) return;
     queueDispatchTimer = setTimeout(() => {
       queueDispatchTimer = 0;
-      if (
-        !connectionInitialized() ||
-        isComposerBusy() ||
-        composerHasActiveQuestion() ||
-        composerHasActivePermission() ||
-        queuedMessageEdit()?.sessionId === composerSessionId()
-      )
-        return;
-      const sid = composerSessionId();
-      if (!sid) return;
+      if (!connectionInitialized()) return;
       if (dispatchingQueuedMessageId()) return;
-      const currentSteeringIds = steeringQueuedMessageIds();
-      const currentFailedSteerIds = failedSteerQueuedMessageIds();
-      if (
-        state.queuedMessages.some(
-          (item) => item.sessionId === sid && currentSteeringIds.has(item.id)
-        )
-      )
-        return;
-      const nextQueued = state.queuedMessages.find(
-        (item) =>
-          item.sessionId === sid &&
-          !item.paused &&
-          !currentSteeringIds.has(item.id) &&
-          !currentFailedSteerIds.has(item.id)
-      );
+      const nextQueued = findNextQueuedMessageForDispatch();
       if (!nextQueued) return;
-      if (failedQueuedMessageIds().has(nextQueued.id)) return;
       void dispatchQueuedMessage(nextQueued);
     }, 250);
   });
@@ -2535,8 +2519,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       current.modelName
     );
   });
-  const showCurrentProviderLimit = createMemo(
-    () => hasProviderLimitWindowWithinThreshold(currentCompactProviderLimit(), 100)
+  const showCurrentProviderLimit = createMemo(() =>
+    hasProviderLimitWindowWithinThreshold(currentCompactProviderLimit(), 100)
   );
 
   const currentProviderLimitTitle = createMemo(() =>

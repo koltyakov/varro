@@ -540,11 +540,16 @@ export class SessionSendOperations {
     const activeSessionId = appStore.state.activeSessionId;
     const targetSessionId = options?.targetSessionId ?? activeSessionId;
     const defaultPermissionMode = permissionsStore.getPermissionModeForSession(null);
-    const selectedAgent = options?.agent ?? appStore.state.selectedAgent;
+    const selectedAgent =
+      options?.agent ??
+      routingStore.getSelectedAgentForSession(targetSessionId) ??
+      appStore.state.selectedAgent;
+    const selectedModel =
+      routingStore.getSelectedModelForSession(targetSessionId) ?? appStore.state.selectedModel;
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
     const capturedComposerState: ComposerState = {
       selectedAgent,
-      selectedModel: appStore.state.selectedModel ? { ...appStore.state.selectedModel } : null,
+      selectedModel: selectedModel ? { ...selectedModel } : null,
       providers: [...appStore.state.providers],
       providerDefaults: { ...appStore.state.providerDefaults },
       editorContext: {

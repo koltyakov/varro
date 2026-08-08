@@ -83,6 +83,7 @@ const SCENARIO_NAMES = [
   'large-transcript',
   'diff-preview-large-transcript',
   'assistant-heavy-history',
+  'cold-large-history',
   'compact-pagination-anchor',
   'incident-delayed-image-history',
   'mixed-small-transcript',
@@ -3059,7 +3060,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 100_000
     );
     messages.push(firstUser);
-    for (let index = 0; index < 49; index += 1) {
+    for (let index = 0; index < 199; index += 1) {
       const detail = 'Variable-height history detail. '.repeat((index % 5) * 3);
       messages.push(
         makeAssistantMessage(
@@ -3078,7 +3079,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 80_000
     );
     messages.push(targetUser);
-    for (let index = 0; index < 78; index += 1) {
+    for (let index = 0; index < 228; index += 1) {
       const detail = 'Variable-height implementation detail. '.repeat((index % 7) * 2);
       messages.push(
         makeAssistantMessage(
@@ -3098,6 +3099,52 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     return state;
   }
 
+  if (name === 'cold-large-history') {
+    const session = makeSession(
+      'session-cold-large-history',
+      'Cold large paginated history',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    for (let index = 0; index < 260; index += 1) {
+      const createdAt = BASE_TIME - (1_000 - index) * 1_000;
+      const user = makeUserMessage(
+        session.id,
+        `message-cold-large-user-${index}`,
+        [
+          index % 8 === 0
+            ? `Review cold-session history section ${index}. ${'Keep the same visible row stable during slow upward pagination. '.repeat(5)}`
+            : `Review cold-session history section ${index}.`,
+        ],
+        createdAt
+      );
+      messages.push(
+        user,
+        makeAssistantMessage(
+          session.id,
+          `message-cold-large-assistant-${index}`,
+          user.info.id,
+          [
+            `## Cold history result ${index}`,
+            '',
+            `This row has a deliberately variable measured height. ${'Virtual estimates must settle without moving the viewport anchor. '.repeat(index % 9)}`,
+            '',
+            index % 7 === 0
+              ? '```ts\nconst viewportAnchorIsStable = true;\n```'
+              : '- pagination remains under direct user scroll ownership',
+          ].join('\n'),
+          createdAt + 1
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    return state;
+  }
+
   if (name === 'compact-pagination-anchor') {
     const session = makeSession(
       'session-compact-pagination-anchor',
@@ -3105,6 +3152,24 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 500
     );
     const messages: MessageEntry[] = [];
+    const olderUser = makeUserMessage(
+      session.id,
+      'message-compact-pagination-older-user',
+      ['Review the older compact activity group.'],
+      BASE_TIME - 200_000
+    );
+    messages.push(olderUser);
+    for (let index = 0; index < 198; index += 1) {
+      const message = makeAssistantMessage(
+        session.id,
+        `message-compact-pagination-older-reasoning-${index}`,
+        olderUser.info.id,
+        '',
+        BASE_TIME - (199_000 - index)
+      );
+      message.parts = [];
+      messages.push(message);
+    }
     const firstUser = makeUserMessage(
       session.id,
       'message-compact-pagination-first-user',
@@ -3239,7 +3304,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 100_000
     );
     messages.push(firstUser);
-    for (let index = 0; index < 49; index += 1) {
+    for (let index = 0; index < 199; index += 1) {
       const detail = 'Scrubbed variable-height history detail. '.repeat((index % 5) * 3);
       messages.push(
         makeAssistantMessage(
@@ -3259,8 +3324,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 80_000
     );
     messages.push(targetUser);
-    for (let index = 0; index < 78; index += 1) {
-      if (index === 73) {
+    for (let index = 0; index < 228; index += 1) {
+      if (index === 223) {
         const imageUser = makeUserMessage(
           session.id,
           'message-incident-delayed-image-user',

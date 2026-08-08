@@ -267,6 +267,8 @@ describe('SessionSendOperations', () => {
 
   it('clears matching composer attachments after sending to an inactive target session', async () => {
     appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('selectedAgent', 'plan');
+    appStore.setState('sessionSelectedAgents', 'session-2', 'build');
     appStore.setState('editorContext', {
       workspacePath: '/repo',
       activeFile: null,
@@ -291,7 +293,10 @@ describe('SessionSendOperations', () => {
 
     await operations.sendMessage('send to target', { targetSessionId: 'session-2' });
 
-    expect(sendAsync).toHaveBeenCalledWith('session-2', expect.any(Object));
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-2',
+      expect.objectContaining({ agent: 'build' })
+    );
     expect(appStore.state.droppedFiles).toEqual([]);
     expect(appStore.state.clipboardImages).toEqual([]);
     expect(appStore.state.terminalSelection).toBeNull();

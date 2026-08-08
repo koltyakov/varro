@@ -98,7 +98,7 @@ Unsent composer text is restored after webview or window reloads. This draft per
 
 ### Queued Messages
 
-Queued messages belong to the session where they were created and dispatch from top to bottom when that session is active, connected, and idle. A pending permission, question, edit, failed dispatch, or steering request prevents automatic dispatch until it is resolved.
+Queued messages belong to the session where they were created and dispatch from top to bottom when that session is connected and idle, even while another chat is active. A pending permission, question, edit, failed dispatch, or steering request prevents automatic dispatch for that session until it is resolved.
 
 - Drag the handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder messages within the same session.
 - Pause or resume an individual message. `Option`/`Alt`-click applies the same action to every queued message for that session.

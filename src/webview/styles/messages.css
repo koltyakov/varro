@@ -1175,7 +1175,7 @@ body.vscode-light
 }
 
 .rendered-markdown p:has(+ p) {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .rendered-markdown p:has(+ :is(ul, ol)) {
@@ -1202,8 +1202,8 @@ body.vscode-light
 }
 
 .rendered-markdown p:has(> strong:only-child) {
-  margin-top: 20px;
-  margin-bottom: 10px;
+  margin-top: 14px;
+  margin-bottom: 8px;
 }
 
 .rendered-markdown [data-markdown-segment='stable'] > :first-child,

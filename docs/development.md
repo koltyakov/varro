@@ -294,7 +294,7 @@ While a session is running:
 
 - follow-ups are queued instead of being sent immediately, including any files, images, or terminal selection attached to the queued message
 - `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply`
-- queued prompts are dispatched automatically once the active session becomes idle
+- queued prompts are dispatched automatically once their session becomes idle, including background sessions
 - queued prompts can be reordered, paused, edited, removed, retried, or sent immediately as steering messages
 - queue snapshots are persisted through the extension host in workspace state; synchronous browser storage excludes image-bearing entries to avoid blocking on large data URLs
 

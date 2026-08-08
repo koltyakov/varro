@@ -254,19 +254,36 @@ describe('projected tool input lifecycle', () => {
     expect(currentToolPart(harness).tool).toBe('bash');
   });
 
-  it('requires both an assistant message id and a call id', () => {
+  it('requires a call id', () => {
     const harness = createHarness();
     expect(harness.handle('session.next.tool.called', { sessionID: SESSION_ID })).toBe(false);
     expect(
       harness.handle('session.next.tool.called', { sessionID: SESSION_ID, callID: CALL_ID })
-    ).toBe(false);
+    ).toBe(true);
     expect(
       harness.handle('session.next.tool.called', {
         sessionID: SESSION_ID,
         assistantMessageID: MESSAGE_ID,
       })
     ).toBe(false);
-    expect(upsertPart).not.toHaveBeenCalled();
+    expect(currentToolPart(harness).messageID).toBe(MESSAGE_ID);
+  });
+
+  it('falls back to the latest active assistant when the streamed assistant id does not match', () => {
+    const harness = createHarness();
+
+    expect(
+      emit(harness, 'session.next.tool.input.started', {
+        assistantMessageID: 'v2-assistant-1',
+        name: 'apply_patch',
+      })
+    ).toBe(true);
+    expect(currentToolPart(harness)).toMatchObject({
+      messageID: MESSAGE_ID,
+      tool: 'apply_patch',
+      state: { status: 'pending' },
+    });
+    expect(harness.scheduleActiveMessageSync).not.toHaveBeenCalled();
   });
 
   it('schedules a resync when the owning assistant message is not loaded', () => {

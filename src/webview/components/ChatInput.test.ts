@@ -1751,7 +1751,37 @@ describe('ChatInput', () => {
         terminalSelection: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
     });
+  });
+
+  it('dispatches a queued message for an idle background session', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', {
+      'session-1': { type: 'busy' },
+      'session-2': { type: 'idle' },
+    });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-2', text: 'Continue in the background' },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Continue in the background', {
+      queuedAttachments: {
+        droppedFiles: undefined,
+        clipboardImages: undefined,
+        terminalSelection: undefined,
+      },
+      preserveComposer: true,
+      targetSessionId: 'session-2',
+    });
+    expect(state.activeSessionId).toBe('session-1');
+    expect(state.queuedMessages).toEqual([]);
   });
 
   it('groups queued rows with separate attachment and image metadata', () => {
@@ -2089,6 +2119,7 @@ describe('ChatInput', () => {
         terminalSelection: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
     });
   });
 
@@ -2133,6 +2164,7 @@ describe('ChatInput', () => {
         terminalSelection: undefined,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
     });
   });
 
@@ -2203,6 +2235,7 @@ describe('ChatInput', () => {
         terminalSelection: { text: 'npm test', terminalName: 'zsh' },
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
     });
     expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1', 'q2']);
 
@@ -2426,6 +2459,7 @@ describe('ChatInput', () => {
           terminalSelection: undefined,
         },
         preserveComposer: true,
+        targetSessionId: 'session-1',
       },
     ]);
   });
@@ -2644,6 +2678,7 @@ describe('ChatInput', () => {
         terminalSelection: null,
       },
       preserveComposer: true,
+      targetSessionId: 'session-1',
     });
     expect(state.queuedMessages).toEqual([]);
   });

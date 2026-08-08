@@ -1225,7 +1225,168 @@ test.describe('auto-scroll', () => {
     }
   });
 
-  test('preserves the same row through exact 50 plus 50 plus final pagination', async ({
+  test('slowly scrolls a cold large session through every history page without jumps', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto(
+      '/e2e/harness/index.html?scenario=cold-large-history&windowed=1&deferHistory=1'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const harness = window as Window & {
+            __varroE2E?: { pendingHistoryRequestCount?: () => number };
+          };
+          return harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0;
+        })
+      )
+      .toBe(1);
+
+    const result = await list.evaluate(async (element) => {
+      const harness = window as Window & {
+        __varroE2E?: {
+          pendingHistoryRequestCount?: () => number;
+          releaseNextHistoryRequest?: () => boolean;
+          requests?: Array<{ path: string }>;
+        };
+      };
+      // oxlint-disable-next-line consistent-function-scoping -- Playwright serializes this scope.
+      const waitForFrame = () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => setTimeout(() => resolve(), 0))
+        );
+      const getRequestCount = () =>
+        (harness.__varroE2E?.requests ?? []).filter((request) =>
+          request.path.includes('/session/session-cold-large-history/message')
+        ).length;
+      const getVisibleRow = () => {
+        const containerRect = element.getBoundingClientRect();
+        return [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find((row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+        });
+      };
+      const violations: Array<Record<string, unknown>> = [];
+      let peakMountedRows = 0;
+      let releasedPages = 0;
+      let steps = 0;
+
+      while (steps < 1_200) {
+        steps += 1;
+        const row = getVisibleRow();
+        const messageId = row?.dataset.msgId;
+        if (!row || !messageId) {
+          violations.push({ step: steps, reason: 'no-visible-row' });
+          break;
+        }
+        const containerTop = element.getBoundingClientRect().top;
+        const rowTop = row.getBoundingClientRect().top - containerTop;
+        const previousScrollTop = element.scrollTop;
+        const beforeGeometry = {
+          rowTop,
+          rowHeight: row.getBoundingClientRect().height,
+          scrollTop: previousScrollTop,
+          scrollHeight: element.scrollHeight,
+          trackTop:
+            element.querySelector<HTMLElement>('.interactive-list-track')?.getBoundingClientRect()
+              .top ?? null,
+          bannerHeight:
+            element.querySelector<HTMLElement>('.message-history-banner')?.getBoundingClientRect()
+              .height ?? null,
+          topSpacerHeight:
+            element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+              .height ?? 0,
+        };
+        const movement = Math.min(96, previousScrollTop);
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+        element.scrollTop = Math.max(0, previousScrollTop - movement);
+        element.dispatchEvent(new Event('scroll'));
+
+        if (
+          element.scrollTop <= 1 &&
+          (harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0) > 0
+        ) {
+          if (harness.__varroE2E?.releaseNextHistoryRequest?.()) releasedPages += 1;
+        }
+
+        const expectedTop = rowTop + movement;
+        const frameTops: Array<number | null> = [];
+        for (let frame = 0; frame < 4; frame += 1) {
+          await waitForFrame();
+          const currentRow = element.querySelector<HTMLElement>(
+            `[data-msg-id="${CSS.escape(messageId)}"]`
+          );
+          const mountedRows = element.querySelectorAll('[data-msg-id]').length;
+          peakMountedRows = Math.max(peakMountedRows, mountedRows);
+          if (!currentRow) {
+            frameTops.push(null);
+            continue;
+          }
+          const currentTop =
+            currentRow.getBoundingClientRect().top - element.getBoundingClientRect().top;
+          frameTops.push(currentTop);
+        }
+        if (frameTops.some((top) => top === null || Math.abs(top - expectedTop) > 2.5)) {
+          violations.push({
+            step: steps,
+            messageId,
+            expectedTop,
+            frameTops,
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+            mountedRows: element.querySelectorAll('[data-msg-id]').length,
+            requestCount: getRequestCount(),
+            beforeGeometry,
+            bannerHeight:
+              element.querySelector<HTMLElement>('.message-history-banner')?.getBoundingClientRect()
+                .height ?? null,
+            topSpacerHeight:
+              element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect()
+                .height ?? 0,
+          });
+        }
+        if (violations.length > 0) break;
+
+        const visibleRow = getVisibleRow();
+        if (!visibleRow) {
+          violations.push({ step: steps, reason: 'viewport-uncovered' });
+          break;
+        }
+        if (
+          element.scrollTop <= 1 &&
+          releasedPages === 2 &&
+          (harness.__varroE2E?.pendingHistoryRequestCount?.() ?? 0) === 0 &&
+          !element.querySelector('.message-history-banner')
+        ) {
+          break;
+        }
+      }
+
+      return {
+        violations,
+        peakMountedRows,
+        releasedPages,
+        requestCount: getRequestCount(),
+        steps,
+        finalScrollTop: element.scrollTop,
+      };
+    });
+
+    expect(result.violations, JSON.stringify(result)).toEqual([]);
+    expect(result.releasedPages).toBe(2);
+    expect(result.requestCount).toBe(3);
+    expect(result.finalScrollTop).toBeLessThan(2);
+    expect(result.peakMountedRows).toBeLessThan(100);
+  });
+
+  test('preserves the same row through exact 200 plus 200 plus final pagination', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 486, height: 800 });
@@ -1343,9 +1504,9 @@ test.describe('auto-scroll', () => {
         });
     });
     expect(historyRequests).toEqual([
-      { before: null, limit: '50' },
-      { before: 'msg_cursor_0001', limit: '50' },
-      { before: 'msg_cursor_0002', limit: '50' },
+      { before: null, limit: '200' },
+      { before: 'msg_cursor_0001', limit: '200' },
+      { before: 'msg_cursor_0002', limit: '200' },
     ]);
   });
 
@@ -1472,7 +1633,7 @@ test.describe('auto-scroll', () => {
         0
       );
     });
-    expect(fixtureMessageCount).toBe(129);
+    expect(fixtureMessageCount).toBe(429);
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(imageRow).toBeAttached({ timeout: 5_000 });
     await imageRequestStarted;
@@ -1544,9 +1705,9 @@ test.describe('auto-scroll', () => {
         });
     });
     expect(historyRequests).toEqual([
-      { before: null, limit: '50' },
-      { before: 'msg_cursor_0001', limit: '50' },
-      { before: 'msg_cursor_0002', limit: '50' },
+      { before: null, limit: '200' },
+      { before: 'msg_cursor_0001', limit: '200' },
+      { before: 'msg_cursor_0002', limit: '200' },
     ]);
 
     const imageResponse = page.waitForResponse((response) =>
