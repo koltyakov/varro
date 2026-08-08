@@ -1904,6 +1904,14 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 edit'
     );
+
+    startLoading();
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 edit'
+    );
   });
 
   it('omits unparsed edit tools from shared activity summaries when inline previews are enabled', async () => {
@@ -8062,7 +8070,42 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('hides the loading label while a compact active tool row is visible', async () => {
+  it('keeps the loading label visible with a running task tool card', async () => {
+    const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
+    tool.tool = 'task';
+    tool.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 1 },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [tool],
+      },
+    ]);
+    setState('streamingPartId', 'tool-active');
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
+      'is-reserved'
+    );
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(container?.querySelector('.tool-invocation-task')).not.toBeNull();
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList).not.toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBeNull();
+  });
+
+  it('hides the loading label once a compact active tool row is visible', async () => {
     const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
     tool.state = {
       status: 'running',

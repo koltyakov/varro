@@ -89,14 +89,14 @@ export function removeQueuedMessage(id: string) {
 export function setQueuedMessagePaused(id: string, paused: boolean, allForSession = false) {
   const message = state.queuedMessages.find((item) => item.id === id);
   if (!message) return;
-  const next = state.queuedMessages.map((item) => {
-    if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return item;
-    if ((item.paused === true) === paused) return item;
-    if (paused) return { ...item, paused: true };
-    const { paused: _paused, ...unpaused } = item;
-    return unpaused;
+  let changed = false;
+  state.queuedMessages.forEach((item, index) => {
+    if (item.id !== id && (!allForSession || item.sessionId !== message.sessionId)) return;
+    if ((item.paused === true) === paused) return;
+    setState('queuedMessages', index, 'paused', paused ? true : undefined);
+    changed = true;
   });
-  commitQueuedMessages(next);
+  if (changed) syncQueuedMessages();
 }
 
 export function reorderQueuedMessage(id: string, targetId: string) {

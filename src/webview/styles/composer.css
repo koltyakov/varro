@@ -1603,7 +1603,8 @@
   transition: opacity 0.1s;
 }
 
-.chat-queue-item:is(:hover, :focus-within) .chat-queue-actions {
+.chat-queue-item:hover .chat-queue-actions,
+.chat-queue-item:has(.chat-queue-control:focus-visible) .chat-queue-actions {
   opacity: 1;
   pointer-events: auto;
 }

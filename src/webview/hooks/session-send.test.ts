@@ -1,3 +1,4 @@
+import { createComputed, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { ClipboardImage } from '../lib/app-state-types';
@@ -609,6 +610,74 @@ describe('session-send helpers', () => {
 
     resolveSend?.();
     await promise;
+  });
+
+  it('publishes the optimistic turn before the session becomes observably busy', async () => {
+    const observedStates: Array<{ busy: boolean; trailingUserId: string }> = [];
+    let setBusy: (busy: boolean) => void;
+    let setTrailingUserId: (messageId: string) => void;
+    const dispose = createRoot((rootDispose) => {
+      const [busy, updateBusy] = createSignal(false);
+      const [trailingUserId, updateTrailingUserId] = createSignal('completed-user');
+      setBusy = updateBusy;
+      setTrailingUserId = updateTrailingUserId;
+      createComputed(() => {
+        observedStates.push({ busy: busy(), trailingUserId: trailingUserId() });
+      });
+      return rootDispose;
+    });
+
+    try {
+      await sendMessageWithDependencies(
+        {
+          getActiveSessionId: () => 'session-1',
+          getDefaultPermissionMode: () => 'default',
+          getSelectedAgent: () => 'build',
+          createSession: vi.fn(async () => 'session-1'),
+          clearPendingAbort: vi.fn(),
+          syncSessionMcps: vi.fn(async () => {}),
+          buildSendPayload: () => ({
+            body: {
+              parts: [{ type: 'text', text: 'follow up' }],
+              model: { providerID: 'openai', modelID: 'gpt-4o' },
+            },
+            effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+          }),
+          requestMessageListScrollToBottom: vi.fn(),
+          startLoading: vi.fn(),
+          setError: vi.fn(),
+          applyEffectiveModel: vi.fn(),
+          resetTodoSync: vi.fn(),
+          clearTodos: vi.fn(),
+          clearSessionUsageLimit: vi.fn(),
+          beforeOptimisticPublish: () => setTrailingUserId('pruned-user'),
+          appendOptimisticMessage: (entry) => setTrailingUserId(entry.info.id),
+          removeOptimisticMessage: vi.fn(),
+          sendAsync: vi.fn(async () => {}),
+          getMessageCount: () => 1,
+          clearDroppedFiles: vi.fn(),
+          clearTerminalSelection: vi.fn(),
+          clearClipboardImages: vi.fn(),
+          postFilesClear: vi.fn(),
+          postTerminalSelectionClear: vi.fn(),
+          syncSession: vi.fn(async () => {}),
+          syncSessionMessages: vi.fn(async () => {}),
+          recheckSessionStatus: vi.fn(async () => {}),
+          setSessionStatusEntry: (_sessionId, status) => setBusy(status.type === 'busy'),
+          stopLoading: vi.fn(),
+          shouldClearComposerAfterSend: () => true,
+        },
+        'follow up'
+      );
+
+      expect(observedStates).not.toContainEqual({
+        busy: true,
+        trailingUserId: 'completed-user',
+      });
+      expect(observedStates.every((state) => state.trailingUserId !== 'pruned-user')).toBe(true);
+    } finally {
+      dispose();
+    }
   });
 
   it('removes the optimistic user message when sending fails', async () => {

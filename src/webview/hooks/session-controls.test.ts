@@ -210,7 +210,8 @@ describe('session-controls helpers', () => {
         setError: vi.fn(),
       },
       'user-1',
-      'updated prompt'
+      'updated prompt',
+      { onOptimisticPublish: () => callOrder.push('publish') }
     );
 
     expect(abortSession).not.toHaveBeenCalled();
@@ -225,9 +226,10 @@ describe('session-controls helpers', () => {
     expect(callOrder).toEqual([
       'loading',
       'invalidate-sync',
-      'prune',
       'delete:assistant-1',
       'delete:user-1',
+      'prune',
+      'publish',
       'send',
     ]);
   });

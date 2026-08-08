@@ -124,13 +124,17 @@ export async function editMessageWithDependencies(
       text: string,
       sessionId: string,
       queuedAttachments?: QueuedAttachmentSnapshot
-    ): () => Promise<boolean>;
+    ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
     stopLoading(): void;
     setError(message: string): void;
   },
   messageId: string,
   text: string,
-  options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
+  options?: {
+    allowEmptyText?: boolean;
+    queuedAttachments?: QueuedAttachmentSnapshot;
+    onOptimisticPublish?: () => void;
+  }
 ) {
   const sessionId = deps.getActiveSessionId();
   if (!sessionId || (!options?.allowEmptyText && !text.trim())) return false;
@@ -145,11 +149,20 @@ export async function editMessageWithDependencies(
   const messagesToDelete = messages.slice(targetIndex).toReversed();
   const sendEditedMessage = deps.prepareEditedMessageSend
     ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments)
-    : () => deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
+    : (beforeOptimisticPublish?: () => void) => {
+        beforeOptimisticPublish?.();
+        return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
+      };
+  let replacementPublished = false;
+  const publishReplacement = () => {
+    if (replacementPublished) return;
+    replacementPublished = true;
+    deps.pruneMessagesFrom?.(sessionId, messageId);
+    options?.onOptimisticPublish?.();
+  };
   try {
     deps.startLoading();
     deps.invalidateMessageSync?.(sessionId);
-    deps.pruneMessagesFrom?.(sessionId, messageId);
     if (deps.isSessionWorking(sessionId)) {
       await deps.abortSession(sessionId);
     }
@@ -167,12 +180,13 @@ export async function editMessageWithDependencies(
   }
 
   try {
-    if (await sendEditedMessage()) return true;
+    if (await sendEditedMessage(publishReplacement)) return true;
   } catch (err) {
     if (deps.getActiveSessionId() === sessionId) {
       deps.setError(err instanceof Error ? err.message : 'Failed to send edited message');
     }
   }
+  publishReplacement();
   if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
   return false;
 }
@@ -280,7 +294,7 @@ type SessionControlDependencies = {
     text: string,
     sessionId: string,
     queuedAttachments?: QueuedAttachmentSnapshot
-  ): () => Promise<boolean>;
+  ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
   invalidateMessageSync(sessionId: string): void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
   deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
@@ -346,7 +360,11 @@ export class SessionControlOperations {
   readonly editMessage = async (
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
+    options?: {
+      allowEmptyText?: boolean;
+      queuedAttachments?: QueuedAttachmentSnapshot;
+      onOptimisticPublish?: () => void;
+    }
   ) => {
     return await editMessageWithDependencies(
       {

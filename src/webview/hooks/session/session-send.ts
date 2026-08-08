@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import type { DroppedFile, EditorContext, PermissionMode } from '../../../shared/protocol';
 import { isProviderAuthFailure } from '../../../shared/error-classification';
 import {
@@ -570,7 +571,7 @@ export class SessionSendOperations {
     const ensureSessionPermission = this.deps.ensureSessionPermission;
     const draftGeneration = getNewChatDraftGeneration();
     const workspaceGeneration = this.deps.getWorkspaceGeneration?.() ?? 0;
-    return () =>
+    return (beforeOptimisticPublish?: () => void) =>
       sendMessageWithDependencies(
         {
           getActiveSessionId: () => appStore.state.activeSessionId,
@@ -599,6 +600,7 @@ export class SessionSendOperations {
           resetTodoSync: this.deps.resetTodoSync,
           clearTodos: composerStore.clearTodos,
           clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
+          beforeOptimisticPublish,
           appendOptimisticMessage: appendOptimisticMessageToActiveSession,
           removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
           sendAsync: this.deps.sendAsync,
@@ -681,6 +683,7 @@ export async function sendMessageWithDependencies(
     resetTodoSync(): void;
     clearTodos(): void;
     clearSessionUsageLimit(sessionId: string): void;
+    beforeOptimisticPublish?(): void;
     appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
     removeOptimisticMessage?(messageId: string): void;
     sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
@@ -730,18 +733,6 @@ export async function sendMessageWithDependencies(
   if (sendBody.variant === undefined) delete sendBody.variant;
 
   const expectsAssistantReply = !sendBody.noReply && sendBody.delivery !== 'steer';
-  if (expectsAssistantReply) {
-    deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
-  }
-  if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
-    deps.startLoading();
-  }
-  if (deps.getActiveSessionId() === sessionId) deps.setError(null);
-  if (effectiveModel && deps.getActiveSessionId() === sessionId) {
-    deps.applyEffectiveModel(effectiveModel, sessionId);
-  }
-
-  deps.clearSessionUsageLimit(sessionId);
   const optimisticMessage = createOptimisticUserMessage(
     sessionId,
     messageId,
@@ -749,12 +740,27 @@ export async function sendMessageWithDependencies(
     sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
     effectiveModel
   );
-  if (deps.getActiveSessionId() === sessionId) {
-    deps.requestMessageListScrollToBottom();
-  }
-  if (optimisticMessage) {
-    deps.appendOptimisticMessage?.(optimisticMessage);
-  }
+  batch(() => {
+    deps.beforeOptimisticPublish?.();
+    if (expectsAssistantReply) {
+      deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
+    }
+    if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
+      deps.startLoading();
+    }
+    if (deps.getActiveSessionId() === sessionId) deps.setError(null);
+    if (effectiveModel && deps.getActiveSessionId() === sessionId) {
+      deps.applyEffectiveModel(effectiveModel, sessionId);
+    }
+
+    deps.clearSessionUsageLimit(sessionId);
+    if (deps.getActiveSessionId() === sessionId) {
+      deps.requestMessageListScrollToBottom();
+    }
+    if (optimisticMessage) {
+      deps.appendOptimisticMessage?.(optimisticMessage);
+    }
+  });
 
   try {
     await deps.sendAsync(sessionId, sendBody);

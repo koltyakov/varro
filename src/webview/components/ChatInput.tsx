@@ -1430,19 +1430,25 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const clearedInputVersion = inputTextMutationVersion();
       resetPastedImageIndex();
       let sent = false;
+      let optimisticPublished = false;
       if (editTargetExists) {
         clearUsageLimitsForSessionTree(composerSessionId());
         sent = await editMessage(editing.messageId, text, {
           allowEmptyText: hasEditableAttachments,
           queuedAttachments,
+          onOptimisticPublish: () => {
+            optimisticPublished = true;
+            resetMessageEditState();
+          },
         });
       } else {
         clearUsageLimitsForSessionTree(composerSessionId());
         sent = await sendMessage(text);
       }
-      if (sent) {
+      if (sent && !optimisticPublished) {
         resetMessageEditState();
       } else if (
+        !optimisticPublished &&
         composerSessionId() === sendSessionId &&
         inputTextMutationVersion() === clearedInputVersion &&
         inputText() === ''

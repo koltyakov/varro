@@ -149,7 +149,11 @@ export interface OpenCodeRuntime {
   editMessage(
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
+    options?: {
+      allowEmptyText?: boolean;
+      queuedAttachments?: QueuedAttachmentSnapshot;
+      onOptimisticPublish?: () => void;
+    }
   ): Promise<boolean>;
   implementPlan(prompt: string, sessionId?: string | null): Promise<void>;
   openPlan(markdown: string, sessionId?: string | null): Promise<void>;
@@ -1820,7 +1824,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   async function editMessage(
     messageId: string,
     text: string,
-    options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
+    options?: {
+      allowEmptyText?: boolean;
+      queuedAttachments?: QueuedAttachmentSnapshot;
+      onOptimisticPublish?: () => void;
+    }
   ) {
     return await sessionControlOperations.editMessage(messageId, text, options);
   }

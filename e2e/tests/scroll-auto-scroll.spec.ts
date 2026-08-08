@@ -21,9 +21,7 @@ test.describe('auto-scroll', () => {
 
   test('starts an active reasoning row without a full-shell jump', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('varro.showThinking', 'true'));
-    await page.goto(
-      '/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1'
-    );
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
     const previousMessage = page.locator('[data-msg-id="message-large-assistant-238"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect
@@ -58,8 +56,9 @@ test.describe('auto-scroll', () => {
         });
         if (samples.length < 16) requestAnimationFrame(sample);
         else {
-          (window as typeof window & { reasoningEntranceSamples?: typeof samples })
-            .reasoningEntranceSamples = samples;
+          (
+            window as typeof window & { reasoningEntranceSamples?: typeof samples }
+          ).reasoningEntranceSamples = samples;
         }
       };
       const observer = new MutationObserver(() => {
@@ -122,6 +121,218 @@ test.describe('auto-scroll', () => {
       expect(movement, JSON.stringify({ previousTop, samples })).toBeGreaterThanOrEqual(-1);
       expect(movement, JSON.stringify({ previousTop, samples })).toBeLessThan(30);
     }
+  });
+
+  test('keeps the transcript fixed when Thinking becomes Worked', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+
+    await page.evaluate(() => {
+      const sessionID = 'session-large-transcript';
+      const messageID = 'message-large-assistant-active';
+      const harness = (
+        window as Window & {
+          __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+        }
+      ).__varroE2E;
+      const part = {
+        id: 'text-bottom-follow-final',
+        sessionID,
+        messageID,
+        type: 'text',
+        text: 'Final response before completion.',
+        time: { start: Date.now(), end: Date.now() },
+      };
+      harness?.updateMessagePart?.(part);
+      window.postMessage(
+        { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+        '*'
+      );
+    });
+    await expect(
+      page.getByText('Final response before completion.', { exact: true })
+    ).toBeVisible();
+    await waitForAnimationFrames(page, 15);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+
+    await page.evaluate(() => {
+      const sessionID = 'session-large-transcript';
+      const messageID = 'message-large-assistant-active';
+      const harnessWindow = window as Window & {
+        completionSlotSamples?: Array<{ top: number; slotHeight: number }>;
+        __varroE2E?: {
+          getSessionMessages?: (sessionId: string) => Array<{ info: Record<string, unknown> }>;
+          updateMessageInfo?: (info: Record<string, unknown>) => void;
+          updateSessionStatus?: (sessionId: string, status: { type: string }) => void;
+        };
+      };
+      const harness = harnessWindow.__varroE2E;
+      const container = document.querySelector<HTMLElement>('.interactive-list')!;
+      const anchor = container.querySelector<HTMLElement>(
+        '[data-msg-id="message-large-assistant-238"]'
+      )!;
+      const samples: Array<{ top: number; slotHeight: number }> = [];
+      const sample = () => {
+        samples.push({
+          top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
+          slotHeight:
+            container
+              .querySelector<HTMLElement>('.interactive-loading-row')
+              ?.getBoundingClientRect().height ?? 0,
+        });
+        if (samples.length < 12) requestAnimationFrame(sample);
+        else harnessWindow.completionSlotSamples = samples;
+      };
+      sample();
+
+      const current = harness
+        ?.getSessionMessages?.(sessionID)
+        .find((entry) => entry.info.id === messageID)?.info;
+      if (!current) throw new Error('Active assistant message is missing');
+      const info = {
+        ...current,
+        time: { ...(current.time as object), completed: Date.now() },
+      };
+      harness?.updateMessageInfo?.(info);
+      harness?.updateSessionStatus?.(sessionID, { type: 'idle' });
+      window.postMessage(
+        { type: 'server/event', payload: { type: 'message.updated', properties: { info } } },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { completionSlotSamples?: unknown }).completionSlotSamples
+        )
+      )
+      .not.toBeUndefined();
+    const samples = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            completionSlotSamples?: Array<{ top: number; slotHeight: number }>;
+          }
+        ).completionSlotSamples ?? []
+    );
+    expect(
+      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+      JSON.stringify(samples)
+    ).toBe(true);
+    expect(new Set(samples.map((sample) => Math.round(sample.slotHeight))).size).toBe(1);
+    await expect(page.locator('.trailing-assistant-summary-row')).toContainText('Worked for');
+  });
+
+  test('keeps the transcript fixed while an edited message is replaced', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+
+    const prompt = 'Review large transcript section 239 and keep the UI responsive.';
+    await page
+      .locator('[data-msg-id="message-large-user-239"]')
+      .getByText(prompt, { exact: true })
+      .click();
+    const inlineComposer = page.locator(
+      '.inline-edit-composer-slot [role="textbox"][aria-multiline="true"]'
+    );
+    await expect(inlineComposer).toBeVisible();
+    await inlineComposer.fill('Corrected final prompt without a viewport jump.');
+    await waitForAnimationFrames(page, 6);
+
+    await page.evaluate(() => {
+      const harness = window as Window & {
+        __sendToExtension?: (message: unknown) => void | Promise<void>;
+        editReplacementSamples?: Array<{
+          top: number;
+          editing: boolean;
+          reserveHeight: number;
+        }>;
+      };
+      const originalSend = harness.__sendToExtension;
+      let delayedDelete = false;
+      harness.__sendToExtension = async (message) => {
+        const request = message as {
+          type?: string;
+          payload?: { method?: string; path?: string };
+        };
+        if (
+          !delayedDelete &&
+          request.type === 'api/request' &&
+          request.payload?.method === 'DELETE' &&
+          request.payload.path?.includes('/message/')
+        ) {
+          delayedDelete = true;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        await originalSend?.(message);
+      };
+
+      const container = document.querySelector<HTMLElement>('.interactive-list')!;
+      const anchor = container.querySelector<HTMLElement>(
+        '[data-msg-id="message-large-assistant-238"]'
+      )!;
+      const samples: Array<{ top: number; editing: boolean; reserveHeight: number }> = [];
+      const sample = () => {
+        samples.push({
+          top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
+          editing: container.classList.contains('editing-message'),
+          reserveHeight:
+            container
+              .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
+              ?.getBoundingClientRect().height ?? 0,
+        });
+        if (samples.length < 50) requestAnimationFrame(sample);
+        else harness.editReplacementSamples = samples;
+      };
+      sample();
+    });
+
+    await inlineComposer.press('Enter');
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { editReplacementSamples?: unknown }).editReplacementSamples
+        )
+      )
+      .not.toBeUndefined();
+    const samples = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            editReplacementSamples?: Array<{
+              top: number;
+              editing: boolean;
+              reserveHeight: number;
+            }>;
+          }
+        ).editReplacementSamples ?? []
+    );
+    expect(
+      samples.every((sample) => Math.abs(sample.top - samples[0]!.top) <= 1),
+      JSON.stringify(samples)
+    ).toBe(true);
+    await expect(
+      page.getByText('Corrected final prompt without a viewport jump.', { exact: true })
+    ).toBeVisible();
   });
 
   test('does not push a full transcript backward when send-time panels collapse', async ({
@@ -646,9 +857,7 @@ test.describe('auto-scroll', () => {
   test('keeps a detached anchor stable when an offscreen active tool joins Explored', async ({
     page,
   }) => {
-    await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1'
-    );
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1');
     const list = page.locator('.interactive-list');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect
@@ -1107,9 +1316,7 @@ test.describe('auto-scroll', () => {
   });
 
   test('reserves an empty follower row when an earlier message owns Explored', async ({ page }) => {
-    await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript'
-    );
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
     const list = page.locator('.interactive-list');
     const follower = page.locator('[data-msg-id="tool-follower-assistant"]');
     const activeItem = page.locator('[data-activity-part-id="tool-follower-running"]');
@@ -1228,9 +1435,7 @@ test.describe('auto-scroll', () => {
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({
     page,
   }) => {
-    await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript'
-    );
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
     const summary = page.locator('.assistant-activity-summary').last();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(summary).toContainText('Explored');
@@ -1364,9 +1569,7 @@ test.describe('auto-scroll', () => {
       };
       // oxlint-disable-next-line consistent-function-scoping -- Playwright serializes this scope.
       const waitForFrame = () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => setTimeout(() => resolve(), 0))
-        );
+        new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(() => resolve(), 0)));
       const getRequestCount = () =>
         (harness.__varroE2E?.requests ?? []).filter((request) =>
           request.path.includes('/session/session-cold-large-history/message')

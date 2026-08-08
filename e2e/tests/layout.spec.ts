@@ -175,6 +175,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const trayWidth = activityTray.getBoundingClientRect().width;
     const trayGap = getComputedStyle(activityTray).rowGap;
     const samples: number[] = [];
+    const summaryTops = [summaryTop];
     // oxlint-disable-next-line unicorn/consistent-function-scoping
     const getLoadingTop = () => {
       const loading = document.querySelector<HTMLElement>('.interactive-loading-row');
@@ -197,6 +198,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     for (let frame = 0; frame < 80 && framesAfterRemoval < 4; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       samples.push(element.isConnected ? element.getBoundingClientRect().height : 0);
+      const currentSummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+      if (currentSummary) summaryTops.push(currentSummary.getBoundingClientRect().top);
       const loadingTop = getLoadingTop();
       if (loadingTop !== null) loadingTops.push(loadingTop);
       if (!element.isConnected) framesAfterRemoval += 1;
@@ -209,6 +212,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       summaryMaskBackground,
       summaryMaskWidth,
       summaryTop,
+      summaryTops,
       trayGap,
       trayWidth,
     };
@@ -224,6 +228,10 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   await expect(loadingIndicator).toBeVisible();
   expect(transition.synchronizedExitAnimationCount).toBeGreaterThanOrEqual(2);
   expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
+  expect(
+    Math.max(...transition.summaryTops) - Math.min(...transition.summaryTops),
+    JSON.stringify(transition.summaryTops)
+  ).toBeLessThanOrEqual(0.5);
   expect(transition.summaryMaskBackground).not.toBe('rgba(0, 0, 0, 0)');
   expect(Math.abs(transition.summaryMaskWidth - transition.trayWidth)).toBeLessThanOrEqual(1);
   expect(transition.trayGap).toBe('0px');
@@ -279,6 +287,99 @@ test('keeps the active tool gap fixed through its entrance animation', async ({ 
   });
   expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(0.5);
   for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
+});
+
+test('keeps a cross-message active tool adjacent to Explored after entrance', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  const summary = page.locator('.assistant-activity-summary').first();
+  await expect(summary).toContainText('Explored');
+
+  await page.evaluate(() => {
+    const sessionId = 'session-tool-cards';
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateMessagePart?: (part: Record<string, unknown>) => void;
+        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
+      };
+    };
+    const original = harnessWindow.__varroE2E
+      ?.getSessionMessages?.(sessionId)
+      .find((message) => message.info.role === 'assistant');
+    if (!original) throw new Error('Cross-message activity fixture is missing');
+    const info = {
+      ...original.info,
+      id: 'message-cross-message-active-tool',
+      time: { created: Date.now() },
+    };
+    const part = {
+      id: 'tool-cross-message-active',
+      sessionID: sessionId,
+      messageID: info.id,
+      type: 'tool' as const,
+      callID: 'tool-cross-message-active-call',
+      tool: 'grep',
+      state: {
+        status: 'running' as const,
+        input: { pattern: 'cross-message activity', path: 'src' },
+        title: 'Search cross-message activity',
+        time: { start: Date.now() },
+      },
+    };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+    for (const [type, properties] of [
+      ['message.updated', { info }],
+      ['message.part.updated', { part }],
+      ['session.status', { sessionID: sessionId, status: { type: 'busy' } }],
+    ] as const) {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    }
+  });
+
+  const row = page.locator('[data-msg-id="message-cross-message-active-tool"]');
+  const tray = row.locator('.assistant-active-activity-tray');
+  const activeTool = tray.locator('.chat-tool-invocation-part');
+  await expect(activeTool).toBeVisible();
+  await expect(row).not.toHaveClass(/interactive-item-entering/);
+  await expect(tray).not.toHaveClass(/has-active-summary/);
+  await expect(row.locator('.assistant-activity-summary')).toHaveCount(0);
+
+  const geometry = await activeTool.evaluate(async (element, summaryElement) => {
+    const rowElement = element.closest<HTMLElement>('.interactive-item-container');
+    const shell = element.closest<HTMLElement>('.assistant-turn-content');
+    const trayElement = element.closest<HTMLElement>('.assistant-active-activity-tray');
+    if (!summaryElement || !rowElement || !shell || !trayElement) {
+      throw new Error('Cross-message activity geometry is missing');
+    }
+    const entranceAnimationNames = new Set([
+      'streamed-message-row-in',
+      'assistant-active-activity-in',
+      'assistant-active-activity-row-in',
+      'assistant-active-activity-shell-in',
+    ]);
+    await Promise.allSettled(
+      rowElement
+        .getAnimations({ subtree: true })
+        .filter(
+          (animation): animation is CSSAnimation =>
+            animation instanceof CSSAnimation && entranceAnimationNames.has(animation.animationName)
+        )
+        .map((animation) => animation.finished)
+    );
+    if (!element.isConnected) throw new Error('Cross-message active tool was removed');
+    return {
+      gap:
+        element.getBoundingClientRect().top -
+        (summaryElement as HTMLElement).getBoundingClientRect().bottom,
+      trayIsOnlyChild: trayElement.parentElement?.children.length === 1,
+    };
+  }, await summary.elementHandle());
+
+  expect(geometry.trayIsOnlyChild).toBe(true);
+  expect(geometry.gap).toBeCloseTo(12, 0);
 });
 
 test('keeps streamed response text fixed when it follows Explored', async ({ page }) => {
@@ -881,6 +982,8 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
   await page.getByRole('button', { name: 'Send (Enter)' }).click();
   const followingUser = page.getByText('Spacing user boundary.', { exact: true });
   await expect(followingUser).toBeVisible();
+  const followingUserRow = page.locator('.interactive-request').filter({ has: followingUser });
+  await expect(followingUserRow).not.toHaveClass(/interactive-item-entering/);
   const gaps = await summary.evaluate((element) => {
     const precedingUser = document.querySelector<HTMLElement>(
       '[data-msg-id="message-tool-cards-user"] .user-message-card'
@@ -1055,7 +1158,7 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
   expect(await measureGap()).toBe(12);
   expect(
     await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
-  ).toBe(21);
+  ).toBe(24);
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {

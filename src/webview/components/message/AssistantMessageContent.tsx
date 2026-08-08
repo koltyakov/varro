@@ -47,13 +47,15 @@ type AssistantRenderEntry = {
   update: (item: AssistantRenderItem) => void;
 };
 
+function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart[]) {
+  return `activity-group:${parts[0]!.id}:${parts[parts.length - 1]!.id}`;
+}
+
 // File-edit stacks rekey on every appended edit, so track their reveal by the
 // first part id; otherwise appending an edit replays the whole stack animation.
 function getRevealTrackingKey(item: AssistantRenderItem) {
   if (item.kind === 'file-edit-stack') return `file-edit-stack:${item.parts[0]!.id}`;
-  if (item.kind === 'activity-group') {
-    return `activity-group:${item.parts[0]!.id}:${item.parts[item.parts.length - 1]!.id}`;
-  }
+  if (item.kind === 'activity-group') return getActivityGroupRevealTrackingKey(item.parts);
   return item.key;
 }
 
@@ -710,6 +712,17 @@ export function AssistantMessageContent(props: {
                     lightweight={!!isLightweight()}
                     questionRequestForTool={props.questionRequestForTool}
                     permissionMatchForTool={props.permissionMatchForTool}
+                    onSummaryShown={() => {
+                      const summaryPartKeys = new Set(
+                        active().summaryParts.map(getAssistantActivityPartKey)
+                      );
+                      const localSummaryParts = item().parts.filter((part) =>
+                        summaryPartKeys.has(getAssistantActivityPartKey(part))
+                      );
+                      if (localSummaryParts.length > 0) {
+                        claimReveal(getActivityGroupRevealTrackingKey(localSummaryParts));
+                      }
+                    }}
                   />
                 </Show>
               </div>
@@ -965,10 +978,16 @@ function AssistantActivityGroup(props: {
   lightweight: boolean;
   questionRequestForTool?: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool?: (part: ToolPart) => ToolCallPermissionMatch | null;
+  onSummaryShown?: () => void;
 }) {
   const expanded = () => isActivityGroupExpanded(props.expansionKey);
   const activityStatus = createMemo(() => getAssistantActivityStatus(props.summaryParts));
   const activityItems = createMemo(() => getAssistantActivityCountItems(props.summaryParts));
+
+  createEffect(() => {
+    if (!props.showSummary || props.summaryParts.length === 0) return;
+    props.onSummaryShown?.();
+  });
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();

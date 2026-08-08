@@ -38,6 +38,7 @@ import {
   getAssistantActivityGroupMap,
   isAssistantActivityPart,
   isAssistantActivityPartRunning,
+  isAssistantEditActivityPart,
   preserveAssistantActivityGroupKeys,
   shouldCompactAssistantActivityPart,
   type AssistantActivityGroupInfo,
@@ -798,7 +799,7 @@ export function MessageList() {
     messageStructureVersion();
     return untrack(() => hasVisibleRunningToolPart(messages()));
   });
-  const visibleRunningToolOutsideCompactActivity = createMemo(() => {
+  const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
     const showInlineChanges = showInlineFileChanges();
     return untrack(() =>
@@ -808,11 +809,11 @@ export function MessageList() {
             part.type === 'tool' &&
             (part.state.status === 'pending' || part.state.status === 'running') &&
             shouldShowAssistantPartInline(part) &&
-            (!isAssistantActivityPart(part) ||
-              !shouldCompactAssistantActivityPart(part, {
-                showInlineFileChanges: showInlineChanges,
-                keepEditInline: true,
-              }))
+            isAssistantEditActivityPart(part) &&
+            !shouldCompactAssistantActivityPart(part, {
+              showInlineFileChanges: showInlineChanges,
+              keepEditInline: true,
+            })
         )
       )
     );
@@ -1550,7 +1551,7 @@ export function MessageList() {
       loadingRowEligible() &&
       !visibleBlockingStreamingPart() &&
       !committedTextBlocksReappear() &&
-      !visibleRunningToolOutsideCompactActivity() &&
+      !visibleRunningInlineFileEdit() &&
       !hasVisibleActivityTrayRows()
   );
 
@@ -1582,8 +1583,8 @@ export function MessageList() {
     const eligible = loadingRowEligible();
     const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
     const blockedByCommittedText = eligible && committedTextBlocksReappear();
+    const blockedByVisibleInlineFileEdit = eligible && visibleRunningInlineFileEdit();
     const blockedByVisibleActivity = eligible && hasVisibleActivityTrayRows();
-    const blockedByVisibleInlineTool = eligible && visibleRunningToolOutsideCompactActivity();
     const shouldShow = shouldShowLoadingRow();
     const isReserved = reserveLoadingRow();
     const isShowing = showLoadingRow();
@@ -1610,8 +1611,8 @@ export function MessageList() {
     if (
       blockedByVisibleStream ||
       blockedByCommittedText ||
-      blockedByVisibleActivity ||
-      blockedByVisibleInlineTool
+      blockedByVisibleInlineFileEdit ||
+      blockedByVisibleActivity
     ) {
       clearLoadingRowReappearTimer();
       loadingRowHiddenByVisibleStream = blockedByVisibleStream;
@@ -4602,7 +4603,7 @@ export function MessageList() {
       const treeWorking = isSessionTreeStatusWorking(sessionId);
       const settledWithError = !!turn.latestAssistant?.error && !treeWorking && !awaitingInput;
       if (settledWithError) return retained;
-      if (activeSessionWorking() || awaitingInput) {
+      if (treeWorking || awaitingInput) {
         return {
           sessionId,
           userMessageId: turn.userMessageId,

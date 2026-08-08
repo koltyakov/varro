@@ -483,6 +483,60 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-group-settling')).not.toBeNull();
   });
 
+  it('does not replay the group settle after the tray already shows Explored', () => {
+    const command = toolPart('command-handoff', 'bash', { command: 'npm test' });
+    const partKey = getAssistantActivityPartKey(command);
+    const group = {
+      key: 'activity-group-handoff',
+      ownerMessageId: command.messageID,
+      ownerPartId: command.id,
+      parts: [command],
+    };
+    const [retainedKeys, setRetainedKeys] = createSignal<ReadonlySet<string>>(new Set([partKey]));
+    const [exitingKeys, setExitingKeys] = createSignal<ReadonlySet<string>>(new Set<string>());
+    const claimedKeys = new Set<string>();
+
+    cleanup = render(
+      () => (
+        <AssistantMessageContent
+          info={createAssistantMessage({ time: { created: 0 } })}
+          parts={[command]}
+          textForPart={(part) =>
+            part.type === 'text' || part.type === 'reasoning' ? part.text : null
+          }
+          compactActivityGroups={[group]}
+          retainedActivityPartKeys={retainedKeys()}
+          exitingActivityPartKeys={exitingKeys()}
+          claimItemReveal={(_messageId, renderKey) => {
+            if (claimedKeys.has(renderKey)) return false;
+            claimedKeys.add(renderKey);
+            return true;
+          }}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.assistant-activity-summary-placeholder')?.textContent).toBe(
+      'Exploring'
+    );
+
+    setExitingKeys(new Set([partKey]));
+    setRetainedKeys(new Set<string>());
+
+    expect(container?.querySelector('.assistant-active-activity-summary')?.textContent).toContain(
+      'Explored: 1 command'
+    );
+
+    setExitingKeys(new Set<string>());
+
+    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 command'
+    );
+    expect(container?.querySelector('.assistant-activity-group-settling')).toBeNull();
+  });
+
   it('keeps active and briefly completed tools together in one bounded tray', () => {
     const runningSearch = toolPart('search-running', 'grep', { pattern: 'activity' });
     runningSearch.state = {

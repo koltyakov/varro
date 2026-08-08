@@ -1829,15 +1829,25 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    container
-      ?.querySelector<HTMLButtonElement>('[aria-label="Pause queued message"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const firstRow = container?.querySelector<HTMLElement>('.chat-queue-item');
+    const actions = firstRow?.querySelector<HTMLElement>('.chat-queue-actions');
+    const actionButtons = Array.from(actions?.querySelectorAll('button') || []);
+    const pauseButton = actions?.querySelector<HTMLButtonElement>(
+      '[aria-label="Pause queued message"]'
+    );
+    const pauseIcon = pauseButton?.firstElementChild;
+
+    pauseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(state.queuedMessages.find((item) => item.id === 'q1')?.paused).toBe(true);
     expect(state.queuedMessages.find((item) => item.id === 'q2')?.paused).toBeUndefined();
     expect(state.queuedMessages.find((item) => item.id === 'other')?.paused).toBeUndefined();
     expect(container?.querySelectorAll('.chat-queue-item.is-paused')).toHaveLength(1);
     expect(container?.querySelector('.chat-queue-paused-label')?.textContent).toBe('Paused');
+    expect(container?.querySelector('.chat-queue-item')).toBe(firstRow);
+    expect(firstRow?.querySelector('.chat-queue-actions')).toBe(actions);
+    expect(Array.from(actions?.querySelectorAll('button') || [])).toEqual(actionButtons);
+    expect(pauseButton?.firstElementChild).not.toBe(pauseIcon);
 
     container
       ?.querySelector<HTMLButtonElement>('[aria-label="Pause queued message"]')

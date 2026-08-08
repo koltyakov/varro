@@ -433,7 +433,12 @@
       > .assistant-active-activity-items
       > .assistant-active-activity-item.is-entering:only-child
   )
-  .assistant-turn-content {
+  .assistant-turn-content:not(
+    .assistant-turn-content-bare,
+    .assistant-turn-content-plain,
+    .assistant-turn-content-highlighted,
+    .assistant-turn-content-planning
+  ) {
   animation: assistant-active-activity-shell-in 0.28s cubic-bezier(0.16, 0.72, 0.24, 1) both;
 }
 

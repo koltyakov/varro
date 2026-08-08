@@ -13,6 +13,10 @@ export function hasVisibleBlockingStreamingPart(part: Part | null, streamingText
     return false;
   }
 
+  if (part.type === 'tool' && part.tool.trim().toLowerCase() === 'task') {
+    return false;
+  }
+
   return shouldShowAssistantPartInline(part);
 }
 

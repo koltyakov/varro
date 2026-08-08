@@ -116,7 +116,11 @@ export async function retryMessage(messageId: string, sessionId?: string | null)
 export async function editMessage(
   messageId: string,
   text: string,
-  options?: { allowEmptyText?: boolean; queuedAttachments?: QueuedAttachmentSnapshot }
+  options?: {
+    allowEmptyText?: boolean;
+    queuedAttachments?: QueuedAttachmentSnapshot;
+    onOptimisticPublish?: () => void;
+  }
 ) {
   return await getCurrentOpenCodeRuntime().editMessage(messageId, text, options);
 }
