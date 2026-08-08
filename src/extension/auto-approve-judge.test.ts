@@ -633,6 +633,137 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
   });
 
+  it('prefers GPT Luna from a connected provider when small_model is absent', async () => {
+    let messageBody: Record<string, unknown> | undefined;
+    const isOpenAIPro = vi.fn(() => Promise.resolve(false));
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'GET' && path === '/config/providers') {
+        return {
+          providers: [
+            {
+              id: 'openai',
+              models: {
+                'gpt-5.6-luna': { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+              },
+            },
+            {
+              id: 'anthropic',
+              models: { opus: { id: 'opus', name: 'Claude Opus' } },
+            },
+          ],
+        };
+      }
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        messageBody = body as Record<string, unknown>;
+        return { info: { structured: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      new HiddenSessionManager(),
+      isOpenAIPro
+    );
+
+    await judge.judge({
+      permission: cargoBuildPermission('perm-luna'),
+      model: { providerID: 'anthropic', modelID: 'opus', variant: 'high' },
+    });
+
+    expect(messageBody?.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.6-luna' });
+    expect(messageBody).not.toHaveProperty('variant');
+    expect(isOpenAIPro).not.toHaveBeenCalled();
+  });
+
+  it('prefers OpenAI GPT Luna Fast for a Pro plan', async () => {
+    let messageBody: Record<string, unknown> | undefined;
+    const isOpenAIPro = vi.fn(() => Promise.resolve(true));
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'GET' && path === '/config/providers') {
+        return {
+          providers: [
+            {
+              id: 'openai',
+              models: {
+                'gpt-5.6-luna': { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+                'gpt-5.6-luna-fast': {
+                  id: 'gpt-5.6-luna-fast',
+                  name: 'GPT-5.6 Luna Fast',
+                },
+              },
+            },
+          ],
+        };
+      }
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        messageBody = body as Record<string, unknown>;
+        return { info: { structured: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      new HiddenSessionManager(),
+      isOpenAIPro
+    );
+
+    await judge.judge({ permission: cargoBuildPermission('perm-luna-fast') });
+
+    expect(messageBody?.model).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.6-luna-fast',
+    });
+    expect(isOpenAIPro).toHaveBeenCalledOnce();
+  });
+
+  it('uses the request model with low reasoning when GPT Luna is unavailable', async () => {
+    let messageBody: Record<string, unknown> | undefined;
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'GET' && path === '/config/providers') {
+        return {
+          providers: [
+            {
+              id: 'anthropic',
+              models: {
+                opus: {
+                  id: 'opus',
+                  name: 'Claude Opus',
+                  variants: {
+                    high: { reasoningEffort: 'high' },
+                    low: { reasoningEffort: 'low' },
+                  },
+                },
+              },
+            },
+          ],
+        };
+      }
+      if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
+      if (method === 'POST' && path === '/session/judge-session-1/message') {
+        messageBody = body as Record<string, unknown>;
+        return { info: { structured: { decision: 'ask', reason: 'Needs user review.' } } };
+      }
+      if (method === 'DELETE' && path === '/session/judge-session-1') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await judge.judge({
+      permission: cargoBuildPermission('perm-fallback'),
+      model: { providerID: 'anthropic', modelID: 'opus', variant: 'high' },
+    });
+
+    expect(messageBody?.model).toEqual({ providerID: 'anthropic', modelID: 'opus' });
+    expect(messageBody?.variant).toBe('low');
+  });
+
   it.each(['false response', 'rejected request'] as const)(
     'keeps a judge helper session hidden after a %s deletion',
     async (failure) => {

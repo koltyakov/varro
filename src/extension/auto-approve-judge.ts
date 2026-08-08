@@ -9,6 +9,7 @@ import type { PermissionRule } from '../shared/opencode-types';
 import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
+import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
@@ -62,7 +63,8 @@ export class AutoApproveJudge {
 
   constructor(
     private readonly server: OpenCodeRequest,
-    private readonly hiddenSessions: HiddenSessionManager
+    private readonly hiddenSessions: HiddenSessionManager,
+    private readonly isOpenAIPro: () => Promise<boolean> = async () => false
   ) {}
 
   async judge(request: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
@@ -168,7 +170,12 @@ export class AutoApproveJudge {
         'POST',
         `/session/${encodeURIComponent(sessionID)}/message`,
         {
-          ...(model ? { model } : {}),
+          ...(model
+            ? {
+                model: { providerID: model.providerID, modelID: model.modelID },
+                ...(model.variant ? { variant: model.variant } : {}),
+              }
+            : {}),
           system: buildJudgeSystemPrompt(),
           parts: [
             {
@@ -211,8 +218,12 @@ export class AutoApproveJudge {
     fallbackModel: AutoApproveJudgeRequest['model']
   ): Promise<JudgeModel | null> {
     const config = asRecord(await this.server.request('GET', '/config').catch(() => null));
-    const smallModel = parseModelRoute(config?.small_model);
-    return smallModel || normalizeModel(fallbackModel);
+    return resolveHelperModel({
+      smallModel: config?.small_model,
+      loadProviderConfig: () => this.server.request('GET', '/config/providers'),
+      fallbackModel: normalizeModel(fallbackModel),
+      isOpenAIPro: this.isOpenAIPro,
+    });
   }
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -768,13 +779,6 @@ function parseJsonObject(text: string) {
   } catch {
     return null;
   }
-}
-
-function parseModelRoute(value: unknown) {
-  if (typeof value !== 'string') return null;
-  const separator = value.indexOf('/');
-  if (separator <= 0 || separator === value.length - 1) return null;
-  return { providerID: value.slice(0, separator), modelID: value.slice(separator + 1) };
 }
 
 function normalizeModel(value: AutoApproveJudgeRequest['model']) {

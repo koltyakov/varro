@@ -64,11 +64,12 @@ async function updateDiffPreviewWithPatch(page: Page, messageId: string, patchTe
         callID: `${part}-call`,
         tool: 'apply_patch',
         state: {
-          status: 'running' as const,
+          status: 'completed' as const,
           input: { patchText: patch },
+          output: 'Done',
           title: 'apply_patch',
           metadata: {},
-          time: { start: 1 },
+          time: { start: 1, end: 2 },
         },
       };
       const harnessWindow = window as typeof window & {
@@ -97,7 +98,7 @@ test.describe('diff preview anchoring', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&activeTurnCollapse=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&activeTurnCollapse=1&expandedActivity=1'
     );
     const list = page.locator('.interactive-list');
     const editMessageId = 'message-diff-preview-assistant-59';
@@ -178,7 +179,9 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('centers the expanded diff and strongly obscures the transcript', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const messageId = 'message-diff-preview-assistant-59';
     await updateExpandableDiffPreview(page, messageId);
 
@@ -250,7 +253,9 @@ test.describe('diff preview anchoring', () => {
   test('keeps visible content anchored while diff previews resize asynchronously', async ({
     page,
   }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
@@ -346,7 +351,9 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('aligns the first changed diff row with the top of the preview', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     await expect(page.locator('.interactive-list')).toBeVisible();
 
     const messageId = 'message-diff-preview-assistant-59';
@@ -382,7 +389,9 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('opens the diff dialog without obscuring horizontal scrolling', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     await expect(page.locator('.interactive-list')).toBeVisible();
 
     const messageId = 'message-diff-preview-assistant-59';
@@ -534,7 +543,9 @@ test.describe('diff preview anchoring', () => {
   test('keeps a focused diff header fixed when it is expanded after scrolling', async ({
     page,
   }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
@@ -576,7 +587,9 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('stops following the bottom when an expanded diff is collapsed', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
@@ -639,7 +652,9 @@ test.describe('diff preview anchoring', () => {
   });
 
   test('does not reattach to bottom after a zero-delta layout scroll event', async ({ page }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
@@ -680,7 +695,9 @@ test.describe('diff preview anchoring', () => {
   test('never resumes bottom follow while scrolling through stale diff heights', async ({
     page,
   }) => {
-    await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+    await page.goto(
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&expandedActivity=1'
+    );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();
 
@@ -715,12 +732,18 @@ test.describe('diff preview anchoring', () => {
 
   test('keeps the visible message anchored when older diff history loads', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&deferHistory=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&deferHistory=1&expandedActivity=1&messagePageSize=50'
     );
     const list = page.locator('.interactive-list');
     const historyBanner = page.locator('.message-history-banner');
     await expect(list).toBeVisible();
     await expect(page.locator('[data-msg-id="message-diff-preview-user-0"]')).toHaveCount(0);
+    await expect(historyBanner).toBeVisible();
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
     await expect
       .poll(() =>
         page.evaluate(() => {
@@ -792,7 +815,7 @@ test.describe('diff preview anchoring', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&boundarySticky=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&windowed=1&boundarySticky=1&expandedActivity=1&messagePageSize=50'
     );
     const list = page.locator('.interactive-list');
     const targetRow = page.locator('[data-msg-id="message-diff-preview-user-35"]');
@@ -803,7 +826,7 @@ test.describe('diff preview anchoring', () => {
 
     await list.evaluate((element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
-      element.scrollTop = 32;
+      element.scrollTop = 80;
       element.dispatchEvent(new Event('scroll'));
     });
 

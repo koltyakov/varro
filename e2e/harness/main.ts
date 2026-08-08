@@ -17,6 +17,13 @@ import type {
   SessionStatus,
   Todo,
 } from '../../src/webview/types';
+import type { getAssistantActivityGroupMap as GetAssistantActivityGroupMap } from '../../src/webview/lib/assistant-activity';
+import {
+  getMessageBlockExpanded,
+  setMessageBlockExpanded,
+} from '../../src/webview/lib/tool-call-expansion-state';
+
+type AssistantActivityGroupMapBuilder = typeof GetAssistantActivityGroupMap;
 
 type MessageEntry<TMessage extends Message = Message> = { info: TMessage; parts: Part[] };
 type PermissionResponse = {
@@ -88,6 +95,7 @@ const SCENARIO_NAMES = [
   'incident-delayed-image-history',
   'mixed-small-transcript',
   'heterogeneous-large-transcript',
+  'thinking-expanded-virtualized-anchor',
   'huge-content-transcript',
   'multi-agent-streaming',
   'rapid-streaming-jitter',
@@ -1467,7 +1475,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             session.id,
             assistant.info.id,
             `message-sticky-terminal-result-${index}`,
-            `Verification ${index + 1} completed.`,
+            `Verification ${index + 1} completed.`
           ),
         ];
       } else if (index !== 32) {
@@ -2904,8 +2912,37 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       messages.push(user, assistant);
     }
 
+    if (new URLSearchParams(window.location.search).get('activeReasoningEntrance') === '1') {
+      const latestAssistant = messages.at(-1)!;
+      const completedAt =
+        ('completed' in latestAssistant.info.time
+          ? latestAssistant.info.time.completed
+          : undefined) ?? latestAssistant.info.time.created + 1;
+      latestAssistant.parts = [
+        makeReasoningPart(
+          session.id,
+          latestAssistant.info.id,
+          'reasoning-bottom-follow-completed',
+          'Establishing the existing activity group.',
+          latestAssistant.info.time.created,
+          completedAt
+        ),
+      ];
+      messages.push({
+        info: {
+          ...latestAssistant.info,
+          id: 'message-large-assistant-active',
+          time: { created: completedAt + 1 },
+        },
+        parts: [],
+      });
+    }
+
     state.sessions = [session];
-    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[session.id] =
+      new URLSearchParams(window.location.search).get('activeReasoningEntrance') === '1'
+        ? { type: 'busy' }
+        : { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 390;
@@ -3548,6 +3585,84 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 400;
+    return state;
+  }
+
+  if (name === 'thinking-expanded-virtualized-anchor') {
+    const session = makeSession(
+      'session-thinking-expanded-virtualized-anchor',
+      'Expanded thinking virtualized anchor',
+      BASE_TIME - 500
+    );
+    const messages: MessageEntry[] = [];
+    for (let index = 0; index < 60; index += 1) {
+      const user = makeUserMessage(
+        session.id,
+        `message-thinking-anchor-user-${index}`,
+        [`Earlier prompt ${index}.`],
+        BASE_TIME - (500 - index) * 1_000
+      );
+      messages.push(
+        user,
+        makeAssistantMessage(
+          session.id,
+          `message-thinking-anchor-assistant-${index}`,
+          user.info.id,
+          `Earlier response ${index}. ${'Measured transcript content. '.repeat(index % 4)}`,
+          user.info.time.created + 1
+        )
+      );
+    }
+
+    const groupUser = makeUserMessage(
+      session.id,
+      'message-thinking-anchor-group-user',
+      ['Investigate the expanded reasoning group.'],
+      BASE_TIME - 100_000
+    );
+    messages.push(groupUser);
+    const groupAssistant = makeAssistantMessage(
+      session.id,
+      'message-thinking-anchor-group-assistant',
+      groupUser.info.id,
+      '',
+      BASE_TIME - 99_000
+    );
+    groupAssistant.parts = Array.from({ length: 9 }, (_, index) =>
+      makeReasoningPart(
+        session.id,
+        groupAssistant.info.id,
+        `${groupAssistant.info.id}-reasoning-${index}`,
+        `Expanded reasoning detail ${index + 1}. ${'This block changes the offscreen group height. '.repeat(3)}`,
+        groupAssistant.info.time.created + index,
+        groupAssistant.info.time.created + index + 1
+      )
+    );
+    messages.push(groupAssistant);
+
+    for (let index = 0; index < 6; index += 1) {
+      const user = makeUserMessage(
+        session.id,
+        `message-thinking-anchor-tail-user-${index}`,
+        [`Later prompt ${index}.`],
+        BASE_TIME - (80_000 - index)
+      );
+      messages.push(
+        user,
+        makeAssistantMessage(
+          session.id,
+          `message-thinking-anchor-tail-assistant-${index}`,
+          user.info.id,
+          `Later response ${index}. ${'The bottom viewport remains detached. '.repeat(2)}`,
+          user.info.time.created + 1
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
     return state;
   }
 
@@ -4565,7 +4680,10 @@ async function handleApiRequest(
     const windowed = new URLSearchParams(window.location.search).get('windowed') === '1';
     if (!windowed) return messages;
 
-    const limit = Math.max(1, Number(url.searchParams.get('limit')) || 50);
+    const configuredPageSize = Number(
+      new URLSearchParams(window.location.search).get('messagePageSize')
+    );
+    const limit = Math.max(1, configuredPageSize || Number(url.searchParams.get('limit')) || 50);
     const before = url.searchParams.get('before');
     const requestedEnd =
       before === null ? messages.length : resolveMessageCursor(state, sessionId, before);
@@ -5026,6 +5144,21 @@ function installBridge(state: ScenarioState) {
   };
 }
 
+function expandScenarioActivityGroups(
+  state: ScenarioState,
+  getAssistantActivityGroupMap: AssistantActivityGroupMapBuilder
+) {
+  const groupKeys = new Set<string>();
+  for (const messages of Object.values(state.messagesBySessionId)) {
+    for (const groups of getAssistantActivityGroupMap(messages).values()) {
+      for (const group of groups) groupKeys.add(group.key);
+    }
+  }
+  for (const key of groupKeys) {
+    if (getMessageBlockExpanded(key) !== true) setMessageBlockExpanded(key, true);
+  }
+}
+
 function setUpHarness() {
   const scenarioName = getScenarioName();
   const scenarioState = createScenarioState(scenarioName);
@@ -5137,8 +5270,27 @@ function setUpHarness() {
     document.documentElement.classList.add(`theme-${THEME}`);
   }
   installBridge(scenarioState);
+  return scenarioState;
 }
 
-setUpHarness();
+const scenarioState = setUpHarness();
 
 await import('../../src/webview/index');
+
+if (new URLSearchParams(window.location.search).get('expandedActivity') === '1') {
+  const { getAssistantActivityGroupMap } = await import('../../src/webview/lib/assistant-activity');
+  const expandActivity = () =>
+    expandScenarioActivityGroups(scenarioState, getAssistantActivityGroupMap);
+  const expansionObserver = new MutationObserver(expandActivity);
+  expansionObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['aria-expanded'],
+    childList: true,
+    subtree: true,
+  });
+  expandActivity();
+  setTimeout(() => {
+    expandActivity();
+    expansionObserver.disconnect();
+  }, 1_000);
+}

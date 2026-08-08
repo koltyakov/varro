@@ -5,9 +5,9 @@ import type { PermissionRule } from '../shared/opencode-types';
 import type { ChatModelSelection } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import type { HiddenSessionManager } from './hidden-session-manager';
+import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 import type { OpenCodeServer } from './server';
-import { parseModelRoute } from './sidebar-provider-utils';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
 
@@ -388,17 +388,13 @@ export class CommitMessageService {
     config: Record<string, unknown> | null,
     directory: string
   ): Promise<ChatModelSelection | null> {
-    const smallModel = parseModelRoute(config?.small_model);
-    if (smallModel) return smallModel;
-
-    const providerConfig = await this.server
-      .request('GET', scopedPath('/config/providers', directory))
-      .catch(() => null);
-    const luna = findGptLunaModels(providerConfig);
-    if (luna.fast && (await this.isOpenAIPro().catch(() => false))) return luna.fast;
-    if (luna.standard) return luna.standard;
-
-    return resolveActiveChatModel(providerConfig, this.getActiveChatModel());
+    return resolveHelperModel({
+      smallModel: config?.small_model,
+      loadProviderConfig: () =>
+        this.server.request('GET', scopedPath('/config/providers', directory)),
+      fallbackModel: this.getActiveChatModel(),
+      isOpenAIPro: this.isOpenAIPro,
+    });
   }
 
   private abortAttempt(attempt: GenerationAttempt): void {
@@ -619,111 +615,6 @@ function readProviderError(value: unknown): string | null {
     getString(error.message) || getString(data?.message) || getString(cause?.message) || null;
   const name = getString(error.name);
   return message && name ? `${name}: ${message}` : message || name;
-}
-
-function findGptLunaModels(value: unknown): {
-  standard: ChatModelSelection | null;
-  fast: ChatModelSelection | null;
-} {
-  const providers = asRecord(value)?.providers;
-  if (!Array.isArray(providers)) return { standard: null, fast: null };
-  let standard: ChatModelSelection | null = null;
-  let fast: ChatModelSelection | null = null;
-
-  for (const rawProvider of providers) {
-    const provider = asRecord(rawProvider);
-    const providerID = getString(provider?.id);
-    const models = asRecord(provider?.models);
-    if (!providerID || !models) continue;
-
-    for (const [modelKey, rawModel] of Object.entries(models)) {
-      const model = asRecord(rawModel);
-      const modelID = getString(model?.id) || modelKey;
-      const identity =
-        `${modelID} ${getString(model?.name) || ''} ${getString(model?.family) || ''}`
-          .toLowerCase()
-          .replace(/[-_.]+/g, ' ');
-      if (getString(model?.status)?.toLowerCase() === 'deprecated') continue;
-      if (!/\bgpt\b/.test(identity) || !/\bluna\b/.test(identity)) continue;
-
-      const options = asRecord(model?.options);
-      const isFast = /\bfast\b/.test(identity) || options?.serviceTier === 'priority';
-      if (isFast && providerID === 'openai' && !fast) {
-        fast = { providerID, modelID };
-      } else if (!isFast && !/\bpro\b/.test(identity) && !standard) {
-        standard = { providerID, modelID };
-      }
-    }
-  }
-  return { standard, fast };
-}
-
-function resolveActiveChatModel(
-  value: unknown,
-  activeModel: ChatModelSelection | null
-): ChatModelSelection | null {
-  if (!activeModel) return null;
-  const model = findProviderModel(value, activeModel.providerID, activeModel.modelID);
-  if (!model) return null;
-  const variant = findLowReasoningVariant(model);
-  return {
-    providerID: activeModel.providerID,
-    modelID: activeModel.modelID,
-    ...(variant ? { variant } : {}),
-  };
-}
-
-function findProviderModel(
-  value: unknown,
-  providerID: string,
-  modelID: string
-): Record<string, unknown> | null {
-  const providers = asRecord(value)?.providers;
-  if (!Array.isArray(providers)) return null;
-  const provider = providers
-    .map((item) => asRecord(item))
-    .find((item) => getString(item?.id) === providerID);
-  const models = asRecord(provider?.models);
-  if (!models) return null;
-  const direct = asRecord(models[modelID]);
-  if (direct) return direct;
-  for (const rawModel of Object.values(models)) {
-    const model = asRecord(rawModel);
-    if (getString(model?.id) === modelID) return model;
-  }
-  return null;
-}
-
-function findLowReasoningVariant(model: Record<string, unknown>): string | null {
-  const variants = asRecord(model.variants);
-  if (!variants) return null;
-  const entries = Object.entries(variants);
-  const low = entries.find(([name, config]) => isReasoningVariant(name, config, 'low'));
-  if (low) return low[0];
-  return entries.find(([name, config]) => isReasoningVariant(name, config, 'none'))?.[0] || null;
-}
-
-function isReasoningVariant(name: string, value: unknown, target: 'low' | 'none'): boolean {
-  const normalizedName = name.toLowerCase().replace(/[-_]+/g, ' ').trim();
-  const config = asRecord(value);
-  const options = asRecord(config?.options);
-  const effort = (
-    getString(config?.reasoningEffort) ||
-    getString(config?.reasoning_effort) ||
-    getString(options?.reasoningEffort) ||
-    getString(options?.reasoning_effort) ||
-    ''
-  )
-    .toLowerCase()
-    .replace(/[-_]+/g, ' ')
-    .trim();
-  if (target === 'low') {
-    return /\b(minimal|low|light|fast)\b/.test(normalizedName) || effort === 'low';
-  }
-  return (
-    ['none', 'off', 'disabled', 'no reasoning', 'no thinking'].includes(normalizedName) ||
-    ['none', 'off', 'disabled'].includes(effort)
-  );
 }
 
 function throwIfCancelled(attempt: GenerationAttempt): void {

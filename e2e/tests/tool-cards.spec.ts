@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
 test('renders read, edit, and bash tool cards', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
   await expect(page.locator('.file-read-card')).toContainText('Read');
   await expect(page.locator('.file-read-card')).toContainText('index.ts');
@@ -17,7 +17,7 @@ test('renders read, edit, and bash tool cards', async ({ page }) => {
 });
 
 test('keeps compact tool card headers on the same geometry contract', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
   const headers = page.locator(
     '.file-read-card-header, .file-change-card-header, .tool-invocation-header'
@@ -40,7 +40,7 @@ test('keeps compact tool card headers on the same geometry contract', async ({ p
 });
 
 test('prevents selection from starting on expandable tool headers', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
   const expandableHeaders = page.locator(
     '.file-change-card-header.is-expandable, .tool-invocation-header:not(:disabled)'
@@ -55,7 +55,7 @@ test('prevents selection from starting on expandable tool headers', async ({ pag
 test('renders search tool details in the same framed card as other tool details', async ({
   page,
 }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
   const searchTool = page
     .locator('.chat-tool-invocation-part')
@@ -80,7 +80,7 @@ test('renders search tool details in the same framed card as other tool details'
 });
 
 test('fills expanded details with terminal and structured cards', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&expandedActivity=1');
 
   const tools = [
     page
@@ -113,7 +113,7 @@ test('fills expanded details with terminal and structured cards', async ({ page 
 });
 
 test('renders aborted and failed tool card states', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-card-errors');
+  await page.goto('/e2e/harness/index.html?scenario=tool-card-errors&expandedActivity=1');
 
   await expect(page.locator('.file-read-card')).toContainText('missing.ts');
   await expect(page.locator('.file-read-error-label.is-aborted')).toContainText('aborted');
@@ -126,7 +126,7 @@ test('renders aborted and failed tool card states', async ({ page }) => {
 });
 
 test('opens files and directories from tool cards', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-open-actions');
+  await page.goto('/e2e/harness/index.html?scenario=tool-open-actions&expandedActivity=1');
 
   await page.getByRole('link', { name: 'App.tsx' }).click();
   await page.getByRole('link', { name: 'src/components' }).click();

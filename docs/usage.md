@@ -206,7 +206,7 @@ To retrieve quota metadata, the extension host can:
 - Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
 - Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
 
-When no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation can also make a one-off OpenAI quota lookup to determine whether that model is eligible.
+When no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation and the auto-approve judge can also make a one-off OpenAI quota lookup to determine whether that model is eligible.
 
 ### Recommended OpenCode Configuration
 

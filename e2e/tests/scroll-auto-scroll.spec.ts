@@ -19,6 +19,111 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(15);
   });
 
+  test('starts an active reasoning row without a full-shell jump', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('varro.showThinking', 'true'));
+    await page.goto(
+      '/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1'
+    );
+    const previousMessage = page.locator('[data-msg-id="message-large-assistant-238"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+    await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeVisible();
+    await waitForAnimationFrames(page, 4);
+
+    const previousTop = await previousMessage.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+    await page.evaluate(() => {
+      const container = document.querySelector<HTMLElement>('.interactive-list')!;
+      const anchor = container.querySelector<HTMLElement>(
+        '[data-msg-id="message-large-assistant-238"]'
+      )!;
+      const samples: Array<{
+        top: number;
+        entering: boolean;
+        rowHeight: number;
+      }> = [];
+      const sample = () => {
+        const item = container.querySelector<HTMLElement>(
+          '[data-activity-part-id="reasoning-bottom-follow"]'
+        );
+        const row = item?.closest<HTMLElement>('[data-msg-id]');
+        samples.push({
+          top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
+          entering: item?.classList.contains('is-entering') ?? false,
+          rowHeight: row?.getBoundingClientRect().height ?? 0,
+        });
+        if (samples.length < 16) requestAnimationFrame(sample);
+        else {
+          (window as typeof window & { reasoningEntranceSamples?: typeof samples })
+            .reasoningEntranceSamples = samples;
+        }
+      };
+      const observer = new MutationObserver(() => {
+        if (!container.querySelector('[data-activity-part-id="reasoning-bottom-follow"]')) {
+          return;
+        }
+        observer.disconnect();
+        sample();
+      });
+      observer.observe(container, { childList: true, subtree: true });
+    });
+
+    await page.evaluate(() => {
+      const sessionID = 'session-large-transcript';
+      const messageID = 'message-large-assistant-active';
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+      };
+      const part = {
+        id: 'reasoning-bottom-follow',
+        sessionID,
+        messageID,
+        type: 'reasoning' as const,
+        text: 'Planning offscreen message expansion',
+        time: { start: Date.now() },
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      window.postMessage(
+        { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+        '*'
+      );
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as typeof window & { reasoningEntranceSamples?: unknown })
+              .reasoningEntranceSamples
+        )
+      )
+      .not.toBeUndefined();
+    const samples = await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            reasoningEntranceSamples?: Array<{
+              top: number;
+              entering: boolean;
+              rowHeight: number;
+            }>;
+          }
+        ).reasoningEntranceSamples ?? []
+    );
+    expect(samples.some((sample) => sample.entering)).toBe(true);
+    expect(samples[0]!.rowHeight).toBeLessThanOrEqual(1);
+    expect(Math.abs(samples[0]!.top - previousTop)).toBeLessThanOrEqual(1);
+    for (let index = 1; index < samples.length; index += 1) {
+      const movement = samples[index - 1]!.top - samples[index]!.top;
+      expect(movement, JSON.stringify({ previousTop, samples })).toBeGreaterThanOrEqual(-1);
+      expect(movement, JSON.stringify({ previousTop, samples })).toBeLessThan(30);
+    }
+  });
+
   test('does not push a full transcript backward when send-time panels collapse', async ({
     page,
   }) => {

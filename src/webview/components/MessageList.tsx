@@ -28,6 +28,7 @@ import {
   getSessionTreeRootId,
   messageStructureVersion,
   messageInfoVersion,
+  onBeforeShowThinkingPreferenceChange,
   showModelPicker,
   showThinking,
   showInlineFileChanges,
@@ -668,6 +669,7 @@ export function MessageList() {
   let widthResizeAnchor: VisibleScrollAnchor | null = null;
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
+  let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
   const PROGRAMMATIC_SCROLL_WINDOW_MS = 200;
@@ -1345,7 +1347,8 @@ export function MessageList() {
 
   function scheduleChangedLayoutRowMeasurements(
     previous: ReadonlyMap<string, string>,
-    current: ReadonlyMap<string, string>
+    current: ReadonlyMap<string, string>,
+    preferredAnchor?: VisibleScrollAnchor | null
   ) {
     const currentMessageIds = new Set(messageIds());
     const mountedRows: Array<{ element: HTMLDivElement; messageId: string }> = [];
@@ -1384,9 +1387,10 @@ export function MessageList() {
       !diffFocusPauseActive &&
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? shouldVirtualize()
-          ? lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
-            ? lastDetachedVisibleAnchor
-            : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)
+          ? (preferredAnchor ??
+            (lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+              ? lastDetachedVisibleAnchor
+              : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)))
           : captureVisibleScrollAnchor()
         : null;
     for (const messageId of unmountedMessageIds) {
@@ -1456,7 +1460,13 @@ export function MessageList() {
 
   createEffect(() => {
     const current = thinkingLayoutSignatures();
-    scheduleChangedLayoutRowMeasurements(previousThinkingLayoutSignatures, current);
+    const preferredAnchor = pendingThinkingLayoutAnchor;
+    pendingThinkingLayoutAnchor = null;
+    scheduleChangedLayoutRowMeasurements(
+      previousThinkingLayoutSignatures,
+      current,
+      preferredAnchor
+    );
 
     previousThinkingLayoutSignatures = new Map(current);
   });
@@ -1862,9 +1872,9 @@ export function MessageList() {
       visibleMessages[firstVisibleMessageIndex]?.info.role === 'assistant'
     ) {
       const loadedMessageIds = new Set(visibleMessages.map((entry) => entry.info.id));
-      const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId).filter(
-        (entry) => !loadedMessageIds.has(entry.info.id)
-      );
+      const boundaryPrompts = getSessionHistoryPrompts(state.activeSessionId)
+        .filter((entry) => !loadedMessageIds.has(entry.info.id))
+        .toSorted((left, right) => left.info.time.created - right.info.time.created);
       if (boundaryPrompts.length > 0) {
         const boundaryPreview = getStickyUserMessagePreview(
           [...boundaryPrompts, visibleMessages[firstVisibleMessageIndex]!],
@@ -3934,6 +3944,16 @@ export function MessageList() {
 
   onMount(() => {
     if (!containerRef) return;
+    const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
+      pendingThinkingLayoutAnchor =
+        !autoScroll() &&
+        !stickyNavigationOwnsScroll() &&
+        !editingMessage() &&
+        !pendingExpansionScrollAnchor
+          ? captureMountedVisibleScrollAnchor()
+          : null;
+    });
+    onCleanup(stopCapturingThinkingAnchor);
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     containerRef.addEventListener('focusin', handleFocusIn);
     containerRef.addEventListener('focusout', handleFocusOut);

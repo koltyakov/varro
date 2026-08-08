@@ -117,12 +117,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.droppedFilesService = new DroppedFilesService(contextProvider);
     this.fileSearch = new FileSearchService();
     this.providerLimitService = new ProviderLimitService(server);
+    const isOpenAIPro = async () => {
+      const status = await this.providerLimitService.get('openai', null);
+      return status.status === 'available' && status.planName?.trim().toLowerCase() === 'pro';
+    };
     this.bridge = new SidebarProviderBridge(extensionUri);
     this.sessionTrash = new SessionTrashManager(persistence);
     this.pinnedSessions = new PinnedSessionManager(persistence);
     this.queuedMessages = new QueuedMessageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
-    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions);
+    this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro);
     this.sessionTitleFallback = new SessionTitleFallback(server, this.hiddenSessions, () =>
       vscode.workspace
         .getConfiguration('varro')
@@ -156,10 +160,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       () => this.runtime.ensureServerStarted(),
       () => this.contextProvider.context.workspacePath || undefined,
       () => this.activeChatModel,
-      async () => {
-        const status = await this.providerLimitService.get('openai', null);
-        return status.status === 'available' && status.planName?.trim().toLowerCase() === 'pro';
-      }
+      isOpenAIPro
     );
 
     this.serverEventBridge = new ServerEventBridge(

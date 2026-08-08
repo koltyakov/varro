@@ -39,7 +39,7 @@ test('high-contrast-light uses the contrast border for thinking and tool cards',
   page,
 }) => {
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&theme=high-contrast-light'
+    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&theme=high-contrast-light&expandedActivity=1'
   );
 
   const thinking = page.locator('.chat-thinking-box').first();

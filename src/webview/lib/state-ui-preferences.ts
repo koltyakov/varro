@@ -13,12 +13,22 @@ import {
 } from './app-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
+const beforeShowThinkingPreferenceChangeListeners = new Set<() => void>();
+
+export function onBeforeShowThinkingPreferenceChange(listener: () => void) {
+  beforeShowThinkingPreferenceChangeListeners.add(listener);
+  return () => beforeShowThinkingPreferenceChangeListeners.delete(listener);
+}
+
 export function toggleThinking() {
   const next = !showThinking();
   setShowThinkingPreference(next);
 }
 
 export function setShowThinkingPreference(next: boolean) {
+  if (next !== showThinking()) {
+    for (const listener of beforeShowThinkingPreferenceChangeListeners) listener();
+  }
   setShowThinking(next);
   writeStored(STORAGE_KEYS.showThinking, next);
 }
