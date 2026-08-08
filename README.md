@@ -33,8 +33,8 @@ When the sidebar is hidden, Varro can notify you when a plan is ready, a top-lev
 
 ## Context And Composer
 
-- The active file and current selection are included automatically by default.
-- A document chip shows the current live editor context and lets you disable it for the session.
+- The active file and current selection are included automatically while live document context is enabled, which is the default for new sessions.
+- A document chip shows the current live editor context and lets you disable or re-enable it for the session.
 - Files, folders, line ranges, and terminal output can be added with `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Files and folders can be dragged into the composer, and images can be pasted directly.
 - Typing `@` searches workspace files and available agents.
@@ -44,7 +44,7 @@ When the sidebar is hidden, Varro can notify you when a plan is ready, a top-lev
 
 ## Usage And Limits
 
-The context indicator reports how much of the selected model's known context window is in use. Its popup includes session totals for input, output, reasoning, cache reads, cache writes, and sub-agent tokens.
+The context indicator reports how much of the selected model's known context window is in use. Its popup includes session totals for input, output, reasoning, cache reads, cache writes, and sub-agent tokens, plus the reported session cost when available.
 
 Provider-limit status is shown when OpenCode metadata or a supported provider endpoint supplies quota data. Available windows include remaining capacity and reset timing. If a provider returns a usage-limit error, Varro provides actions to stop retrying or switch providers.
 

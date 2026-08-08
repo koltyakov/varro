@@ -51,9 +51,8 @@ Varro is a workspace extension. In Remote SSH, Dev Containers, and similar setup
 Varro can include more than the text in the composer.
 
 - Workspace path, sent as `[Working directory: ...]`
-- Active file
-- Current selection
-- Unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection
+- Active file, when live current-document context is enabled for the session
+- Current selection, including unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection, when live current-document context is enabled
 - Selected terminal text
 - Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`
 - Explicitly attached files or folders
@@ -184,14 +183,17 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Open the model picker footer to hide or show providers and individual models.
 - In the model settings view, right-click a model to assign it to project `small_model` or to an available sub-agent. Varro updates the project OpenCode configuration after checking for unsaved or concurrent changes.
 
-The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size.
+The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
 
-The composer can show two pieces of model metadata:
+The composer can show model and session metadata:
 
 - Provider limit status, when Varro can read quota information from OpenCode metadata or a supported provider endpoint.
 - Context usage, based on token totals from assistant messages and the selected model's context window.
+- Reported session cost in the context popup, when OpenCode supplies cost data.
 
 If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
+
+Provider and authentication changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows `Provider update queued` and applies it after active work finishes.
 
 ### Provider-Limit Polling And Credentials
 
@@ -329,12 +331,15 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Inline permission and question prompts
 - Todo tracking from `todowrite` or related todo events
 - Diff summaries for changed files
+- Complete inline file-edit previews when `varro.chat.showInlineFileChanges` is enabled; filenames in the previews open the corresponding file
 - Session summaries with changed-file counts and line additions/deletions
 - Context compaction markers when OpenCode summarizes a session
 - Usage-limit banners when a run is retrying against provider limits
 - A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
 - A slow-request banner when an OpenCode request has been waiting for more than 15 seconds
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
+
+Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
 
 ## VS Code Commands And Keybindings
 
