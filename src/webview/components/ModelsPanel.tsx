@@ -21,7 +21,7 @@ import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
 import type { OpenCodeModelRouting } from '../types';
-import { FormattedModelName } from './FormattedModelName';
+import { FormattedModelName } from './chat-input/ToolbarPickers';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];

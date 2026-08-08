@@ -13,7 +13,7 @@ import {
 } from '../lib/model-capabilities';
 import { sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
-import { FormattedModelName } from './FormattedModelName';
+import { FormattedModelName } from './chat-input/ToolbarPickers';
 
 interface ModelSelection {
   providerID?: string;

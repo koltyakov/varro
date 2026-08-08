@@ -318,8 +318,6 @@ export function ModelPickerButton(props: {
   canEllipsize: boolean;
   onToggle: () => void;
 }) {
-  const displayModelName = () => formatModelName(props.modelName);
-
   return (
     <button
       ref={props.buttonRef}
@@ -341,11 +339,21 @@ export function ModelPickerButton(props: {
               />
             )}
           </Show>
-          <span class="model-name-text">{displayModelName()}</span>
+          <span class="model-name-text">
+            <FormattedModelName name={props.modelName} />
+          </span>
         </span>
       </Show>
       <PickerChevron />
     </button>
+  );
+}
+
+export function FormattedModelName(props: { name: string }) {
+  return (
+    <For each={formatModelName(props.name).split(/(⚡)/)}>
+      {(part) => (part === '⚡' ? <span title="Fast (more expensive)">{part}</span> : part)}
+    </For>
   );
 }
 
