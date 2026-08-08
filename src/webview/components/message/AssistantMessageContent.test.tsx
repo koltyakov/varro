@@ -426,7 +426,7 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('[data-part-id="edit-compact"]')).toBeNull();
   });
 
-  it('applies failure emphasis only to the failed-tool suffix', () => {
+  it('omits failed tools from the activity summary', () => {
     setCompactToolOutput(true);
     const failed = toolPart('read-failed', 'read', { filePath: 'src/failing.ts' });
     failed.state = {
@@ -441,8 +441,8 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-summary-main')?.textContent).toBe(
       'Explored: 2 files'
     );
-    expect(container?.querySelector('.assistant-activity-status-failed')?.textContent).toBe(
-      '· 1 tool failed'
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'failed'
     );
     expect(container?.querySelector('.assistant-activity-group')?.classList).not.toContain(
       'has-failure'
@@ -516,6 +516,7 @@ describe('AssistantMessageContent', () => {
     });
 
     expect(container?.querySelectorAll('.assistant-active-activity-tray')).toHaveLength(1);
+    expect(container?.querySelectorAll('.assistant-active-activity-items')).toHaveLength(1);
     expect(container?.querySelectorAll('.assistant-active-activity-item')).toHaveLength(3);
     expect(
       container?.querySelector('[data-activity-part-id="read-completed"].is-completed')

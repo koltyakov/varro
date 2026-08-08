@@ -35,23 +35,48 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1');
   const tray = page.locator('.assistant-active-activity-tray');
   await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(12);
+  const trayItems = tray.locator('.assistant-active-activity-items');
+  await trayItems.evaluate(async (element) => {
+    await Promise.all(
+      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap((item) =>
+        item.getAnimations().map((animation) => animation.finished)
+      )
+    );
+  });
 
-  const trayGeometry = await tray.evaluate((element) => ({
-    clientHeight: element.clientHeight,
-    scrollHeight: element.scrollHeight,
-    scrollbarWidth: getComputedStyle(element).scrollbarWidth,
-  }));
-  expect(trayGeometry.clientHeight).toBeLessThanOrEqual(168);
+  const trayGeometry = await trayItems.evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    const visibleItems = [
+      ...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item'),
+    ]
+      .filter((item) => {
+        const bounds = item.getBoundingClientRect();
+        return bounds.bottom > viewport.top + 1 && bounds.top < viewport.bottom - 1;
+      })
+      .map((item) => item.dataset.activityPartId);
+    return {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollbarWidth: getComputedStyle(element).scrollbarWidth,
+      visibleItems,
+    };
+  });
+  expect(trayGeometry.visibleItems).toHaveLength(3);
   expect(trayGeometry.scrollHeight).toBeGreaterThan(trayGeometry.clientHeight);
   expect(trayGeometry.scrollbarWidth).toBe('none');
 
   const activeSpacing = await tray.evaluate(async (element) => {
     const summary = element.querySelector<HTMLElement>('.assistant-activity-summary')!;
+    const viewport = element.querySelector<HTMLElement>('.assistant-active-activity-items')!;
     const items = [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')];
+    viewport.scrollTop = 0;
+    const summaryBox = summary.getBoundingClientRect();
+    const firstBoxBeforeExit = items[0]!
+      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
+      .getBoundingClientRect();
     items[1]!.classList.add('is-exiting');
     element.classList.add('is-exiting');
     await new Promise((resolve) => setTimeout(resolve, 450));
-    const summaryBox = summary.getBoundingClientRect();
     const firstBox = items[0]!
       .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
       .getBoundingClientRect();
@@ -59,7 +84,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
       .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
       .getBoundingClientRect();
     return {
-      summaryToFirst: firstBox.top - summaryBox.bottom,
+      summaryToFirst: firstBoxBeforeExit.top - summaryBox.bottom,
       firstToThird: thirdBox.top - firstBox.bottom,
     };
   });
@@ -98,7 +123,6 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const container = element.closest<HTMLElement>('.interactive-list')!;
     return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
   });
-  await page.waitForTimeout(1_250);
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
@@ -123,7 +147,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     harnessWindow.__varroE2E?.updateMessagePart?.(part);
   });
 
-  await expect(completedItem).toHaveClass(/is-completed/);
+  await expect(completedItem).toHaveClass(/is-(?:completed|exiting)/);
   const transition = await completedItem.evaluate(async (element) => {
     await new Promise<void>((resolve) => {
       if (element.classList.contains('is-exiting')) {
@@ -615,6 +639,8 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
         getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
       };
     };
     const assistant = harnessWindow.__varroE2E
@@ -625,8 +651,11 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     const postEvent = (type: string, properties: Record<string, unknown>) => {
       window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
     };
+    harnessWindow.__varroE2E?.updateSessionStatus?.('session-tool-cards', { type: 'busy' });
+    const updatedInfo = { ...assistant.info, time: { created: Date.now() } };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(updatedInfo);
     postEvent('message.updated', {
-      info: { ...assistant.info, time: { created: Date.now() } },
+      info: updatedInfo,
     });
     postEvent('session.status', { sessionID: 'session-tool-cards', status: { type: 'busy' } });
     postEvent('message.part.updated', {
@@ -686,7 +715,8 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
       '.assistant-message-flow-item .rendered-markdown'
     );
     const tray = element.closest<HTMLElement>('.assistant-active-activity-tray');
-    if (!activitySummaries[0] || !activitySummaries[1] || !reference || !tray) {
+    const viewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
+    if (!activitySummaries[0] || !activitySummaries[1] || !reference || !tray || !viewport) {
       throw new Error('Thinking spacing fixtures are missing');
     }
     const samples: Array<{ boxTop: number; scrollTop: number; trayTop: number }> = [];
@@ -694,21 +724,21 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       samples.push({
         boxTop: element.getBoundingClientRect().top,
-        scrollTop: tray.scrollTop,
-        trayTop: tray.getBoundingClientRect().top,
+        scrollTop: viewport.scrollTop,
+        trayTop: viewport.getBoundingClientRect().top,
       });
     }
     return {
       boxTop: element.getBoundingClientRect().top,
-      clientHeight: tray.clientHeight,
+      clientHeight: viewport.clientHeight,
       markdown:
         reference.getBoundingClientRect().top - activitySummaries[0].getBoundingClientRect().bottom,
-      scrollHeight: tray.scrollHeight,
-      scrollTop: tray.scrollTop,
+      scrollHeight: viewport.scrollHeight,
+      scrollTop: viewport.scrollTop,
       samples,
       thinking:
         element.getBoundingClientRect().top - activitySummaries[1].getBoundingClientRect().bottom,
-      trayTop: tray.getBoundingClientRect().top,
+      trayTop: viewport.getBoundingClientRect().top,
     };
   });
   expect(gaps.thinking).toBeCloseTo(gaps.markdown, 0);
@@ -800,7 +830,7 @@ test('keeps a debounced trailing tool row at zero height until the tool is visib
   expect((await row.boundingBox())?.height).toBe(0);
   await expect(activeItem).toHaveCount(0);
 
-  await page.clock.fastForward(179);
+  await page.clock.fastForward(499);
   await expect(row).toHaveClass(/interactive-item-render-empty/);
   expect((await row.boundingBox())?.height).toBe(0);
 

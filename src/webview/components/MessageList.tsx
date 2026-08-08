@@ -162,9 +162,8 @@ const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
-const ACTIVITY_SHOW_DELAY_MS = 180;
-const ACTIVITY_MIN_VISIBLE_MS = 2_400;
-const ACTIVITY_COMPLETED_HOLD_MS = 1_600;
+const ACTIVITY_SHOW_DELAY_MS = 500;
+const ACTIVITY_MIN_VISIBLE_MS = 2_000;
 const ACTIVITY_EXIT_MS = 420;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
@@ -2693,35 +2692,70 @@ export function MessageList() {
   }
 
   function reserveActivityExitSpace(key: string) {
-    if (!containerRef || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll()) return;
+    if (
+      !containerRef ||
+      !autoScroll() ||
+      (!pinnedToBottom && getDistanceFromBottom(containerRef) > 2) ||
+      stickyNavigationOwnsScroll()
+    ) {
+      return;
+    }
     const partId = key.slice(key.lastIndexOf('\u0000') + 1);
     const item = containerRef.querySelector<HTMLElement>(
       `[data-activity-part-id="${CSS.escape(partId)}"]`
     );
     if (!item) return;
+    const preserveCurrentBottomTarget = () => {
+      const trackedScrollTop = untrack(scrollTop);
+      const target = Math.min(
+        containerRef!.scrollTop,
+        trackedScrollTop,
+        lastAutoScrolledBottomScrollTop > 0 ? lastAutoScrolledBottomScrollTop : trackedScrollTop
+      );
+      activityExitBottomTarget ??= target;
+      if (containerRef!.scrollTop > activityExitBottomTarget + 0.5) {
+        setPreservedScrollTop(activityExitBottomTarget);
+      }
+    };
 
     const tray = item.closest<HTMLElement>('.assistant-active-activity-tray');
     const gap = tray ? Number.parseFloat(getComputedStyle(tray).rowGap) || 0 : 0;
-    let reserve = item.getBoundingClientRect().height + gap;
     const summary = tray?.querySelector<HTMLElement>('.assistant-active-activity-summary');
+    const itemViewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
+    const remainingItems = tray?.querySelectorAll(
+      ':scope > .assistant-active-activity-items > .assistant-active-activity-item:not(.is-exiting)'
+    );
+    const maxVisibleItems = Number.parseInt(itemViewport?.dataset.maxVisibleItems || '', 10);
+    if (remainingItems && Number.isFinite(maxVisibleItems) && remainingItems.length > maxVisibleItems) {
+      preserveCurrentBottomTarget();
+      const target = activityExitBottomTarget;
+      requestAnimationFrame(() => {
+        if (
+          target === null ||
+          activityExitBottomTarget !== target ||
+          !containerRef ||
+          userScrollRecentlyActive()
+        ) {
+          return;
+        }
+        setPreservedScrollTop(target);
+      });
+      return;
+    }
+
+    let reserve = item.getBoundingClientRect().height + gap;
     if (tray && summary) {
-      const remainingItems = tray.querySelectorAll(
-        ':scope > .assistant-active-activity-item:not(.is-exiting)'
-      );
-      if (remainingItems.length === 1 && remainingItems[0] === item) {
+      if (remainingItems?.length === 1 && remainingItems[0] === item) {
         reserve += Number.parseFloat(getComputedStyle(summary).marginBottom) || 0;
       }
     }
     if (tray && !tray.querySelector('.assistant-active-activity-summary')) {
-      const remainingItems = tray.querySelectorAll(
-        ':scope > .assistant-active-activity-item:not(.is-exiting)'
-      );
       const flow = tray.parentElement;
       const visibleFlowItems = flow
         ? [...flow.children].filter((element) => element.getClientRects().length > 0)
         : [];
       if (
-        remainingItems.length === 1 &&
+        remainingItems?.length === 1 &&
         remainingItems[0] === item &&
         visibleFlowItems.length === 1
       ) {
@@ -2736,7 +2770,7 @@ export function MessageList() {
     }
     if (reserve <= 0.5) return;
 
-    activityExitBottomTarget = containerRef.scrollTop;
+    preserveCurrentBottomTarget();
     setActivityExitBottomReserve((current) => current + reserve);
     queueMicrotask(() => {
       lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
@@ -2862,7 +2896,9 @@ export function MessageList() {
       return;
     }
 
-    appendBottomReserveTarget = Math.max(appendBottomReserveTarget, target);
+    if (appendBottomReserveTarget <= 0.5) {
+      appendBottomReserveTarget = Math.min(target, containerRef.scrollTop);
+    }
     batch(() => {
       setAppendBottomReserve((current) => current + reserve);
       setActivityExitBottomReserve(0);
@@ -4407,7 +4443,7 @@ export function MessageList() {
   const settledActivityPartKeys = new Set<string>();
   const activityCompletionTimers = new Map<
     string,
-    { exitTimer: ReturnType<typeof setTimeout>; finishTimer: ReturnType<typeof setTimeout> }
+    { exitTimer?: ReturnType<typeof setTimeout>; finishTimer: ReturnType<typeof setTimeout> }
   >();
   const activityShowTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -4432,7 +4468,7 @@ export function MessageList() {
   const clearActivityCompletionTimer = (key: string) => {
     const timers = activityCompletionTimers.get(key);
     if (!timers) return;
-    clearTimeout(timers.exitTimer);
+    if (timers.exitTimer) clearTimeout(timers.exitTimer);
     clearTimeout(timers.finishTimer);
     activityCompletionTimers.delete(key);
   };
@@ -4561,25 +4597,24 @@ export function MessageList() {
         continue;
       }
 
-      const holdMs = Math.max(
-        ACTIVITY_COMPLETED_HOLD_MS,
-        firstSeenAt === undefined ? 0 : firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now
-      );
+      const holdMs = Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
       setSetMembership(setRetainedActivityPartKeys, key, true);
-      const exitTimer = setTimeout(() => {
+      const beginExit = () => {
         reserveActivityExitSpace(key);
         batch(() => {
           setSetMembership(setRetainedActivityPartKeys, key, false);
           setSetMembership(setExitingActivityPartKeys, key, true);
         });
-      }, holdMs);
+      };
+      const exitTimer = holdMs > 0 ? setTimeout(beginExit, holdMs) : undefined;
+      if (holdMs === 0) beginExit();
       const finishTimer = setTimeout(() => {
         activityCompletionTimers.delete(key);
         activityPartFirstSeenAt.delete(key);
         settledActivityPartKeys.add(key);
         finishActivityExit(key);
       }, holdMs + ACTIVITY_EXIT_MS);
-      activityCompletionTimers.set(key, { exitTimer, finishTimer });
+      activityCompletionTimers.set(key, { finishTimer, ...(exitTimer ? { exitTimer } : {}) });
     }
 
     for (const key of new Set([
@@ -5231,7 +5266,7 @@ export function MessageList() {
     <div class="interactive-list-shell min-h-0 flex-1">
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${shouldMeasureRows() || loadingOlderHistory() ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
         role="log"
         aria-live="polite"
         aria-label="Chat messages"

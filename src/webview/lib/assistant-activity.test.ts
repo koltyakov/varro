@@ -83,7 +83,7 @@ describe('assistant activity summaries', () => {
     expect(formatAssistantActivitySummary([pending])).toBe('Explored: 1 search');
   });
 
-  it('surfaces failed tools in the collapsed summary', () => {
+  it('omits failed tools from the collapsed summary', () => {
     const failed: ToolPart = {
       ...completedTool('bash-1', 'bash'),
       state: {
@@ -95,7 +95,7 @@ describe('assistant activity summaries', () => {
     };
 
     expect(getAssistantActivityStatus([failed])).toEqual({ running: false, failed: 1, aborted: 0 });
-    expect(formatAssistantActivitySummary([failed])).toBe('Explored: 1 command · 1 tool failed');
+    expect(formatAssistantActivitySummary([failed])).toBe('Explored: 1 command');
   });
 
   it('keeps actionable and delegated activity outside compact groups', () => {

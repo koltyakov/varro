@@ -922,6 +922,7 @@ test.describe('auto-scroll', () => {
       )
       .toBeLessThan(2);
     await page.waitForTimeout(1_250);
+    await waitForAnimationFrames(page, 4);
     const anchor = await getVisibleMessageAnchor(list);
 
     await page.evaluate(() => {

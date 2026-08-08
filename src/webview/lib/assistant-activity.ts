@@ -260,10 +260,8 @@ export function getAssistantActivityCountItems(parts: readonly AssistantActivity
 export function formatAssistantActivitySummary(parts: readonly AssistantActivityPart[]) {
   const status = getAssistantActivityStatus(parts);
   const counts = formatAssistantActivityCounts(parts);
-  const statusLabels = [
-    ...(status.failed > 0 ? [formatCount(status.failed, 'tool failed', 'tools failed')] : []),
-    ...(status.aborted > 0 ? [formatCount(status.aborted, 'tool aborted', 'tools aborted')] : []),
-  ];
+  const statusLabels =
+    status.aborted > 0 ? [formatCount(status.aborted, 'tool aborted', 'tools aborted')] : [];
   return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
 }
 

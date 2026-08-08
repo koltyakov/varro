@@ -221,6 +221,80 @@ function samePartList(previous: readonly Part[], next: readonly Part[]) {
   return previous.length === next.length && previous.every((part, index) => part === next[index]);
 }
 
+const MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS = 3;
+
+function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
+  let updateQueued = false;
+  let previousItemSignature = '';
+  const observedItems = new Set<Element>();
+
+  const update = () => {
+    updateQueued = false;
+    if (!element.isConnected) return;
+
+    const items = [
+      ...element.querySelectorAll<HTMLElement>(
+        ':scope > .assistant-active-activity-item:not(.is-exiting)'
+      ),
+    ];
+    for (const item of items) {
+      if (observedItems.has(item)) continue;
+      observedItems.add(item);
+      resizeObserver?.observe(item);
+    }
+    for (const item of observedItems) {
+      if (items.includes(item as HTMLElement)) continue;
+      observedItems.delete(item);
+      resizeObserver?.unobserve(item);
+    }
+
+    if (items.length > MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS) {
+      const firstItem = items[0]!;
+      const lastVisibleItem = items[MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS - 1]!;
+      const firstItemContent = firstItem.querySelector<HTMLElement>(
+        '.assistant-active-activity-item-content'
+      );
+      const firstItemPadding = firstItemContent
+        ? Number.parseFloat(getComputedStyle(firstItemContent).paddingTop) || 0
+        : 0;
+      const maxHeight =
+        lastVisibleItem.offsetTop +
+        lastVisibleItem.offsetHeight -
+        firstItem.offsetTop -
+        firstItemPadding;
+      if (maxHeight > 0) {
+        element.style.setProperty('--assistant-active-activity-items-max-height', `${maxHeight}px`);
+      }
+    } else {
+      element.style.removeProperty('--assistant-active-activity-items-max-height');
+    }
+
+    const itemSignature = items.map((item) => item.dataset.activityPartId).join('\u0000');
+    if (itemSignature === previousItemSignature) return;
+    previousItemSignature = itemSignature;
+    if (items.length <= 1) {
+      element.scrollTop = 0;
+    } else {
+      element.scrollTop = element.scrollHeight;
+    }
+  };
+  const queueUpdate = () => {
+    if (updateQueued) return;
+    updateQueued = true;
+    queueMicrotask(update);
+  };
+  const resizeObserver =
+    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueUpdate);
+  const mutationObserver = new MutationObserver(queueUpdate);
+  mutationObserver.observe(element, { childList: true });
+  queueUpdate();
+
+  return () => {
+    mutationObserver.disconnect();
+    resizeObserver?.disconnect();
+  };
+}
+
 export function getFileEditStackRenderKey(
   parts: readonly ToolPart[],
   inlinePreviewEnabled: boolean
@@ -553,21 +627,6 @@ export function AssistantMessageContent(props: {
         );
       return (
         <div
-          ref={(element) => {
-            queueMicrotask(() => {
-              if (!element.isConnected) return;
-              const activeItems = element.querySelectorAll(
-                ':scope > .assistant-active-activity-item:not(.is-exiting)'
-              );
-              // Keep a lone active card's header inside the tray instead of
-              // bottom-aligning an overheight card beneath the clip edge.
-              if (activeItems.length === 1) {
-                element.scrollTop = 0;
-                return;
-              }
-              element.scrollTo?.({ top: element.scrollHeight, behavior: 'smooth' });
-            });
-          }}
           class={`assistant-active-activity-tray${hasExitingPart() ? ' is-exiting' : ''}${activeSummary() ? ' has-active-summary' : ''}`}
           data-assistant-render-key={entry.key}
           aria-label="Active tools"
@@ -600,35 +659,41 @@ export function AssistantMessageContent(props: {
               </div>
             )}
           </Show>
-          <For each={item().parts}>
-            {(part) => {
-              const partKey = getAssistantActivityPartKey(part);
-              const entering = claimReveal(`active-activity:${part.id}`) && !isLightweight();
-              const exiting = () =>
-                !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
-              return (
-                <div
-                  class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${exiting() ? ' is-exiting' : ''}`}
-                  data-activity-part-id={part.id}
-                >
-                  <div class="assistant-active-activity-item-content">
-                    <MessagePart
-                      part={part}
-                      messageInfo={props.info}
-                      streamedText={props.textForPart(part)}
-                      lightweight={isLightweight()}
-                      questionRequest={
-                        part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
-                      }
-                      permissionMatch={
-                        part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
-                      }
-                    />
+          <div
+            ref={(element) => onCleanup(prepareActiveActivityItemsViewport(element))}
+            class="assistant-active-activity-items"
+            data-max-visible-items={MAX_VISIBLE_ACTIVE_ACTIVITY_ITEMS}
+          >
+            <For each={item().parts}>
+              {(part) => {
+                const partKey = getAssistantActivityPartKey(part);
+                const entering = claimReveal(`active-activity:${part.id}`) && !isLightweight();
+                const exiting = () =>
+                  !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
+                return (
+                  <div
+                    class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${exiting() ? ' is-exiting' : ''}`}
+                    data-activity-part-id={part.id}
+                  >
+                    <div class="assistant-active-activity-item-content">
+                      <MessagePart
+                        part={part}
+                        messageInfo={props.info}
+                        streamedText={props.textForPart(part)}
+                        lightweight={isLightweight()}
+                        questionRequest={
+                          part.type === 'tool' ? props.questionRequestForTool?.(part) : undefined
+                        }
+                        permissionMatch={
+                          part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
+                        }
+                      />
+                    </div>
                   </div>
-                </div>
-              );
-            }}
-          </For>
+                );
+              }}
+            </For>
+          </div>
         </div>
       );
     }
@@ -864,7 +929,6 @@ function AssistantActivityGroup(props: {
         >
           <AssistantActivitySummaryText
             items={activityItems()}
-            failed={activityStatus().failed}
             aborted={activityStatus().aborted}
           />
           <svg
@@ -960,7 +1024,6 @@ function observeActivitySummaryResize(
 
 function AssistantActivitySummaryText(props: {
   items: AssistantActivityCountItem[];
-  failed: number;
   aborted: number;
 }) {
   const [compactCount, setCompactCount] = createSignal(0);
@@ -968,14 +1031,10 @@ function AssistantActivitySummaryText(props: {
   let measurementElement: HTMLSpanElement | undefined;
 
   const fullLabel = () => {
-    const statusLabels = [
-      ...(props.failed > 0
-        ? [`${props.failed} ${props.failed === 1 ? 'tool failed' : 'tools failed'}`]
-        : []),
-      ...(props.aborted > 0
+    const statusLabels =
+      props.aborted > 0
         ? [`${props.aborted} ${props.aborted === 1 ? 'tool aborted' : 'tools aborted'}`]
-        : []),
-    ];
+        : [];
     const counts = `Explored: ${props.items.map((item) => item.label).join(', ')}`;
     return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
   };
@@ -1040,7 +1099,6 @@ function AssistantActivitySummaryText(props: {
         <AssistantActivitySummaryCandidate
           items={props.items}
           compactCount={compactCount()}
-          failed={props.failed}
           aborted={props.aborted}
         />
       </span>
@@ -1053,7 +1111,6 @@ function AssistantActivitySummaryText(props: {
           <AssistantActivitySummaryCandidate
             items={props.items}
             compactCount={0}
-            failed={props.failed}
             aborted={props.aborted}
             measureIcons
           />
@@ -1066,7 +1123,6 @@ function AssistantActivitySummaryText(props: {
 function AssistantActivitySummaryCandidate(props: {
   items: AssistantActivityCountItem[];
   compactCount: number;
-  failed: number;
   aborted: number;
   measureIcons?: boolean;
 }) {
@@ -1098,12 +1154,6 @@ function AssistantActivitySummaryCandidate(props: {
           )}
         </For>
       </span>
-      <Show when={props.failed > 0}>
-        <span class="assistant-activity-status-failed">
-          {'· '}
-          {props.failed} {props.failed === 1 ? 'tool failed' : 'tools failed'}
-        </span>
-      </Show>
       <Show when={props.aborted > 0}>
         <span>
           {' · '}

@@ -341,7 +341,13 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  max-height: min(168px, 30vh);
+  min-width: 0;
+}
+
+.assistant-active-activity-items {
+  display: flex;
+  flex-direction: column;
+  max-height: min(var(--assistant-active-activity-items-max-height, 168px), 30vh);
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -349,12 +355,8 @@
   scrollbar-width: none;
 }
 
-.assistant-active-activity-tray::-webkit-scrollbar {
+.assistant-active-activity-items::-webkit-scrollbar {
   display: none;
-}
-
-.assistant-active-activity-tray.is-exiting {
-  overflow-y: visible;
 }
 
 .assistant-active-activity-tray.has-active-summary {
@@ -362,11 +364,11 @@
 }
 
 .assistant-active-activity-tray.has-active-summary > .assistant-active-activity-summary {
-  margin-bottom: 12px;
+  margin-bottom: var(--assistant-activity-item-gap);
 }
 
 .assistant-active-activity-tray.has-active-summary:not(
-    :has(> .assistant-active-activity-item:not(.is-exiting))
+    :has(> .assistant-active-activity-items > .assistant-active-activity-item:not(.is-exiting))
   )
   > .assistant-active-activity-summary {
   margin-bottom: 0;
@@ -375,7 +377,8 @@
 .assistant-active-activity-summary {
   position: relative;
   z-index: 1;
-  min-height: 14px;
+  height: 14px;
+  flex: 0 0 14px;
   background: var(--color-vscode-sidebar);
 }
 
@@ -392,10 +395,11 @@
   overflow: clip;
 }
 
-.assistant-active-activity-item:not(.is-exiting)
+.assistant-active-activity-items
+  > .assistant-active-activity-item:not(.is-exiting)
   ~ .assistant-active-activity-item:not(.is-exiting)
   .assistant-active-activity-item-content {
-  padding-top: 12px;
+  padding-top: var(--assistant-activity-item-gap);
 }
 
 .assistant-active-activity-item.is-entering {
@@ -426,13 +430,11 @@
   from {
     grid-template-rows: 1fr;
     opacity: 0.82;
-    transform: translateY(0);
   }
 
   to {
     grid-template-rows: 0fr;
     opacity: 0;
-    transform: translateY(-24px);
   }
 }
 
@@ -456,6 +458,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  height: 14px;
   max-width: 100%;
   min-height: 0;
   padding: 0;
@@ -557,11 +560,11 @@
 .assistant-activity-details {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--assistant-activity-item-gap);
 }
 
 .assistant-activity-summary + .assistant-activity-details {
-  margin-top: 12px;
+  margin-top: var(--assistant-activity-item-gap);
 }
 
 .assistant-activity-detail {
@@ -865,6 +868,8 @@ body.vscode-light
 }
 
 .assistant-message-flow {
+  --assistant-activity-item-gap: 12px;
+
   display: flex;
   flex-direction: column;
   gap: 8px;
