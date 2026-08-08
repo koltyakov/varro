@@ -269,13 +269,34 @@ describe('AssistantMessageContent', () => {
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
 
-    setParts((current) => [...current, toolPart('bash-1', 'bash', { command: 'npm test' })]);
+    const runningCommand = toolPart('bash-1', 'bash', { command: 'npm test' });
+    runningCommand.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 1 },
+    };
+    setParts((current) => [...current, runningCommand]);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expect(summary()).toBe(initialSummary);
-    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search, 1 command');
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search');
+    expect(summary()?.textContent).not.toContain('command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(summary()?.classList).not.toContain('assistant-activity-summary-settling');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
+    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+
+    setParts((current) => [
+      ...current.slice(0, -1),
+      {
+        ...runningCommand,
+        state: completedToolState({ command: 'npm test' }, 'passed'),
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search, 1 command');
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
   });
 

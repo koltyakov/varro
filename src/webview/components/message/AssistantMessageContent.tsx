@@ -369,6 +369,8 @@ export function AssistantMessageContent(props: {
   const isActiveActivityTrayPart = (part: Part) => {
     if (!isLocallyCompactActivityCandidate(part)) return false;
     const key = getAssistantActivityPartKey(part);
+    const activityGroup = compactActivityGroupByPartKey().get(key);
+    if (activityGroup && isActivityGroupExpanded(activityGroup.key)) return false;
     return (
       (isAssistantActivityPartRunning(part) &&
         (!props.visibleActiveActivityPartKeys ||
@@ -403,14 +405,39 @@ export function AssistantMessageContent(props: {
       return groups.length > 0 ? groups : null;
     }
   );
-  const compactActivityGroupByPartKey = createMemo(
+  const baseCompactActivityGroupByPartKey = createMemo(
     () =>
-      new Map(
+      new Map<string, AssistantActivityGroupInfo>(
         effectiveCompactActivityGroups()?.flatMap((group) =>
           group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
         ) || []
       )
   );
+  const compactActivityGroupByPartKey = createMemo(() => {
+    const groups = new Map(baseCompactActivityGroupByPartKey());
+    let expandedGroup: AssistantActivityGroupInfo | null = null;
+
+    for (const part of displayParts()) {
+      if (isAssistantActivityPart(part)) {
+        const existingGroup = groups.get(getAssistantActivityPartKey(part));
+        if (existingGroup) {
+          expandedGroup = isActivityGroupExpanded(existingGroup.key) ? existingGroup : null;
+          continue;
+        }
+        if (
+          expandedGroup &&
+          isLocallyCompactActivityCandidate(part) &&
+          isAssistantActivityPartRunning(part)
+        ) {
+          groups.set(getAssistantActivityPartKey(part), expandedGroup);
+          continue;
+        }
+      }
+      expandedGroup = null;
+    }
+
+    return groups;
+  });
   const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
     if (group.ownerMessageId !== props.info.id) return null;
     return (
@@ -734,7 +761,8 @@ export function AssistantMessageContent(props: {
               return (
                 (!isAssistantActivityPartRunning(part) ||
                   !props.visibleActiveActivityPartKeys?.has(key)) &&
-                !props.retainedActivityPartKeys?.has(key)
+                (!props.retainedActivityPartKeys?.has(key) ||
+                  isActivityGroupExpanded(activityGroup().key))
               );
             })}
             expansionKey={activityGroup().key}

@@ -701,6 +701,12 @@ export function MessageList() {
   const [reserveLoadingRow, setReserveLoadingRow] = createSignal(false);
   const [showLoadingRow, setShowLoadingRow] = createSignal(false);
   const [trailingSummarySettled, setTrailingSummarySettled] = createSignal(true);
+  const [trailingSummaryOwner, setTrailingSummaryOwner] = createSignal<{
+    sessionId: string;
+    messageId: string;
+  } | null>(null);
+  const [trailingSummaryOwnerConfirmed, setTrailingSummaryOwnerConfirmed] = createSignal(false);
+  let trailingSummaryOwnerEpoch = 0;
   const [loadingOlderHistoryOwners, setLoadingOlderHistoryOwners] = createSignal<
     ReadonlyMap<string, HistoryLoadingOwner>
   >(new Map());
@@ -774,6 +780,25 @@ export function MessageList() {
   const visibleRunningToolPart = createMemo(() => {
     messageStructureVersion();
     return untrack(() => hasVisibleRunningToolPart(messages()));
+  });
+  const visibleRunningToolOutsideCompactActivity = createMemo(() => {
+    messageStructureVersion();
+    const showInlineChanges = showInlineFileChanges();
+    return untrack(() =>
+      messages().some((message) =>
+        message.parts.some(
+          (part) =>
+            part.type === 'tool' &&
+            (part.state.status === 'pending' || part.state.status === 'running') &&
+            shouldShowAssistantPartInline(part) &&
+            (!isAssistantActivityPart(part) ||
+              !shouldCompactAssistantActivityPart(part, {
+                showInlineFileChanges: showInlineChanges,
+                keepEditInline: true,
+              }))
+        )
+      )
+    );
   });
   const committedTextBlocksReappear = createMemo(() => {
     messageStructureVersion();
@@ -1451,10 +1476,9 @@ export function MessageList() {
     return !!latest && isAssistantMessage(latest) && !latest.time.completed && !latest.error;
   });
 
-  const trailingFinalResponseMessageId = createMemo(() => {
+  const structurallyTrailingFinalResponseMessageId = createMemo(() => {
     messageStructureVersion();
     messageInfoVersion();
-    if (state.streamingPartId || state.streamingText.length > 0) return null;
 
     const entries = messages();
     for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -1476,7 +1500,10 @@ export function MessageList() {
     }
     return null;
   });
-  const trailingFinalResponseReady = () => trailingFinalResponseMessageId() !== null;
+  const trailingFinalResponseMessageId = createMemo(() => {
+    if (state.streamingPartId || state.streamingText.length > 0) return null;
+    return structurallyTrailingFinalResponseMessageId();
+  });
 
   const loadingRowEligible = createMemo(
     () =>
@@ -1492,6 +1519,7 @@ export function MessageList() {
       loadingRowEligible() &&
       !visibleBlockingStreamingPart() &&
       !committedTextBlocksReappear() &&
+      !visibleRunningToolOutsideCompactActivity() &&
       !hasVisibleActivityTrayRows()
   );
 
@@ -1524,6 +1552,7 @@ export function MessageList() {
     const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
     const blockedByCommittedText = eligible && committedTextBlocksReappear();
     const blockedByVisibleActivity = eligible && hasVisibleActivityTrayRows();
+    const blockedByVisibleInlineTool = eligible && visibleRunningToolOutsideCompactActivity();
     const shouldShow = shouldShowLoadingRow();
     const isReserved = reserveLoadingRow();
     const isShowing = showLoadingRow();
@@ -1547,7 +1576,12 @@ export function MessageList() {
     clearLoadingRowReserveReleaseTimer();
     if (!isReserved) setReserveLoadingRow(true);
 
-    if (blockedByVisibleStream || blockedByCommittedText || blockedByVisibleActivity) {
+    if (
+      blockedByVisibleStream ||
+      blockedByCommittedText ||
+      blockedByVisibleActivity ||
+      blockedByVisibleInlineTool
+    ) {
       clearLoadingRowReappearTimer();
       loadingRowHiddenByVisibleStream = blockedByVisibleStream;
       if (isShowing) setShowLoadingRow(false);
@@ -1700,12 +1734,42 @@ export function MessageList() {
   );
 
   createEffect(() => {
-    const settled = !activeSessionWorking() && trailingFinalResponseReady();
-    if (trailingSummarySettled() === settled) return;
+    const sessionId = state.activeSessionId;
+    const structuralMessageId = structurallyTrailingFinalResponseMessageId();
+    const owner = trailingSummaryOwner();
+    const ownerMatchesCurrentResponse =
+      owner && owner.sessionId === sessionId && owner.messageId === structuralMessageId;
+    if (ownerMatchesCurrentResponse) {
+      const streaming = !!state.streamingPartId || state.streamingText.length > 0;
+      if (streaming && !trailingSummaryOwnerConfirmed()) {
+        trailingSummaryOwnerEpoch += 1;
+        batch(() => {
+          setTrailingSummarySettled(false);
+          setTrailingSummaryOwner(null);
+          setTrailingSummaryOwnerConfirmed(false);
+        });
+        return;
+      }
+      if (!trailingSummarySettled()) setTrailingSummarySettled(true);
+      return;
+    }
+
+    const messageId = trailingFinalResponseMessageId();
+    const settled = !activeSessionWorking() && messageId !== null;
+    const nextOwner = settled && sessionId && messageId ? { sessionId, messageId } : null;
+    const ownerEpoch = ++trailingSummaryOwnerEpoch;
     batch(() => {
       setTrailingSummarySettled(settled);
+      setTrailingSummaryOwner(nextOwner);
+      setTrailingSummaryOwnerConfirmed(false);
       if (settled && !loadingRowEligible()) setReserveLoadingRow(false);
     });
+    if (nextOwner) {
+      queueMicrotask(() => {
+        if (disposed || ownerEpoch !== trailingSummaryOwnerEpoch) return;
+        setTrailingSummaryOwnerConfirmed(true);
+      });
+    }
   });
 
   const questionRequestsByToolCall = createMemo(() =>
@@ -4730,15 +4794,7 @@ export function MessageList() {
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
-    const activeStatusType = state.activeSessionId
-      ? state.sessionStatus[state.activeSessionId]?.type
-      : undefined;
-    const suppressTrailingSummary =
-      activeSessionWorking() ||
-      activeStatusType === 'busy' ||
-      activeStatusType === 'retry' ||
-      !trailingFinalResponseReady() ||
-      !trailingSummarySettled();
+    const suppressTrailingSummary = trailingSummaryOwner() === null;
     const sessions = state.sessions.map((session) => ({
       id: session.id,
       parentID: session.parentID,
@@ -4760,7 +4816,7 @@ export function MessageList() {
     );
   });
   const trailingAssistantDialogSummary = createMemo(() => {
-    const messageId = trailingFinalResponseMessageId();
+    const messageId = trailingSummaryOwner()?.messageId;
     if (!messageId) return null;
     const summary = assistantDialogSummaryMap().get(messageId);
     if (!summary) return null;

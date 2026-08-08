@@ -250,8 +250,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   const finalSummaryBox = (await summary.boundingBox())!;
   const finalLoadingBox = (await loadingRow.locator('.loading-verb').boundingBox())!;
   const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
-  expect(settledGap).toBeGreaterThanOrEqual(10);
-  expect(settledGap).toBeLessThanOrEqual(14.5);
+  expect(settledGap).toBeGreaterThanOrEqual(8);
+  expect(settledGap).toBeLessThanOrEqual(11.5);
 });
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
@@ -303,6 +303,106 @@ test('hides sibling active tools while one tool is expanded', async ({ page }) =
   await firstHeader.click();
   await expect(firstItem.locator('.tool-invocation-chevron')).not.toHaveClass(/expanded/);
   await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1', 'tool-active-2']);
+});
+
+test('adds active tools directly to an expanded Explored group', async ({ page }) => {
+  await page.clock.install();
+  await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
+  const summary = page.locator('.assistant-activity-summary').first();
+  await summary.click();
+  await expect(summary).toHaveAttribute('aria-expanded', 'true');
+  const details = page.locator('.assistant-activity-detail');
+  const initialDetailCount = await details.count();
+  const initialSummary = await summary.textContent();
+
+  await page.evaluate(() => {
+    const sessionId = 'session-tool-cards';
+    const messageId = 'message-tool-cards-assistant';
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateMessagePart?: (part: Record<string, unknown>) => void;
+        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
+      };
+    };
+    const assistant = harnessWindow.__varroE2E
+      ?.getSessionMessages?.(sessionId)
+      .find((message) => message.info.id === messageId);
+    if (!assistant) throw new Error('Expanded activity fixture is missing');
+    const info = { ...assistant.info, time: { created: Date.now() } };
+    const part = {
+      id: 'tool-expanded-running',
+      sessionID: sessionId,
+      messageID: messageId,
+      type: 'tool' as const,
+      callID: 'tool-expanded-running-call',
+      tool: 'grep',
+      state: {
+        status: 'running' as const,
+        input: { pattern: 'expanded activity', path: 'src' },
+        title: 'Search expanded activity',
+        time: { start: Date.now() },
+      },
+    };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+    for (const [type, properties] of [
+      ['message.updated', { info }],
+      ['message.part.updated', { part }],
+      ['session.status', { sessionID: sessionId, status: { type: 'busy' } }],
+    ] as const) {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    }
+  });
+
+  await expect(details).toHaveCount(initialDetailCount + 1);
+  await expect(summary).toHaveText(initialSummary || '');
+  await expect(page.locator('.assistant-active-activity-tray')).toHaveCount(0);
+});
+
+test('hides Thinking while an apply_patch tool is shown inline', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript');
+  await page.evaluate(() => {
+    const sessionId = 'session-diff-preview-large-transcript';
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
+      };
+    };
+    const assistant = harnessWindow.__varroE2E
+      ?.getSessionMessages?.(sessionId)
+      .find((message) => message.info.id === 'message-diff-preview-assistant-59');
+    if (!assistant) throw new Error('Inline apply_patch fixture is missing');
+    const info = { ...assistant.info, time: { created: Date.now() } };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+    harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: { type: 'message.updated', properties: { info } },
+      },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'session.status',
+          properties: { sessionID: sessionId, status: { type: 'busy' } },
+        },
+      },
+      '*'
+    );
+  });
+
+  const latestRow = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
+  await expect(latestRow.locator('.chat-tool-invocation-part.file-change-card')).toBeVisible();
+  await expect(page.locator('.interactive-loading-row .loading-indicator')).toBeHidden();
 });
 
 test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
@@ -831,7 +931,10 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
       if (!loadingVerb) throw new Error('Thinking indicator is missing');
       return loadingVerb.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
     });
-  expect(await measureGap()).toBe(12);
+  expect(await measureGap()).toBe(9);
+  expect(
+    await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
+  ).toBe(21);
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {
@@ -865,7 +968,7 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
   await expect(emptyRow).toBeAttached();
   await expect(emptyRow).toHaveClass(/interactive-item-render-empty/);
   expect((await emptyRow.boundingBox())?.height).toBe(0);
-  expect(await measureGap()).toBe(12);
+  expect(await measureGap()).toBe(9);
 });
 
 test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({

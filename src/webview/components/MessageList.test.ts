@@ -7846,6 +7846,41 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBeNull();
   });
 
+  it('hides the loading label while an active edit tool is shown inline', async () => {
+    const patch = toolPart('patch-active');
+    patch.tool = 'apply_patch';
+    patch.state = {
+      status: 'running',
+      input: {
+        patchText:
+          '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
+      },
+      title: 'Apply patch',
+      time: { start: 1 },
+    };
+    setShowInlineFileChanges(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Apply the change')] },
+      {
+        info: assistantMessage('message-1', {
+          parentID: 'user-1',
+          time: { created: 1 },
+        }),
+        parts: [patch],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList).toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('hides the loading label while a compact active tool row is visible', async () => {
     const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
     tool.state = {
@@ -8016,6 +8051,67 @@ describe('MessageList loading row', () => {
       HTMLDivElement
     );
     expect(container?.querySelector('.trailing-assistant-summary-row .loading-indicator')).toBeNull();
+  });
+
+  it('keeps the worked summary visible across post-completion signals until a new prompt', async () => {
+    setState('activeSessionId', 'session-1');
+    const completedDialog: MessageEntry[] = [
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000, completed: 11_000 },
+          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Final response')],
+      },
+    ];
+    replaceMessages(completedDialog);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const workedRow = container?.querySelector('.trailing-assistant-summary-row');
+    expect(workedRow).toBeInstanceOf(HTMLDivElement);
+
+    batch(() => {
+      startLoading(12_000);
+      setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    });
+    await Promise.resolve();
+    vi.advanceTimersByTime(700);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+
+    batch(() => {
+      setState('streamingPartId', 'text-assistant-1');
+      setState('streamingText', 'Final response');
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+
+    batch(() => {
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+      replaceMessages([
+        ...completedDialog,
+        {
+          info: { ...userMessage('user-2'), time: { created: 13_000 } },
+          parts: [textPart('text-user-2', 'Follow-up prompt')],
+        },
+      ]);
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
+    expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
   });
 
   it('does not show a trailing worked summary before the final text response', async () => {
