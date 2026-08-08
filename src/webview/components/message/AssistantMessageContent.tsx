@@ -282,6 +282,26 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     } else {
       element.scrollTop = element.scrollHeight;
     }
+    if (typeof CSSAnimation !== 'undefined') {
+      const entranceAnimations = items.flatMap((item) =>
+        item
+          .getAnimations()
+          .filter(
+            (animation): animation is CSSAnimation =>
+              animation instanceof CSSAnimation &&
+              animation.animationName === 'assistant-active-activity-in'
+          )
+      );
+      if (entranceAnimations.length > 0) {
+        void Promise.allSettled(entranceAnimations.map((animation) => animation.finished)).then(
+          () => {
+            if (element.isConnected && previousItemSignature === itemSignature) {
+              element.scrollTop = element.scrollHeight;
+            }
+          }
+        );
+      }
+    }
   };
   const queueUpdate = () => {
     if (updateQueued) return;

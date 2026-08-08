@@ -107,6 +107,40 @@ test('hiding an expanded offscreen activity group preserves the bottom viewport'
   }
 });
 
+test('hiding thinking after a real expansion preserves a mid-transcript anchor', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=thinking-expanded-virtualized-anchor');
+  const list = page.locator('.interactive-list');
+  const summary = page.locator('.assistant-activity-summary', { hasText: '9 thoughts' });
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+  await summary.click();
+  await expect.poll(() => page.locator('.chat-thinking-box').count()).toBe(9);
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 920, bubbles: true }));
+    element.scrollTop = 920;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  const anchor = await getVisibleMessageAnchor(list);
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+
+  await composer.fill('/thinking');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.chat-thinking-box')).toHaveCount(0);
+
+  const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+  for (const top of samples) {
+    expect(top).not.toBeNull();
+    expect(Math.abs(top! - anchor.top), JSON.stringify({ anchor, samples })).toBeLessThan(1.5);
+  }
+});
+
 test('/thinking description reflects current visibility state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=plan-ready&expandedActivity=1');
 

@@ -166,6 +166,7 @@ const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
 const ACTIVITY_SHOW_DELAY_MS = 500;
 const ACTIVITY_MIN_VISIBLE_MS = 2_000;
 const ACTIVITY_EXIT_MS = 420;
+const ACTIVITY_EXIT_CLEANUP_GRACE_MS = 250;
 // Only offer "jump to latest" when at least this much content is hidden
 // below the viewport; a barely-scrolled list doesn't need the button.
 const JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX = 240;
@@ -1374,6 +1375,7 @@ export function MessageList() {
     );
     const activeSessionId = state.activeSessionId;
     const invalidatedAnchorOwnershipEpoch = userScrollOwnershipEpoch;
+    const preferredLayoutAnchor = preferredAnchor ?? pendingThinkingLayoutAnchor;
     const invalidatedAnchor =
       (invalidatedUnmountedHeight || mountedRows.length > 0) &&
       !autoScroll() &&
@@ -1387,7 +1389,7 @@ export function MessageList() {
       !diffFocusPauseActive &&
       !(activeSessionId && getCurrentPendingHistoryAnchor(activeSessionId))
         ? shouldVirtualize()
-          ? (preferredAnchor ??
+          ? (preferredLayoutAnchor ??
             (lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
               ? lastDetachedVisibleAnchor
               : captureDetachedVisibleScrollAnchor(containerRef?.scrollTop ?? 0)))
@@ -1461,12 +1463,16 @@ export function MessageList() {
   createEffect(() => {
     const current = thinkingLayoutSignatures();
     const preferredAnchor = pendingThinkingLayoutAnchor;
-    pendingThinkingLayoutAnchor = null;
     scheduleChangedLayoutRowMeasurements(
       previousThinkingLayoutSignatures,
       current,
       preferredAnchor
     );
+    queueMicrotask(() => {
+      if (pendingThinkingLayoutAnchor === preferredAnchor) {
+        pendingThinkingLayoutAnchor = null;
+      }
+    });
 
     previousThinkingLayoutSignatures = new Map(current);
   });
@@ -2106,6 +2112,7 @@ export function MessageList() {
     if (!applyRowHeightMeasurements(measurements, { widthReflow: widthReflowOnly })) return;
 
     scheduleMeasurementPublish(widthReflowOnly ? 'width' : 'content');
+    restorePendingHistoryAnchorIfMounted();
     scheduleStickyPreviewGeometryRefresh({ force: !widthReflowOnly });
     scheduleVisibleMeasurement({ afterResize: true, widthResize: widthReflowOnly });
   }
@@ -2320,7 +2327,7 @@ export function MessageList() {
         : undefined);
     const anchor = preferredMessageId
       ? captureMessageScrollAnchor(preferredMessageId)
-      : captureVisibleScrollAnchor({ preferStableRenderItem: true });
+      : captureVisibleScrollAnchor();
     if (!anchor && preferredMessageId) return false;
     pendingAnchor.anchor = anchor;
     pendingAnchor.previousScrollHeight = containerRef.scrollHeight;
@@ -2811,13 +2818,7 @@ export function MessageList() {
     );
     if (!item) return;
     const preserveCurrentBottomTarget = () => {
-      const trackedScrollTop = untrack(scrollTop);
-      const target = Math.min(
-        containerRef!.scrollTop,
-        trackedScrollTop,
-        lastAutoScrolledBottomScrollTop > 0 ? lastAutoScrolledBottomScrollTop : trackedScrollTop
-      );
-      activityExitBottomTarget ??= target;
+      activityExitBottomTarget ??= containerRef!.scrollTop;
       if (containerRef!.scrollTop > activityExitBottomTarget + 0.5) {
         setPreservedScrollTop(activityExitBottomTarget);
       }
@@ -3630,6 +3631,7 @@ export function MessageList() {
     }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (nestedScrollerWillConsumeWheel(event)) return;
+    pendingExpansionScrollAnchor = null;
     directMovementAnchor = null;
     if (containerRef && !editingMessage()) {
       const metrics = shouldVirtualize() ? virtualMetrics() : null;
@@ -3773,6 +3775,7 @@ export function MessageList() {
     ) {
       return;
     }
+    pendingExpansionScrollAnchor = null;
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (widthResizeActive) {
@@ -3809,6 +3812,7 @@ export function MessageList() {
     ) {
       return;
     }
+    pendingExpansionScrollAnchor = null;
     if (event.pointerType !== 'touch') {
       if (event.target !== containerRef) return;
 
@@ -4094,6 +4098,7 @@ export function MessageList() {
         scheduleStickyPreviewViewportState(containerRef.scrollTop, currentContainerClientHeight);
       }
       if (trackChanged || containerHeightChanged || widthChanged) {
+        if (trackChanged && shouldCorrectBottomAfterResize()) performScroll({ force: true });
         scheduleVisibleMeasurement({ afterResize: true, widthResize: widthChanged });
       }
     });
@@ -4689,6 +4694,51 @@ export function MessageList() {
     });
   };
 
+  const completeActivityExit = (
+    key: string,
+    timers: {
+      exitTimer?: ReturnType<typeof setTimeout>;
+      finishTimer: ReturnType<typeof setTimeout>;
+    }
+  ) => {
+    if (activityCompletionTimers.get(key) !== timers) return;
+    clearActivityCompletionTimer(key);
+    activityPartFirstSeenAt.delete(key);
+    settledActivityPartKeys.add(key);
+    finishActivityExit(key);
+  };
+
+  const finishActivityExitAfterAnimation = (key: string) => {
+    queueMicrotask(() => {
+      const timers = activityCompletionTimers.get(key);
+      const partId = key.slice(key.lastIndexOf('\u0000') + 1);
+      const item = containerRef?.querySelector<HTMLElement>(
+        `[data-activity-part-id="${CSS.escape(partId)}"]`
+      );
+      const animation =
+        typeof CSSAnimation === 'undefined'
+          ? undefined
+          : item
+              ?.getAnimations()
+              .find(
+                (candidate): candidate is CSSAnimation =>
+                  candidate instanceof CSSAnimation &&
+                  candidate.animationName === 'assistant-active-activity-out'
+              );
+      if (!timers || !animation) return;
+
+      clearTimeout(timers.finishTimer);
+      timers.finishTimer = setTimeout(
+        () => completeActivityExit(key, timers),
+        ACTIVITY_EXIT_MS + ACTIVITY_EXIT_CLEANUP_GRACE_MS
+      );
+      void animation.finished.then(
+        () => completeActivityExit(key, timers),
+        () => undefined
+      );
+    });
+  };
+
   createComputed(() => {
     const activityMessages = compactActivityMessages();
     const candidates: AssistantActivityPart[] = [];
@@ -4809,14 +4859,13 @@ export function MessageList() {
           setSetMembership(setRetainedActivityPartKeys, key, false);
           setSetMembership(setExitingActivityPartKeys, key, true);
         });
+        finishActivityExitAfterAnimation(key);
       };
       const exitTimer = holdMs > 0 ? setTimeout(beginExit, holdMs) : undefined;
       if (holdMs === 0) beginExit();
       const finishTimer = setTimeout(() => {
-        activityCompletionTimers.delete(key);
-        activityPartFirstSeenAt.delete(key);
-        settledActivityPartKeys.add(key);
-        finishActivityExit(key);
+        const timers = activityCompletionTimers.get(key);
+        if (timers) completeActivityExit(key, timers);
       }, holdMs + ACTIVITY_EXIT_MS);
       activityCompletionTimers.set(key, { finishTimer, ...(exitTimer ? { exitTimer } : {}) });
     }
@@ -5448,6 +5497,33 @@ export function MessageList() {
     pendingOlderHistoryAnchors.set(sessionId, pendingAnchor);
     setLoadingOlderHistory(sessionId, true, loadingOwner);
     let settleOwner: typeof historyAnchorSettleOwner = null;
+    let historyRestoreRafId = 0;
+    const initialMessageIds = messageIds();
+    const historyStructureChanged = () => messageIds() !== initialMessageIds;
+    const canAlignHistoryAnchor = () =>
+      isCurrentWindow() &&
+      pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor &&
+      !pendingAnchor.invalidated &&
+      userScrollOwnershipEpoch === pendingAnchor.ownershipEpoch &&
+      (!settleOwner || historyAnchorSettleOwner === settleOwner);
+    const historyMutationObserver = new MutationObserver(() => {
+      if (!canAlignHistoryAnchor() || !historyStructureChanged()) return;
+      measureVisibleItems();
+      restorePendingHistoryAnchorIfMounted();
+    });
+    if (trackRef) historyMutationObserver.observe(trackRef, { childList: true, subtree: true });
+    const keepHistoryAnchorAlignedBeforePaint = () => {
+      historyRestoreRafId = requestAnimationFrame(() => {
+        historyRestoreRafId = 0;
+        if (!canAlignHistoryAnchor()) return;
+        if (historyStructureChanged()) {
+          measureVisibleItems();
+          restorePendingHistoryAnchorIfMounted();
+        }
+        keepHistoryAnchorAlignedBeforePaint();
+      });
+    };
+    keepHistoryAnchorAlignedBeforePaint();
     try {
       let loadedAnyPage = false;
       let staleRetryCount = 0;
@@ -5483,17 +5559,6 @@ export function MessageList() {
       if (!loadedAnyPage) return;
       settleOwner = { sessionId, generation, windowVersion };
       historyAnchorSettleOwner = settleOwner;
-      // The pinned range contains the old viewport. Replace provisional prefix heights and align
-      // its stable render item synchronously so the browser never paints the estimated position.
-      measureVisibleItems();
-      restorePendingHistoryAnchorIfMounted();
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => {
-          measureVisibleItems();
-          restorePendingHistoryAnchorIfMounted();
-          resolve();
-        })
-      );
       const canRestoreAnchor = () =>
         isCurrentWindow() &&
         historyAnchorSettleOwner === settleOwner &&
@@ -5502,6 +5567,16 @@ export function MessageList() {
         pendingOlderHistoryAnchors.get(sessionId) === pendingAnchor &&
         !pendingAnchor.invalidated &&
         userScrollOwnershipEpoch === pendingAnchor.ownershipEpoch;
+      // The pinned range contains the old viewport. Replace provisional prefix heights and align
+      // its stable render item synchronously so the browser never paints the estimated position.
+      measureVisibleItems();
+      restorePendingHistoryAnchorIfMounted();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await waitForAnimationFrame();
+        if (!canRestoreAnchor()) return;
+        measureVisibleItems();
+        restorePendingHistoryAnchorIfMounted();
+      }
       if (!canRestoreAnchor()) return;
       const currentContainer = containerRef;
       if (!currentContainer) return;
@@ -5510,6 +5585,8 @@ export function MessageList() {
         setPreservedScrollTop(pendingAnchor.previousScrollTop + Math.max(0, heightDelta));
       }
     } finally {
+      if (historyRestoreRafId) cancelAnimationFrame(historyRestoreRafId);
+      historyMutationObserver.disconnect();
       if (
         settleOwner &&
         historyAnchorSettleOwner === settleOwner &&

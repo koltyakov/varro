@@ -2495,6 +2495,76 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
+  it('yields expansion anchoring to direct outer wheel movement', async () => {
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    let expansionOffset = 0;
+    const harness = await mountDeferredHistory(
+      [
+        { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+        { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+        { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+        { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+      ],
+      (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? expansionOffset : 0)
+    );
+    await harness.startLoad(20);
+    const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    const layoutObserver = observers.find(
+      (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
+    );
+    const expandedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
+    const expansionControl = document.createElement('button');
+    expansionControl.setAttribute('aria-expanded', 'false');
+    expansionControl.getBoundingClientRect = () =>
+      new DOMRect(0, 200 + expansionOffset - harness.getScrollTop(), 500, 20);
+    expandedRow.append(expansionControl);
+    expansionControl.click();
+    expansionOffset = 100;
+    layoutObserver!.callback(
+      [{ target: track } as unknown as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
+    harness.animationFrames.flush();
+    await Promise.resolve();
+    expect(harness.getScrollTop()).toBe(120);
+
+    expansionControl.click();
+    harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 200 }));
+    harness.setScrollTop(160);
+    harness.list.dispatchEvent(new Event('scroll'));
+    expansionOffset = 200;
+    layoutObserver!.callback(
+      [{ target: track } as unknown as ResizeObserverEntry],
+      layoutObserver as unknown as ResizeObserver
+    );
+    harness.animationFrames.flush();
+    await Promise.resolve();
+
+    expect(harness.getScrollTop()).toBe(160);
+    await harness.resolveLoad();
+    harness.animationFrames.restore();
+  });
+
   it('transfers pending history anchoring to the edited row through a prepend', async () => {
     const harness = await mountDeferredHistory([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
