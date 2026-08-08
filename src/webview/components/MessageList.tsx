@@ -94,6 +94,7 @@ import {
   StickyUserMessagePreviewCard,
 } from './message-list/MessageListChrome';
 import {
+  getSubagentSessionIds,
   getStickyUserMessagePreview,
   isMessageHiddenBehindStickyPreview,
   STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX,
@@ -829,6 +830,7 @@ export function MessageList() {
     for (const [index, entry] of messages().entries()) result.set(entry.info.id, index);
     return result;
   });
+  const subagentSessionIds = createMemo(() => getSubagentSessionIds(messages()));
   const promptNumberMap = createMemo(() =>
     getPromptNumberMap(
       mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId))
@@ -1870,7 +1872,11 @@ export function MessageList() {
       });
     }
 
-    let preview = getStickyUserMessagePreview(visibleMessages, firstVisibleMessageIndex);
+    let preview = getStickyUserMessagePreview(
+      visibleMessages,
+      firstVisibleMessageIndex,
+      subagentSessionIds()
+    );
     let usesBoundaryPrompt = false;
     if (
       !preview &&

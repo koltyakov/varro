@@ -3,10 +3,12 @@ import { render } from 'solid-js/web';
 import type * as AssistantDialogModule from '../components/message-list/assistant-dialog';
 import type * as StickyPreviewModule from '../components/message-list/sticky-preview';
 
-const { assistantDialogSummaryPasses, stickyPreviewSelectionPasses } = vi.hoisted(() => ({
-  assistantDialogSummaryPasses: { value: 0 },
-  stickyPreviewSelectionPasses: { value: 0 },
-}));
+const { assistantDialogSummaryPasses, stickyPreviewMessageReads, stickyPreviewSelectionPasses } =
+  vi.hoisted(() => ({
+    assistantDialogSummaryPasses: { value: 0 },
+    stickyPreviewMessageReads: { value: 0 },
+    stickyPreviewSelectionPasses: { value: 0 },
+  }));
 
 vi.mock('../components/message-list/assistant-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof AssistantDialogModule>();
@@ -29,7 +31,15 @@ vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
       ...args: Parameters<typeof actual.getStickyUserMessagePreview>
     ) => {
       stickyPreviewSelectionPasses.value += 1;
-      return actual.getStickyUserMessagePreview(...args);
+      const countedMessages = new Proxy(args[0], {
+        get(target, property, receiver) {
+          if (typeof property === 'string' && /^\d+$/.test(property)) {
+            stickyPreviewMessageReads.value += 1;
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      return actual.getStickyUserMessagePreview(countedMessages, args[1], args[2]);
     },
   };
 });
@@ -143,6 +153,7 @@ describe('MessageList virtualization perf guards', () => {
   beforeEach(() => {
     resetDefaultAppState();
     assistantDialogSummaryPasses.value = 0;
+    stickyPreviewMessageReads.value = 0;
     stickyPreviewSelectionPasses.value = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -377,6 +388,7 @@ describe('MessageList virtualization perf guards', () => {
       Array.from({ length: 200 }, (_, index) => {
         const id = `message-${index}`;
         const info = index % 2 === 0 ? createUserMessage(id) : createAssistantMessage(id);
+        if (info.role === 'assistant') info.parentID = `message-${index - 1}`;
         return entry(info, [createTextPart(`part-${index}`, id, `Message ${index}`)]);
       })
     );
@@ -422,7 +434,8 @@ describe('MessageList virtualization perf guards', () => {
     });
 
     stickyPreviewSelectionPasses.value = 0;
-    list.scrollTop = 7_200;
+    stickyPreviewMessageReads.value = 0;
+    list.scrollTop = 7_320;
     list.dispatchEvent(new Event('scroll'));
     await settlePerfEffects();
 
@@ -432,6 +445,7 @@ describe('MessageList virtualization perf guards', () => {
     await settlePerfEffects();
 
     expect(stickyPreviewSelectionPasses.value).toBe(1);
+    expect(stickyPreviewMessageReads.value).toBeLessThan(10);
   });
 
   it('keeps the rendered row window bounded across width changes', async () => {

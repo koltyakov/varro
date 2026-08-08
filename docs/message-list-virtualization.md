@@ -309,6 +309,9 @@ Direct input acquires ownership only when it can affect the transcript:
 - Coalesce sticky viewport position, viewport size, placeholder hydration, and geometry refresh into
   one animation-frame pass. The hot scroll path must not rescan and republish sticky state for every
   native event.
+- Derive structural sticky inputs such as subagent session IDs outside that frame pass and reuse them
+  until message structure changes. Prompt text and attachment parsing remain live so previews cannot
+  become stale.
 - Collision uses the full painted overlay, including solid/fade gap and safety buffer. During upward
   movement, hide predictively before the source enters and defer reappearance until the source clears
   the full release boundary or the gesture becomes idle.

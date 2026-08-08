@@ -22,7 +22,7 @@ export function getStickyUserMessageCounts(parts: Part[]): {
 export const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
 const EMPTY_USER_MESSAGE_PREVIEW = '(no content)';
 
-function getSubagentSessionIds(messages: Array<{ info: Message }>) {
+export function getSubagentSessionIds(messages: readonly { info: Message }[]): ReadonlySet<string> {
   const result = new Set<string>();
   for (const entry of messages) {
     if (entry.info.role === 'assistant' && 'mode' in entry.info && entry.info.mode === 'subagent') {
@@ -38,13 +38,13 @@ export function hasStickyUserMessageContent(parts: Part[]) {
 
 export function getStickyUserMessagePreview(
   messages: MessageEntry[],
-  firstVisibleMessageIndex: number | null
+  firstVisibleMessageIndex: number | null,
+  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages)
 ): StickyUserMessagePreview | null {
   if (firstVisibleMessageIndex === null || firstVisibleMessageIndex < 0) return null;
   const firstVisibleEntry = messages[firstVisibleMessageIndex];
   if (!firstVisibleEntry) return null;
   if (firstVisibleEntry.info.role === 'user') return null;
-  const subagentSessionIds = getSubagentSessionIds(messages);
   const parentUserMessageId = firstVisibleEntry.info.parentID;
   let fallback: StickyUserMessagePreview | null = null;
 
