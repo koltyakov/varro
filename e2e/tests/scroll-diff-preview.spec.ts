@@ -97,7 +97,7 @@ test.describe('diff preview anchoring', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&activeTurnCollapse=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&activeTurnCollapse=1'
     );
     const list = page.locator('.interactive-list');
     const editMessageId = 'message-diff-preview-assistant-59';

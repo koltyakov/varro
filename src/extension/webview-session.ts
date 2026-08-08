@@ -13,7 +13,6 @@ import type { SessionTrashManager } from './session-trash-manager';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import { logger } from './logger';
 import { parseWebviewMessage } from './util/webview-message';
-import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../shared/provider-limit-config';
 import { renderWebviewLoadingHtml } from './webview-html';
 import type {
   ExtensionMessage,
@@ -68,15 +67,10 @@ export class WebviewSession {
       handleMessage(message: WebviewMessage): Promise<void>;
       ensureServerStarted(): Promise<unknown>;
       readConfig(): {
-        expandThinkingByDefault: boolean;
-        compactToolOutput: boolean;
         showInlineFileChanges?: boolean;
         showChangedFiles?: boolean;
         desktopSessionPaneSide: 'left' | 'right';
         defaultPermissionMode: PermissionMode;
-        providerLimitPollIntervalSeconds: number;
-        providerLimitThresholdPercent: number;
-        providerLimitsDisabled?: boolean;
       };
       currentTheme(): InitialWebviewState['theme'];
       renderStatus(): ServerStatus;
@@ -288,16 +282,10 @@ export class WebviewSession {
       droppedFiles: this.contextFilesState.getContextFiles(),
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
-      expandThinkingByDefault: config.expandThinkingByDefault,
-      compactToolOutput: config.compactToolOutput,
       showInlineFileChanges: config.showInlineFileChanges,
       showChangedFiles: config.showChangedFiles,
       desktopSessionPaneSide: config.desktopSessionPaneSide,
       defaultPermissionMode: config.defaultPermissionMode,
-      providerLimitPollIntervalSeconds: config.providerLimitPollIntervalSeconds,
-      providerLimitThresholdPercent: config.providerLimitThresholdPercent,
-      providerLimitsDisabled:
-        config.providerLimitPollIntervalSeconds === DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
       interruptedSessionIds: this.interruptedSessionsForWebview.map((item) => item.id),
       pendingPermissions: this.blockingRequestsForWebview
         .filter((item) => item.kind === 'permission')

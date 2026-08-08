@@ -265,7 +265,6 @@ describe('MessageRouter', () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);
     const payload = {
-      expandThinkingByDefault: true,
       desktopSessionPaneSide: 'right' as const,
       defaultPermissionMode: 'full' as const,
     };

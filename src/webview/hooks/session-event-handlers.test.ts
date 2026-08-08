@@ -3934,6 +3934,37 @@ describe('registerSessionEventHandlers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
+  it('keeps a completed child session idle on a trailing busy status', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-parent',
+        getMessages: () => [createCompletedAssistantEntry(1, 2)],
+        getSessionStatus: () => ({ type: 'idle' }),
+        isSessionInActiveTree: (sessionId) =>
+          sessionId === 'session-parent' || sessionId === 'session-child',
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-child', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-child', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-child', { type: 'busy' });
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
   it('stops active parent loading when the last working child session becomes idle', () => {
     const handlers = installHandlers();
 

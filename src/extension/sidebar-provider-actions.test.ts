@@ -306,27 +306,20 @@ describe('createSidebarProviderActions', () => {
     const { actions, deps } = createActionFixture();
 
     await actions.updateConfig({
-      expandThinkingByDefault: true,
       desktopSessionPaneSide: 'right',
       defaultPermissionMode: 'full',
     });
 
-    expect(mocks.vscode.workspace.getConfiguration).toHaveBeenCalledTimes(3);
+    expect(mocks.vscode.workspace.getConfiguration).toHaveBeenCalledTimes(2);
     expect(mocks.vscode.workspace.getConfiguration).toHaveBeenNthCalledWith(1, 'varro');
     expect(mocks.config.update).toHaveBeenNthCalledWith(
       1,
-      'chat.expandThinkingByDefault',
-      true,
-      'global'
-    );
-    expect(mocks.config.update).toHaveBeenNthCalledWith(
-      2,
       'chat.desktopSessionPaneSide',
       'right',
       'global'
     );
     expect(mocks.config.update).toHaveBeenNthCalledWith(
-      3,
+      2,
       'chat.defaultPermissionMode',
       'full',
       'global'

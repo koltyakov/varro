@@ -2,7 +2,6 @@ import {
   isLoading,
   loadingStartedAt,
   setComposerFocusKey,
-  setExpandThinkingByDefault,
   setIsLoading,
   setLoadingLastActivityAt,
   setLoadingStartedAt,
@@ -22,11 +21,6 @@ export function toggleThinking() {
 export function setShowThinkingPreference(next: boolean) {
   setShowThinking(next);
   writeStored(STORAGE_KEYS.showThinking, next);
-}
-
-export function setExpandThinkingByDefaultPreference(next: boolean) {
-  setExpandThinkingByDefault(next);
-  writeStored(STORAGE_KEYS.expandThinkingByDefault, next);
 }
 
 export function startLoading(now = Date.now()) {

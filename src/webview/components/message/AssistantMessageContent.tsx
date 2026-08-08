@@ -11,7 +11,7 @@ import {
   type AssistantActivityKind,
   type AssistantActivityPart,
 } from '../../lib/assistant-activity';
-import { isLoading, compactToolOutput, showInlineFileChanges } from '../../lib/state';
+import { isLoading, showInlineFileChanges } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import { trapModalFocus } from '../../lib/modal-focus';
 import {
@@ -355,7 +355,6 @@ export function AssistantMessageContent(props: {
       : dedupedParts()
   );
   const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
-    compactToolOutput() &&
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
       showInlineFileChanges: showInlineFileChanges(),
@@ -381,7 +380,7 @@ export function AssistantMessageContent(props: {
   const effectiveCompactActivityGroups = createMemo<readonly AssistantActivityGroupInfo[] | null>(
     () => {
       if (props.compactActivityGroups !== undefined) return props.compactActivityGroups;
-      if (!compactToolOutput() || props.info.mode === 'subagent') return null;
+      if (props.info.mode === 'subagent') return null;
 
       const groups: AssistantActivityGroupInfo[] = [];
       let activityParts: AssistantActivityPart[] = [];

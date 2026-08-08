@@ -158,13 +158,6 @@ export function createSidebarProviderActions(
       await vscode.workspace
         .getConfiguration('varro')
         .update(
-          'chat.expandThinkingByDefault',
-          payload.expandThinkingByDefault as boolean,
-          vscode.ConfigurationTarget.Global
-        );
-      await vscode.workspace
-        .getConfiguration('varro')
-        .update(
           'chat.desktopSessionPaneSide',
           payload.desktopSessionPaneSide as 'left' | 'right',
           vscode.ConfigurationTarget.Global

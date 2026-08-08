@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import type { AssistantMessage, Part, TextPart, ToolPart } from '../types';
 import { AssistantMessageContent } from '../components/message/AssistantMessageContent';
-import { resetDefaultAppState, setCompactToolOutput } from '../lib/state';
+import { resetDefaultAppState } from '../lib/state';
 import { settlePerfEffects } from './harness';
 
 let container: HTMLDivElement | null = null;
@@ -207,8 +207,6 @@ describe('AssistantMessageContent perf guards', () => {
       writable: true,
       value: ResizeObserverSpy,
     });
-    setCompactToolOutput(true);
-
     const parts: Part[] = Array.from({ length: 20 }, (_, index) => [
       createReadPart(index),
       { ...createTextPart(`Boundary ${index}`), id: `text-${index}` },

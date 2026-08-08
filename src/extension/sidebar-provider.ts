@@ -295,15 +295,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     this.configDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
-        event.affectsConfiguration('varro.chat.expandThinkingByDefault') ||
-        event.affectsConfiguration('varro.chat.compactToolOutput') ||
         event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
-        event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
-        event.affectsConfiguration('varro.providerLimits.disabled') ||
-        event.affectsConfiguration('varro.providerLimits.thresholdPercent') ||
-        event.affectsConfiguration('varro.providerLimits.pollIntervalSeconds')
+        event.affectsConfiguration('varro.chat.defaultPermissionMode')
       ) {
         this.postConfigState();
       }

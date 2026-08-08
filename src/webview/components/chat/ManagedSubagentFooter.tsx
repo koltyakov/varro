@@ -1,5 +1,4 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
-import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import type { SelectedModel } from '../../lib/app-state-types';
 import {
   formatModelName,
@@ -16,8 +15,6 @@ import {
   getSelectedModelForSession,
   getSessionTreeIds,
   getStoredVariantForModel,
-  providerLimitPollIntervalSeconds,
-  providerLimitThresholdPercent,
   state,
 } from '../../lib/state';
 import {
@@ -124,9 +121,7 @@ export function ManagedSubagentFooter(props: {
     );
   });
   const showProviderLimit = createMemo(
-    () =>
-      providerLimitPollIntervalSeconds() !== DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS &&
-      hasProviderLimitWindowWithinThreshold(compactProviderLimit(), providerLimitThresholdPercent())
+    () => hasProviderLimitWindowWithinThreshold(compactProviderLimit(), 100)
   );
   const providerLimitBadges = createMemo(() =>
     showProviderLimit() ? getProviderLimitCompactBadges(compactProviderLimit()) : []

@@ -510,15 +510,10 @@ export type InitialWebviewState = {
   droppedFiles: DroppedFile[];
   emptyStateLogoUri: string;
   remoteExtensionHost?: boolean;
-  expandThinkingByDefault?: boolean;
-  compactToolOutput?: boolean;
   showInlineFileChanges?: boolean;
   showChangedFiles?: boolean;
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
-  providerLimitPollIntervalSeconds?: number;
-  providerLimitThresholdPercent?: number;
-  providerLimitsDisabled?: boolean;
   interruptedSessionIds?: string[];
   pendingPermissions?: Array<Record<string, unknown>>;
   pendingQuestions?: Array<Record<string, unknown>>;
@@ -560,11 +555,7 @@ export type ExtensionMessage =
     }
   | {
       type: 'config/update';
-      payload: WebviewConfigUpdatePayload & {
-        providerLimitsDisabled?: boolean;
-        providerLimitPollIntervalSeconds?: number;
-        providerLimitThresholdPercent?: number;
-      };
+      payload: WebviewConfigUpdatePayload;
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }

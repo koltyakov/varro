@@ -361,13 +361,10 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const payload = asRecord(message?.payload);
       const desktopSessionPaneSide = getDesktopSessionPaneSide(payload?.desktopSessionPaneSide);
       const defaultPermissionMode = getPermissionMode(payload?.defaultPermissionMode);
-      return typeof payload?.expandThinkingByDefault === 'boolean' &&
-        desktopSessionPaneSide &&
-        defaultPermissionMode
+      return desktopSessionPaneSide && defaultPermissionMode
         ? {
             type,
             payload: {
-              expandThinkingByDefault: payload.expandThinkingByDefault,
               desktopSessionPaneSide,
               defaultPermissionMode,
             },

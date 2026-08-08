@@ -48,10 +48,6 @@ export function createMountBridgeOperations(deps: {
           deps.applyTheme(payload.theme);
         },
         setConfig: (payload) => {
-          uiStore.setExpandThinkingByDefaultPreference(payload.expandThinkingByDefault);
-          if (payload.compactToolOutput !== undefined) {
-            uiStore.setCompactToolOutput(payload.compactToolOutput);
-          }
           if (payload.showInlineFileChanges !== undefined) {
             uiStore.setShowInlineFileChanges(payload.showInlineFileChanges);
           }
@@ -60,21 +56,6 @@ export function createMountBridgeOperations(deps: {
           }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
-          if (payload.providerLimitThresholdPercent !== undefined) {
-            uiStore.setProviderLimitThresholdPercent(payload.providerLimitThresholdPercent);
-          }
-          if (
-            payload.providerLimitsDisabled !== undefined ||
-            payload.providerLimitPollIntervalSeconds !== undefined
-          ) {
-            uiStore.setProviderLimitPollIntervalSeconds(
-              payload.providerLimitPollIntervalSeconds !== undefined
-                ? payload.providerLimitPollIntervalSeconds
-                : payload.providerLimitsDisabled === true
-                  ? -1
-                  : 120
-            );
-          }
         },
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,

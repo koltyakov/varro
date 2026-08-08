@@ -29,7 +29,6 @@ import {
   messageStructureVersion,
   messageInfoVersion,
   showModelPicker,
-  compactToolOutput,
   showThinking,
   showInlineFileChanges,
 } from '../lib/state';
@@ -242,11 +241,9 @@ export function getCompactActivityLayoutSignatures(
   messages: readonly {
     info: { id: string; role: 'user' | 'assistant' };
     parts: readonly Part[];
-  }[],
-  enabled: boolean
+  }[]
 ) {
   const signatures = new Map<string, string>();
-  if (!enabled) return signatures;
 
   for (const message of messages) {
     if (message.info.role !== 'assistant') continue;
@@ -403,6 +400,19 @@ export function MessageList() {
   let trackRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
   const [showPromptNumbers, setShowPromptNumbers] = createSignal(false);
+  const [retainedActivityPartKeys, setRetainedActivityPartKeys] = createSignal<ReadonlySet<string>>(
+    new Set()
+  );
+  const [exitingActivityPartKeys, setExitingActivityPartKeys] = createSignal<ReadonlySet<string>>(
+    new Set()
+  );
+  const [visibleActiveActivityPartKeys, setVisibleActiveActivityPartKeys] = createSignal<
+    ReadonlySet<string>
+  >(new Set());
+  const hasVisibleActivityTrayRows = () =>
+    visibleActiveActivityPartKeys().size > 0 ||
+    retainedActivityPartKeys().size > 0 ||
+    exitingActivityPartKeys().size > 0;
   const [promptNumberReadySessionIds, setPromptNumberReadySessionIds] = createSignal<
     ReadonlySet<string>
   >(new Set());
@@ -1220,7 +1230,7 @@ export function MessageList() {
   );
   let previousInlinePreviewLayoutSignatures = new Map<string, string>();
   const compactActivityLayoutSignatures = createMemo(() =>
-    getCompactActivityLayoutSignatures(messages(), compactToolOutput())
+    getCompactActivityLayoutSignatures(messages())
   );
   let previousCompactActivityLayoutSignatures = new Map<string, string>();
   const thinkingLayoutSignatures = createMemo(() =>
@@ -1481,7 +1491,8 @@ export function MessageList() {
     () =>
       loadingRowEligible() &&
       !visibleBlockingStreamingPart() &&
-      !committedTextBlocksReappear()
+      !committedTextBlocksReappear() &&
+      !hasVisibleActivityTrayRows()
   );
 
   createEffect(() => {
@@ -1512,6 +1523,7 @@ export function MessageList() {
     const eligible = loadingRowEligible();
     const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
     const blockedByCommittedText = eligible && committedTextBlocksReappear();
+    const blockedByVisibleActivity = eligible && hasVisibleActivityTrayRows();
     const shouldShow = shouldShowLoadingRow();
     const isReserved = reserveLoadingRow();
     const isShowing = showLoadingRow();
@@ -1535,7 +1547,7 @@ export function MessageList() {
     clearLoadingRowReserveReleaseTimer();
     if (!isReserved) setReserveLoadingRow(true);
 
-    if (blockedByVisibleStream || blockedByCommittedText) {
+    if (blockedByVisibleStream || blockedByCommittedText || blockedByVisibleActivity) {
       clearLoadingRowReappearTimer();
       loadingRowHiddenByVisibleStream = blockedByVisibleStream;
       if (isShowing) setShowLoadingRow(false);
@@ -4441,15 +4453,6 @@ export function MessageList() {
     if (!activeSessionWorking()) return new Set<string>();
     return trailingAssistantTurn()?.assistantMessageIds ?? new Set<string>();
   });
-  const [retainedActivityPartKeys, setRetainedActivityPartKeys] = createSignal<ReadonlySet<string>>(
-    new Set()
-  );
-  const [exitingActivityPartKeys, setExitingActivityPartKeys] = createSignal<ReadonlySet<string>>(
-    new Set()
-  );
-  const [visibleActiveActivityPartKeys, setVisibleActiveActivityPartKeys] = createSignal<
-    ReadonlySet<string>
-  >(new Set());
   createEffect(() => {
     if (exitingActivityPartKeys().size === 0) preserveActivityExitReserve();
   });
@@ -4656,7 +4659,6 @@ export function MessageList() {
   });
   const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
     (previous) => {
-      if (!compactToolOutput()) return new Map<string, AssistantActivityGroupInfo[]>();
       const activeMessageIds = activeActivityMessageIds();
       const activityMessages = compactActivityMessages();
 

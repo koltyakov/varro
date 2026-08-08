@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   WebviewThemeKind,
 } from '../../../shared/protocol';
+import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
 import * as clientModule from '../../lib/client';
@@ -959,7 +960,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getProviderLimit: routingStore.getProviderLimit,
       loadProviderLimit: (providerID, modelID) => client.config.providerLimit(providerID, modelID),
       setProviderLimit: routingStore.setProviderLimit,
-      getPollIntervalMs: () => uiStore.providerLimitPollIntervalSeconds() * 1000,
+      getPollIntervalMs: () => DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS * 1000,
       logError,
     });
 

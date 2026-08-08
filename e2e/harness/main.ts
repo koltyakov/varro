@@ -1462,6 +1462,12 @@ function createScenarioState(name: ScenarioName): ScenarioState {
               time: { start: BASE_TIME - 19_000 + index, end: BASE_TIME - 18_000 + index },
             },
           },
+          makeTextPart(
+            session.id,
+            assistant.info.id,
+            `message-sticky-terminal-result-${index}`,
+            `Verification ${index + 1} completed.`,
+          ),
         ];
       } else if (index !== 32) {
         assistant.parts = [];
@@ -4124,10 +4130,6 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     terminalSelection: null,
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
-    compactToolOutput: new URLSearchParams(window.location.search).get('compactToolOutput') === '1',
-    ...(new URLSearchParams(window.location.search).get('expandThinking') === '1'
-      ? { expandThinkingByDefault: true }
-      : {}),
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,

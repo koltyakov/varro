@@ -80,11 +80,6 @@ export class ContextProvider implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.update()),
-      vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('varro.context')) {
-          this.update();
-        }
-      })
     );
 
     this.update();
@@ -335,7 +330,6 @@ export class ContextProvider implements vscode.Disposable {
       name: folder.name,
       path: folder.uri.fsPath,
     }));
-    const config = getContextConfig();
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -359,7 +353,7 @@ export class ContextProvider implements vscode.Disposable {
       this._context.activeFile = null;
       const selection = editor.selection;
       this._context.selection =
-        config.autoAttachSelection && !selection.isEmpty
+        !selection.isEmpty
           ? { startLine: selection.start.line + 1, endLine: selection.end.line + 1 }
           : null;
       this._context.editorText = this.createEditorTextContext(editor, null, doc.fileName);
@@ -379,17 +373,16 @@ export class ContextProvider implements vscode.Disposable {
       ? getRelativePath(doc.uri, workspaceFolder)
       : doc.uri.fsPath;
 
-    this._context.activeFile =
-      config.autoAttachFile && belongsToSelectedWorkspace
-        ? {
-            path: doc.uri.fsPath,
-            relativePath,
-            language: doc.languageId,
-          }
-        : null;
+    this._context.activeFile = belongsToSelectedWorkspace
+      ? {
+          path: doc.uri.fsPath,
+          relativePath,
+          language: doc.languageId,
+        }
+      : null;
 
     const selection = editor.selection;
-    if (config.autoAttachSelection && !selection.isEmpty && belongsToSelectedWorkspace) {
+    if (!selection.isEmpty && belongsToSelectedWorkspace) {
       this._context.selection = {
         startLine: selection.start.line + 1,
         endLine: selection.end.line + 1,
@@ -717,12 +710,7 @@ export class ContextProvider implements vscode.Disposable {
     relativePath: string
   ): EditorTextContext | null {
     const { document, selection } = editor;
-    const config = getContextConfig();
-    if (
-      config.autoAttachSelection &&
-      !selection.isEmpty &&
-      (document.isDirty || document.isUntitled)
-    ) {
+    if (!selection.isEmpty && (document.isDirty || document.isUntitled)) {
       const text = document.getText(selection);
       const truncated = text.length > ContextProvider.MAX_SELECTION_CHARACTERS;
       return {
@@ -735,7 +723,7 @@ export class ContextProvider implements vscode.Disposable {
         truncated,
       };
     }
-    if (!document.isDirty || !config.autoAttachFile || !path) return null;
+    if (!document.isDirty || !path) return null;
 
     const halfWindow = Math.floor(ContextProvider.MAX_DIRTY_BUFFER_LINES / 2);
     const startLine = Math.max(0, selection.active.line - halfWindow);
@@ -900,14 +888,6 @@ function cloneEditorContext(context: EditorContext): EditorContext {
     editorText: context.editorText ? { ...context.editorText } : null,
     diagnostics: context.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     diagnosticsTotal: context.diagnosticsTotal,
-  };
-}
-
-function getContextConfig() {
-  const config = vscode.workspace.getConfiguration('varro.context');
-  return {
-    autoAttachFile: config.get<boolean>('autoAttachFile', true),
-    autoAttachSelection: config.get<boolean>('autoAttachSelection', true),
   };
 }
 

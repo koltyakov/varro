@@ -43,10 +43,6 @@ import type {
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
 } from '../../shared/opencode-types';
-import {
-  readProviderLimitPollIntervalSeconds,
-  readProviderLimitThresholdPercent,
-} from '../../shared/provider-limit-config';
 import type { UsageLimitNotice } from './usage-limit';
 import {
   resetAttachmentOrderState,
@@ -68,7 +64,6 @@ import { createSessionTreeIndex } from './session-tree-index';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import {
   readDesktopSessionPaneSide,
-  readExpandThinkingByDefault,
   readInitialWebviewState,
   readShowThinking,
   readStoredBooleanRecord,
@@ -167,20 +162,12 @@ export interface AppStateInstance {
   setState: SetStoreFunction<AppState>;
   showThinking: Accessor<boolean>;
   setShowThinking: Setter<boolean>;
-  expandThinkingByDefault: Accessor<boolean>;
-  setExpandThinkingByDefault: Setter<boolean>;
-  compactToolOutput: Accessor<boolean>;
-  setCompactToolOutput: Setter<boolean>;
   showInlineFileChanges: Accessor<boolean>;
   setShowInlineFileChanges: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
   setShowChangedFiles: Setter<boolean>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
-  providerLimitPollIntervalSeconds: Accessor<number>;
-  setProviderLimitPollIntervalSeconds: Setter<number>;
-  providerLimitThresholdPercent: Accessor<number>;
-  setProviderLimitThresholdPercent: Setter<number>;
   inputText: Accessor<string>;
   setInputText: Setter<string>;
   inputTextMutationVersion: Accessor<number>;
@@ -339,12 +326,6 @@ export function createAppState(): AppStateInstance {
   });
 
   const [showThinking, setShowThinking] = createSignal(readShowThinking());
-  const [expandThinkingByDefault, setExpandThinkingByDefault] = createSignal(
-    readExpandThinkingByDefault(initialWebviewState)
-  );
-  const [compactToolOutput, setCompactToolOutput] = createSignal(
-    initialWebviewState.compactToolOutput ?? false
-  );
   const [showInlineFileChanges, setShowInlineFileChanges] = createSignal(
     initialWebviewState.showInlineFileChanges ?? false
   );
@@ -353,12 +334,6 @@ export function createAppState(): AppStateInstance {
   );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
-  );
-  const [providerLimitPollIntervalSeconds, setProviderLimitPollIntervalSeconds] = createSignal(
-    readProviderLimitPollIntervalSeconds(initialWebviewState)
-  );
-  const [providerLimitThresholdPercent, setProviderLimitThresholdPercent] = createSignal(
-    readProviderLimitThresholdPercent(initialWebviewState)
   );
   const [inputText, setInputTextValue] = createSignal(
     readStoredString(STORAGE_KEYS.inputDraft) ?? ''
@@ -425,20 +400,12 @@ export function createAppState(): AppStateInstance {
     setState,
     showThinking,
     setShowThinking,
-    expandThinkingByDefault,
-    setExpandThinkingByDefault,
-    compactToolOutput,
-    setCompactToolOutput,
     showInlineFileChanges,
     setShowInlineFileChanges,
     showChangedFiles,
     setShowChangedFiles,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
-    providerLimitPollIntervalSeconds,
-    setProviderLimitPollIntervalSeconds,
-    providerLimitThresholdPercent,
-    setProviderLimitThresholdPercent,
     inputText,
     setInputText,
     inputTextMutationVersion,
@@ -518,21 +485,12 @@ export const state = defaultAppState.state;
 export const setState = defaultAppState.setState;
 export const showThinking = defaultAppState.showThinking;
 export const setShowThinking = defaultAppState.setShowThinking;
-export const expandThinkingByDefault = defaultAppState.expandThinkingByDefault;
-export const setExpandThinkingByDefault = defaultAppState.setExpandThinkingByDefault;
-export const compactToolOutput = defaultAppState.compactToolOutput;
-export const setCompactToolOutput = defaultAppState.setCompactToolOutput;
 export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
 export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
 export const showChangedFiles = defaultAppState.showChangedFiles;
 export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
-export const providerLimitPollIntervalSeconds = defaultAppState.providerLimitPollIntervalSeconds;
-export const setProviderLimitPollIntervalSeconds =
-  defaultAppState.setProviderLimitPollIntervalSeconds;
-export const providerLimitThresholdPercent = defaultAppState.providerLimitThresholdPercent;
-export const setProviderLimitThresholdPercent = defaultAppState.setProviderLimitThresholdPercent;
 export const inputText = defaultAppState.inputText;
 export const setInputText = defaultAppState.setInputText;
 export const inputTextMutationVersion = defaultAppState.inputTextMutationVersion;
@@ -589,13 +547,9 @@ export function resetDefaultAppState() {
   const next = createAppState();
   setState(reconcile(next.state));
   setShowThinking(next.showThinking());
-  setExpandThinkingByDefault(next.expandThinkingByDefault());
-  setCompactToolOutput(next.compactToolOutput());
   setShowInlineFileChanges(next.showInlineFileChanges());
   setShowChangedFiles(next.showChangedFiles());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
-  setProviderLimitPollIntervalSeconds(next.providerLimitPollIntervalSeconds());
-  setProviderLimitThresholdPercent(next.providerLimitThresholdPercent());
   setInputText(next.inputText());
   setNextPastedImageIndex(next.nextPastedImageIndex());
   setIsLoading(next.isLoading());

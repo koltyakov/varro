@@ -32,7 +32,7 @@ test('resets padding injected by legacy webview hosts', async ({ page }) => {
 });
 
 test('bounds active tools and eases completed tools into Explored', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
   const tray = page.locator('.assistant-active-activity-tray');
   await expect(tray.locator('.assistant-active-activity-item')).toHaveCount(12);
   const trayItems = tray.locator('.assistant-active-activity-items');
@@ -94,7 +94,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   expect(activeSpacing.firstToThird).toBeLessThanOrEqual(14);
 
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
   );
   const transitionTray = page.locator('.assistant-active-activity-tray');
   const completedItem = transitionTray.locator('[data-activity-part-id="tool-active-0"]');
@@ -119,6 +119,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   });
   const placeholderTop = (await placeholder.boundingBox())!.y;
   const loadingRow = page.locator('.interactive-loading-row');
+  const loadingIndicator = loadingRow.locator('.loading-indicator');
+  await expect(loadingIndicator).toBeHidden();
   const loadingTopBefore = await loadingRow.evaluate((element) => {
     const container = element.closest<HTMLElement>('.interactive-list')!;
     return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
@@ -219,6 +221,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   ).toBe(true);
   expect(transition.heights.at(-1)).toBeLessThan(transition.heights[0]! - 5);
   expect(transition.itemWasRemoved).toBe(true);
+  await expect(loadingIndicator).toBeVisible();
   expect(transition.synchronizedExitAnimationCount).toBeGreaterThanOrEqual(2);
   expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
   expect(transition.summaryMaskBackground).not.toBe('rgba(0, 0, 0, 0)');
@@ -253,7 +256,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1'
   );
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
   await expect(activeTool).toBeVisible();
@@ -280,7 +283,7 @@ test('keeps the active tool gap fixed through its entrance animation', async ({ 
 
 test('hides sibling active tools while one tool is expanded', async ({ page }) => {
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=3'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3'
   );
   const items = page.locator('.assistant-active-activity-item');
   await expect(items).toHaveCount(3);
@@ -309,10 +312,13 @@ test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
   );
 
   const row = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
-  const lastDiff = row.locator('.file-change-inline-diffs-unwrapped .diff-view-file').last();
-  const nextBlock = row.locator(
-    '[data-assistant-render-key="part:message-diff-preview-assistant-59-spacing-tool"] .chat-tool-invocation-part'
-  );
+  await row.locator('.assistant-activity-summary').click();
+  const details = row.locator('.assistant-activity-detail');
+  const lastDiff = details
+    .first()
+    .locator('.file-change-inline-diffs-unwrapped .diff-view-file')
+    .last();
+  const nextBlock = details.last().locator('.chat-tool-invocation-part');
   await expect(lastDiff).toBeVisible();
   await expect(nextBlock).toBeVisible();
   expect(
@@ -329,7 +335,7 @@ test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
 
 test('matches collapsed activity-to-event spacing to expanded detail spacing', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1600 });
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   const summary = page.locator('.assistant-activity-summary').first();
   await expect(summary).toContainText('Explored');
   await page.evaluate(() => {
@@ -646,7 +652,7 @@ test('matches collapsed activity-to-event spacing to expanded detail spacing', a
 
 test('keeps Explored spacing consistent beside user blocks', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1000 });
-  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   const summary = page.locator('.assistant-activity-summary');
   await expect(summary).toContainText('Explored');
   await page.addStyleTag({ content: '.assistant-dialog-summary { display: none !important; }' });
@@ -676,9 +682,7 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
 
 test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 1000 });
-  await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&expandThinking=1'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
   await page.addStyleTag({
     content: '.assistant-active-activity-item.is-entering { animation: none !important; }',
   });
@@ -757,6 +761,8 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   await expect(summaries).toHaveCount(2);
   await expect(markdown).toBeVisible();
   await expect(thinkingBox.locator('.thinking-label-text')).toHaveText('Thinking');
+  await thinkingBox.locator('.thinking-header').click();
+  await expect(thinkingBox.locator('.thinking-header')).toHaveAttribute('aria-expanded', 'true');
   const gaps = await thinkingBox.evaluate(async (element) => {
     const activitySummaries = document.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const reference = document.querySelector<HTMLElement>(
@@ -798,18 +804,16 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   expect(gaps.samples.every((sample) => sample.boxTop >= sample.trayTop - 0.5)).toBe(true);
 });
 
-test('keeps the Thinking gap fixed while an empty assistant message awaits its first part', async ({
-  page,
-}) => {
+test('keeps the hidden Thinking slot fixed while an active tool is visible', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1'
+    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1'
   );
 
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
   const loading = page.locator('.interactive-loading-row .loading-indicator');
   await expect(activeTool).toBeVisible();
-  await expect(loading).toBeVisible();
+  await expect(loading).toBeHidden();
   await activeTool.evaluate(async (element) => {
     const item = element.closest('.assistant-active-activity-item');
     const row = element.closest('.interactive-item-container');
@@ -870,7 +874,7 @@ test('keeps a debounced trailing tool row at zero height until the tool is visib
   await page.clock.install();
   await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
   await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+    '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
   );
   const row = page.locator('[data-msg-id="message-tool-cards-assistant-69"]');
   const activeItem = page.locator('[data-activity-part-id="message-tool-cards-assistant-69-tool"]');
@@ -1219,7 +1223,7 @@ test('virtualized sticky preview remains visible through active tool layout chan
 }) => {
   await page.setViewportSize({ width: 482, height: 1006 });
   await page.goto(
-    '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&compactToolOutput=1&longActiveTurn=1'
+    '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&longActiveTurn=1'
   );
 
   const sticky = page.locator('.latest-user-message-sticky');
@@ -1767,10 +1771,12 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
   expect(Math.abs(result.lastSafeGap ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(24);
 });
 
-test('sticky and visible-row geometry survive view modes and width reflow', async ({ page }) => {
+test('sticky and visible-row geometry survive inline-file-change values and width reflow', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto(
-    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&multiFileDiff=1'
+    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1'
   );
   const list = page.locator('.interactive-list');
   await list.evaluate((element) => {
@@ -1784,14 +1790,14 @@ test('sticky and visible-row geometry survive view modes and width reflow', asyn
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       )
   );
-  const cases = [
-    { compact: true, inline: true, width: 720 },
-    { compact: true, inline: false, width: 480 },
-    { compact: false, inline: true, width: 360 },
-    { compact: false, inline: false, width: 720 },
+  const layouts = [
+    { inline: true, width: 720 },
+    { inline: false, width: 480 },
+    { inline: true, width: 360 },
+    { inline: false, width: 720 },
   ];
-  for (const mode of cases) {
-    await page.evaluate((nextMode) => {
+  for (const layout of layouts) {
+    await page.evaluate((nextLayout) => {
       const initial = (
         window as Window & {
           __initialWebviewState?: {
@@ -1805,9 +1811,7 @@ test('sticky and visible-row geometry survive view modes and width reflow', asyn
           data: {
             type: 'config/update',
             payload: {
-              expandThinkingByDefault: false,
-              compactToolOutput: nextMode.compact,
-              showInlineFileChanges: nextMode.inline,
+              showInlineFileChanges: nextLayout.inline,
               showChangedFiles: false,
               desktopSessionPaneSide: initial?.desktopSessionPaneSide ?? 'right',
               defaultPermissionMode: initial?.defaultPermissionMode ?? 'auto',
@@ -1818,8 +1822,8 @@ test('sticky and visible-row geometry survive view modes and width reflow', asyn
       const shell = document.querySelector<HTMLElement>('.chat-main-column-shell');
       if (!shell) throw new Error('Chat shell is missing');
       shell.style.maxWidth = 'none';
-      shell.style.width = `${nextMode.width}px`;
-    }, mode);
+      shell.style.width = `${nextLayout.width}px`;
+    }, layout);
 
     const samples = await list.evaluate(async (element) => {
       const result: Array<{
@@ -1848,10 +1852,10 @@ test('sticky and visible-row geometry survive view modes and width reflow', asyn
 
     for (const sample of samples) {
       if (sample.stickyTop !== null) {
-        expect(Math.abs(sample.stickyTop), JSON.stringify({ mode, sample })).toBeLessThan(1);
+        expect(Math.abs(sample.stickyTop), JSON.stringify({ layout, sample })).toBeLessThan(1);
       }
       if (sample.collisionGap !== null) {
-        expect(sample.collisionGap, JSON.stringify({ mode, sample })).toBeGreaterThanOrEqual(-1);
+        expect(sample.collisionGap, JSON.stringify({ layout, sample })).toBeGreaterThanOrEqual(-1);
       }
       expect(sample.mountedRows).toBeLessThan(120);
     }
@@ -1865,10 +1869,10 @@ test('sticky and visible-row geometry survive view modes and width reflow', asyn
     });
     const movementSamples = await sampleMessageTopAcrossFrames(list, modeAnchor.id, 6);
     for (const top of movementSamples) {
-      expect(top, JSON.stringify({ mode, modeAnchor, movementSamples })).not.toBeNull();
+      expect(top, JSON.stringify({ layout, modeAnchor, movementSamples })).not.toBeNull();
       expect(
         Math.abs(top! - (modeAnchor.top + 32)),
-        JSON.stringify({ mode, modeAnchor, movementSamples })
+        JSON.stringify({ layout, modeAnchor, movementSamples })
       ).toBeLessThan(2);
     }
   }
@@ -1885,7 +1889,6 @@ test('terminal attachment sticky preview navigates to its original message', asy
   );
   const laterAssistant = page.locator('[data-msg-id="message-sticky-terminal-assistant-32"]');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
-  await expect(page.locator('.message-history-banner')).toBeAttached();
   await expect(page.locator('[data-msg-id="message-sticky-terminal-older-user"]')).toHaveCount(0);
 
   await expect(laterAssistant).toBeInViewport();

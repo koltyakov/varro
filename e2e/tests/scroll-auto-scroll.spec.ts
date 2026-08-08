@@ -542,7 +542,7 @@ test.describe('auto-scroll', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1'
     );
     const list = page.locator('.interactive-list');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -596,7 +596,7 @@ test.describe('auto-scroll', () => {
 
   test('keeps trailing active-tool space until streamed content replaces it', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
     );
     const activeItem = page.locator(
       '[data-activity-part-id="message-tool-cards-assistant-69-tool"]'
@@ -717,7 +717,7 @@ test.describe('auto-scroll', () => {
 
   test('uses trailing activity reserve for the next active tool', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
     );
     const list = page.locator('.interactive-list');
     const initialItem = page.locator(
@@ -876,7 +876,7 @@ test.describe('auto-scroll', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
     );
     const list = page.locator('.interactive-list');
     const activeItems = page.locator('.assistant-active-activity-item');
@@ -1003,7 +1003,7 @@ test.describe('auto-scroll', () => {
 
   test('reserves an empty follower row when an earlier message owns Explored', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript'
     );
     const list = page.locator('.interactive-list');
     const follower = page.locator('[data-msg-id="tool-follower-assistant"]');
@@ -1124,7 +1124,7 @@ test.describe('auto-scroll', () => {
     page,
   }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1'
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript'
     );
     const summary = page.locator('.assistant-activity-summary').last();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -1161,7 +1161,7 @@ test.describe('auto-scroll', () => {
 
   test('renders every file diff without paging them', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&compactToolOutput=1&multiFileDiff=1'
+      '/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1'
     );
     const finalRow = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -1384,7 +1384,7 @@ test.describe('auto-scroll', () => {
   test('settles a compact anchor after provisional history heights collapse', async ({ page }) => {
     await page.setViewportSize({ width: 486, height: 800 });
     await page.goto(
-      '/e2e/harness/index.html?scenario=compact-pagination-anchor&windowed=1&deferHistory=1&compactToolOutput=1'
+      '/e2e/harness/index.html?scenario=compact-pagination-anchor&windowed=1&deferHistory=1'
     );
     const list = page.locator('.interactive-list');
     const historyBanner = page.locator('.message-history-banner');

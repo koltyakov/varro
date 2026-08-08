@@ -268,24 +268,9 @@ export function readStoredQueuedMessages(hostValue?: unknown): QueuedMessage[] {
   return messages;
 }
 
-function readStoredBoolean(key: string): boolean | null {
-  const value = readStored<unknown>(key);
-  return typeof value === 'boolean' ? value : null;
-}
-
 export function readShowThinking(): boolean {
   const value = readStored<unknown>(STORAGE_KEYS.showThinking);
   return typeof value === 'boolean' ? value : true;
-}
-
-export function readExpandThinkingByDefault(
-  initialWebviewState: Partial<InitialWebviewState> = readInitialWebviewState()
-): boolean {
-  return (
-    initialWebviewState.expandThinkingByDefault ??
-    readStoredBoolean(STORAGE_KEYS.expandThinkingByDefault) ??
-    false
-  );
 }
 
 export function readDesktopSessionPaneSide(

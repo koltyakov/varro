@@ -2,12 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { getAssistantActivityPartKey } from '../../lib/assistant-activity';
-import {
-  resetDefaultAppState,
-  setCompactToolOutput,
-  setIsLoading,
-  setShowInlineFileChanges,
-} from '../../lib/state';
+import { resetDefaultAppState, setIsLoading, setShowInlineFileChanges } from '../../lib/state';
 import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, ReasoningPart, TextPart, ToolPart } from '../../types';
 import {
@@ -240,24 +235,7 @@ describe('deduplicateFileEdits', () => {
 });
 
 describe('AssistantMessageContent', () => {
-  it('keeps activity parts ungrouped when compact tool output is disabled', () => {
-    renderAssistantMessageContent({
-      parts: [reasoningPart('reasoning-1'), toolPart('read-1', 'read')],
-    });
-
-    expect(container?.querySelector('.assistant-activity-group')).toBeNull();
-    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(2);
-    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
-
-    setCompactToolOutput(true);
-
-    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
-    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
-    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(0);
-  });
-
   it('updates consecutive activity in place without flashing and preserves expansion', async () => {
-    setCompactToolOutput(true);
     const initialParts: Part[] = [
       reasoningPart('reasoning-1'),
       toolPart('read-1', 'read', { filePath: 'src/a.ts' }),
@@ -313,7 +291,6 @@ describe('AssistantMessageContent', () => {
         disconnect() {}
       }
     );
-    setCompactToolOutput(true);
     renderAssistantMessageContent({
       parts: [
         toolPart('read-1', 'read'),
@@ -357,7 +334,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const edit = fileEditPart('edit-inline', 'src/app.ts');
     edit.state = completedToolState(
@@ -380,7 +356,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('moves completed inline file edits into compact history', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const edit = previewFileEditPart('edit-history', 'src/history.ts');
 
@@ -396,7 +371,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps unparsed edit tools out of the activity summary when inline previews are enabled', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
 
     renderAssistantMessageContent({
@@ -414,7 +388,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('groups file edits when inline previews are disabled', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(false);
     const edit = fileEditPart('edit-compact', 'src/app.ts');
 
@@ -427,7 +400,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('omits failed tools from the activity summary', () => {
-    setCompactToolOutput(true);
     const failed = toolPart('read-failed', 'read', { filePath: 'src/failing.ts' });
     failed.state = {
       status: 'error',
@@ -450,7 +422,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps active activity visible until it moves into Explored', async () => {
-    setCompactToolOutput(true);
     const running = toolPart('grep-running', 'grep', { pattern: 'activity' });
     running.state = {
       status: 'running',
@@ -492,7 +463,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps active and briefly completed tools together in one bounded tray', () => {
-    setCompactToolOutput(true);
     const runningSearch = toolPart('search-running', 'grep', { pattern: 'activity' });
     runningSearch.state = {
       status: 'running',
@@ -525,7 +495,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('does not height-animate active activity outside the virtualized viewport', () => {
-    setCompactToolOutput(true);
     const running = toolPart('search-offscreen', 'grep', { pattern: 'activity' });
     running.state = {
       status: 'running',
@@ -552,7 +521,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('does not height-animate exiting activity outside the virtualized viewport', () => {
-    setCompactToolOutput(true);
     const command = toolPart('command-offscreen-exit', 'bash', { command: 'npm test' });
 
     renderAssistantMessageContent({
@@ -568,7 +536,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('renders the first exiting tool behind its new Explored row', () => {
-    setCompactToolOutput(true);
     const command = toolPart('command-exiting', 'bash', { command: 'npm test' });
 
     renderAssistantMessageContent({
@@ -587,7 +554,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps questions outside compact activity groups before and while pending', () => {
-    setCompactToolOutput(true);
     const question = toolPart('question-1', 'question');
     const [questionActive, setQuestionActive] = createSignal(false);
 
@@ -618,8 +584,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('keeps delegated agent tasks outside compact activity groups', () => {
-    setCompactToolOutput(true);
-
     renderAssistantMessageContent({
       parts: [toolPart('read-1', 'read'), toolPart('task-1', 'task'), toolPart('grep-1', 'grep')],
     });
@@ -752,7 +716,6 @@ describe('AssistantMessageContent', () => {
   });
 
   it('does not re-animate a file-edit stack when another edit is appended', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const info = createAssistantMessage({ time: { created: 0 } });
     const [parts, setParts] = createSignal<Part[]>([fileEditPart('edit-1', 'src/a.ts')]);
@@ -853,7 +816,9 @@ describe('AssistantMessageContent', () => {
   });
 
   it('groups consecutive file edits into a single stack container', () => {
+    setShowInlineFileChanges(true);
     renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
       parts: [fileEditPart('edit-1', 'src/one.ts'), fileEditPart('edit-2', 'src/two.ts')],
     });
 
@@ -867,43 +832,6 @@ describe('AssistantMessageContent', () => {
 
   it.each([
     {
-      compactOutput: false,
-      inlineChanges: false,
-      detailsShown: false,
-      summaryCount: 0,
-      pagerCount: 0,
-      detailCount: 0,
-      renderedPartCount: 3,
-    },
-    {
-      compactOutput: false,
-      inlineChanges: false,
-      detailsShown: true,
-      summaryCount: 0,
-      pagerCount: 0,
-      detailCount: 0,
-      renderedPartCount: 3,
-    },
-    {
-      compactOutput: false,
-      inlineChanges: true,
-      detailsShown: false,
-      summaryCount: 0,
-      pagerCount: 0,
-      detailCount: 0,
-      renderedPartCount: 3,
-    },
-    {
-      compactOutput: false,
-      inlineChanges: true,
-      detailsShown: true,
-      summaryCount: 0,
-      pagerCount: 0,
-      detailCount: 0,
-      renderedPartCount: 3,
-    },
-    {
-      compactOutput: true,
       inlineChanges: false,
       detailsShown: false,
       summaryCount: 1,
@@ -912,7 +840,6 @@ describe('AssistantMessageContent', () => {
       renderedPartCount: 0,
     },
     {
-      compactOutput: true,
       inlineChanges: false,
       detailsShown: true,
       summaryCount: 1,
@@ -921,7 +848,6 @@ describe('AssistantMessageContent', () => {
       renderedPartCount: 3,
     },
     {
-      compactOutput: true,
       inlineChanges: true,
       detailsShown: false,
       summaryCount: 1,
@@ -930,7 +856,6 @@ describe('AssistantMessageContent', () => {
       renderedPartCount: 2,
     },
     {
-      compactOutput: true,
       inlineChanges: true,
       detailsShown: true,
       summaryCount: 1,
@@ -938,8 +863,7 @@ describe('AssistantMessageContent', () => {
       detailCount: 1,
       renderedPartCount: 3,
     },
-  ])('renders compact=$compactOutput inline=$inlineChanges details=$detailsShown', (expected) => {
-    setCompactToolOutput(expected.compactOutput);
+  ])('renders inline=$inlineChanges details=$detailsShown', (expected) => {
     setShowInlineFileChanges(expected.inlineChanges);
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
@@ -968,7 +892,7 @@ describe('AssistantMessageContent', () => {
     );
   });
 
-  it('keeps every inline edit rendered when compact output changes', () => {
+  it('keeps every inline edit rendered in compact output', () => {
     setShowInlineFileChanges(true);
     renderAssistantMessageContent({
       info: createAssistantMessage({ time: { created: 0 } }),
@@ -980,22 +904,11 @@ describe('AssistantMessageContent', () => {
 
     expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
     expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
-
-    setCompactToolOutput(true);
-
-    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
-    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
-
-    setCompactToolOutput(false);
-
-    expect(container?.querySelector('.assistant-file-edit-pager')).toBeNull();
-    expect(container?.querySelectorAll('.message-part-mock')).toHaveLength(2);
   });
 
   it.each(['subagent', 'question'] as const)(
     'renders every inline edit for %s output',
     (variant) => {
-      setCompactToolOutput(true);
       setShowInlineFileChanges(true);
       const parts = [
         previewFileEditPart('edit-1', 'src/one.ts'),
@@ -1022,7 +935,6 @@ describe('AssistantMessageContent', () => {
   );
 
   it('renders all compact inline edit tool calls without a pager', () => {
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     const multiFilePart: ToolPart = {
       ...fileEditPart('edit-multi', 'src/one.ts'),
@@ -1073,7 +985,7 @@ describe('AssistantMessageContent', () => {
     ).toEqual(['edit-multi', 'edit-final']);
   });
 
-  it('does not group reads and searches containing edit words as file edits', () => {
+  it('does not classify compact reads and searches containing edit words as file edits', () => {
     const readPart: ToolPart = {
       ...fileEditPart('read-edit-path', 'src/webview/lib/message-edit-state.ts'),
       tool: 'read',
@@ -1094,7 +1006,8 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({ parts: [readPart, grepPart] });
 
     expect(container?.querySelector('.assistant-file-edit-stack')).toBeNull();
-    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(2);
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
+    expect(container?.querySelectorAll('[data-assistant-render-key]')).toHaveLength(1);
   });
 
   it('revises file stack keys only when inline preview content affects layout', () => {

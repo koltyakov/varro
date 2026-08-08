@@ -4,7 +4,7 @@ import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
 import { client } from '../lib/client';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
-import { setExpandThinkingByDefault, setState as setAppState } from '../lib/state';
+import { setState as setAppState } from '../lib/state';
 import {
   Message,
   getAssistantContainerVariant,
@@ -74,14 +74,14 @@ function textPart(id: string, text: string): Part {
   };
 }
 
-function reasoningPart(id: string, text: string): Part {
+function reasoningPart(id: string, text: string, completed = false): Part {
   return {
     id,
     sessionID: 'session-1',
     messageID: 'message-1',
     type: 'reasoning',
     text,
-    time: { start: 0 },
+    time: { start: 0, ...(completed ? { end: 1 } : {}) },
   };
 }
 
@@ -685,6 +685,7 @@ describe('Message tool call expansion', () => {
       container!
     );
 
+    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
     container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
 
@@ -1282,8 +1283,6 @@ describe('Message streamed assistant text rendering', () => {
   });
 
   it('renders streamed reasoning updates without mutating the stored part text', () => {
-    setExpandThinkingByDefault(true);
-
     cleanup = render(
       () =>
         Message({
@@ -1296,6 +1295,7 @@ describe('Message streamed assistant text rendering', () => {
     );
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toContain('Plan');
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
     expect(container?.querySelector('.thinking-text')?.textContent).toContain('Inspect logs');
   });
 
@@ -1365,7 +1365,7 @@ describe('Message streamed assistant text rendering', () => {
 });
 
 describe('Message assistant final answer rendering', () => {
-  it('does not attach assistant part observers for normal-sized assistant turns', async () => {
+  it('observes only the compact message flow for normal-sized assistant turns', async () => {
     const host = document.createElement('div');
     host.className = 'interactive-list';
     host.appendChild(container!);
@@ -1376,7 +1376,7 @@ describe('Message assistant final answer rendering', () => {
         Message({
           info: assistantMessage('message-normal-observers'),
           parts: [
-            reasoningPart('reason-1', 'Inspecting'),
+            reasoningPart('reason-1', 'Inspecting', true),
             textPart('text-1', 'Status update.'),
             textPart('text-2', 'Final answer.'),
           ],
@@ -1387,7 +1387,11 @@ describe('Message assistant final answer rendering', () => {
 
     await Promise.resolve();
 
-    expect(resizeObserverObserveMock).not.toHaveBeenCalled();
+    expect(resizeObserverObserveMock).toHaveBeenCalledTimes(1);
+    expect(resizeObserverObserveMock).toHaveBeenCalledWith(
+      container?.querySelector('.assistant-message-flow'),
+      undefined,
+    );
 
     host.remove();
   });
@@ -1636,7 +1640,9 @@ describe('Message assistant final answer rendering', () => {
     );
     expect(container?.querySelector('.assistant-turn-content-highlighted')).toBeNull();
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeNull();
-    expect(container?.querySelector('.tool-invocation-header')).toBeInstanceOf(HTMLButtonElement);
+    expect(container?.querySelector('.assistant-activity-summary')).toBeInstanceOf(
+      HTMLButtonElement
+    );
   });
 
   it('renders changed files outside the assistant response block', async () => {
@@ -1693,9 +1699,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
-    const thinkingItem = container
-      ?.querySelector('.chat-thinking-box')
-      ?.closest('.assistant-message-flow-item');
+    const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final-planning');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
@@ -1725,9 +1729,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
-    const thinkingItem = container
-      ?.querySelector('.chat-thinking-box')
-      ?.closest('.assistant-message-flow-item');
+    const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);

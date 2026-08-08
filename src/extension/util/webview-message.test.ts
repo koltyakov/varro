@@ -762,7 +762,6 @@ describe('webview message validation', () => {
       parseWebviewMessage({
         type: 'config/update',
         payload: {
-          expandThinkingByDefault: true,
           desktopSessionPaneSide: 'bottom',
           defaultPermissionMode: 'full',
         },

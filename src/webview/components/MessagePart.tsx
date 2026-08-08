@@ -1,5 +1,5 @@
 import { Show, createEffect, createMemo, createSignal } from 'solid-js';
-import { expandThinkingByDefault, getMessageById, state, showThinking } from '../lib/state';
+import { getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
 import type { AssistantMessage, Part, ReasoningPart, SubtaskPart, TextPart } from '../types';
@@ -122,9 +122,7 @@ function ReasoningBlock(props: {
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
-  const [expanded, setExpanded] = createSignal(
-    getMessageBlockExpanded(currentExpansionKey) ?? expandThinkingByDefault()
-  );
+  const [expanded, setExpanded] = createSignal(getMessageBlockExpanded(currentExpansionKey) ?? false);
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
   const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);
@@ -139,7 +137,7 @@ function ReasoningBlock(props: {
     const nextExpansionKey = expansionKey();
     if (nextExpansionKey === currentExpansionKey) return;
     currentExpansionKey = nextExpansionKey;
-    setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? expandThinkingByDefault());
+    setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? false);
   });
 
   const toggleExpanded = () => {

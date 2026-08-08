@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
-import {
-  setExpandThinkingByDefaultPreference,
-  setShowInlineFileChanges,
-  setState,
-} from '../lib/state';
+import { setShowInlineFileChanges, setState } from '../lib/state';
 import type { AssistantMessage, Permission, QuestionRequest, Session, ToolPart } from '../types';
 import {
   ToolCall,
@@ -40,7 +36,6 @@ function setExtensionSender() {
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  setExpandThinkingByDefaultPreference(false);
   setShowInlineFileChanges(false);
   selectSessionMock.mockClear();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
@@ -51,7 +46,6 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  setExpandThinkingByDefaultPreference(false);
   setShowInlineFileChanges(false);
   setState('permissions', []);
   setState('questions', []);
@@ -217,9 +211,7 @@ describe('ToolCall', () => {
     expect(getToolCallExpanded(key)).toBe(false);
   });
 
-  it('keeps command blocks collapsed by default even when thinking auto-expand is enabled', () => {
-    setExpandThinkingByDefaultPreference(true);
-
+  it('keeps command blocks collapsed by default', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',

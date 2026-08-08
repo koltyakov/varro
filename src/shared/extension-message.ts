@@ -11,10 +11,6 @@ import {
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
-import {
-  DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS,
-  normalizeProviderLimitThresholdPercent,
-} from './provider-limit-config';
 import { asRecord } from './type-utils';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
@@ -157,7 +153,6 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (
         !payload ||
-        typeof payload.expandThinkingByDefault !== 'boolean' ||
         !isDesktopSessionPaneSide(payload.desktopSessionPaneSide) ||
         !isPermissionMode(payload.defaultPermissionMode)
       ) {
@@ -166,10 +161,6 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       return {
         type,
         payload: {
-          expandThinkingByDefault: payload.expandThinkingByDefault,
-          ...(typeof payload.compactToolOutput === 'boolean'
-            ? { compactToolOutput: payload.compactToolOutput }
-            : {}),
           ...(typeof payload.showInlineFileChanges === 'boolean'
             ? { showInlineFileChanges: payload.showInlineFileChanges }
             : {}),
@@ -178,28 +169,6 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
             : {}),
           desktopSessionPaneSide: payload.desktopSessionPaneSide,
           defaultPermissionMode: payload.defaultPermissionMode,
-          ...(typeof payload.providerLimitPollIntervalSeconds === 'number' &&
-          Number.isFinite(payload.providerLimitPollIntervalSeconds)
-            ? {
-                providerLimitPollIntervalSeconds: payload.providerLimitPollIntervalSeconds,
-              }
-            : {}),
-          ...(payload.providerLimitsDisabled === undefined
-            ? {}
-            : {
-                providerLimitsDisabled: payload.providerLimitsDisabled === true,
-              }),
-          ...(payload.providerLimitPollIntervalSeconds ===
-          DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS
-            ? { providerLimitsDisabled: true }
-            : {}),
-          ...(payload.providerLimitThresholdPercent === undefined
-            ? {}
-            : {
-                providerLimitThresholdPercent: normalizeProviderLimitThresholdPercent(
-                  payload.providerLimitThresholdPercent
-                ),
-              }),
         },
       };
     }

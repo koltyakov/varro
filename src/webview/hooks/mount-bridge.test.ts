@@ -15,14 +15,10 @@ const {
   rememberCurrentDocumentNavigation,
   syncDraftPermissionForWorkspace,
   syncSessionMarkersForWorkspace,
-  setExpandThinkingByDefaultPreference,
-  setCompactToolOutput,
   setShowInlineFileChanges,
   setShowChangedFiles,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
-  setProviderLimitPollIntervalSeconds,
-  setProviderLimitThresholdPercent,
   setWorkspaceStatusSummary,
   setWorkspaceStatuses,
 } = vi.hoisted(() => ({
@@ -37,14 +33,10 @@ const {
   rememberCurrentDocumentNavigation: vi.fn(),
   syncDraftPermissionForWorkspace: vi.fn(),
   syncSessionMarkersForWorkspace: vi.fn(),
-  setExpandThinkingByDefaultPreference: vi.fn(),
-  setCompactToolOutput: vi.fn(),
   setShowInlineFileChanges: vi.fn(),
   setShowChangedFiles: vi.fn(),
   setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
-  setProviderLimitPollIntervalSeconds: vi.fn(),
-  setProviderLimitThresholdPercent: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
   setWorkspaceStatuses: vi.fn(),
 }));
@@ -68,14 +60,10 @@ vi.mock('../lib/state', async () => {
     rememberCurrentDocumentNavigation,
     syncDraftPermissionForWorkspace,
     syncSessionMarkersForWorkspace,
-    setExpandThinkingByDefaultPreference,
-    setCompactToolOutput,
     setShowInlineFileChanges,
     setShowChangedFiles,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
-    setProviderLimitPollIntervalSeconds,
-    setProviderLimitThresholdPercent,
   };
 });
 
@@ -517,15 +505,10 @@ describe('mount bridge helpers', () => {
     operations.handleExtensionMessage({
       type: 'config/update',
       payload: {
-        expandThinkingByDefault: true,
-        compactToolOutput: true,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
-        providerLimitPollIntervalSeconds: 90,
-        providerLimitsDisabled: false,
-        providerLimitThresholdPercent: 25,
       },
     });
 
@@ -537,10 +520,7 @@ describe('mount bridge helpers', () => {
     });
     expect(setError).toHaveBeenCalledWith(null);
     expect(ensureConnectionInitialized).toHaveBeenCalledTimes(1);
-    expect(setProviderLimitPollIntervalSeconds).toHaveBeenCalledWith(90);
-    expect(setProviderLimitThresholdPercent).toHaveBeenCalledWith(25);
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
-    expect(setCompactToolOutput).toHaveBeenCalledWith(true);
     expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
   });

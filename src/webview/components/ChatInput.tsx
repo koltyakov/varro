@@ -48,7 +48,6 @@ import {
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
   getProviderLimit,
-  providerLimitThresholdPercent,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -57,7 +56,6 @@ import {
   getStoredVariantForModel,
   setSessionUsageLimit,
   isSessionCompacting,
-  providerLimitPollIntervalSeconds,
   replaceClipboardImages,
   stripClipboardImagePlaceholders,
   replaceContextFiles,
@@ -152,7 +150,6 @@ import {
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
-import { DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../shared/provider-limit-config';
 import {
   getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
@@ -2525,9 +2522,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
     return getActiveUsageLimitNotice(activeSessionId);
   });
-  const showProviderLimits = createMemo(
-    () => providerLimitPollIntervalSeconds() !== DISABLED_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS
-  );
   const currentProviderLimit = createMemo(() => {
     const current = currentModel();
     if (!current.providerID) return null;
@@ -2542,12 +2536,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     );
   });
   const showCurrentProviderLimit = createMemo(
-    () =>
-      showProviderLimits() &&
-      hasProviderLimitWindowWithinThreshold(
-        currentCompactProviderLimit(),
-        providerLimitThresholdPercent()
-      )
+    () => hasProviderLimitWindowWithinThreshold(currentCompactProviderLimit(), 100)
   );
 
   const currentProviderLimitTitle = createMemo(() =>

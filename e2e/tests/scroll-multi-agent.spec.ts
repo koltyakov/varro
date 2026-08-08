@@ -320,7 +320,7 @@ test.describe('multi-agent large virtualized scroll stability', () => {
 
   test('offscreen activity completion does not move a detached viewport', async ({ page }) => {
     await page.goto(
-      '/e2e/harness/index.html?scenario=multi-agent-large-streaming&compactToolOutput=1'
+      '/e2e/harness/index.html?scenario=multi-agent-large-streaming'
     );
     const list = page.locator('.interactive-list');
     await expect(list).toBeVisible();

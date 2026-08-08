@@ -51,8 +51,8 @@ Varro is a workspace extension. In Remote SSH, Dev Containers, and similar setup
 Varro can include more than the text in the composer.
 
 - Workspace path, sent as `[Working directory: ...]`
-- Active file, when `varro.context.autoAttachFile` is enabled
-- Current selection, when `varro.context.autoAttachSelection` is enabled
+- Active file
+- Current selection
 - Unsaved selected text, or a bounded window of a dirty editor buffer when there is no selection
 - Selected terminal text
 - Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`
@@ -195,7 +195,7 @@ If a provider or model hits a usage limit, Varro shows a usage-limit banner with
 
 ### Provider-Limit Polling And Credentials
 
-Provider-limit polling is enabled by default. Varro polls every `120` seconds and, when that default is in use, every `30` seconds while the active session is working. Results are cached briefly in the extension host.
+Provider-limit polling is enabled. Varro polls every `120` seconds and every `30` seconds while the active session is working. Results are cached briefly in the extension host.
 
 Adapter coverage currently includes Antigravity, Anthropic, OpenAI/Codex, GitHub Copilot, Gemini, OpenRouter, Z.AI, MiniMax, and Kimi, plus metadata-header probes for compatible OpenAI and GitHub Copilot configurations. Availability depends on the provider and credential type; unsupported providers simply do not show quota details.
 
@@ -206,7 +206,7 @@ To retrieve quota metadata, the extension host can:
 - Contact provider quota or metadata endpoints with those credentials, or inspect supported local metadata and proxy endpoints such as Antigravity and Anthropic status data.
 - Refresh an expired Anthropic OAuth token sourced from `~/.claude/.credentials.json` after an authentication failure and atomically write the refreshed credentials back to that file. OpenCode-sourced Anthropic credentials are not rewritten.
 
-Set `varro.providerLimits.disabled` to `true` to stop periodic provider-limit polling and hide its UI. This setting does not affect normal model requests that OpenCode makes while you chat. It is not a complete provider-metadata opt-out: when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation can make a one-off OpenAI quota lookup to determine whether that model is eligible.
+When no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available, commit-message generation can also make a one-off OpenAI quota lookup to determine whether that model is eligible.
 
 ### Recommended OpenCode Configuration
 
@@ -363,20 +363,9 @@ Server:
 - `varro.server.command` - optional path to the OpenCode CLI executable
 - `varro.server.autoUpdate` - automatically install compatible OpenCode CLI updates in the background on macOS and Linux; Windows, or disabling this setting, uses an upgrade prompt instead. Automatic installation is capped at the OpenCode version declared and tested by Varro, and failed automatic updates show tailored recovery guidance.
 
-Context:
-
-- `varro.context.autoAttachFile` - include the active editor file in live context
-- `varro.context.autoAttachSelection` - include the current editor selection in live context
-
-Provider limits:
-
-- `varro.providerLimits.disabled` - disable periodic provider-limit polling and hide provider-limit UI; otherwise polling uses the built-in `120` second interval, with active sessions refreshed every `30` seconds when the default interval is in use. Commit-message generation can still make a one-off OpenAI quota lookup when no valid `small_model` is configured and an OpenAI GPT Luna Fast model is available
-- `varro.providerLimits.thresholdPercent` - show provider-limit UI when any provider-limit window has this remaining percentage less than or equal to the threshold; defaults to `100`
-
 Chat view:
 
 - `varro.chat.defaultPermissionMode` - initial permission mode when no saved project or global selection exists; defaults to `auto`
-- `varro.chat.expandThinkingByDefault` - expand reasoning/thinking blocks by default; defaults to `false`
 - `varro.chat.showInlineFileChanges` - show line-by-line edits in file-change tool cards; defaults to `true`
 - `varro.chat.showChangedFiles` - show the changed-files panel above the composer; defaults to `false`
 - `varro.chat.desktopSessionPaneSide` - on large screens, show the sessions pane on the `left` or `right`; defaults to `right`

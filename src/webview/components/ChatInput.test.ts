@@ -10,8 +10,6 @@ import {
   inputText,
   setConnectionInitialized,
   setIsLoading,
-  setProviderLimitPollIntervalSeconds,
-  setProviderLimitThresholdPercent,
   setShowChangedFiles,
   setShowModelPicker,
   setState,
@@ -145,8 +143,6 @@ afterEach(() => {
   setInputText('');
   setConnectionInitialized(false);
   setIsLoading(false);
-  setProviderLimitPollIntervalSeconds(120);
-  setProviderLimitThresholdPercent(40);
   setShowChangedFiles(false);
   setShowModelPicker(false);
   setState('activeSessionId', null);
@@ -796,52 +792,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
   });
 
-  it('hides provider-limit UI when polling is disabled', () => {
-    setProviderLimitPollIntervalSeconds(-1);
-    setState('providers', [
-      {
-        id: 'openai',
-        name: 'OpenAI',
-        source: 'api',
-        models: {
-          'gpt-4o': {
-            id: 'gpt-4o',
-            name: 'GPT-4o',
-            capabilities: { toolcall: true },
-            cost: { input: 0, output: 0 },
-          },
-        },
-      },
-    ]);
-    setState('providerDefaults', { openai: 'gpt-4o' });
-    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    setState('providerLimits', {
-      'openai:gpt-4o': {
-        providerID: 'openai',
-        modelID: 'gpt-4o',
-        status: 'available',
-        source: 'provider',
-        checkedAt: 1,
-        windows: [
-          {
-            id: 'daily',
-            label: 'Daily',
-            unit: 'requests',
-            remaining: 12,
-            limit: 50,
-            resetAt: null,
-          },
-        ],
-      },
-    });
-
-    cleanup = render(() => ChatInput(), container!);
-
-    expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
-  });
-
-  it('hides provider-limit UI when no window crosses the threshold', () => {
-    setProviderLimitThresholdPercent(40);
+  it('shows all available provider-limit windows under the fixed threshold', () => {
     setState('providers', [
       {
         id: 'openai',
@@ -889,11 +840,13 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('.toolbar-limit-chip')).toBeNull();
+    const chip = container?.querySelector('.toolbar-limit-chip');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain('41%');
+    expect(chip?.textContent).toContain('80%');
   });
 
-  it('shows provider-limit UI when any window crosses the threshold', () => {
-    setProviderLimitThresholdPercent(40);
+  it('filters provider-limit badges for the selected model', () => {
     setState('providers', [
       {
         id: 'openai',
@@ -928,6 +881,14 @@ describe('ChatInput', () => {
             resetAt: null,
           },
           {
+            id: 'spark_five_hour',
+            label: '5-Hour Spark Limit',
+            unit: 'requests',
+            remaining: 10,
+            limit: 100,
+            resetAt: null,
+          },
+          {
             id: 'month',
             label: 'Monthly Limit',
             unit: 'requests',
@@ -941,11 +902,14 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('.toolbar-limit-chip')).not.toBeNull();
+    const chip = container?.querySelector('.toolbar-limit-chip');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain('39%');
+    expect(chip?.textContent).toContain('80%');
+    expect(chip?.textContent).not.toContain('10%');
   });
 
   it('shows provider-limit UI for a monthly-only Copilot-style limit', () => {
-    setProviderLimitThresholdPercent(60);
     setState('providers', [
       {
         id: 'github-copilot',
@@ -991,7 +955,6 @@ describe('ChatInput', () => {
   });
 
   it('keeps the selected provider-limit window after limit refreshes', async () => {
-    setProviderLimitThresholdPercent(40);
     setupModelState();
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit({
@@ -1317,7 +1280,6 @@ describe('ChatInput', () => {
   });
 
   it('removes the provider limit title while the popup is open', async () => {
-    setProviderLimitThresholdPercent(40);
     setupModelState();
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit({ planName: 'Pro' }),
@@ -1497,7 +1459,6 @@ describe('ChatInput', () => {
   });
 
   it('right-aligns the provider limit popup when no context is shown', async () => {
-    setProviderLimitThresholdPercent(40);
     setupModelState();
     const model = state.providers[0]?.models['gpt-4o'];
     if (!model) throw new Error('Expected GPT-4o fixture');
@@ -1524,7 +1485,6 @@ describe('ChatInput', () => {
   });
 
   it('right-aligns the provider limit popup when context is shown', async () => {
-    setProviderLimitThresholdPercent(40);
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);

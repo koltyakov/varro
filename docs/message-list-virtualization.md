@@ -45,8 +45,8 @@ break another unless the shared invariants below remain true.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
 - A view setting that changes rendered row content must participate in height invalidation even when
-  the affected row is unmounted. This includes thinking visibility, compact activity, inline file
-  previews, disclosure state, and any future lightweight rendering mode.
+  the affected row is unmounted. This includes thinking visibility, inline file previews, disclosure
+  state, and any future lightweight rendering mode.
 - An unmounted height invalidated by a view change becomes provisional. It must not remain marked as
   an exact measurement from the old view.
 - Width reflow owns a stable visible message captured before the first changed-height batch is
@@ -133,8 +133,7 @@ The effective ownership order is:
   bottom target fixed; raising it with later `scrollTop` growth prevents streamed content from
   consuming the reserve.
 - Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
-  run when the row unmounts, the session changes, compact rendering is disabled, or user input takes
-  ownership.
+  run when the row unmounts, the session changes, or user input takes ownership.
 
 ### Sticky Prompts
 

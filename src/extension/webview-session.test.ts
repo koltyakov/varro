@@ -151,15 +151,10 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     handleMessage: vi.fn(() => Promise.resolve()),
     ensureServerStarted: vi.fn(() => Promise.resolve(undefined)),
     readConfig: vi.fn(() => ({
-      expandThinkingByDefault: false,
-      compactToolOutput: true,
       showInlineFileChanges: true,
       showChangedFiles: true,
       desktopSessionPaneSide: 'left' as const,
       defaultPermissionMode: 'default' as const,
-      providerLimitPollIntervalSeconds: 120,
-      providerLimitThresholdPercent: 40,
-      providerLimitsDisabled: false,
     })),
     currentTheme: vi.fn(() => 'dark' as const),
     renderStatus: vi.fn(() => RUNNING_STATUS),
@@ -319,7 +314,7 @@ describe('WebviewSession', () => {
     expect(session.blockingRequestsForWebview).toHaveLength(1);
   });
 
-  it('includes provider-limit poll interval in the initial webview state', async () => {
+  it('includes pinned sessions in the initial webview state', async () => {
     const { session, bridge } = createSession();
     const view = createWebviewView(true);
 
@@ -328,9 +323,6 @@ describe('WebviewSession', () => {
 
     expect(bridge.renderHtml).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerLimitPollIntervalSeconds: 120,
-        providerLimitThresholdPercent: 40,
-        providerLimitsDisabled: false,
         pinnedSessionIds: ['pinned-session'],
       })
     );

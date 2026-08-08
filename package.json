@@ -258,16 +258,6 @@
           "default": true,
           "description": "Automatically install OpenCode CLI updates only through the OpenCode version declared in Varro's manifest"
         },
-        "varro.chat.expandThinkingByDefault": {
-          "type": "boolean",
-          "default": false,
-          "description": "Expand thinking blocks by default in the chat view."
-        },
-        "varro.chat.compactToolOutput": {
-          "type": "boolean",
-          "default": true,
-          "description": "Group routine tool calls and reasoning into expandable summary rows in the chat view."
-        },
         "varro.chat.showInlineFileChanges": {
           "type": "boolean",
           "default": true,
@@ -315,28 +305,6 @@
           "minimum": 0,
           "default": 4096,
           "description": "Reserved token headroom before automatic OpenCode compaction triggers. Lower values compact later. Set to null to use OpenCode defaults. Project opencode.json overrides this setting."
-        },
-        "varro.context.autoAttachFile": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically include the active file in live editor context"
-        },
-        "varro.context.autoAttachSelection": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically include the current selection in live editor context"
-        },
-        "varro.providerLimits.disabled": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Disable provider-limit polling and hide provider-limit UI."
-        },
-        "varro.providerLimits.thresholdPercent": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100,
-          "default": 100,
-          "markdownDescription": "Show provider-limit UI only when at least one provider-limit window has this remaining percent less than or equal to the threshold."
         },
         "varro.debug.simulateMissingCli": {
           "deprecationMessage": "Debug only setting. Not intended for regular use.",

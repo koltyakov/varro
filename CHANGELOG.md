@@ -4,7 +4,10 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.24.x - August 2026
 
-- Made compact tool activity the default, with clearer live progress and responsive expandable summaries.
+- Made compact tool activity the only view, removed its obsolete setting, and added clearer live progress and responsive expandable summaries.
+- Made thinking blocks start collapsed and removed the obsolete default-expansion setting.
+- Made active-file and editor-selection context automatic and removed their obsolete settings.
+- Made provider-limit polling and display unconditional and removed their obsolete settings.
 - Added reported session cost to context details and identified fast models as more expensive.
 - Made provider and authentication changes non-disruptive by applying queued refreshes after active work finishes and showing pending status.
 - Improved long-conversation scrolling, history loading, sticky prompt navigation, read mode, and session switching.

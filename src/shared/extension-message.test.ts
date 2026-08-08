@@ -448,60 +448,40 @@ describe('parseExtensionMessage', () => {
       parseExtensionMessage({
         type: 'config/update',
         payload: {
-          expandThinkingByDefault: true,
-          compactToolOutput: true,
           showInlineFileChanges: true,
           showChangedFiles: true,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'full',
-          providerLimitPollIntervalSeconds: 120,
-          providerLimitsDisabled: false,
-          providerLimitThresholdPercent: 35,
         },
       })
     ).toEqual({
       type: 'config/update',
       payload: {
-        expandThinkingByDefault: true,
-        compactToolOutput: true,
         showInlineFileChanges: true,
         showChangedFiles: true,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'full',
-        providerLimitPollIntervalSeconds: 120,
-        providerLimitsDisabled: false,
-        providerLimitThresholdPercent: 35,
       },
     });
 
     expect(
       parseExtensionMessage({
         type: 'config/update',
-        payload: { expandThinkingByDefault: true },
+        payload: { desktopSessionPaneSide: 'left' },
       })
     ).toBeNull();
-  });
-
-  it('parses disabled provider-limit polling in config/update', () => {
     expect(
       parseExtensionMessage({
         type: 'config/update',
-        payload: {
-          expandThinkingByDefault: true,
-          desktopSessionPaneSide: 'left',
-          defaultPermissionMode: 'default',
-          providerLimitsDisabled: true,
-        },
+        payload: { desktopSessionPaneSide: 'bottom', defaultPermissionMode: 'full' },
       })
-    ).toEqual({
-      type: 'config/update',
-      payload: {
-        expandThinkingByDefault: true,
-        desktopSessionPaneSide: 'left',
-        defaultPermissionMode: 'default',
-        providerLimitsDisabled: true,
-      },
-    });
+    ).toBeNull();
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: { desktopSessionPaneSide: 'left', defaultPermissionMode: 'invalid' },
+      })
+    ).toBeNull();
   });
 
   it('parses auto permission mode in config/update', () => {
@@ -509,7 +489,6 @@ describe('parseExtensionMessage', () => {
       parseExtensionMessage({
         type: 'config/update',
         payload: {
-          expandThinkingByDefault: true,
           desktopSessionPaneSide: 'left',
           defaultPermissionMode: 'auto',
         },
@@ -517,33 +496,10 @@ describe('parseExtensionMessage', () => {
     ).toEqual({
       type: 'config/update',
       payload: {
-        expandThinkingByDefault: true,
         desktopSessionPaneSide: 'left',
         defaultPermissionMode: 'auto',
       },
     });
   });
 
-  it('maps legacy disabled provider-limit polling payloads to the boolean flag', () => {
-    expect(
-      parseExtensionMessage({
-        type: 'config/update',
-        payload: {
-          expandThinkingByDefault: true,
-          desktopSessionPaneSide: 'left',
-          defaultPermissionMode: 'default',
-          providerLimitPollIntervalSeconds: -1,
-        },
-      })
-    ).toEqual({
-      type: 'config/update',
-      payload: {
-        expandThinkingByDefault: true,
-        desktopSessionPaneSide: 'left',
-        defaultPermissionMode: 'default',
-        providerLimitPollIntervalSeconds: -1,
-        providerLimitsDisabled: true,
-      },
-    });
-  });
 });

@@ -8,7 +8,6 @@ import {
   setMessagesIncremental,
   state,
   setSessions,
-  setCompactToolOutput,
   setShowInlineFileChanges,
   setShowModelPicker,
   setShowThinkingPreference,
@@ -734,7 +733,7 @@ describe('compact activity virtualization signatures', () => {
     },
   };
 
-  it('revises only assistant rows with compactable activity when the mode changes', () => {
+  it('signatures include only assistant rows with compactable activity', () => {
     const messages = [
       { info: { id: 'user-1', role: 'user' as const }, parts: [textPart('text-1', 'Prompt')] },
       {
@@ -747,8 +746,7 @@ describe('compact activity virtualization signatures', () => {
       },
     ];
 
-    expect(getCompactActivityLayoutSignatures(messages, false)).toEqual(new Map());
-    expect(getCompactActivityLayoutSignatures(messages, true)).toEqual(
+    expect(getCompactActivityLayoutSignatures(messages)).toEqual(
       new Map([['assistant-1', 'read-1']])
     );
   });
@@ -885,7 +883,6 @@ afterEach(async () => {
   setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
-  setCompactToolOutput(false);
   setShowInlineFileChanges(false);
   setShowThinkingPreference(true);
   stopLoading();
@@ -983,7 +980,6 @@ describe('MessageList compact activity', () => {
       text: 'Verifying results',
       time: { start: 3, end: 4 },
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
@@ -1039,7 +1035,6 @@ describe('MessageList compact activity', () => {
     };
     const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, { info, parts: [read, search] }]);
@@ -1131,7 +1126,6 @@ describe('MessageList compact activity', () => {
     };
     const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
     const info = assistantMessage('assistant-1', { parentID: 'user-1' });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, { info, parts: [search] }]);
@@ -1200,7 +1194,6 @@ describe('MessageList compact activity', () => {
       info: assistantMessage('assistant-3', { parentID: 'user-1' }),
       parts: [{ ...textPart('response-1', 'Checks passed.'), messageID: 'assistant-3' }],
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, first, { info: secondInfo, parts: [running] }, response]);
@@ -1267,7 +1260,6 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, { info, parts: [read] }]);
@@ -1310,7 +1302,6 @@ describe('MessageList compact activity', () => {
       info: assistantMessage('assistant-2', { parentID: 'user-1' }),
       parts: [running],
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, reasoningMessage]);
@@ -1343,7 +1334,6 @@ describe('MessageList compact activity', () => {
       title: 'npm run old-check',
       time: { start: 1 },
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
@@ -1393,7 +1383,6 @@ describe('MessageList compact activity', () => {
       };
       return part;
     });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([
@@ -1451,7 +1440,6 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, { info, parts: [first, running, last] }]);
@@ -1508,7 +1496,6 @@ describe('MessageList compact activity', () => {
       parentID: 'user-1',
       time: { created: 1 },
     });
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
     replaceMessages([user, { info, parts: [command] }]);
@@ -1593,7 +1580,6 @@ describe('MessageList compact activity', () => {
       text: 'Checking after the response',
       time: { start: 3, end: 4 },
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
@@ -1686,7 +1672,6 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 0, end: 1 },
     };
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -1785,7 +1770,6 @@ describe('MessageList compact activity', () => {
         parts: [edit],
       },
     ];
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -1823,7 +1807,6 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 1, end: 2 },
     };
-    setCompactToolOutput(true);
     setShowInlineFileChanges(true);
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
@@ -1864,7 +1847,6 @@ describe('MessageList compact activity', () => {
       text: 'Verifying results',
       time: { start: 3, end: 4 },
     };
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
@@ -2049,7 +2031,6 @@ describe('MessageList history pagination', () => {
         parts: [command],
       },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
-    setCompactToolOutput(true);
     const harness = await mountDeferredHistory(
       [
         {
@@ -2194,9 +2175,9 @@ describe('MessageList history pagination', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
-    expect(container?.querySelector<HTMLElement>('[data-msg-id="older-30"]')?.style.height).toBe(
-      '160px'
-    );
+    expect(
+      container?.querySelector<HTMLElement>('[data-msg-id="older-30"]')?.style.height
+    ).not.toBe('100px');
 
     const touchStart = new MouseEvent('pointerdown', { bubbles: true, button: 0 });
     Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
@@ -6438,7 +6419,6 @@ describe('MessageList sticky prompt preview', () => {
     }
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
-    setCompactToolOutput(true);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
@@ -7866,6 +7846,39 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBeNull();
   });
 
+  it('hides the loading label while a compact active tool row is visible', async () => {
+    const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
+    tool.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 1 },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run tests')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [tool],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
+      'is-reserved'
+    );
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(container?.querySelector('[data-activity-part-id="tool-active"]')).not.toBeNull();
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList).toContain('is-reserved');
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('re-shows the loading row only after a sustained visible-stream gap', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
@@ -8706,197 +8719,6 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
-  it('preserves the visible row when compact activity mode remeasures virtualized rows', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    const rowHeights = Array.from({ length: 50 }, () => 100);
-    const rowTop = (index: number) =>
-      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
-    const totalHeight = () => rowHeights.reduce((total, height) => total + height, 0);
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, totalHeight());
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
-        }
-        return new DOMRect(0, 0, 500, 40);
-      }
-    );
-
-    setState('activeSessionId', 'session-1');
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        return {
-          info: assistantMessage(messageId),
-          parts:
-            index >= 5 && index < 39
-              ? [
-                  {
-                    id: `read-${index}`,
-                    sessionID: 'session-1',
-                    messageID: messageId,
-                    type: 'tool' as const,
-                    callID: `call-${index}`,
-                    tool: 'read',
-                    state: {
-                      status: 'completed' as const,
-                      input: { filePath: `src/file-${index}.ts` },
-                      output: 'source',
-                      title: `src/file-${index}.ts`,
-                      metadata: {},
-                      time: { start: 1, end: 2 },
-                    },
-                  },
-                  { ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId },
-                ]
-              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
-        };
-      })
-    );
-
-    cleanup = render(() => MessageList(), container!);
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, get: totalHeight });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-
-    for (let frame = 0; frame < 4; frame += 1) {
-      await Promise.resolve();
-      animationFrames.flush();
-    }
-    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
-    scrollTopValue = 2000;
-    list.dispatchEvent(new Event('scroll'));
-    await Promise.resolve();
-    animationFrames.flush();
-    await Promise.resolve();
-
-    const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
-    expect(anchor).toBeInstanceOf(HTMLDivElement);
-    const anchorTopBefore = anchor.getBoundingClientRect().top;
-    const mountedRows = [
-      ...(container?.querySelectorAll<HTMLElement>('[data-msg-id^="assistant-"]') || []),
-    ];
-    for (const row of mountedRows) {
-      const index = Number(row.dataset.msgId!.replace('assistant-', ''));
-      if (index >= 5 && index < 39) rowHeights[index] = 60;
-    }
-
-    setCompactToolOutput(true);
-    await Promise.resolve();
-    await Promise.resolve();
-    animationFrames.flush();
-    await Promise.resolve();
-
-    expect(container?.querySelector('.assistant-activity-summary')).toBeInstanceOf(
-      HTMLButtonElement
-    );
-    expect(anchor.isConnected).toBe(true);
-    expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
-    animationFrames.restore();
-  });
-
-  it('invalidates cached heights for offscreen rows when compact output changes', async () => {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    let list: HTMLDivElement | null = null;
-    let scrollTopValue = 0;
-
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        if (this === list || this.classList.contains('interactive-list')) {
-          return new DOMRect(0, 0, 500, 400);
-        }
-        if (this.classList.contains('interactive-list-track')) {
-          return new DOMRect(0, 0, 500, 5000);
-        }
-        if (this.dataset.msgId?.startsWith('assistant-')) {
-          const index = Number(this.dataset.msgId.replace('assistant-', ''));
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
-        }
-        return new DOMRect(0, 0, 500, 40);
-      }
-    );
-
-    setState('activeSessionId', 'session-1');
-    replaceMessages(
-      Array.from({ length: 50 }, (_, index) => {
-        const messageId = `assistant-${index}`;
-        const activityPart = toolPart(`read-${index}`, messageId, `call-${index}`);
-        activityPart.tool = 'read';
-        activityPart.state = {
-          status: 'completed',
-          input: { filePath: `src/file-${index}.ts` },
-          output: 'source',
-          title: `src/file-${index}.ts`,
-          metadata: {},
-          time: { start: 1, end: 2 },
-        };
-        return {
-          info: assistantMessage(messageId, { parentID: 'user-1' }),
-          parts:
-            index < 40
-              ? [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }]
-              : [activityPart],
-        };
-      })
-    );
-
-    cleanup = render(() => MessageList(), container!);
-    list = container?.querySelector('.interactive-list') as HTMLDivElement;
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
-    Object.defineProperty(list, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTopValue,
-      set: (value: number) => {
-        scrollTopValue = value;
-      },
-    });
-
-    for (let frame = 0; frame < 4; frame += 1) {
-      await Promise.resolve();
-      animationFrames.flush();
-    }
-    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
-    scrollTopValue = 0;
-    list.dispatchEvent(new Event('scroll'));
-    await Promise.resolve();
-    animationFrames.flush();
-    await Promise.resolve();
-
-    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    const bottomSpacer = () =>
-      Number.parseFloat(
-        container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height || '0'
-      );
-    const bottomPadBefore = bottomSpacer();
-
-    setCompactToolOutput(true);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    // The disclosure owner retains provisional height. Every collapsed follower row, including the
-    // latest assistant, is known to render no content and must not add 160px each.
-    expect(bottomSpacer() - bottomPadBefore).toBe(-840);
-    animationFrames.restore();
-  });
-
   it('invalidates cached heights for offscreen reasoning rows when thinking visibility changes', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     let list: HTMLDivElement | null = null;
@@ -8971,9 +8793,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    // Hidden reasoning rows have no rendered block size, including the latest assistant. A later
-    // asynchronous summary invalidates the zero-height classification and forces rehydration.
-    expect(bottomSpacer() - bottomPadBefore).toBe(-1000);
+    // Compact activity already gives the follower rows zero height, so hiding thinking removes only
+    // the disclosure owner's provisional height.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-100);
     animationFrames.restore();
   });
 

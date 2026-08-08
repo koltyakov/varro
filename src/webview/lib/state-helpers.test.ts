@@ -1608,25 +1608,20 @@ describe('state helpers', () => {
     expect(stateModule.openAttentionSessionsKey()).toBe(0);
     expect(stateModule.messageListScrollRequestKey()).toBe(0);
     expect(stateModule.showThinking()).toBe(true);
-    expect(stateModule.expandThinkingByDefault()).toBe(false);
-    expect(stateModule.compactToolOutput()).toBe(false);
     expect(stateModule.showChangedFiles()).toBe(false);
 
     stateModule.requestComposerFocus();
     stateModule.requestOpenAttentionSessions();
     stateModule.requestMessageListScrollToBottom();
     stateModule.toggleThinking();
-    stateModule.setExpandThinkingByDefaultPreference(true);
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.openAttentionSessionsKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
     expect(stateModule.showThinking()).toBe(false);
-    expect(stateModule.expandThinkingByDefault()).toBe(true);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));
-    expect(window.localStorage.getItem('varro.expandThinkingByDefault')).toBe(JSON.stringify(true));
   });
 
   it('updates incremental message entries when only metadata changes', async () => {
@@ -1765,88 +1760,4 @@ describe('state helpers', () => {
     expect(stateModule.desktopSessionPaneSide()).toBe('right');
   });
 
-  it('uses the default provider-limit poll interval when polling is enabled', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      theme: 'dark',
-      serverStatus: { state: 'stopped' },
-      editorContext: {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      },
-      terminalSelection: null,
-      droppedFiles: [],
-      emptyStateLogoUri: '',
-      providerLimitsDisabled: false,
-    };
-
-    const stateModule = await loadState();
-
-    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(120);
-    expect(stateModule.providerLimitThresholdPercent()).toBe(100);
-  });
-
-  it('reads provider-limit threshold percent from initial webview state', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      theme: 'dark',
-      serverStatus: { state: 'stopped' },
-      editorContext: {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      },
-      terminalSelection: null,
-      droppedFiles: [],
-      emptyStateLogoUri: '',
-      providerLimitThresholdPercent: 25,
-    };
-
-    const stateModule = await loadState();
-
-    expect(stateModule.providerLimitThresholdPercent()).toBe(25);
-  });
-
-  it('reads disabled provider-limit polling from initial webview state', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      theme: 'dark',
-      serverStatus: { state: 'stopped' },
-      editorContext: {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      },
-      terminalSelection: null,
-      droppedFiles: [],
-      emptyStateLogoUri: '',
-      providerLimitsDisabled: true,
-    };
-
-    const stateModule = await loadState();
-
-    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
-  });
-
-  it('keeps legacy disabled provider-limit polling state working', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
-      theme: 'dark',
-      serverStatus: { state: 'stopped' },
-      editorContext: {
-        workspacePath: '/repo',
-        activeFile: null,
-        selection: null,
-        diagnostics: [],
-      },
-      terminalSelection: null,
-      droppedFiles: [],
-      emptyStateLogoUri: '',
-      providerLimitPollIntervalSeconds: -1,
-    };
-
-    const stateModule = await loadState();
-
-    expect(stateModule.providerLimitPollIntervalSeconds()).toBe(-1);
-  });
 });

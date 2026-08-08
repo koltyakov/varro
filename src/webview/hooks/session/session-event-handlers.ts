@@ -997,11 +997,12 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         return;
       }
       // opencode can emit a trailing `busy` after a turn already settled. Only
-      // suppress it once canonical status says this session is no longer working;
-      // a completed assistant step may still be followed by another tool/model step.
+      // suppress it for the active tree once canonical status says this session is
+      // no longer working; a completed assistant step may still be followed by
+      // another tool/model step.
       if (
         status.type === 'busy' &&
-        sessionID === deps.getActiveSessionId() &&
+        isSessionInActiveTree(sessionID) &&
         latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt()) &&
         !isRunningSessionStatus(deps.getSessionStatus(sessionID))
       ) {

@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
-import {
-  resetDefaultAppState,
-  setExpandThinkingByDefaultPreference,
-  setShowThinking,
-  setState,
-} from '../lib/state';
+import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, ReasoningPart } from '../types';
 import {
@@ -23,7 +18,6 @@ beforeEach(() => {
   document.body.appendChild(container);
   resetDefaultAppState();
   resetToolCallExpansionState();
-  setExpandThinkingByDefaultPreference(false);
   setShowThinking(true);
 });
 
@@ -32,7 +26,6 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
-  setExpandThinkingByDefaultPreference(false);
   resetDefaultAppState();
 });
 
@@ -152,12 +145,13 @@ describe('splitReasoningText', () => {
 });
 
 describe('MessagePart', () => {
-  it('expands reasoning blocks by default when the setting is enabled', () => {
-    setExpandThinkingByDefaultPreference(true);
-
+  it('starts reasoning blocks collapsed', () => {
     renderPart(reasoningPart('**Planning**\n\nStep one'));
 
-    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
     const icon = container?.querySelector('.thinking-topic-icon');
     expect(icon?.getAttribute('width')).toBe('12');
     expect(icon?.getAttribute('height')).toBe('12');
@@ -183,28 +177,7 @@ describe('MessagePart', () => {
     );
   });
 
-  it('keeps a user-collapsed reasoning block closed when expanded by default', () => {
-    setExpandThinkingByDefaultPreference(true);
-    const part = reasoningPart('**Planning**\n\nStep one');
-    renderPart(part);
-
-    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
-    expect(container?.querySelector('.thinking-content')).toBeNull();
-
-    cleanup?.();
-    cleanup = undefined;
-    container!.innerHTML = '';
-    renderPart({ ...part, text: '**Planning**\n\nUpdated step' });
-
-    expect(container?.querySelector('.thinking-content')).toBeNull();
-    expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
-      'false'
-    );
-  });
-
   it('keeps a reasoning summary but hides an empty HTML-comment body', () => {
-    setExpandThinkingByDefaultPreference(true);
-
     renderPart(reasoningPart('**Designing shared finder cache with TTL**\n\n<!-- -->'));
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toBe(
@@ -291,7 +264,6 @@ describe('MessagePart', () => {
   });
 
   it('shows model and variant labels when subagent reasoning changes models', () => {
-    setExpandThinkingByDefaultPreference(true);
     setState('providers', [
       {
         id: 'openai',
@@ -344,7 +316,6 @@ describe('MessagePart', () => {
   });
 
   it('shows a No thinking detail when a subagent drops an unsupported variant', () => {
-    setExpandThinkingByDefaultPreference(true);
     setState('providers', [
       {
         id: 'openai',

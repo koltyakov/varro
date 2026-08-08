@@ -176,8 +176,7 @@ That initial state includes:
 - editor context
 - terminal selection
 - dropped files
-- config such as thinking expansion and desktop session pane side
-- provider-limit configuration
+- config such as desktop session pane side
 - whether the extension host is remote
 - interrupted session IDs
 - pending permission and question snapshots

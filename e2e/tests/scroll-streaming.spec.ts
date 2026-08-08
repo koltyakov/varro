@@ -182,6 +182,39 @@ test.describe('rapid streaming bottom follow', () => {
       ).toBe(true);
     }
   });
+
+  test('keeps the top viewport fixed while detached streaming arrives', async ({ page }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(15);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+
+    expect((await getScrollMetrics(page, '.interactive-list')).scrollTop).toBe(0);
+    const anchor = await getVisibleMessageAnchor(list);
+
+    for (let i = 0; i < 8; i += 1) {
+      await appendDeltaToRapidStreaming(
+        page,
+        `\n\nTop-scroll streaming chunk ${i}: ${'the top viewport should remain fixed '.repeat(6)}`
+      );
+      const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 2);
+      expect(
+        samples.every((top) => top !== null && Math.abs(top - anchor.top) < 1.5),
+        JSON.stringify({ i, anchor, samples })
+      ).toBe(true);
+      expect((await getScrollMetrics(page, '.interactive-list')).scrollTop).toBe(0);
+    }
+  });
 });
 
 test.describe('bottom scroll stability during height changes', () => {
