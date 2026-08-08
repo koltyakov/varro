@@ -108,6 +108,35 @@ export function VirtualizedContent(
               !!props.forceVirtualContent?.(msg.info.id) ||
               !!props.assistantActivityGroupMap?.has(msg.info.id)
           );
+          const previousVisibleIndex = createMemo(() => {
+            let previousIndex = index() + rangeOffset() - 1;
+            while (
+              previousIndex >= 0 &&
+              props.renderEmptyMessageIds?.has(props.messages[previousIndex]!.info.id)
+            ) {
+              previousIndex -= 1;
+            }
+            return previousIndex;
+          });
+          const followsVisibleAssistantResponse = createMemo(() => {
+            const previousIndex = previousVisibleIndex();
+            return (
+              msg.info.role === 'assistant' &&
+              previousIndex >= 0 &&
+              props.messages[previousIndex]!.info.role === 'assistant'
+            );
+          });
+          const continuesVisibleActivityGroup = createMemo(() => {
+            const previousIndex = previousVisibleIndex();
+            if (msg.info.role !== 'assistant' || previousIndex < 0) return false;
+            const previousMessage = props.messages[previousIndex]!;
+            if (previousMessage.info.role !== 'assistant') return false;
+            const currentGroups = props.assistantActivityGroupMap?.get(msg.info.id);
+            const previousGroups = props.assistantActivityGroupMap?.get(previousMessage.info.id);
+            if (!currentGroups || !previousGroups) return false;
+            const previousKeys = new Set(previousGroups.map((group) => group.key));
+            return currentGroups.some((group) => previousKeys.has(group.key));
+          });
           const pinnedGapPlaceholder = createMemo(() => {
             const absIndex = index() + rangeOffset();
             const gapStart = pinnedGapStart();
@@ -137,6 +166,8 @@ export function VirtualizedContent(
               virtualHeight={virtualHeight()}
               virtualPlaceholder={virtualPlaceholder()}
               renderEmpty={props.renderEmptyMessageIds?.has(msg.info.id)}
+              followsVisibleAssistantResponse={followsVisibleAssistantResponse()}
+              continuesVisibleActivityGroup={continuesVisibleActivityGroup()}
               modelChangeMap={props.modelChangeMap}
               promptNumberMap={props.promptNumberMap}
               showPromptNumbers={props.showPromptNumbers}
@@ -144,6 +175,7 @@ export function VirtualizedContent(
               previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
               fileEditStackGroupMap={props.fileEditStackGroupMap}
               assistantDialogSummaryMap={props.assistantDialogSummaryMap}
+              isFinalAssistantMessage={props.isFinalAssistantMessage}
               assistantActivityGroupMap={props.assistantActivityGroupMap}
               retainedActivityPartKeys={props.retainedActivityPartKeys}
               exitingActivityPartKeys={props.exitingActivityPartKeys}

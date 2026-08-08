@@ -1,6 +1,8 @@
 import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
+import { ClampedToolText } from './ClampedToolText';
+import { CopyIconButton } from './CopyIconButton';
 
 function formatMetadataValue(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -58,12 +60,22 @@ export function PermissionPrompt(props: { permission: Permission }) {
 
       <Show when={metadataEntries().length > 0}>
         <div class="permission-prompt-meta">
-          {metadataEntries().map(([key, value]) => (
-            <div class="permission-meta-entry">
-              <span class="permission-meta-key">{key}</span>
-              <span class="permission-meta-value">{formatMetadataValue(value)}</span>
-            </div>
-          ))}
+          {metadataEntries().map(([key, value]) => {
+            const text = formatMetadataValue(value);
+            return (
+              <div class="permission-meta-entry">
+                <span class="permission-meta-key">{key}</span>
+                <div class="permission-meta-value-shell">
+                  <ClampedToolText
+                    content={text}
+                    title={`Permission request (${key})`}
+                    class="permission-meta-value"
+                  />
+                  <CopyIconButton text={text} label={key} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Show>
 

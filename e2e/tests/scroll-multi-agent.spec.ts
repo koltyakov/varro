@@ -46,6 +46,41 @@ async function appendRunningToolPart(page: Page, index: number) {
   }, index);
 }
 
+async function completeRunningToolPart(page: Page, index: number) {
+  await page.evaluate((toolIndex) => {
+    const part = {
+      id: `message-mla-assistant-streaming-tool-${toolIndex}`,
+      sessionID: 'session-multi-agent-large-streaming',
+      messageID: 'message-mla-assistant-streaming',
+      type: 'tool' as const,
+      callID: `message-mla-assistant-streaming-tool-${toolIndex}-call`,
+      tool: toolIndex % 2 === 0 ? 'bash' : 'grep',
+      state: {
+        status: 'completed' as const,
+        input:
+          toolIndex % 2 === 0
+            ? { command: `npm run check-${toolIndex}` }
+            : { pattern: `stream-${toolIndex}`, path: 'src' },
+        output: 'Completed successfully',
+        title: toolIndex % 2 === 0 ? `npm run check-${toolIndex}` : `Search: stream-${toolIndex}`,
+        metadata: {},
+        time: { start: Date.now() - 1_000, end: Date.now() },
+      },
+    };
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+    };
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: { type: 'message.part.updated', properties: { part } },
+      },
+      '*'
+    );
+  }, index);
+}
+
 test.describe('multi-agent scroll stability', () => {
   test('keeps bottom follow engaged with multiple completed agent responses', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=multi-agent-streaming');
@@ -280,6 +315,55 @@ test.describe('multi-agent large virtualized scroll stability', () => {
         expect(top).not.toBeNull();
         expect(Math.abs(top! - before.top - 1)).toBeLessThan(1.5);
       }
+    }
+  });
+
+  test('offscreen activity completion does not move a detached viewport', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=multi-agent-large-streaming&compactToolOutput=1'
+    );
+    const list = page.locator('.interactive-list');
+    await expect(list).toBeVisible();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight - 300);
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 3);
+    const anchor = await getVisibleMessageAnchor(list);
+
+    await appendRunningToolPart(page, 100);
+    await page.waitForTimeout(250);
+    const activity = page.locator(
+      '[data-activity-part-id="message-mla-assistant-streaming-tool-100"]'
+    );
+    await expect(activity).toHaveCount(1);
+    expect(
+      await activity.evaluate((element) => {
+        const transcript = element.closest('.interactive-list');
+        return (
+          !!transcript &&
+          element.getBoundingClientRect().top >= transcript.getBoundingClientRect().bottom
+        );
+      })
+    ).toBe(true);
+    await expect(activity).not.toHaveClass(/is-entering/);
+    await completeRunningToolPart(page, 100);
+
+    const box = await list.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    for (let sample = 0; sample < 32; sample += 1) {
+      const before = await getVisibleMessageAnchor(list, anchor.id);
+      await page.mouse.wheel(0, -1);
+      await page.waitForTimeout(100);
+      const current = await getVisibleMessageAnchor(list, anchor.id);
+      expect(
+        Math.abs(current.top - before.top - 1),
+        JSON.stringify({ sample, before, current })
+      ).toBeLessThan(1.5);
     }
   });
 

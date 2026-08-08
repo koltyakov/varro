@@ -1,7 +1,7 @@
 import { batch, createSignal } from 'solid-js';
 import type { MessageEntry } from '../types';
 
-export const MESSAGE_HISTORY_WINDOW = 50;
+export const MESSAGE_HISTORY_WINDOW = 200;
 export const MESSAGE_HISTORY_CACHE_SESSION_LIMIT = 20;
 export const MESSAGE_HISTORY_PAGE_CACHE_LIMIT = 20;
 

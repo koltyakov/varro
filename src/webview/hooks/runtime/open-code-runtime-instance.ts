@@ -405,6 +405,21 @@ async function fetchSessionMessages(
     }
   }
   const messages = resetHistoryWindow ? incoming : mergeWindowedHistory(current, incoming);
+  if (!resetHistoryWindow) {
+    const promptCursor = getSessionHistoryPromptCursor(sessionId);
+    const loadedMessageIds = new Set(messages.map((entry) => entry.info.id));
+    const hasBoundaryPrompt = getSessionHistoryPrompts(sessionId).some(
+      (entry) => !loadedMessageIds.has(entry.info.id) && hasPreviewablePromptContent(entry)
+    );
+    if (promptCursor && !hasBoundaryPrompt) {
+      void loadSessionBoundaryPrompts(
+        sessionId,
+        promptCursor,
+        options?.isCurrent,
+        loadedMessageIds
+      );
+    }
+  }
   appStore.setState('sessionMessageCounts', sessionId, messages.length);
   return messages;
 }

@@ -570,14 +570,19 @@
 }
 
 .diff-view-overlay-filename {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-vscode-fg);
   text-align: left;
+}
+
+.diff-view-overlay-title .diff-view-stats {
+  margin-left: auto;
 }
 
 .diff-view-overlay-filename:hover:not(:disabled) {
@@ -2044,10 +2049,13 @@ kbd {
 }
 
 .chat-image-figure .chat-image-img {
+  width: 100%;
+  height: 100%;
   max-height: 100%;
   max-width: 100%;
   border-radius: var(--radius-xs);
   display: block;
+  object-fit: contain;
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
@@ -2062,8 +2070,10 @@ kbd {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 280px;
-  max-width: 100%;
+  max-width: 498px;
+  aspect-ratio: 16 / 9;
+  margin-inline: auto;
+  overflow: hidden;
   cursor: zoom-in;
   user-select: none;
   -webkit-user-select: none;
@@ -2246,7 +2256,6 @@ kbd {
 
 .message-image-carousel-figure .chat-image-img {
   width: 100%;
-  height: 280px;
   object-fit: contain;
   margin: 0 auto;
 }
@@ -2316,14 +2325,6 @@ kbd {
 }
 
 @media (max-width: 640px) {
-  .chat-image-figure .chat-image-preview-trigger {
-    height: 224px;
-  }
-
-  .message-image-carousel-figure .chat-image-img {
-    height: 224px;
-  }
-
   .message-image-carousel-nav {
     width: 26px;
     height: 26px;
@@ -2366,20 +2367,31 @@ kbd {
 }
 
 .interactive-loading-row {
-  height: 34px;
+  height: 42px;
   box-sizing: border-box;
-  padding-top: 2px;
+  padding-top: 6px;
   overflow: hidden;
   overflow-anchor: none;
 }
 
 .interactive-loading-row .loading-indicator {
-  height: 100%;
+  height: auto;
   box-sizing: border-box;
+  padding-top: 0;
 }
 
 .interactive-loading-row.is-reserved .loading-indicator {
   visibility: hidden;
+}
+
+.interactive-loading-row.trailing-assistant-summary-row {
+  height: auto;
+  min-height: 42px;
+}
+
+.trailing-assistant-summary-row .assistant-dialog-summary {
+  margin-top: 0;
+  width: 100%;
 }
 
 .user-message-text {

@@ -662,13 +662,15 @@ test.describe('auto-scroll', () => {
       .evaluate(
         (summary, loading) => {
           const summaryBox = summary.getBoundingClientRect();
-          const loadingBox = (loading as HTMLElement).getBoundingClientRect();
+          const loadingBox = (loading as HTMLElement)
+            .querySelector<HTMLElement>('.loading-verb')!
+            .getBoundingClientRect();
           return loadingBox.top - summaryBox.bottom;
         },
         await loadingRow.elementHandle()
       );
-    expect(settledGap).toBeGreaterThanOrEqual(5);
-    expect(settledGap).toBeLessThanOrEqual(9);
+    expect(settledGap).toBeGreaterThanOrEqual(10);
+    expect(settledGap).toBeLessThanOrEqual(14.5);
 
     await page.evaluate(() => {
       const part = {
@@ -711,6 +713,406 @@ test.describe('auto-scroll', () => {
     });
 
     await expect(appendReserve).toHaveCount(0);
+  });
+
+  test('uses trailing activity reserve for the next active tool', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+    );
+    const list = page.locator('.interactive-list');
+    const initialItem = page.locator(
+      '[data-activity-part-id="message-tool-cards-assistant-69-tool"]'
+    );
+    await expect(initialItem).toBeVisible();
+    await initialItem.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      for (let index = 1; index <= 2; index += 1) {
+        const part = {
+          id: `message-tool-cards-assistant-69-initial-tool-${index}`,
+          sessionID: 'session-tool-cards-large-transcript',
+          messageID: 'message-tool-cards-assistant-69',
+          type: 'tool' as const,
+          callID: `message-tool-cards-assistant-69-initial-tool-${index}-call`,
+          tool: 'bash',
+          state: {
+            status: 'running' as const,
+            input: { command: `npm run initial-check-${index}` },
+            title: `npm run initial-check-${index}`,
+            time: { start: Date.now() + index },
+          },
+        };
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          },
+          '*'
+        );
+      }
+    });
+    const activeItems = page.locator('.assistant-active-activity-item');
+    await expect(activeItems).toHaveCount(3);
+    await page.waitForTimeout(1_250);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const parts = harnessWindow.__varroE2E
+        ?.getSessionMessages?.('session-tool-cards-large-transcript')
+        .flatMap((message) => message.parts)
+        .filter(
+          (candidate) =>
+            candidate.id === 'message-tool-cards-assistant-69-tool' ||
+            String(candidate.id).startsWith('message-tool-cards-assistant-69-initial-tool-')
+        );
+      if (parts?.length !== 3) throw new Error('Trailing active tool fixtures are missing');
+      for (const part of parts) {
+        const previousState = part.state as Record<string, unknown>;
+        part.state = {
+          status: 'completed',
+          input: previousState.input,
+          output: 'Completed',
+          title: previousState.title,
+          metadata: {},
+          time: { start: Date.now() - 1_000, end: Date.now() },
+        };
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      }
+    });
+
+    await expect(activeItems).toHaveCount(0, { timeout: 5_000 });
+    const reserve = page.locator('.append-scroll-bottom-reserve');
+    await expect(reserve).toBeVisible();
+    await waitForAnimationFrames(page, 3);
+    const summary = page.locator('.assistant-activity-summary').last();
+    const loadingRow = page.locator('.interactive-loading-row');
+    const before = await list.evaluate((element) => {
+      const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+      const summaryElement = summaries[summaries.length - 1];
+      const loading = element.querySelector<HTMLElement>('.interactive-loading-row');
+      if (!summaryElement || !loading) throw new Error('Trailing activity geometry is missing');
+      const containerTop = element.getBoundingClientRect().top;
+      return {
+        scrollTop: element.scrollTop,
+        reserveHeight: Number.parseFloat(
+          getComputedStyle(element.querySelector<HTMLElement>('.append-scroll-bottom-reserve')!)
+            .height
+        ),
+        summaryTop: summaryElement.getBoundingClientRect().top - containerTop,
+        loadingTop: loading.getBoundingClientRect().top - containerTop,
+      };
+    });
+
+    await page.evaluate(() => {
+      const part = {
+        id: 'message-tool-cards-assistant-69-next-tool',
+        sessionID: 'session-tool-cards-large-transcript',
+        messageID: 'message-tool-cards-assistant-69',
+        type: 'tool' as const,
+        callID: 'message-tool-cards-assistant-69-next-tool-call',
+        tool: 'bash',
+        state: {
+          status: 'running' as const,
+          input: { command: 'npm run next-check' },
+          title: 'npm run next-check',
+          time: { start: Date.now() },
+        },
+      };
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part } },
+        },
+        '*'
+      );
+    });
+
+    const summarySamples = await summary.evaluate(async (element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      const tops: number[] = [];
+      for (let frame = 0; frame < 40; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      return tops;
+    });
+    const nextItem = page.locator(
+      '[data-activity-part-id="message-tool-cards-assistant-69-next-tool"]'
+    );
+    await expect(nextItem).toBeVisible();
+    expect(
+      summarySamples.every((top) => Math.abs(top - before.summaryTop) <= 1.5),
+      JSON.stringify({ before, summarySamples })
+    ).toBe(true);
+    expect(
+      Math.abs((await list.evaluate((element) => element.scrollTop)) - before.scrollTop)
+    ).toBeLessThan(1.5);
+    const summaryBox = (await summary.boundingBox())!;
+    const nextItemBox = (await nextItem.boundingBox())!;
+    expect(before.reserveHeight).toBeGreaterThanOrEqual(nextItemBox.height);
+    expect(nextItemBox.y).toBeGreaterThanOrEqual(summaryBox.y + summaryBox.height - 1);
+    const loadingTop = await loadingRow.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+    expect(loadingTop).toBeGreaterThan(before.loadingTop);
+  });
+
+  test('keeps the transcript fixed when every active tool moves into Explored', async ({
+    page,
+  }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1&activeTray=1&activeTrayIndex=69'
+    );
+    const list = page.locator('.interactive-list');
+    const activeItems = page.locator('.assistant-active-activity-item');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      for (let index = 1; index < 8; index += 1) {
+        const part = {
+          id: `message-tool-cards-assistant-69-tool-${index}`,
+          sessionID: 'session-tool-cards-large-transcript',
+          messageID: 'message-tool-cards-assistant-69',
+          type: 'tool' as const,
+          callID: `message-tool-cards-assistant-69-tool-${index}-call`,
+          tool: index % 2 === 0 ? 'grep' : 'bash',
+          state: {
+            status: 'running' as const,
+            input:
+              index % 2 === 0
+                ? { pattern: `activity-${index}`, path: 'src/webview' }
+                : { command: `npm run check-${index}` },
+            title: index % 2 === 0 ? `Search ${index}` : `Command ${index}`,
+            time: { start: Date.now() - 1_000 + index },
+          },
+        };
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          },
+          '*'
+        );
+      }
+    });
+
+    await expect(activeItems).toHaveCount(8);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+    await page.waitForTimeout(1_250);
+    const anchor = await getVisibleMessageAnchor(list);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+          updateMessagePart?: (updatedPart: unknown) => void;
+        };
+      };
+      const part = harnessWindow.__varroE2E
+        ?.getSessionMessages?.('session-tool-cards-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((candidate) => candidate.id === 'message-tool-cards-assistant-69-tool');
+      if (!part) throw new Error('Leading active tool is missing');
+      const previousState = part.state as Record<string, unknown>;
+      const completed = {
+        ...part,
+        state: {
+          status: 'completed' as const,
+          input: previousState.input,
+          output: 'Completed',
+          title: previousState.title,
+          metadata: {},
+          time: { start: Date.now() - 1_000, end: Date.now() },
+        },
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: completed } },
+        },
+        '*'
+      );
+    });
+
+    const leadingExitSamples = await sampleMessageTopAcrossFrames(list, anchor.id, 150);
+    expect(
+      leadingExitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 0.1),
+      JSON.stringify({ anchor, leadingExitSamples })
+    ).toBe(true);
+    await expect(activeItems).toHaveCount(7);
+    const collapseAnchor = await getVisibleMessageAnchor(list);
+
+    await page.evaluate(() => {
+      const sessionId = 'session-tool-cards-large-transcript';
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          updateSessionStatus?: (id: string, status: { type: 'idle' }) => void;
+        };
+      };
+      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'idle' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID: sessionId, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+    });
+
+    const samples = await sampleMessageTopAcrossFrames(list, collapseAnchor.id, 120);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - collapseAnchor.top) <= 0.1),
+      JSON.stringify({ collapseAnchor, samples })
+    ).toBe(true);
+    await expect(activeItems).toHaveCount(0);
+    await expect(page.locator('.assistant-activity-summary').last()).toContainText('Explored');
+    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+  });
+
+  test('reserves an empty follower row when an earlier message owns Explored', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&compactToolOutput=1'
+    );
+    const list = page.locator('.interactive-list');
+    const follower = page.locator('[data-msg-id="tool-follower-assistant"]');
+    const activeItem = page.locator('[data-activity-part-id="tool-follower-running"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await page.evaluate(() => {
+      const sessionID = 'session-tool-cards-large-transcript';
+      const info = {
+        id: 'tool-follower-assistant',
+        sessionID,
+        role: 'assistant' as const,
+        parentID: 'message-tool-cards-user-69',
+        time: { created: Date.now() },
+        modelID: 'model-test',
+        providerID: 'provider-test',
+        mode: 'primary' as const,
+        path: { cwd: '/workspace', root: '/workspace' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      };
+      const part = {
+        id: 'tool-follower-running',
+        sessionID,
+        messageID: info.id,
+        type: 'tool' as const,
+        callID: 'tool-follower-running-call',
+        tool: 'bash',
+        state: {
+          status: 'running' as const,
+          input: { command: 'npm run follower' },
+          title: 'npm run follower',
+          time: { start: Date.now() },
+        },
+      };
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
+        };
+      };
+      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionID, { type: 'busy' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID, status: { type: 'busy' } },
+          },
+        },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.updated', properties: { info } },
+        },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part } },
+        },
+        '*'
+      );
+    });
+
+    await expect(activeItem).toBeVisible();
+    await activeItem.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+    await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+    const sourceGeometry = await follower.evaluate((element) => {
+      const tray = element.querySelector<HTMLElement>('.assistant-active-activity-tray');
+      return {
+        rowHeight: element.getBoundingClientRect().height,
+        trayHeight: tray?.getBoundingClientRect().height ?? null,
+        hasSummary: !!tray?.querySelector('.assistant-active-activity-summary'),
+        flowItems: tray?.parentElement?.children.length ?? null,
+      };
+    });
+    const anchor = await getVisibleMessageAnchor(list);
+
+    await page.evaluate(() => {
+      const sessionID = 'session-tool-cards-large-transcript';
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateSessionStatus?: (id: string, status: { type: 'idle' }) => void };
+      };
+      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionID, { type: 'idle' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+    });
+
+    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    await expect(activeItem).toHaveCount(0);
+    const reserveHeight = await page
+      .locator('.append-scroll-bottom-reserve')
+      .evaluate((element) => element.getBoundingClientRect().height);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
+      JSON.stringify({ anchor, samples, reserveHeight, sourceGeometry })
+    ).toBe(true);
+    expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 0.5);
   });
 
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({
@@ -1069,10 +1471,11 @@ test.describe('auto-scroll', () => {
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(imageRow).toBeAttached({ timeout: 5_000 });
     await imageRequestStarted;
-    const frameHeightBeforeRelease = await imageFrame.evaluate(
-      (element) => element.getBoundingClientRect().height
-    );
-    expect(frameHeightBeforeRelease).toBe(224);
+    const frameBeforeRelease = await imageFrame.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+    expect(frameBeforeRelease.width / frameBeforeRelease.height).toBeCloseTo(16 / 9, 2);
     expect(
       await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
     ).toBe(0);
@@ -1159,10 +1562,11 @@ test.describe('auto-scroll', () => {
       return element.getBoundingClientRect().top - scrollList.getBoundingClientRect().top;
     });
     await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.decode());
-    const frameHeightAfterRelease = await imageFrame.evaluate(
-      (element) => element.getBoundingClientRect().height
-    );
-    expect(frameHeightAfterRelease).toBe(224);
+    const frameAfterRelease = await imageFrame.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+    expect(frameAfterRelease).toEqual(frameBeforeRelease);
     expect(
       await imageFrame.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)
     ).toBe(640);

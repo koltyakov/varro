@@ -218,6 +218,31 @@ test.describe('diff preview anchoring', () => {
     expect(layout.listOpacity).toBe('0.1');
     await expect(overlay.locator('.diff-view-overlay-title .diff-view-file-type')).toHaveText('TS');
 
+    const overlayFilename = overlay.locator('.diff-view-overlay-filename');
+    await overlayFilename.click();
+    await expect(overlay).toBeVisible();
+
+    const headerGap = await overlay.locator('.diff-view-overlay-header').evaluate((header) => {
+      const filenameRect = header
+        .querySelector<HTMLElement>('.diff-view-overlay-filename')!
+        .getBoundingClientRect();
+      const statsRect = header
+        .querySelector<HTMLElement>('.diff-view-stats')!
+        .getBoundingClientRect();
+      return {
+        x: (filenameRect.right + statsRect.left) / 2,
+        y: filenameRect.top + filenameRect.height / 2,
+        width: statsRect.left - filenameRect.right,
+      };
+    });
+    expect(headerGap.width).toBeGreaterThan(20);
+    await page.mouse.click(headerGap.x, headerGap.y);
+    await expect(overlay).toHaveCount(0);
+
+    await page
+      .locator(`[data-msg-id="${messageId}"] .diff-view-toggle`)
+      .evaluate((button) => (button as HTMLButtonElement).click());
+    await expect(overlay).toBeVisible();
     await overlay.click({ position: { x: 2, y: 2 } });
     await expect(overlay).toHaveCount(0);
   });

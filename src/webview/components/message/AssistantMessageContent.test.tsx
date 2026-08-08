@@ -523,6 +523,49 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
   });
 
+  it('does not height-animate active activity outside the virtualized viewport', () => {
+    setCompactToolOutput(true);
+    const running = toolPart('search-offscreen', 'grep', { pattern: 'activity' });
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Search',
+      time: { start: 0 },
+    };
+    const partKey = getAssistantActivityPartKey(running);
+    const claimItemReveal = vi.fn(() => true);
+
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [running],
+      outerListVirtualized: true,
+      nearViewport: false,
+      visibleActiveActivityPartKeys: new Set([partKey]),
+      claimItemReveal,
+    });
+
+    const item = container?.querySelector('[data-activity-part-id="search-offscreen"]');
+    expect(item).not.toBeNull();
+    expect(item?.classList).not.toContain('is-entering');
+    expect(claimItemReveal).toHaveBeenCalledWith('assistant-1', 'active-activity:search-offscreen');
+  });
+
+  it('does not height-animate exiting activity outside the virtualized viewport', () => {
+    setCompactToolOutput(true);
+    const command = toolPart('command-offscreen-exit', 'bash', { command: 'npm test' });
+
+    renderAssistantMessageContent({
+      parts: [command],
+      outerListVirtualized: true,
+      nearViewport: false,
+      exitingActivityPartKeys: new Set([getAssistantActivityPartKey(command)]),
+    });
+
+    const item = container?.querySelector('[data-activity-part-id="command-offscreen-exit"]');
+    expect(item).not.toBeNull();
+    expect(item?.classList).not.toContain('is-exiting');
+  });
+
   it('renders the first exiting tool behind its new Explored row', () => {
     setCompactToolOutput(true);
     const command = toolPart('command-exiting', 'bash', { command: 'npm test' });
@@ -542,7 +585,7 @@ describe('AssistantMessageContent', () => {
     ).not.toBeNull();
   });
 
-  it('keeps actionable tools outside compact activity groups', () => {
+  it('keeps questions outside compact activity groups before and while pending', () => {
     setCompactToolOutput(true);
     const question = toolPart('question-1', 'question');
     const [questionActive, setQuestionActive] = createSignal(false);
@@ -560,7 +603,10 @@ describe('AssistantMessageContent', () => {
           : null,
     });
 
-    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(1);
+    expect(container?.querySelectorAll('.assistant-activity-group')).toHaveLength(2);
+    expect(
+      container?.querySelector('[data-assistant-render-key="part:question-1"]')
+    ).not.toBeNull();
 
     setQuestionActive(true);
 

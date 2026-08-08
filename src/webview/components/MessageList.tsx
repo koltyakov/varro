@@ -43,7 +43,7 @@ import {
   type AssistantActivityGroupInfo,
   type AssistantActivityPart,
 } from '../lib/assistant-activity';
-import { isAssistantMessage } from '../lib/message-metrics';
+import { isAssistantMessage, isContinuationAssistantFinish } from '../lib/message-metrics';
 import {
   getFinalAssistantTextPartId,
   hasVisibleReasoningContent,
@@ -123,6 +123,7 @@ import {
   type ExpansionScrollAnchor,
 } from './message-list/scrolling';
 import { VirtualizedContent } from './message-list/VirtualizedContent';
+import { AssistantDialogSummaryForMessage } from './message-list/MessageRows';
 import { deduplicateFileEdits } from './message/AssistantMessageContent';
 import {
   getLinkedToolCallKeys,
@@ -161,7 +162,6 @@ const APPEND_SCROLL_TRANSITION_MS = 180;
 const EXPANSION_SCROLL_ANCHOR_WINDOW_MS = 250;
 const LOADING_ROW_REAPPEAR_DELAY_MS = 600;
 const LOADING_ROW_RESERVE_RELEASE_DELAY_MS = 600;
-const TRAILING_SUMMARY_SETTLE_DELAY_MS = 700;
 const ACTIVITY_SHOW_DELAY_MS = 180;
 const ACTIVITY_MIN_VISIBLE_MS = 2_400;
 const ACTIVITY_COMPLETED_HOLD_MS = 1_600;
@@ -192,6 +192,7 @@ type VisibleScrollAnchor = {
   messageId: string;
   top: number;
   topPad: number;
+  messageTop?: number;
   activityGroupKey?: string;
   renderKey?: string;
 };
@@ -535,6 +536,7 @@ export function MessageList() {
   let ignoreScrollUntil = 0;
   let lastObservedScrollTop = 0;
   let pendingInitialScrollSessionId: string | null = null;
+  let pendingInitialHistoryFillSessionId: string | null = null;
   let initialScrollRafId = 0;
   let appendScrollRafId = 0;
   let appendScrollSessionId: string | null = null;
@@ -583,6 +585,7 @@ export function MessageList() {
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
   let activityExitBottomTarget: number | null = null;
+  let activityCollapseSettleRafId = 0;
   let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastUserScrollAt = Number.NEGATIVE_INFINITY;
   let lastUserOwnedScrollMovementAt = Number.NEGATIVE_INFINITY;
@@ -878,7 +881,7 @@ export function MessageList() {
 
     if (geometryRefreshPending && widthResizeActive) {
       const current = untrack(stickyUserMessagePreview);
-      if (!current || !shouldHideStickyUserMessagePreviewImmediately(current)) return;
+      if (!current || !shouldHideStickyUserMessagePreviewAfterLayout(current)) return;
 
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = current.id;
@@ -1016,7 +1019,6 @@ export function MessageList() {
   let previousResizeMessageIds: readonly string[] | null = null;
   let loadingRowReappearTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowReserveReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
-  let trailingSummarySettleTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let loadingRowHiddenByVisibleStream = false;
   let loadingRowReservedForMessageHydration = false;
   let appendBottomReserveTarget = 0;
@@ -1102,12 +1104,6 @@ export function MessageList() {
     if (!loadingRowReserveReleaseTimer) return;
     clearTimeout(loadingRowReserveReleaseTimer);
     loadingRowReserveReleaseTimer = 0;
-  }
-
-  function clearTrailingSummarySettleTimer() {
-    if (!trailingSummarySettleTimer) return;
-    clearTimeout(trailingSummarySettleTimer);
-    trailingSummarySettleTimer = 0;
   }
 
   function markVirtualMetricsDirty(messageId: string) {
@@ -1269,6 +1265,14 @@ export function MessageList() {
       (previousResizeMessageIds.length !== currentMessageIds.length ||
         previousResizeMessageIds.some((id, index) => id !== currentMessageIds[index]));
     previousResizeMessageIds = currentMessageIds;
+    if (idsChanged && state.activeSessionId) {
+      // Yield to both the message and virtual-range reconciliations, but still correct before paint.
+      queueMicrotask(() => {
+        queueMicrotask(() => {
+          restorePendingHistoryAnchorIfMounted();
+        });
+      });
+    }
     if (idsChanged && widthResizeActive) {
       cancelWidthResize();
       scheduleStickyPreviewGeometryRefresh({ force: true });
@@ -1438,30 +1442,32 @@ export function MessageList() {
     return !!latest && isAssistantMessage(latest) && !latest.time.completed && !latest.error;
   });
 
-  const trailingFinalResponseReady = createMemo(() => {
+  const trailingFinalResponseMessageId = createMemo(() => {
     messageStructureVersion();
     messageInfoVersion();
-    if (state.streamingPartId || state.streamingText.length > 0) return false;
+    if (state.streamingPartId || state.streamingText.length > 0) return null;
 
     const entries = messages();
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index]!;
-      if (entry.info.role === 'user') return false;
+      if (entry.info.role === 'user') return null;
       if (entry.info.mode === 'subagent') continue;
-      if (!entry.info.time.completed) return false;
+      if (!entry.info.time.completed) return null;
+      if (isContinuationAssistantFinish(entry.info.finish)) return null;
 
       const finalTextPartId = getFinalAssistantTextPartId(entry.parts, true);
-      if (!finalTextPartId) return false;
+      if (!finalTextPartId) return null;
       const finalTextPartIndex = entry.parts.findIndex((part) => part.id === finalTextPartId);
       const finalTextPart = entry.parts[finalTextPartIndex];
-      return (
-        finalTextPart?.type === 'text' &&
+      return finalTextPart?.type === 'text' &&
         !isWorkspaceDirectoryText(finalTextPart.text.trimStart()) &&
         !entry.parts.slice(finalTextPartIndex + 1).some((part) => part.type === 'tool')
-      );
+        ? entry.info.id
+        : null;
     }
-    return false;
+    return null;
   });
+  const trailingFinalResponseReady = () => trailingFinalResponseMessageId() !== null;
 
   const loadingRowEligible = createMemo(
     () =>
@@ -1475,8 +1481,8 @@ export function MessageList() {
   const shouldShowLoadingRow = createMemo(
     () =>
       loadingRowEligible() &&
-      (!visibleBlockingStreamingPart() || visibleRunningToolPart()) &&
-      (!committedTextBlocksReappear() || visibleRunningToolPart())
+      !visibleBlockingStreamingPart() &&
+      !committedTextBlocksReappear()
   );
 
   createEffect(() => {
@@ -1506,6 +1512,7 @@ export function MessageList() {
   createEffect(() => {
     const eligible = loadingRowEligible();
     const blockedByVisibleStream = eligible && visibleBlockingStreamingPart();
+    const blockedByCommittedText = eligible && committedTextBlocksReappear();
     const shouldShow = shouldShowLoadingRow();
     const isReserved = reserveLoadingRow();
     const isShowing = showLoadingRow();
@@ -1529,9 +1536,9 @@ export function MessageList() {
     clearLoadingRowReserveReleaseTimer();
     if (!isReserved) setReserveLoadingRow(true);
 
-    if (blockedByVisibleStream) {
+    if (blockedByVisibleStream || blockedByCommittedText) {
       clearLoadingRowReappearTimer();
-      loadingRowHiddenByVisibleStream = true;
+      loadingRowHiddenByVisibleStream = blockedByVisibleStream;
       if (isShowing) setShowLoadingRow(false);
       return;
     }
@@ -1682,24 +1689,12 @@ export function MessageList() {
   );
 
   createEffect(() => {
-    clearTrailingSummarySettleTimer();
-
-    if (activeSessionWorking() || !trailingFinalResponseReady()) {
-      if (trailingSummarySettled()) setTrailingSummarySettled(false);
-      return;
-    }
-
-    if (trailingSummarySettled()) return;
-
-    trailingSummarySettleTimer = setTimeout(() => {
-      trailingSummarySettleTimer = 0;
-      if (!activeSessionWorking() && trailingFinalResponseReady()) {
-        batch(() => {
-          setTrailingSummarySettled(true);
-          if (!loadingRowEligible()) setReserveLoadingRow(false);
-        });
-      }
-    }, TRAILING_SUMMARY_SETTLE_DELAY_MS);
+    const settled = !activeSessionWorking() && trailingFinalResponseReady();
+    if (trailingSummarySettled() === settled) return;
+    batch(() => {
+      setTrailingSummarySettled(settled);
+      if (settled && !loadingRowEligible()) setReserveLoadingRow(false);
+    });
   });
 
   const questionRequestsByToolCall = createMemo(() =>
@@ -2064,6 +2059,7 @@ export function MessageList() {
             messageId,
             activityGroupKey,
             top: elementRect.top - containerRect.top,
+            messageTop: rowAnchor.top,
             topPad,
           };
         }
@@ -2071,6 +2067,7 @@ export function MessageList() {
           messageId,
           renderKey,
           top: elementRect.top - containerRect.top,
+          messageTop: rowAnchor.top,
           topPad,
         };
       }
@@ -2230,20 +2227,24 @@ export function MessageList() {
 
   function getMountedScrollAnchorElement(anchor: VisibleScrollAnchor) {
     if (!containerRef) return null;
+    const row =
+      mountedMessageRows.get(anchor.messageId) ??
+      containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`);
     if (anchor.activityGroupKey) {
-      return containerRef.querySelector<HTMLElement>(
-        `[data-assistant-activity-group-key="${CSS.escape(anchor.activityGroupKey)}"]`
+      return (
+        row?.querySelector<HTMLElement>(
+          `[data-assistant-activity-group-key="${CSS.escape(anchor.activityGroupKey)}"]`
+        ) ?? row
       );
     }
     if (anchor.renderKey) {
-      return containerRef.querySelector<HTMLElement>(
-        `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
+      return (
+        row?.querySelector<HTMLElement>(
+          `[data-assistant-render-key="${CSS.escape(anchor.renderKey)}"]`
+        ) ?? row
       );
     }
-    return (
-      mountedMessageRows.get(anchor.messageId) ??
-      containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`)
-    );
+    return row;
   }
 
   function restorePendingHistoryAnchorIfMounted() {
@@ -2281,7 +2282,11 @@ export function MessageList() {
       const element = getMountedScrollAnchorElement(anchor);
       if (element) {
         const containerRect = containerRef.getBoundingClientRect();
-        delta = element.getBoundingClientRect().top - containerRect.top - anchor.top;
+        const targetTop =
+          element.dataset.msgId === anchor.messageId
+            ? (anchor.messageTop ?? anchor.top)
+            : anchor.top;
+        delta = element.getBoundingClientRect().top - containerRect.top - targetTop;
       } else if (shouldVirtualize()) {
         if (options?.useMessageOffsetFallback) {
           const index = messageIndexById().get(anchor.messageId);
@@ -2345,7 +2350,7 @@ export function MessageList() {
       const currentStickyPreview = untrack(stickyUserMessagePreview);
       if (
         currentStickyPreview &&
-        shouldHideStickyUserMessagePreviewImmediately(currentStickyPreview)
+        shouldHideStickyUserMessagePreviewAfterLayout(currentStickyPreview)
       ) {
         setStickyUserMessagePreview(null);
         previousStickyPreviewId = currentStickyPreview.id;
@@ -2597,18 +2602,18 @@ export function MessageList() {
     return true;
   }
 
-  function shouldHideStickyUserMessagePreviewImmediately(
+  function getStickyUserMessagePreviewHideReason(
     preview: StickyUserMessagePreview | null,
     geometry?: {
       containerRect: DOMRect;
       stickyBounds: { top: number; bottom: number };
     }
-  ) {
-    if (!containerRef || !preview) return false;
+  ): 'next-prompt' | 'source' | null {
+    if (!containerRef || !preview) return null;
 
     const containerRect = geometry?.containerRect ?? containerRef.getBoundingClientRect();
     const stickyBounds = geometry?.stickyBounds ?? getStickyUserMessagePreviewBounds(containerRect);
-    if (!stickyBounds) return false;
+    if (!stickyBounds) return null;
 
     const currentPreviewIndex = messageIndexById().get(preview.id) ?? preview.index;
     const nextUserMessageTop =
@@ -2619,21 +2624,45 @@ export function MessageList() {
       nextUserMessageTop !== undefined &&
       nextUserMessageTop <= stickyBounds.bottom
     ) {
-      return true;
+      return 'next-prompt';
     }
 
     const row = getStickyUserMessageSourceElement(preview.id);
-    if (!row) return false;
+    if (!row) return null;
 
-    if (containerRef.clientHeight <= 0) return false;
+    if (containerRef.clientHeight <= 0) return null;
 
     const rowRect = row.getBoundingClientRect();
     const rowBottom = rowRect.bottom - containerRect.top;
-    return !isMessageHiddenBehindStickyPreview({
+    return isMessageHiddenBehindStickyPreview({
       rowBottom,
       nextUserMessageTop,
       stickyPreviewBottom: stickyBounds.bottom,
-    });
+    })
+      ? null
+      : 'source';
+  }
+
+  function shouldHideStickyUserMessagePreviewImmediately(
+    preview: StickyUserMessagePreview | null,
+    geometry?: {
+      containerRect: DOMRect;
+      stickyBounds: { top: number; bottom: number };
+    }
+  ) {
+    return getStickyUserMessagePreviewHideReason(preview, geometry) !== null;
+  }
+
+  function shouldHideStickyUserMessagePreviewAfterLayout(
+    preview: StickyUserMessagePreview | null,
+    geometry?: {
+      containerRect: DOMRect;
+      stickyBounds: { top: number; bottom: number };
+    }
+  ) {
+    const reason = getStickyUserMessagePreviewHideReason(preview, geometry);
+    if (reason !== 'source') return reason === 'next-prompt';
+    return !(activeSessionWorking() && !userScrollRecentlyActive());
   }
 
   function distanceFromBottom() {
@@ -2673,7 +2702,38 @@ export function MessageList() {
 
     const tray = item.closest<HTMLElement>('.assistant-active-activity-tray');
     const gap = tray ? Number.parseFloat(getComputedStyle(tray).rowGap) || 0 : 0;
-    const reserve = item.getBoundingClientRect().height + gap;
+    let reserve = item.getBoundingClientRect().height + gap;
+    const summary = tray?.querySelector<HTMLElement>('.assistant-active-activity-summary');
+    if (tray && summary) {
+      const remainingItems = tray.querySelectorAll(
+        ':scope > .assistant-active-activity-item:not(.is-exiting)'
+      );
+      if (remainingItems.length === 1 && remainingItems[0] === item) {
+        reserve += Number.parseFloat(getComputedStyle(summary).marginBottom) || 0;
+      }
+    }
+    if (tray && !tray.querySelector('.assistant-active-activity-summary')) {
+      const remainingItems = tray.querySelectorAll(
+        ':scope > .assistant-active-activity-item:not(.is-exiting)'
+      );
+      const flow = tray.parentElement;
+      const visibleFlowItems = flow
+        ? [...flow.children].filter((element) => element.getClientRects().length > 0)
+        : [];
+      if (
+        remainingItems.length === 1 &&
+        remainingItems[0] === item &&
+        visibleFlowItems.length === 1
+      ) {
+        const row = tray.closest<HTMLElement>('.interactive-item-container');
+        if (row) {
+          reserve += Math.max(
+            0,
+            row.getBoundingClientRect().height - tray.getBoundingClientRect().height
+          );
+        }
+      }
+    }
     if (reserve <= 0.5) return;
 
     activityExitBottomTarget = containerRef.scrollTop;
@@ -2684,7 +2744,104 @@ export function MessageList() {
     });
   }
 
+  function reserveCollapsedActivityTraySpace(keys: ReadonlySet<string>) {
+    if (
+      keys.size === 0 ||
+      !containerRef ||
+      !autoScroll() ||
+      !pinnedToBottom ||
+      stickyNavigationOwnsScroll()
+    ) {
+      return;
+    }
+
+    const partIds = new Set([...keys].map((key) => key.slice(key.lastIndexOf('\u0000') + 1)));
+    const trays = new Set<HTMLElement>();
+    for (const item of containerRef.querySelectorAll<HTMLElement>('[data-activity-part-id]')) {
+      if (!partIds.has(item.dataset.activityPartId || '')) continue;
+      const tray = item.closest<HTMLElement>('.assistant-active-activity-tray');
+      if (tray) trays.add(tray);
+    }
+
+    const collapsingTrays: Array<{
+      tray: HTMLElement;
+      summary: HTMLElement | null;
+      flow: HTMLElement;
+    }> = [];
+    for (const tray of trays) {
+      const items = [...tray.querySelectorAll<HTMLElement>('[data-activity-part-id]')];
+      if (items.some((item) => !partIds.has(item.dataset.activityPartId || ''))) continue;
+      const summary = tray.querySelector<HTMLElement>('.assistant-active-activity-summary');
+      const flow = tray.parentElement;
+      if (flow) collapsingTrays.push({ tray, summary, flow });
+    }
+
+    let reserve = collapsingTrays.reduce(
+      (total, { tray, summary }) =>
+        total +
+        Math.max(
+          0,
+          tray.getBoundingClientRect().height - (summary?.getBoundingClientRect().height ?? 0)
+        ),
+      0
+    );
+    const traysByFlow = new Map<HTMLElement, typeof collapsingTrays>();
+    for (const tray of collapsingTrays) {
+      const flowTrays = traysByFlow.get(tray.flow);
+      if (flowTrays) flowTrays.push(tray);
+      else traysByFlow.set(tray.flow, [tray]);
+    }
+    for (const [flow, flowTrays] of traysByFlow) {
+      const visibleChildren = [...flow.children].filter(
+        (element) => element.getClientRects().length > 0
+      );
+      const collapsingTrayElements = new Set(flowTrays.map(({ tray }) => tray));
+      const survivingChildCount = visibleChildren.filter((element) => {
+        if (!collapsingTrayElements.has(element as HTMLElement)) return true;
+        return flowTrays.some(({ tray, summary }) => tray === element && summary !== null);
+      }).length;
+      const gap = Number.parseFloat(getComputedStyle(flow).rowGap) || 0;
+      reserve +=
+        Math.max(0, visibleChildren.length - 1) * gap - Math.max(0, survivingChildCount - 1) * gap;
+
+      if (survivingChildCount === 0 && visibleChildren.length === flowTrays.length) {
+        const row = flow.closest<HTMLElement>('.interactive-item-container');
+        if (row) {
+          reserve += Math.max(
+            0,
+            row.getBoundingClientRect().height - flow.getBoundingClientRect().height
+          );
+        }
+      }
+    }
+    if (reserve <= 0.5) return;
+
+    appendBottomReserveTarget = Math.max(appendBottomReserveTarget, bottomScrollTop());
+    setAppendBottomReserve((current) => current + reserve);
+    activityExitBottomTarget = containerRef.scrollTop;
+    if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
+    const collapseTarget = activityExitBottomTarget;
+    activityCollapseSettleRafId = requestAnimationFrame(() => {
+      activityCollapseSettleRafId = 0;
+      if (
+        !containerRef ||
+        activityExitBottomTarget !== collapseTarget ||
+        exitingActivityPartKeys().size > 0
+      ) {
+        return;
+      }
+      reconcileAppendBottomReserve();
+      setPreservedScrollTop(collapseTarget);
+      activityExitBottomTarget = null;
+      lastAutoScrolledBottomScrollTop = collapseTarget;
+      const sessionId = state.activeSessionId;
+      if (sessionId) startFollowLoop(sessionId);
+    });
+  }
+
   function clearActivityExitReserve() {
+    if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
+    activityCollapseSettleRafId = 0;
     activityExitBottomTarget = null;
     if (untrack(activityExitBottomReserve) > 0.5) setActivityExitBottomReserve(0);
   }
@@ -2744,6 +2901,7 @@ export function MessageList() {
     if (appendScrollRafId) return;
     if (!options?.force && userScrollRecentlyActive() && !followModeLocked) return;
 
+    reconcileAppendBottomReserve();
     const now = performance.now();
     suppressSyncScrollTop = true;
     const result = performScrollToBottom({
@@ -3019,6 +3177,34 @@ export function MessageList() {
         distanceFromBottom() <= 1;
 
       if (stable && !isStreaming) {
+        const shouldFillInitialViewport =
+          pendingInitialHistoryFillSessionId === sessionId &&
+          isSessionHistoryTruncated(sessionId) &&
+          !isSessionHistoryLoadFailed(sessionId) &&
+          containerRef.clientHeight > 1 &&
+          containerRef.scrollHeight > 1 &&
+          containerRef.scrollHeight <= containerRef.clientHeight + 1;
+        pendingInitialHistoryFillSessionId = null;
+        if (shouldFillInitialViewport) {
+          const generation = activeSessionGeneration;
+          activeFollowLoopSessionId = null;
+          void handleLoadOlderHistory()?.then(() => {
+            if (
+              generation !== activeSessionGeneration ||
+              state.activeSessionId !== sessionId ||
+              !autoScroll()
+            ) {
+              return;
+            }
+            pendingInitialHistoryFillSessionId =
+              isSessionHistoryTruncated(sessionId) && !isSessionHistoryLoadFailed(sessionId)
+                ? sessionId
+                : null;
+            performScroll({ force: true });
+            startFollowLoop(sessionId);
+          });
+          return;
+        }
         expectedScrollTop = -1;
         followModeLocked = false;
         activeFollowLoopSessionId = null;
@@ -3690,7 +3876,6 @@ export function MessageList() {
       clearUpwardStickyHandoff();
       clearLoadingRowReappearTimer();
       clearLoadingRowReserveReleaseTimer();
-      clearTrailingSummarySettleTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       cancelScheduledMeasurement();
       cancelScheduledStickyPreviewFrame();
@@ -3807,7 +3992,7 @@ export function MessageList() {
       return;
     }
 
-    if (shouldHideStickyUserMessagePreviewImmediately(current)) {
+    if (shouldHideStickyUserMessagePreviewAfterLayout(current)) {
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = current?.id ?? null;
       return;
@@ -3838,7 +4023,7 @@ export function MessageList() {
       if (
         containerRef &&
         containerRef.clientHeight >= STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX &&
-        !shouldHideStickyUserMessagePreviewImmediately(activePreview)
+        !shouldHideStickyUserMessagePreviewAfterLayout(activePreview)
       ) {
         return;
       }
@@ -3861,7 +4046,7 @@ export function MessageList() {
       previousStickyPreviewBounds = stickyBounds;
       if (
         !stickyBounds ||
-        !shouldHideStickyUserMessagePreviewImmediately(activePreview, {
+        !shouldHideStickyUserMessagePreviewAfterLayout(activePreview, {
           containerRect,
           stickyBounds,
         })
@@ -3892,6 +4077,7 @@ export function MessageList() {
     viewportForcedVirtualContentMessageIds.clear();
     setMeasurementVersion((version) => version + 1);
     pendingInitialScrollSessionId = editingAtSessionStart ? null : sessionId;
+    pendingInitialHistoryFillSessionId = editingAtSessionStart ? null : sessionId;
     cancelPendingScroll();
     pendingScrollToBottomRequest = false;
     deferredScrollToBottomRequestKey = null;
@@ -4258,6 +4444,14 @@ export function MessageList() {
     activityShowTimers.delete(key);
   };
 
+  const finishActivityExit = (key: string) => {
+    batch(() => {
+      const exitingKeys = untrack(exitingActivityPartKeys);
+      if (exitingKeys.has(key) && exitingKeys.size === 1) preserveActivityExitReserve();
+      setSetMembership(setExitingActivityPartKeys, key, false);
+    });
+  };
+
   createComputed(() => {
     const activityMessages = compactActivityMessages();
     const candidates: AssistantActivityPart[] = [];
@@ -4286,6 +4480,18 @@ export function MessageList() {
         candidates.push(part);
       }
     }
+
+    const abruptlyGroupedKeys = new Set(
+      candidates
+        .filter(
+          (part) =>
+            isAssistantActivityPartRunning(part) &&
+            !activeMessageIds.has(part.messageID) &&
+            visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part))
+        )
+        .map(getAssistantActivityPartKey)
+    );
+    reserveCollapsedActivityTraySpace(abruptlyGroupedKeys);
 
     for (let index = 0; index < candidates.length; index += 1) {
       const part = candidates[index]!;
@@ -4371,7 +4577,7 @@ export function MessageList() {
         activityCompletionTimers.delete(key);
         activityPartFirstSeenAt.delete(key);
         settledActivityPartKeys.add(key);
-        setSetMembership(setExitingActivityPartKeys, key, false);
+        finishActivityExit(key);
       }, holdMs + ACTIVITY_EXIT_MS);
       activityCompletionTimers.set(key, { exitTimer, finishTimer });
     }
@@ -4500,6 +4706,23 @@ export function MessageList() {
       })
     );
   });
+  const trailingAssistantDialogSummary = createMemo(() => {
+    const messageId = trailingFinalResponseMessageId();
+    if (!messageId) return null;
+    const summary = assistantDialogSummaryMap().get(messageId);
+    if (!summary) return null;
+    const message = messages().find((entry) => entry.info.id === messageId);
+    return message ? { message, summary } : null;
+  });
+  const rowAssistantDialogSummaryMap = createMemo(() => {
+    const summaries = assistantDialogSummaryMap();
+    if (editingMessage()) return summaries;
+    const trailing = trailingAssistantDialogSummary();
+    if (!trailing || !summaries.has(trailing.message.info.id)) return summaries;
+    const rowSummaries = new Map(summaries);
+    rowSummaries.delete(trailing.message.info.id);
+    return rowSummaries;
+  });
   createEffect(() => {
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
@@ -4516,24 +4739,11 @@ export function MessageList() {
         exiting: exitingActivityPartKeys(),
       }
     );
-    const delayedActivityMessageIds = new Set(
-      activityMessages.flatMap((message) =>
-        message.parts.some(
-          (part) =>
-            isAssistantActivityPart(part) &&
-            delayedActivityPartKeys.has(getAssistantActivityPartKey(part))
-        )
-          ? [message.info.id]
-          : []
-      )
-    );
     const modelChanges = modelChangeMap();
-    const dialogSummaries = assistantDialogSummaryMap();
-    const lastAssistantId = lastAssistantID();
+    const dialogSummaries = rowAssistantDialogSummaryMap();
     const next = new Set(
       [...candidates].filter(
         (messageId) =>
-          (messageId !== lastAssistantId || delayedActivityMessageIds.has(messageId)) &&
           !modelChanges.has(messageId) &&
           !dialogSummaries.has(messageId)
       )
@@ -5121,7 +5331,15 @@ export function MessageList() {
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               fileEditStackGroupMap={assistantStackGroupMap()}
-              assistantDialogSummaryMap={assistantDialogSummaryMap()}
+              assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}
+              isFinalAssistantMessage={(messageId) =>
+                assistantDialogSummaryMap().has(messageId) ||
+                (state.activeSessionId !== null &&
+                  state.sessionStatus[state.activeSessionId]?.type !== 'busy' &&
+                  state.sessionStatus[state.activeSessionId]?.type !== 'retry' &&
+                  !activeSessionWorking() &&
+                  trailingFinalResponseMessageId() === messageId)
+              }
               assistantActivityGroupMap={assistantActivityGroupMap()}
               retainedActivityPartKeys={retainedActivityPartKeys()}
               exitingActivityPartKeys={exitingActivityPartKeys()}
@@ -5162,8 +5380,27 @@ export function MessageList() {
               permissions={standalonePermissions()}
             />
           </Show>
-          <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
-            <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
+          <Show
+            when={!editingMessage() ? trailingAssistantDialogSummary() : null}
+            fallback={
+              <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
+                <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
+              </Show>
+            }
+          >
+            {(trailing) => (
+              <div class="interactive-item-container interactive-response interactive-loading-row trailing-assistant-summary-row">
+                <AssistantDialogSummaryForMessage
+                  summary={trailing().summary}
+                  msg={trailing().message}
+                  hasBuildAgent={hasBuildAgent()}
+                  latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                  shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
+                  buildPlanImplementationPrompt={buildPlanImplementationPrompt}
+                  buildPlanDocumentContent={buildPlanDocumentContent}
+                />
+              </div>
+            )}
           </Show>
           <Show when={appendBottomReserve() > 0.5}>
             <div

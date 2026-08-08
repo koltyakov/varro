@@ -442,10 +442,8 @@ input:focus-visible {
 }
 
 .interactive-item-container {
-  /* Unified vertical rhythm: every row contributes 6px top + 6px bottom so
-     any two adjacent rows produce the same 12px gap as
-     `.assistant-turn-content-plain .assistant-message-flow { gap: 12px }`
-     used between parts inside a turn. */
+  /* Every visible row contributes half of the same 12px gap used between
+     content blocks inside an assistant turn. */
   padding: 6px 0;
   display: flex;
   flex-direction: column;

@@ -556,6 +556,15 @@ export function AssistantMessageContent(props: {
           ref={(element) => {
             queueMicrotask(() => {
               if (!element.isConnected) return;
+              const activeItems = element.querySelectorAll(
+                ':scope > .assistant-active-activity-item:not(.is-exiting)'
+              );
+              // Keep a lone active card's header inside the tray instead of
+              // bottom-aligning an overheight card beneath the clip edge.
+              if (activeItems.length === 1) {
+                element.scrollTop = 0;
+                return;
+              }
               element.scrollTo?.({ top: element.scrollHeight, behavior: 'smooth' });
             });
           }}
@@ -594,10 +603,12 @@ export function AssistantMessageContent(props: {
           <For each={item().parts}>
             {(part) => {
               const partKey = getAssistantActivityPartKey(part);
-              const entering = claimReveal(`active-activity:${part.id}`);
+              const entering = claimReveal(`active-activity:${part.id}`) && !isLightweight();
+              const exiting = () =>
+                !isLightweight() && !!props.exitingActivityPartKeys?.has(partKey);
               return (
                 <div
-                  class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${props.exitingActivityPartKeys?.has(partKey) ? ' is-exiting' : ''}`}
+                  class={`assistant-active-activity-item${entering ? ' is-entering' : ''}${props.retainedActivityPartKeys?.has(partKey) ? ' is-completed' : ''}${exiting() ? ' is-exiting' : ''}`}
                   data-activity-part-id={part.id}
                 >
                   <div class="assistant-active-activity-item-content">
@@ -644,16 +655,14 @@ export function AssistantMessageContent(props: {
           <AssistantActivityGroup
             info={props.info}
             parts={item().parts}
-            summaryParts={activityGroup().parts.filter(
-              (part) => {
-                const key = getAssistantActivityPartKey(part);
-                return (
-                  (!isAssistantActivityPartRunning(part) ||
-                    !props.visibleActiveActivityPartKeys?.has(key)) &&
-                  !props.retainedActivityPartKeys?.has(key)
-                );
-              }
-            )}
+            summaryParts={activityGroup().parts.filter((part) => {
+              const key = getAssistantActivityPartKey(part);
+              return (
+                (!isAssistantActivityPartRunning(part) ||
+                  !props.visibleActiveActivityPartKeys?.has(key)) &&
+                !props.retainedActivityPartKeys?.has(key)
+              );
+            })}
             expansionKey={activityGroup().key}
             showSummary={showSummary()}
             textForPart={props.textForPart}

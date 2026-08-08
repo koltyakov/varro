@@ -334,9 +334,9 @@ describe('useOpenCode session state flows', () => {
     await hookModule.selectSession('session-1');
     await hookModule.loadFullSessionHistory('session-1');
 
-    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 50 });
+    expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(1, 'session-1', { limit: 200 });
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-2',
     });
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
@@ -404,11 +404,11 @@ describe('useOpenCode session state flows', () => {
 
     await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-2',
     });
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-1',
     });
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
@@ -435,7 +435,7 @@ describe('useOpenCode session state flows', () => {
     const load = hookModule.loadOlderSessionHistoryPage('session-1');
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenLastCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-older',
       });
     });
@@ -655,7 +655,7 @@ describe('useOpenCode session state flows', () => {
     const staleLoad = hookModule.loadOlderSessionHistoryPage('session-a');
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-a', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-stale',
       });
     });
@@ -705,7 +705,7 @@ describe('useOpenCode session state flows', () => {
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-1',
       });
       expect(
@@ -715,24 +715,96 @@ describe('useOpenCode session state flows', () => {
 
     await expect(hookModule.loadOlderSessionHistoryPage('session-1')).resolves.toBe(true);
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(2, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-1',
     });
     expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-2',
     });
     expect(messageWindow.getSessionHistoryCursor('session-1')).toBe('cursor-2');
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenNthCalledWith(3, 'session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-2',
       });
       expect(
         messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
       ).toEqual(['user-0', 'user-1']);
     });
+  });
+
+  it('restarts boundary prefetch after an active message invalidates its revision', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const staleBoundary = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const latest = [{ info: assistantMessage('assistant-1', 'user-1'), parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    latest.nextCursor = 'cursor-1';
+    const completedAssistant = assistantMessage('assistant-2', 'user-1');
+    if (completedAssistant.role !== 'assistant') {
+      throw new Error('Expected an assistant message fixture');
+    }
+    completedAssistant.time.completed = 3;
+    const resynced = [
+      latest[0]!,
+      { info: completedAssistant, parts: [] },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    resynced.nextCursor = 'cursor-1';
+    const boundary = [
+      {
+        info: userMessage('user-1'),
+        parts: [
+          {
+            id: 'user-1-text',
+            sessionID: 'session-1',
+            messageID: 'user-1',
+            type: 'text' as const,
+            text: 'Boundary prompt',
+          },
+        ],
+      },
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    let latestLoads = 0;
+    let boundaryLoads = 0;
+    clientMocks.sessionGet.mockResolvedValue(session('session-1'));
+    clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
+      if (!options?.before) {
+        latestLoads += 1;
+        return latestLoads === 1 ? latest : resynced;
+      }
+      boundaryLoads += 1;
+      return boundaryLoads === 1 ? staleBoundary.promise : boundary;
+    });
+
+    const { hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('message.updated')).toBe(true));
+      await hookModule.selectSession('session-1');
+      await vi.waitFor(() => expect(boundaryLoads).toBe(1));
+
+      handlers.get('message.updated')?.({ properties: { info: completedAssistant } });
+
+      await vi.waitFor(() => {
+        expect(latestLoads).toBeGreaterThanOrEqual(2);
+        expect(boundaryLoads).toBe(2);
+        expect(
+          messageWindow.getSessionHistoryPrompts('session-1').map((entry) => entry.info.id)
+        ).toEqual(['user-1']);
+      });
+    } finally {
+      staleBoundary.resolve(boundary);
+      await staleBoundary.promise;
+      dispose();
+    }
   });
 
   it('does not block scroll pagination on an in-flight prompt prefetch', async () => {
@@ -760,7 +832,7 @@ describe('useOpenCode session state flows', () => {
     await hookModule.selectSession('session-1');
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-a',
       });
     });
@@ -770,7 +842,7 @@ describe('useOpenCode session state flows', () => {
       firstPromptPage.resolve(olderPage);
       await vi.waitFor(() => {
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-b',
         });
       });
@@ -827,7 +899,7 @@ describe('useOpenCode session state flows', () => {
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-valid',
       });
     });
@@ -884,7 +956,7 @@ describe('useOpenCode session state flows', () => {
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-valid',
       });
     });
@@ -941,7 +1013,7 @@ describe('useOpenCode session state flows', () => {
 
     await vi.waitFor(() => {
       expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-older',
       });
     });
@@ -1094,7 +1166,7 @@ describe('useOpenCode session state flows', () => {
       const pageLoad = hookModule.loadOlderSessionHistoryPage('session-1');
       await vi.waitFor(() => {
         expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-older',
         });
       });
@@ -1234,7 +1306,7 @@ describe('useOpenCode session state flows', () => {
     await hookModule.loadFullSessionHistory('session-1');
 
     expect(clientMocks.sessionMessages).toHaveBeenCalledWith('session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-b',
     });
     expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([

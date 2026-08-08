@@ -723,7 +723,8 @@ describe('state helpers', () => {
   });
 
   it('deduplicates context files and manages clipboard image placeholders', async () => {
-    const stateModule = await loadState();
+    window.localStorage.clear();
+    let stateModule = await loadState();
 
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
     stateModule.addContextFile({ path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' });
@@ -797,8 +798,20 @@ describe('state helpers', () => {
       }),
     ]);
 
+    vi.resetModules();
+    stateModule = await loadState();
+    expect(stateModule.state.droppedFiles).toEqual([
+      expect.objectContaining({
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        attachmentSequence: expect.any(Number),
+      }),
+    ]);
+
     stateModule.clearContextFiles();
     expect(stateModule.state.droppedFiles).toEqual([]);
+    expect(window.localStorage.getItem('varro.inputDraftFiles')).toBeNull();
 
     stateModule.setInputText('See [img-2.png] later');
     for (let i = 1; i <= stateModule.MAX_CLIPBOARD_IMAGES + 1; i++) {

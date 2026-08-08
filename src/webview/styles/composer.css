@@ -1546,13 +1546,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 6px;
   height: 24px;
   padding: 0 3px;
   flex-shrink: 0;
   color: var(--color-vscode-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.chat-queue-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .chat-queue-editing-label {
@@ -1574,7 +1580,8 @@
   letter-spacing: 0.02em;
 }
 
-.chat-queue-attachment-icon {
+.chat-queue-attachment-icon,
+.chat-queue-image-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;

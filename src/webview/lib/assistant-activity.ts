@@ -94,7 +94,8 @@ function formatActivityCount(kind: AssistantActivityKind, count: number) {
 
 export function isAssistantActivityPart(part: Part): part is AssistantActivityPart {
   if (part.type === 'reasoning') return true;
-  return part.type === 'tool' && normalizeToolName(part.tool) !== 'task';
+  if (part.type !== 'tool') return false;
+  return !['question', 'task'].includes(normalizeToolName(part.tool));
 }
 
 export function getAssistantActivityPartKey(

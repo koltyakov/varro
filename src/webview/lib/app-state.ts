@@ -38,6 +38,7 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { mergeContextFile } from '../../shared/context-files';
 import type {
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
@@ -71,6 +72,7 @@ import {
   readInitialWebviewState,
   readShowThinking,
   readStoredBooleanRecord,
+  readStoredDroppedFiles,
   readStoredPermissionModes,
   readStoredQueuedMessages,
   readStoredSelectedModel,
@@ -231,6 +233,10 @@ export interface AppStateInstance {
 
 export function createAppState(): AppStateInstance {
   const initialWebviewState = readInitialWebviewState();
+  const initialDroppedFiles = mergeInitialDroppedFiles(
+    readStoredDroppedFiles(STORAGE_KEYS.inputDraftFiles),
+    initialWebviewState.droppedFiles ?? []
+  );
   const currentDocumentWorkspace =
     initialWebviewState.editorContext?.workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') ||
     null;
@@ -238,8 +244,12 @@ export function createAppState(): AppStateInstance {
     STORAGE_KEYS.projectCurrentDocumentEnabled
   );
   resetAttachmentOrderState();
-  seedContextFileAttachmentSequences(initialWebviewState.droppedFiles ?? []);
+  seedContextFileAttachmentSequences(initialDroppedFiles);
   seedClipboardImageAttachmentSequences([]);
+  writeStored(
+    STORAGE_KEYS.inputDraftFiles,
+    initialDroppedFiles.length > 0 ? initialDroppedFiles : null
+  );
   const sessionMarkerWorkspaceScope = getSessionMarkerWorkspaceScope(
     initialWebviewState.editorContext?.workspacePath
   );
@@ -273,7 +283,7 @@ export function createAppState(): AppStateInstance {
       ? (projectCurrentDocumentEnabled[currentDocumentWorkspace] ?? true)
       : true,
     draftCurrentDocumentEnabled: null,
-    droppedFiles: initialWebviewState.droppedFiles ?? [],
+    droppedFiles: initialDroppedFiles,
     clipboardImages: [],
     sessions: [],
     sessionsLoadError: null,
@@ -484,6 +494,22 @@ export function createAppState(): AppStateInstance {
   });
 
   return appState;
+}
+
+function mergeInitialDroppedFiles(
+  storedFiles: DroppedFile[],
+  hostFiles: DroppedFile[]
+): DroppedFile[] {
+  const files = storedFiles.map((file) => ({ ...file }));
+  for (const file of hostFiles) {
+    const index = files.findIndex((item) => item.path === file.path);
+    if (index === -1) {
+      files.push({ ...file });
+      continue;
+    }
+    files[index] = mergeContextFile(files[index], file);
+  }
+  return files;
 }
 
 export const defaultAppState = createAppState();

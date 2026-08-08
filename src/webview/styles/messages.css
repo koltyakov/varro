@@ -395,7 +395,7 @@
 .assistant-active-activity-item:not(.is-exiting)
   ~ .assistant-active-activity-item:not(.is-exiting)
   .assistant-active-activity-item-content {
-  padding-top: 8px;
+  padding-top: 12px;
 }
 
 .assistant-active-activity-item.is-entering {
@@ -414,13 +414,11 @@
   from {
     grid-template-rows: 0fr;
     opacity: 0;
-    transform: translateY(4px);
   }
 
   to {
     grid-template-rows: 1fr;
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -563,7 +561,7 @@
 }
 
 .assistant-activity-summary + .assistant-activity-details {
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .assistant-activity-detail {
@@ -870,6 +868,19 @@ body.vscode-light
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.interactive-item-container.interactive-response.interactive-response-follows-response:not(
+    .interactive-item-render-empty,
+    .interactive-response-file-edit-group
+  ) {
+  padding-top: 6px;
+}
+
+.interactive-item-container.interactive-response.interactive-response-follows-response.interactive-response-continues-activity-group:not(
+    .interactive-item-render-empty
+  ) {
+  padding-top: 6px;
 }
 
 .model-change-indicator.assistant-dialog-summary {

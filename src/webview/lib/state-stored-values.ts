@@ -158,6 +158,17 @@ function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
   return file;
 }
 
+export function readStoredDroppedFiles(key: string): DroppedFile[] {
+  const value = readStored<unknown>(key);
+  const files: DroppedFile[] = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const file = normalizeStoredDroppedFile(item);
+    if (!file || files.some((existingFile) => existingFile.path === file.path)) continue;
+    files.push(file);
+  }
+  return files;
+}
+
 function normalizeStoredTerminalSelection(value: unknown): QueuedMessage['terminalSelection'] {
   const record = asStoredRecord(value);
   if (typeof record?.text !== 'string' || typeof record.terminalName !== 'string') return null;

@@ -121,6 +121,7 @@ export function addContextFile(file: DroppedFile) {
       files[idx] = { ...mergeContextFile(files[idx], file), attachmentSequence };
     })
   );
+  persistContextFiles();
 }
 
 export function addContextFiles(files: DroppedFile[]) {
@@ -142,6 +143,7 @@ export function addContextFiles(files: DroppedFile[]) {
       }
     })
   );
+  persistContextFiles();
 }
 
 export function removeContextFile(path: string) {
@@ -153,11 +155,13 @@ export function removeContextFile(path: string) {
       if (idx !== -1) files.splice(idx, 1);
     })
   );
+  persistContextFiles();
 }
 
 export function clearContextFiles() {
   clearContextFileAttachmentSequences();
   setState('droppedFiles', []);
+  persistContextFiles();
 }
 
 export function replaceContextFiles(files: DroppedFile[]) {
@@ -167,6 +171,15 @@ export function replaceContextFiles(files: DroppedFile[]) {
     'droppedFiles',
     files.map((file) => ({ ...file }))
   );
+  persistContextFiles();
+}
+
+function persistContextFiles() {
+  const files = state.droppedFiles.map((file) => ({
+    ...file,
+    ...(file.lineRanges ? { lineRanges: file.lineRanges.map((range) => ({ ...range })) } : {}),
+  }));
+  writeStored(STORAGE_KEYS.inputDraftFiles, files.length > 0 ? files : null);
 }
 
 /**

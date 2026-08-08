@@ -60,7 +60,7 @@ export const composerStore = {
     setState('attachedDiagnostics', null);
   },
   clearDroppedFiles() {
-    setState('droppedFiles', []);
+    clearContextFiles();
   },
   clearTodos() {
     setState('todos', []);

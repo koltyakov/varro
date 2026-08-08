@@ -300,7 +300,7 @@ While a session is running:
 
 The session UI also distinguishes running, attention-needed, failed, completed, and plan-ready states. On larger layouts, the session list can stay pinned beside the main chat pane.
 
-Session message history is paged in 50-message windows. Opening a session loads the newest page; reaching the top prepends the next page while preserving the visible scroll anchor. See [Message List Virtualization](message-list-virtualization.md) for the identity and scroll invariants around this flow.
+Session message history is paged in 200-message windows. Opening a session loads the newest page; reaching the top prepends the next page while preserving the visible scroll anchor. See [Message List Virtualization](message-list-virtualization.md) for the identity and scroll invariants around this flow.
 
 ## Provider Limits
 

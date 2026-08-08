@@ -152,7 +152,7 @@ Sessions are filtered to the current workspace directory. The default list is sp
 - Use `/export` to open the current session as JSON in the editor.
 - Changed-file rows open the selected session's before/after snapshot in VS Code's native diff editor when OpenCode provides both sides, with the working-tree Git diff as a fallback.
 
-Opening a session fetches the newest 50 messages. Scrolling to the top automatically prepends the next 50-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
+Opening a session fetches the newest 200 messages. Scrolling to the top automatically prepends the next 200-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
 
 On large layouts, Varro can keep a persistent session pane beside the chat. Use `varro.chat.desktopSessionPaneSide` to choose whether that pane appears on the left or right.
 

@@ -21,6 +21,8 @@ break another unless the shared invariants below remain true.
   first.
 - Prepending one history page changes every existing message index. Treat stale indexes after a
   prepend as a correctness bug, not a tolerable cache delay.
+- A row-local render item may refine an anchor only while it remains in the captured message row.
+  If grouping moves that item to another row during a prepend, preserve the captured message ID.
 
 ### Height Accounting
 
@@ -38,6 +40,8 @@ break another unless the shared invariants below remain true.
 - A row measurement correction above the visible anchor must preserve that anchor's viewport
   position.
 - Content below the anchor may change `scrollHeight`, but it must not move the anchor.
+- The trailing Thinking, empty-reserve, and Worked states share one bottom slot outside virtual row
+  prefixes. Switching states must not briefly mount both the loading label and dialog summary.
 - Asynchronous content must reserve its final layout space where practical. Images are the primary
   example: loading an image after its row remounts must not add hundreds of pixels to the row.
 - A view setting that changes rendered row content must participate in height invalidation even when
@@ -121,8 +125,13 @@ The effective ownership order is:
   exit completes.
 - A bottom reserve compensates only for space actively disappearing from flow. It is inert structural
   chrome, does not become part of row-only virtual prefixes, and is removed when no exit remains.
-- When a bottom-pinned activity exit finishes, hand its disappearing height to the append reserve so
-  the transcript stays fixed until subsequent streamed content consumes that space.
+- When bottom-pinned activity leaves flow, including a direct active-tray collapse into Explored,
+  hand its disappearing height to the append reserve so the transcript stays fixed until subsequent
+  streamed content consumes that space. Transfer the reserve before removing the final exiting row;
+  a one-frame gap between those updates is a visible jump. Include row padding when the source row
+  becomes semantically empty and its Explored summary is rendered by another row. Keep the original
+  bottom target fixed; raising it with later `scrollTop` growth prevents streamed content from
+  consuming the reserve.
 - Timer, CSS animation, and cleanup paths must share a bounded completion contract. Cleanup must still
   run when the row unmounts, the session changes, compact rendering is disabled, or user input takes
   ownership.
@@ -143,6 +152,10 @@ The effective ownership order is:
   The outer transcript does not need to move for the user to have taken ownership.
 - Sticky navigation and its loading owner belong to one message-window version. Cancellation releases
   that owner immediately, and an obsolete request cannot clear a newer owner's loading state.
+- During an active stream without recent user movement, transient source-row geometry from virtual
+  metric invalidation must not hide the current sticky prompt, even if layout correction briefly
+  changes bottom-follow flags. Direct user movement and verified next-prompt collisions still take
+  precedence.
 - A stale sticky page may retry only while its session, window version, cursor boundary, and
   non-failed state remain current, using the same bounded policy as ordinary pagination.
 
@@ -165,6 +178,8 @@ The effective ownership order is:
   It must not require the user to leave the boundary and scroll back.
 - If the initial window cannot overflow, an upward wheel at `scrollTop === 0` must still request
   history even though the browser cannot emit a scroll event.
+- A bottom-following initial window with valid history must load through enough settled pages to
+  fill the viewport. Provisional heights for compacted rows must not end that fill early.
 - A stale response is retried only while the same session, generation, cursor boundary, and
   non-failed load remain current. Retry loops are bounded for responses that make no progress.
 - Once a page adds rows and the list overflows, ordinary scroll pagination returns to one-page
@@ -216,7 +231,7 @@ image loads.
 ### Approximate Fixtures Replaced The Real Reproduction
 
 Generic 50-row fixtures and an all-at-once 129-message replay passed while the real extension path
-still failed. The production path loads 50 messages and prepends older pages. Loading all messages at
+still failed. The production path loads 200 messages and prepends older pages. Loading all messages at
 once bypassed the structural transition that caused stale indexes.
 
 Principle: reproduce the same data, pagination, viewport, and interaction order before changing the
@@ -248,7 +263,7 @@ Principle: programmatic scrolling requires explicit ownership and cancellation o
 ## Required Debugging Workflow
 
 1. Reproduce with the reported session or an exact serialized equivalent.
-2. Match extension pagination: initial 50-message window and `before` page prepends.
+2. Match extension pagination: initial 200-message window and `before` page prepends.
 3. Match the reported viewport width because wrapping and image preview height affect rows.
 4. Identify the user-facing invariant and its owner before changing code.
 5. Record, for every scroll step:

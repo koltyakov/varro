@@ -98,8 +98,10 @@ describe('assistant activity summaries', () => {
     expect(formatAssistantActivitySummary([failed])).toBe('Explored: 1 command · 1 tool failed');
   });
 
-  it('keeps agent and subtask activity outside compact groups', () => {
+  it('keeps actionable and delegated activity outside compact groups', () => {
     expect(isAssistantActivityPart(completedTool('read-1', 'read'))).toBe(true);
+    expect(isAssistantActivityPart(completedTool('question-1', 'question'))).toBe(false);
+    expect(isAssistantActivityPart(completedTool('question-2', 'functions.question'))).toBe(false);
     expect(isAssistantActivityPart(completedTool('task-1', 'task'))).toBe(false);
     expect(
       isAssistantActivityPart({
@@ -277,5 +279,36 @@ describe('assistant activity summaries', () => {
         .get('assistant-1')
         ?.map((group) => group.parts.map((part) => part.id))
     ).toEqual([['bash-1'], ['reasoning-1']]);
+  });
+
+  it('keeps completed questions between separate activity groups', () => {
+    const messages = [
+      {
+        info: {
+          id: 'assistant-1',
+          sessionID: 'session-1',
+          role: 'assistant' as const,
+          time: { created: 1, completed: 2 },
+          parentID: 'user-1',
+          modelID: 'model-1',
+          providerID: 'provider-1',
+          mode: 'default',
+          path: { cwd: '/', root: '/' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [
+          completedTool('read-1', 'read'),
+          completedTool('question-1', 'question'),
+          completedTool('grep-1', 'grep'),
+        ],
+      },
+    ];
+
+    expect(
+      getAssistantActivityGroupMap(messages)
+        .get('assistant-1')
+        ?.map((group) => group.parts.map((part) => part.id))
+    ).toEqual([['read-1'], ['grep-1']]);
   });
 });

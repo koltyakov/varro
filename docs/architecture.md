@@ -367,7 +367,7 @@ The webview adds more derived states on top of that data.
 - File search uses `vscode.workspace.findFiles()` with a short-lived cache and ranking heuristic rather than shelling out.
 - Session lists are filtered to the active workspace path, which prevents unrelated project sessions from appearing in the sidebar.
 - Queued follow-up prompts are persisted in extension-host workspace state and auto-dispatched once the active session becomes idle. The browser-side mirror excludes image-bearing entries from synchronous local storage.
-- Message loads are windowed: opening a session fetches the newest 50 messages, reaching the top automatically prepends the next 50-message page while preserving the visible anchor, and the boundary banner becomes a `Retry` action only after a page request fails.
+- Message loads are windowed: opening a session fetches the newest 200 messages, reaching the top automatically prepends the next 200-message page while preserving the visible anchor, and the boundary banner becomes a `Retry` action only after a page request fails.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.

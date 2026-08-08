@@ -1794,7 +1794,7 @@ describe('ChatInput', () => {
     });
   });
 
-  it('groups queued rows with attachment metadata and icon-only actions', () => {
+  it('groups queued rows with separate attachment and image metadata', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');
     setState('queuedMessages', [
@@ -1806,6 +1806,7 @@ describe('ChatInput', () => {
         clipboardImages: [
           { id: 'img-1', url: 'blob:1', mime: 'image/png', filename: 'img-1.png', size: 10 },
         ],
+        terminalSelection: { text: 'npm test', terminalName: 'zsh' },
       },
       { id: 'q2', sessionId: 'session-1', text: 'Another follow-up' },
     ]);
@@ -1813,9 +1814,15 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const meta = container?.querySelector('.chat-queue-meta');
+    const metaItems = Array.from(container?.querySelectorAll('.chat-queue-meta-item') || []);
     expect(container?.querySelector('.chat-queue-summary')).toBeNull();
-    expect(meta?.textContent).toContain('2');
+    expect(metaItems.map((item) => item.textContent)).toEqual(['1', '2']);
+    expect(metaItems.map((item) => item.getAttribute('aria-label'))).toEqual([
+      '1 image',
+      '2 attachments',
+    ]);
     expect(meta?.closest('.chat-queue-actions')).toBeNull();
+    expect(container?.querySelector('.chat-queue-image-icon')).not.toBeNull();
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
     expect(container?.querySelector('[aria-label="Send as Steer"]')?.textContent).toBe('');
     expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(10);

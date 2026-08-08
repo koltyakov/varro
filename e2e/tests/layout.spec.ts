@@ -52,12 +52,12 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     element.classList.add('is-exiting');
     await new Promise((resolve) => setTimeout(resolve, 450));
     const summaryBox = summary.getBoundingClientRect();
-    const firstBox = (
-      items[0]!.querySelector<HTMLElement>('button') ?? items[0]!
-    ).getBoundingClientRect();
-    const thirdBox = (
-      items[2]!.querySelector<HTMLElement>('button') ?? items[2]!
-    ).getBoundingClientRect();
+    const firstBox = items[0]!
+      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
+      .getBoundingClientRect();
+    const thirdBox = items[2]!
+      .querySelector<HTMLElement>('.chat-tool-invocation-part, .chat-thinking-box')!
+      .getBoundingClientRect();
     return {
       summaryToFirst: firstBox.top - summaryBox.bottom,
       firstToThird: thirdBox.top - firstBox.bottom,
@@ -65,8 +65,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   });
   expect(activeSpacing.summaryToFirst).toBeGreaterThanOrEqual(10);
   expect(activeSpacing.summaryToFirst).toBeLessThanOrEqual(14);
-  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(6);
-  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(10);
+  expect(activeSpacing.firstToThird).toBeGreaterThanOrEqual(10);
+  expect(activeSpacing.firstToThird).toBeLessThanOrEqual(14);
 
   await page.goto(
     '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1&activeTrayPrefix=1'
@@ -74,8 +74,21 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   const transitionTray = page.locator('.assistant-active-activity-tray');
   const completedItem = transitionTray.locator('[data-activity-part-id="tool-active-0"]');
   const placeholder = transitionTray.locator('.assistant-activity-summary-placeholder');
+  const prefixCodeBlock = page.locator('.interactive-result-code-block');
   await expect(placeholder).toHaveText('Exploring');
   await expect(transitionTray.locator('button.assistant-activity-summary')).toHaveCount(0);
+  await expect(prefixCodeBlock).toBeVisible();
+  expect(
+    await transitionTray.evaluate(
+      (element, codeBlock) => {
+        return (
+          element.getBoundingClientRect().top -
+          (codeBlock as HTMLElement).getBoundingClientRect().bottom
+        );
+      },
+      await prefixCodeBlock.elementHandle()
+    )
+  ).toBeCloseTo(12, 0);
   await completedItem.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
@@ -184,10 +197,593 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   expect(Math.abs((await summary.boundingBox())!.y - transition.summaryTop)).toBeLessThanOrEqual(1);
   await page.waitForTimeout(150);
   const finalSummaryBox = (await summary.boundingBox())!;
-  const finalLoadingBox = (await loadingRow.boundingBox())!;
+  const finalLoadingBox = (await loadingRow.locator('.loading-verb').boundingBox())!;
   const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
-  expect(settledGap).toBeGreaterThanOrEqual(5);
-  expect(settledGap).toBeLessThanOrEqual(9);
+  expect(settledGap).toBeGreaterThanOrEqual(10);
+  expect(settledGap).toBeLessThanOrEqual(14.5);
+});
+
+test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1'
+  );
+  const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
+  await expect(activeTool).toBeVisible();
+  const gaps = await activeTool.evaluate((element) => {
+    const item = element.closest<HTMLElement>('.assistant-active-activity-item');
+    const summary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+    const animation = item
+      ?.getAnimations()
+      .find(
+        (candidate) =>
+          getComputedStyle(item).animationName === 'assistant-active-activity-in' &&
+          candidate.effect instanceof KeyframeEffect
+      );
+    if (!item || !summary || !animation) throw new Error('Active tool entrance is missing');
+    animation.pause();
+    return [0, 140, 280].map((currentTime) => {
+      animation.currentTime = currentTime;
+      return element.getBoundingClientRect().top - summary.getBoundingClientRect().bottom;
+    });
+  });
+  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(0.5);
+  for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
+});
+
+test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 1600 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1&spacingBoundary=1'
+  );
+
+  const row = page.locator('[data-msg-id="message-diff-preview-assistant-59"]');
+  const lastDiff = row.locator('.file-change-inline-diffs-unwrapped .diff-view-file').last();
+  const nextBlock = row.locator(
+    '[data-assistant-render-key="part:message-diff-preview-assistant-59-spacing-tool"] .chat-tool-invocation-part'
+  );
+  await expect(lastDiff).toBeVisible();
+  await expect(nextBlock).toBeVisible();
+  expect(
+    await nextBlock.evaluate(
+      (element, diff) => {
+        return (
+          element.getBoundingClientRect().top - (diff as HTMLElement).getBoundingClientRect().bottom
+        );
+      },
+      await lastDiff.elementHandle()
+    )
+  ).toBeCloseTo(12, 0);
+});
+
+test('matches collapsed activity-to-event spacing to expanded detail spacing', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 1600 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
+  const summary = page.locator('.assistant-activity-summary').first();
+  await expect(summary).toContainText('Explored');
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'tool-task-spacing',
+              sessionID: 'session-tool-cards',
+              messageID: 'message-tool-cards-assistant',
+              type: 'tool',
+              callID: 'tool-task-spacing-call',
+              tool: 'task',
+              state: {
+                status: 'completed',
+                input: { description: 'Verify activity spacing' },
+                output: 'Verified',
+                title: 'Verify activity spacing',
+                metadata: {},
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
+            },
+          },
+        },
+      },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'tool-read-spacing',
+              sessionID: 'session-tool-cards',
+              messageID: 'message-tool-cards-assistant',
+              type: 'tool',
+              callID: 'tool-read-spacing-call',
+              tool: 'read',
+              state: {
+                status: 'completed',
+                input: { file_path: '/workspace/spacing.ts' },
+                output: 'export const spacing = 16;',
+                title: 'Read spacing fixture',
+                metadata: {},
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
+            },
+          },
+        },
+      },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'text-spacing-boundary',
+              sessionID: 'session-tool-cards',
+              messageID: 'message-tool-cards-assistant',
+              type: 'text',
+              text: 'Spacing prose boundary.',
+            },
+          },
+        },
+      },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'tool-task-spacing-followup',
+              sessionID: 'session-tool-cards',
+              messageID: 'message-tool-cards-assistant',
+              type: 'tool',
+              callID: 'tool-task-spacing-followup-call',
+              tool: 'task',
+              state: {
+                status: 'completed',
+                input: { description: 'Verify prose spacing' },
+                output: 'Verified',
+                title: 'Verify prose spacing',
+                metadata: {},
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+  const taskCard = page.locator('.tool-invocation-task').first();
+  await expect(taskCard).toBeVisible();
+  const trailingSummary = page.locator('.assistant-activity-summary').nth(1);
+  await expect(trailingSummary).toContainText('Explored');
+  await trailingSummary.evaluate(async (element) => {
+    const item = element.closest('.assistant-message-flow-item');
+    if (!item) throw new Error('Activity flow item is missing');
+    await Promise.all(item.getAnimations({ subtree: true }).map((animation) => animation.finished));
+  });
+  const collapsedGap = await summary.evaluate((element) => {
+    const card = document.querySelector<HTMLElement>('.tool-invocation-task');
+    if (!card) throw new Error('Task card is missing');
+    return card.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+  });
+  const incomingGap = await trailingSummary.evaluate((element) => {
+    const card = document.querySelector<HTMLElement>('.tool-invocation-task');
+    if (!card) throw new Error('Task card is missing');
+    return element.getBoundingClientRect().top - card.getBoundingClientRect().bottom;
+  });
+  const prose = page.getByText('Spacing prose boundary.', { exact: true });
+  const followingTask = page
+    .locator('.tool-invocation-task')
+    .filter({ hasText: 'Verify prose spacing' });
+  await expect(prose).toBeVisible();
+  await expect(followingTask).toBeVisible();
+  const proseGaps = await prose.evaluate((element) => {
+    const summaries = document.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+    const card = [...document.querySelectorAll<HTMLElement>('.tool-invocation-task')].find((item) =>
+      item.textContent?.includes('Verify prose spacing')
+    );
+    const precedingSummary = summaries[1];
+    if (!precedingSummary || !card) throw new Error('Prose boundary fixtures are missing');
+    const proseBox = element.getBoundingClientRect();
+    return {
+      summaryToProse: proseBox.top - precedingSummary.getBoundingClientRect().bottom,
+      proseToEvent: card.getBoundingClientRect().top - proseBox.bottom,
+    };
+  });
+  await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+      };
+    };
+    const original = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .find((message) => message.info.role === 'assistant');
+    if (!original) throw new Error('Tool-card assistant fixture is missing');
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const postEvent = (type: string, properties: Record<string, unknown>) => {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    };
+    const proseInfo = {
+      ...original.info,
+      id: 'message-spacing-prose-followup',
+      time: { created: Date.now(), completed: Date.now() + 1 },
+    };
+    postEvent('message.updated', { info: proseInfo });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'text-spacing-followup',
+        sessionID: 'session-tool-cards',
+        messageID: proseInfo.id,
+        type: 'text',
+        text: 'Cross-message prose boundary.',
+      },
+    });
+    postEvent('message.updated', {
+      info: {
+        ...original.info,
+        id: 'message-spacing-empty-followup',
+        time: { created: Date.now() + 2, completed: Date.now() + 3 },
+      },
+    });
+    const activityInfo = {
+      ...original.info,
+      id: 'message-spacing-activity-followup',
+      time: { created: Date.now() + 4, completed: Date.now() + 5 },
+    };
+    postEvent('message.updated', { info: activityInfo });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'tool-spacing-followup',
+        sessionID: 'session-tool-cards',
+        messageID: activityInfo.id,
+        type: 'tool',
+        callID: 'tool-spacing-followup-call',
+        tool: 'read',
+        state: {
+          status: 'completed',
+          input: { file_path: '/workspace/cross-message-spacing.ts' },
+          output: 'export const spacing = 16;',
+          title: 'Read cross-message spacing fixture',
+          metadata: {},
+          time: { start: Date.now(), end: Date.now() + 1 },
+        },
+      },
+    });
+    postEvent('message.updated', {
+      info: {
+        ...original.info,
+        id: 'message-spacing-empty-activity-followup',
+        time: { created: Date.now() + 6, completed: Date.now() + 7 },
+      },
+    });
+    const continuedActivityInfo = {
+      ...original.info,
+      id: 'message-spacing-continued-activity-followup',
+      time: { created: Date.now() + 8, completed: Date.now() + 9 },
+    };
+    postEvent('message.updated', { info: continuedActivityInfo });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'tool-spacing-continued-followup',
+        sessionID: 'session-tool-cards',
+        messageID: continuedActivityInfo.id,
+        type: 'tool',
+        callID: 'tool-spacing-continued-followup-call',
+        tool: 'read',
+        state: {
+          status: 'completed',
+          input: { file_path: '/workspace/continued-spacing.ts' },
+          output: 'export const continuedSpacing = 12;',
+          title: 'Read continued spacing fixture',
+          metadata: {},
+          time: { start: Date.now(), end: Date.now() + 1 },
+        },
+      },
+    });
+  });
+  const crossMessageProse = page.getByText('Cross-message prose boundary.', { exact: true });
+  const crossMessageSummary = page.locator('.assistant-activity-summary').last();
+  await expect(crossMessageProse).toBeVisible();
+  await expect(crossMessageSummary).toContainText('Explored: 2 files');
+  await page
+    .locator(
+      '[data-msg-id="message-spacing-prose-followup"], [data-msg-id="message-spacing-activity-followup"], [data-msg-id="message-spacing-continued-activity-followup"]'
+    )
+    .evaluateAll(async (rows) => {
+      await Promise.allSettled(
+        rows
+          .flatMap((row) => row.getAnimations({ subtree: true }))
+          .map((animation) => animation.finished)
+      );
+    });
+  const crossMessageGaps = await crossMessageProse.evaluate((element) => {
+    const precedingCard = [...document.querySelectorAll<HTMLElement>('.tool-invocation-task')].find(
+      (item) => item.textContent?.includes('Verify prose spacing')
+    );
+    const followingSummary = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-spacing-activity-followup"] .assistant-activity-summary'
+    );
+    if (!precedingCard || !followingSummary) {
+      throw new Error('Cross-message spacing fixtures are missing');
+    }
+    const proseBox = element.getBoundingClientRect();
+    return {
+      eventToProse: proseBox.top - precedingCard.getBoundingClientRect().bottom,
+      proseToSummary: followingSummary.getBoundingClientRect().top - proseBox.bottom,
+    };
+  });
+  await page.addStyleTag({
+    content: '.assistant-activity-group-settling { animation: none !important; }',
+  });
+  const continuedActivityRow = page.locator(
+    '[data-msg-id="message-spacing-continued-activity-followup"]'
+  );
+  await expect(continuedActivityRow).toHaveClass(/interactive-item-render-empty/);
+  const collapsedActivityRowHeight = await continuedActivityRow.evaluate(
+    (element) => element.getBoundingClientRect().height
+  );
+  expect(collapsedActivityRowHeight).toBe(0);
+
+  await crossMessageSummary.click();
+  await expect(continuedActivityRow).toHaveClass(/interactive-response-continues-activity-group/);
+  const firstCrossMessageDetail = page.locator(
+    '[data-msg-id="message-spacing-activity-followup"] .assistant-activity-detail .chat-tool-invocation-part'
+  );
+  const continuedCrossMessageDetail = page.locator(
+    '[data-msg-id="message-spacing-continued-activity-followup"] .assistant-activity-detail .chat-tool-invocation-part'
+  );
+  await expect(firstCrossMessageDetail).toBeVisible();
+  await expect(continuedCrossMessageDetail).toBeVisible();
+  const continuedActivityGap = await continuedCrossMessageDetail.evaluate((element) => {
+    const previous = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-spacing-activity-followup"] .assistant-activity-detail .chat-tool-invocation-part'
+    );
+    if (!previous) throw new Error('Previous cross-message activity detail is missing');
+    return element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
+  });
+
+  await summary.click();
+  const firstDetail = page.locator('.assistant-activity-detail .chat-tool-invocation-part').first();
+  await expect(firstDetail).toBeVisible();
+  const expandedGap = await summary.evaluate((element) => {
+    const card = document.querySelector<HTMLElement>(
+      '.assistant-activity-detail .chat-tool-invocation-part'
+    );
+    if (!card) throw new Error('Expanded detail card is missing');
+    return card.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+  });
+
+  expect(incomingGap).toBe(12);
+  expect(collapsedGap).toBe(12);
+  expect(expandedGap).toBe(12);
+  expect(proseGaps).toEqual({ summaryToProse: 12, proseToEvent: 12 });
+  expect(crossMessageGaps.eventToProse).toBeCloseTo(12, 0);
+  expect(crossMessageGaps.proseToSummary).toBe(12);
+  expect(continuedActivityGap).toBeCloseTo(12, 0);
+});
+
+test('keeps Explored spacing consistent beside user blocks', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
+  const summary = page.locator('.assistant-activity-summary');
+  await expect(summary).toContainText('Explored');
+  await page.addStyleTag({ content: '.assistant-dialog-summary { display: none !important; }' });
+  await page.getByRole('textbox', { name: 'Message composer' }).fill('Spacing user boundary.');
+  await page.getByRole('button', { name: 'Send (Enter)' }).click();
+  const followingUser = page.getByText('Spacing user boundary.', { exact: true });
+  await expect(followingUser).toBeVisible();
+  const gaps = await summary.evaluate((element) => {
+    const precedingUser = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-tool-cards-user"] .user-message-card'
+    );
+    const nextUser = [...document.querySelectorAll<HTMLElement>('.user-message-card')].find(
+      (card) => card.textContent?.includes('Spacing user boundary.')
+    );
+    if (!precedingUser || !nextUser) {
+      throw new Error('Explored user-boundary fixtures are missing');
+    }
+    return {
+      userToSummary:
+        element.getBoundingClientRect().top - precedingUser.getBoundingClientRect().bottom,
+      summaryToUser: nextUser.getBoundingClientRect().top - element.getBoundingClientRect().bottom,
+    };
+  });
+  expect(gaps.userToSummary).toBeCloseTo(12, 0);
+  expect(gaps.summaryToUser).toBeCloseTo(12, 0);
+});
+
+test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&expandThinking=1'
+  );
+  await page.addStyleTag({
+    content: '.assistant-active-activity-item.is-entering { animation: none !important; }',
+  });
+  await expect(page.locator('.assistant-activity-summary')).toHaveCount(1);
+  await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+      };
+    };
+    const assistant = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .find((message) => message.info.role === 'assistant');
+    if (!assistant) throw new Error('Tool-card assistant fixture is missing');
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const postEvent = (type: string, properties: Record<string, unknown>) => {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    };
+    postEvent('message.updated', {
+      info: { ...assistant.info, time: { created: Date.now() } },
+    });
+    postEvent('session.status', { sessionID: 'session-tool-cards', status: { type: 'busy' } });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'text-thinking-spacing',
+        sessionID: 'session-tool-cards',
+        messageID: assistant.info.id,
+        type: 'text',
+        text: 'Thinking spacing reference.',
+      },
+    });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'tool-thinking-spacing',
+        sessionID: 'session-tool-cards',
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'tool-thinking-spacing-call',
+        tool: 'grep',
+        state: {
+          status: 'completed',
+          input: { pattern: 'spacing', path: 'src' },
+          output: 'src/spacing.ts:1:export const spacing = true;',
+          title: 'Search thinking spacing fixture',
+          metadata: {},
+          time: { start: Date.now() - 2, end: Date.now() - 1 },
+        },
+      },
+    });
+    postEvent('message.part.updated', {
+      part: {
+        id: 'reasoning-thinking-spacing',
+        sessionID: 'session-tool-cards',
+        messageID: assistant.info.id,
+        type: 'reasoning',
+        text: [
+          'Examining',
+          ...Array.from(
+            { length: 24 },
+            (_, index) => `Detailed reasoning line ${index + 1} keeps the active card overheight.`
+          ),
+        ].join('\n\n'),
+        time: { start: Date.now() },
+      },
+    });
+  });
+
+  const summaries = page.locator('.assistant-activity-summary');
+  const markdown = page.getByText('Thinking spacing reference.', { exact: true });
+  const thinkingBox = page.locator('.assistant-active-activity-item .chat-thinking-box');
+  await expect(summaries).toHaveCount(2);
+  await expect(markdown).toBeVisible();
+  await expect(thinkingBox.locator('.thinking-label-text')).toHaveText('Thinking');
+  const gaps = await thinkingBox.evaluate(async (element) => {
+    const activitySummaries = document.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+    const reference = document.querySelector<HTMLElement>(
+      '.assistant-message-flow-item .rendered-markdown'
+    );
+    const tray = element.closest<HTMLElement>('.assistant-active-activity-tray');
+    if (!activitySummaries[0] || !activitySummaries[1] || !reference || !tray) {
+      throw new Error('Thinking spacing fixtures are missing');
+    }
+    const samples: Array<{ boxTop: number; scrollTop: number; trayTop: number }> = [];
+    for (let frame = 0; frame < 30 && element.isConnected; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push({
+        boxTop: element.getBoundingClientRect().top,
+        scrollTop: tray.scrollTop,
+        trayTop: tray.getBoundingClientRect().top,
+      });
+    }
+    return {
+      boxTop: element.getBoundingClientRect().top,
+      clientHeight: tray.clientHeight,
+      markdown:
+        reference.getBoundingClientRect().top - activitySummaries[0].getBoundingClientRect().bottom,
+      scrollHeight: tray.scrollHeight,
+      scrollTop: tray.scrollTop,
+      samples,
+      thinking:
+        element.getBoundingClientRect().top - activitySummaries[1].getBoundingClientRect().bottom,
+      trayTop: tray.getBoundingClientRect().top,
+    };
+  });
+  expect(gaps.thinking).toBeCloseTo(gaps.markdown, 0);
+  expect(gaps.scrollHeight).toBeGreaterThan(gaps.clientHeight);
+  expect(gaps.scrollTop).toBe(0);
+  expect(gaps.boxTop).toBeGreaterThanOrEqual(gaps.trayTop - 0.5);
+  expect(gaps.samples.length).toBeGreaterThan(0);
+  expect(gaps.samples.every((sample) => sample.scrollTop === 0)).toBe(true);
+  expect(gaps.samples.every((sample) => sample.boxTop >= sample.trayTop - 0.5)).toBe(true);
+});
+
+test('keeps the Thinking gap fixed while an empty assistant message awaits its first part', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=1'
+  );
+
+  const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
+  const loading = page.locator('.interactive-loading-row .loading-indicator');
+  await expect(activeTool).toBeVisible();
+  await expect(loading).toBeVisible();
+  await activeTool.evaluate(async (element) => {
+    const item = element.closest('.assistant-active-activity-item');
+    const row = element.closest('.interactive-item-container');
+    await Promise.all(
+      [...(item?.getAnimations() ?? []), ...(row?.getAnimations() ?? [])].map(
+        (animation) => animation.finished
+      )
+    );
+  });
+  const measureGap = () =>
+    activeTool.evaluate((element) => {
+      const loadingVerb = document.querySelector<HTMLElement>(
+        '.interactive-loading-row .loading-verb'
+      );
+      if (!loadingVerb) throw new Error('Thinking indicator is missing');
+      return loadingVerb.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+    });
+  expect(await measureGap()).toBe(12);
+
+  await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+      };
+    };
+    const original = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .find((message) => message.info.role === 'assistant');
+    if (!original) throw new Error('Tool-card assistant fixture is missing');
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.updated',
+          properties: {
+            info: {
+              ...original.info,
+              id: 'message-tool-cards-empty-assistant',
+              time: { created: Date.now() },
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+
+  const emptyRow = page.locator('[data-msg-id="message-tool-cards-empty-assistant"]');
+  await expect(emptyRow).toBeAttached();
+  await expect(emptyRow).toHaveClass(/interactive-item-render-empty/);
+  expect((await emptyRow.boundingBox())?.height).toBe(0);
+  expect(await measureGap()).toBe(12);
 });
 
 test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({
@@ -213,36 +809,62 @@ test('keeps a debounced trailing tool row at zero height until the tool is visib
   await expect(activeItem).toHaveCount(1);
 });
 
-test('single image messages reserve their preview height before loading', async ({ page }) => {
+test('image previews reserve matching 16:9 frames before loading', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=blank');
   await expect(page.locator('.interactive-session')).toBeVisible();
 
-  const trigger = page.locator('.chat-image-preview-trigger');
   await page.locator('.interactive-session').evaluate((root) => {
-    const figure = document.createElement('figure');
-    figure.className = 'chat-image-figure';
-    const button = document.createElement('button');
-    button.className = 'chat-image-preview-trigger';
-    const image = document.createElement('img');
-    image.className = 'chat-image-img';
-    button.append(image);
-    figure.append(button);
-    root.append(figure);
+    for (const isCarousel of [false, true]) {
+      const figure = document.createElement('figure');
+      figure.className = `chat-image-figure${isCarousel ? ' message-image-carousel-figure' : ''}`;
+      const button = document.createElement('button');
+      button.className = `chat-image-preview-trigger${isCarousel ? ' message-image-carousel-preview-trigger' : ''}`;
+      const image = document.createElement('img');
+      image.className = 'chat-image-img';
+      button.append(image);
+      figure.append(button);
+      root.append(figure);
+    }
   });
 
-  await expect
-    .poll(() => trigger.evaluate((element) => element.getBoundingClientRect().height))
-    .toBe(224);
-  await trigger.locator('img').evaluate((image: HTMLImageElement) => {
-    image.src =
-      'data:image/svg+xml,' +
-      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="482" height="485"/>');
-    return image.decode();
-  });
-  await expect
-    .poll(() => trigger.evaluate((element) => element.getBoundingClientRect().height))
-    .toBe(224);
+  const triggers = page.locator('.chat-image-preview-trigger');
+  const measureFrames = () =>
+    triggers.evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      })
+    );
+  const beforeLoad = await measureFrames();
+  expect(beforeLoad).toHaveLength(2);
+  expect(beforeLoad[0]).toEqual(beforeLoad[1]);
+  expect(beforeLoad[0]!.width / beforeLoad[0]!.height).toBeCloseTo(16 / 9, 2);
+
+  await triggers.locator('img').evaluateAll((images: HTMLImageElement[]) =>
+    Promise.all(
+      images.map((image) => {
+        image.src =
+          'data:image/svg+xml,' +
+          encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="482" height="485"/>');
+        return image.decode();
+      })
+    )
+  );
+  expect(await measureFrames()).toEqual(beforeLoad);
+  const imageBoxes = await triggers.locator('img').evaluateAll((images) =>
+    images.map((image) => {
+      const box = image.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    })
+  );
+  expect(imageBoxes).toEqual(beforeLoad);
+
+  await page.setViewportSize({ width: 1000, height: 800 });
+  expect(await measureFrames()).toEqual([
+    { width: 498, height: 280.125 },
+    { width: 498, height: 280.125 },
+  ]);
 });
 
 test('the first image message does not overlap the sticky prompt', async ({ page }) => {
@@ -299,7 +921,11 @@ test('the first image message does not overlap the sticky prompt', async ({ page
     .locator('.interactive-request')
     .filter({ hasText: 'Image message appears immediately' })
     .last();
-  await expect(row.locator('.chat-image-preview-trigger')).toHaveCSS('height', '224px');
+  const previewRatio = await row.locator('.chat-image-preview-trigger').evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.width / box.height;
+  });
+  expect(previewRatio).toBeCloseTo(16 / 9, 2);
   await expect(row).not.toHaveClass(/interactive-item-entering/);
   await expect
     .poll(() =>
@@ -510,6 +1136,124 @@ test('sticky preview follows live prompt geometry when the assistant row grows',
   await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
 });
 
+test('virtualized sticky preview remains visible through active tool layout changes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 482, height: 1006 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&compactToolOutput=1&longActiveTurn=1'
+  );
+
+  const sticky = page.locator('.latest-user-message-sticky');
+  const source = page.locator('[data-msg-id="message-sticky-large-user-2"] .user-message-card');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+  await expect(source).toBeAttached();
+  expect(
+    await source.evaluate((element) => {
+      const list = element.closest<HTMLElement>('.interactive-list');
+      if (!list) throw new Error('Message list is missing');
+      return element.getBoundingClientRect().bottom - list.getBoundingClientRect().top;
+    })
+  ).toBeLessThanOrEqual(0);
+  await expect(sticky).toBeVisible();
+  await expect(sticky).toContainText('Run a variety of virtualization verifications');
+  const stickyText = await sticky.textContent();
+
+  const samples = await page
+    .locator('.interactive-list')
+    .evaluate(async (element, expectedText) => {
+      const sessionID = 'session-sticky-preview-large';
+      const messageID = 'sticky-live-assistant';
+      const reasoning = {
+        id: 'sticky-live-reasoning',
+        sessionID,
+        messageID,
+        type: 'reasoning' as const,
+        text: '',
+        time: { start: Date.now() },
+      };
+      const tool = {
+        id: 'sticky-live-tool',
+        sessionID,
+        messageID,
+        type: 'tool' as const,
+        callID: 'sticky-live-tool-call',
+        tool: 'bash',
+        state: {
+          status: 'running' as const,
+          input: { command: 'npm run verification' },
+          title: 'npm run verification',
+          time: { start: Date.now() },
+        },
+      };
+      // oxlint-disable-next-line unicorn/consistent-function-scoping
+      const postEvent = (type: string, properties: Record<string, unknown>) => {
+        window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+      };
+      postEvent('session.status', { sessionID, status: { type: 'busy' } });
+      postEvent('message.updated', {
+        info: {
+          id: messageID,
+          sessionID,
+          role: 'assistant',
+          parentID: 'message-sticky-large-user-2',
+          time: { created: Date.now() },
+          modelID: 'model-test',
+          providerID: 'provider-test',
+          mode: 'primary',
+          path: { cwd: '/workspace', root: '/workspace' },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      });
+      postEvent('message.part.updated', { part: reasoning });
+      postEvent('message.part.delta', {
+        sessionID,
+        messageID,
+        partID: reasoning.id,
+        field: 'text',
+        delta: 'Analyzing the virtualized transcript.',
+      });
+
+      const result: Array<string | null> = [];
+      for (let frame = 0; frame < 720; frame += 1) {
+        if (frame === 180) postEvent('message.part.updated', { part: tool });
+        if (frame === 360) {
+          postEvent('message.part.updated', {
+            part: { ...reasoning, time: { ...reasoning.time, end: Date.now() } },
+          });
+        }
+        if (frame === 540) {
+          postEvent('message.part.updated', {
+            part: {
+              ...tool,
+              state: {
+                status: 'completed',
+                input: tool.state.input,
+                output: 'Passed',
+                title: tool.state.title,
+                metadata: {},
+                time: { start: tool.state.time.start, end: Date.now() },
+              },
+            },
+          });
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const current = document.querySelector<HTMLElement>('.latest-user-message-sticky');
+        result.push(
+          current?.textContent?.includes(expectedText || '') ? current.textContent : null
+        );
+      }
+      return result;
+    }, stickyText);
+
+  expect(
+    samples.every((sample) => sample !== null),
+    JSON.stringify(samples)
+  ).toBe(true);
+  await expect(sticky).toBeVisible();
+});
+
 test('first image prompt dismisses its sticky preview during slow upward scrolling', async ({
   page,
 }) => {
@@ -629,17 +1373,22 @@ test('image sticky yields after a fractional upward wheel tick reveals its sourc
       const source = document.querySelector<HTMLElement>(sourceSelector);
       const listTop = element.getBoundingClientRect().top;
       if (source && source.getBoundingClientRect().bottom <= listTop) {
-        const targetBottom = listTop - 0.25;
+        const targetBottom = listTop - 0.5;
         element.scrollTop += source.getBoundingClientRect().bottom - targetBottom;
         element.dispatchEvent(new Event('scroll'));
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-        const sourceBottomBefore = source.getBoundingClientRect().bottom;
+        let settledSource = document.querySelector<HTMLElement>(sourceSelector);
+        if (!settledSource) continue;
+        element.scrollTop += settledSource.getBoundingClientRect().bottom - targetBottom;
+        element.dispatchEvent(new Event('scroll'));
+        settledSource = document.querySelector<HTMLElement>(sourceSelector);
+        if (!settledSource) continue;
+        const sourceBottomBefore = settledSource.getBoundingClientRect().bottom;
         const delta = 0.75;
         element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
         element.scrollTop = Math.max(0, element.scrollTop - delta);
         element.dispatchEvent(new Event('scroll'));
-        const sourceBottomAfter = source.getBoundingClientRect().bottom;
+        const sourceBottomAfter = settledSource.getBoundingClientRect().bottom;
         let stickyVisibleFrames = 0;
         for (let settleFrame = 0; settleFrame < 6; settleFrame += 1) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -839,7 +1588,7 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   expect(result.stickyHidden, JSON.stringify(result)).toBe(true);
   expect(result.hideGapFromOverlay, JSON.stringify(result)).not.toBeNull();
   expect(result.hideGapFromOverlay ?? Number.NEGATIVE_INFINITY).toBeGreaterThan(0);
-  expect(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(33);
+  expect(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(37);
   await expect(nextPrompt).toContainText('Continue if you have next steps');
 });
 

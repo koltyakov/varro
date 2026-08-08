@@ -570,6 +570,41 @@ describe('session-selection helpers', () => {
     await selection;
   });
 
+  it('reconciles status before startup synchronization completes', async () => {
+    const activeSession = { value: null as string | null };
+    const loaded = deferred<ReturnType<typeof loadedSession>>();
+    const statuses = deferred<Record<string, SessionStatus>>();
+    const mcpSync = deferred<void>();
+    const mergeSessionStatuses = vi.fn();
+    const loadSessionStatuses = vi.fn(() => statuses.promise);
+    const deps = createSelectionDependencies({
+      getActiveSessionId: () => activeSession.value,
+      setActiveSessionId: (id) => {
+        activeSession.value = id;
+      },
+      loadSession: () => loaded.promise,
+      loadSessionStatuses,
+      syncSessionMcps: () => mcpSync.promise,
+      mergeSessionStatuses,
+    });
+
+    const selection = selectSessionWithDependencies(deps, { next: () => 1 }, 'session-1');
+
+    await vi.waitFor(() => expect(loadSessionStatuses).toHaveBeenCalledTimes(1));
+    statuses.resolve({ 'session-1': { type: 'idle' } });
+    loaded.resolve(loadedSession('session-1'));
+
+    await vi.waitFor(() => {
+      expect(mergeSessionStatuses).toHaveBeenCalledWith(
+        { 'session-1': { type: 'idle' } },
+        { snapshotStartedAt: expect.any(Number) }
+      );
+    });
+
+    mcpSync.resolve();
+    await selection;
+  });
+
   it('does not report loaded messages as failed when follow-up startup sync fails', async () => {
     const activeSession = { value: null as string | null };
     const setMessagesIncremental = vi.fn();

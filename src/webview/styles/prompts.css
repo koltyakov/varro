@@ -621,6 +621,7 @@ body.vscode-high-contrast-light
 
 .permission-meta-entry {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   padding: 1px 0;
 }
@@ -635,8 +636,29 @@ body.vscode-high-contrast-light
 }
 
 .permission-meta-value {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   color: var(--color-vscode-fg);
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre-wrap;
   word-break: break-all;
+}
+
+.permission-meta-value-shell {
+  display: flex;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-meta-value-shell .tool-copy-button {
+  padding: 2px 0 2px 6px;
+}
+
+.permission-meta-entry:hover .tool-copy-button {
+  opacity: 1;
 }
 
 .permission-prompt-group-note {

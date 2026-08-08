@@ -57,4 +57,32 @@ describe('composer draft persistence', () => {
     expect(window.localStorage.getItem(STORAGE_KEYS.inputDraft)).toBeNull();
     expect(createAppState().inputText()).toBe('');
   });
+
+  it('restores attached files when app state is recreated', () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.inputDraftFiles,
+      JSON.stringify([
+        {
+          path: '/repo/src/file.ts',
+          relativePath: 'src/file.ts',
+          type: 'file',
+          lineRanges: [{ startLine: 2, endLine: 4 }],
+          attachmentSequence: 3,
+        },
+        { path: '', relativePath: 'invalid.ts', type: 'file' },
+      ])
+    );
+
+    const restored = createAppState();
+
+    expect(restored.state.droppedFiles).toEqual([
+      {
+        path: '/repo/src/file.ts',
+        relativePath: 'src/file.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 2, endLine: 4 }],
+        attachmentSequence: 3,
+      },
+    ]);
+  });
 });

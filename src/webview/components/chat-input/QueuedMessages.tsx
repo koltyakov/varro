@@ -65,13 +65,19 @@ export function QueuedMessages(props: {
             const isLocked = () => isInFlight() || isEditing();
             const didDispatchFail = () => props.failedDispatchItemIds?.has(item.id) ?? false;
             const didSteerFail = () => props.failedSteerItemIds?.has(item.id) ?? false;
+            const imageCount = item.clipboardImages?.length || 0;
             const attachmentCount =
-              (item.droppedFiles?.length || 0) +
-              (item.clipboardImages?.length || 0) +
-              (item.terminalSelection ? 1 : 0);
+              (item.droppedFiles?.length || 0) + (item.terminalSelection ? 1 : 0);
             const label =
               item.text ||
-              (attachmentCount === 1 ? '1 attachment' : `${attachmentCount} attachments`);
+              [
+                imageCount > 0 ? `${imageCount} ${imageCount === 1 ? 'image' : 'images'}` : '',
+                attachmentCount > 0
+                  ? `${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(', ');
             const startDragging = (event: DragEvent) => {
               if (isLocked() || !event.dataTransfer) {
                 event.preventDefault();
@@ -164,26 +170,56 @@ export function QueuedMessages(props: {
                     <span class="chat-queue-paused-label">Paused</span>
                   </Show>
                 </div>
-                <Show when={attachmentCount > 0}>
-                  <span
-                    class="chat-queue-meta"
-                    title={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
-                  >
-                    <span class="chat-queue-attachment-icon" aria-hidden="true">
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.25"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
+                <Show when={attachmentCount > 0 || imageCount > 0}>
+                  <span class="chat-queue-meta">
+                    <Show when={imageCount > 0}>
+                      <span
+                        class="chat-queue-meta-item"
+                        title={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
+                        aria-label={`${imageCount} ${imageCount === 1 ? 'image' : 'images'}`}
                       >
-                        <path d="M10.5 5.5l-4.24 4.24a2 2 0 102.83 2.83l4.6-4.59a3 3 0 00-4.24-4.24L4.5 8.69a4 4 0 105.66 5.66l4.1-4.1" />
-                      </svg>
-                    </span>
-                    <span>{attachmentCount}</span>
+                        <span class="chat-queue-image-icon" aria-hidden="true">
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                            <circle cx="5.5" cy="6.5" r="1" />
+                            <path d="M3 11l3-3 2.5 2.5L11 7l2 2" />
+                          </svg>
+                        </span>
+                        <span>{imageCount}</span>
+                      </span>
+                    </Show>
+                    <Show when={attachmentCount > 0}>
+                      <span
+                        class="chat-queue-meta-item"
+                        title={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
+                        aria-label={`${attachmentCount} ${attachmentCount === 1 ? 'attachment' : 'attachments'}`}
+                      >
+                        <span class="chat-queue-attachment-icon" aria-hidden="true">
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.25"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M10.5 5.5l-4.24 4.24a2 2 0 102.83 2.83l4.6-4.59a3 3 0 00-4.24-4.24L4.5 8.69a4 4 0 105.66 5.66l4.1-4.1" />
+                          </svg>
+                        </span>
+                        <span>{attachmentCount}</span>
+                      </span>
+                    </Show>
                   </span>
                 </Show>
                 <div class="chat-queue-actions">

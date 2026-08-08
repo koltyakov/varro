@@ -1303,27 +1303,70 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       BASE_TIME - 9_000
     );
     messages.push(compactionUser, compactionAssistant);
+    const longActiveTurn =
+      new URLSearchParams(window.location.search).get('longActiveTurn') === '1';
     const nextUser = makeUserMessage(
       session.id,
       'message-sticky-large-user-2',
       [
-        'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
+        longActiveTurn
+          ? 'Run a variety of virtualization verifications and cold scroll to the top, sticky messages, active explore tools completion, chat jumps, and streaming behavior. Keep the prompt visible throughout.'
+          : 'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
       ],
       BASE_TIME - 2_000
     );
     messages.push(nextUser);
-    for (let index = 0; index < 12; index += 1) {
-      messages.push(
-        makeAssistantMessage(
-          session.id,
-          `message-sticky-large-final-assistant-${index}`,
-          nextUser.info.id,
-          index === 0
+    const finalAssistantCount = longActiveTurn ? 70 : 12;
+    for (let index = 0; index < finalAssistantCount; index += 1) {
+      const assistantText =
+        longActiveTurn && index % 10 === 0
+          ? Array.from(
+              { length: 4 },
+              (_, paragraph) =>
+                `Live retained response ${index + 1}.${paragraph + 1} keeps the prompt source just above the virtualized viewport during activity transitions.`
+            ).join('\n\n')
+          : index === 0
             ? 'Planning targeted test and lint verification.'
-            : `Follow-up implementation and verification step ${index + 1}.`,
-          BASE_TIME - 1_000 + index
-        )
+            : `Follow-up implementation and verification step ${index + 1}.`;
+      const assistant = makeAssistantMessage(
+        session.id,
+        `message-sticky-large-final-assistant-${index}`,
+        nextUser.info.id,
+        assistantText,
+        BASE_TIME - 1_000 + index
       );
+      if (finalAssistantCount > 12 && index % 10 !== 0) {
+        assistant.parts = [
+          makeReasoningPart(
+            session.id,
+            assistant.info.id,
+            `${assistant.info.id}-reasoning`,
+            `Checking virtualized activity step ${index + 1}.`,
+            BASE_TIME - 1_000 + index,
+            BASE_TIME - 900 + index
+          ),
+          {
+            id: `${assistant.info.id}-tool`,
+            sessionID: session.id,
+            messageID: assistant.info.id,
+            type: 'tool',
+            callID: `${assistant.info.id}-tool-call`,
+            tool: index % 2 === 0 ? 'read' : 'bash',
+            state: {
+              status: 'completed',
+              input:
+                index % 2 === 0
+                  ? { file_path: `/workspace/varro/src/activity-${index}.ts` }
+                  : { command: `npm run activity-${index}` },
+              output: 'Completed',
+              title: `Activity ${index + 1}`,
+              metadata: {},
+              time: { start: BASE_TIME - 1_000 + index, end: BASE_TIME - 900 + index },
+            },
+          },
+        ];
+      }
+      messages.push(assistant);
     }
 
     state.sessions = [session];
@@ -2873,6 +2916,8 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       new URLSearchParams(window.location.search).get('multiFileDiff') === '1';
     const includeActiveTurnCollapse =
       new URLSearchParams(window.location.search).get('activeTurnCollapse') === '1';
+    const includeSpacingBoundary =
+      new URLSearchParams(window.location.search).get('spacingBoundary') === '1';
 
     for (let index = 0; index < 60; index += 1) {
       const createdAt = BASE_TIME - (200 - index) * 1000;
@@ -2898,7 +2943,10 @@ function createScenarioState(name: ScenarioName): ScenarioState {
             ].join('\n')
           : `*** Begin Patch\n*** Update File: src/report-${index}.ts\n@@\n-export const status = 'pending';\n+export const status = 'ready';\n*** End Patch`;
       const patchPart = makeApplyPatchToolPart(session.id, assistantId, patchId, patchText);
-      if ((includeMultiFileDiff || includeActiveTurnCollapse) && index === 59) {
+      if (
+        (includeMultiFileDiff || includeActiveTurnCollapse || includeSpacingBoundary) &&
+        index === 59
+      ) {
         patchPart.state = {
           status: 'completed',
           input: patchPart.state.input,
@@ -2916,6 +2964,24 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         `Prepared report update ${index}.`,
         [patchPart]
       );
+      if (includeSpacingBoundary && index === 59) {
+        assistant.parts.push({
+          id: `${assistantId}-spacing-tool`,
+          sessionID: session.id,
+          messageID: assistantId,
+          type: 'tool',
+          callID: `${assistantId}-spacing-tool-call`,
+          tool: 'bash',
+          state: {
+            status: 'completed',
+            input: { command: 'npm run verify-report' },
+            output: 'Passed',
+            title: 'Verify report',
+            metadata: {},
+            time: { start: createdAt + 4, end: createdAt + 5 },
+          },
+        });
+      }
       messages.push(user, assistant);
 
       if (includeActiveTurnCollapse && index === 59) {
@@ -4059,6 +4125,9 @@ function buildInitialState(state: ScenarioState): InitialWebviewState {
     droppedFiles: [],
     emptyStateLogoUri: '/assets/icon.png',
     compactToolOutput: new URLSearchParams(window.location.search).get('compactToolOutput') === '1',
+    ...(new URLSearchParams(window.location.search).get('expandThinking') === '1'
+      ? { expandThinkingByDefault: true }
+      : {}),
     showInlineFileChanges: state.showInlineFileChanges,
     defaultPermissionMode: 'default',
     pendingPermissions: state.initialPendingPermissions ?? state.pendingPermissions,

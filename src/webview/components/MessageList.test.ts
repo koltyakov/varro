@@ -1837,7 +1837,7 @@ describe('MessageList compact activity', () => {
 
 describe('MessageList history pagination', () => {
   async function mountDeferredHistory(
-    initialMessages = [
+    initialMessages: MessageEntry[] = [
       {
         info: userMessage('current-user'),
         parts: [textPart('current-user-text', 'Current prompt')],
@@ -1847,16 +1847,16 @@ describe('MessageList history pagination', () => {
         parts: [textPart('current-assistant-text', 'Current response')],
       },
     ],
-    getMessageLayoutOffset: (messageId: string) => number = () => 0
-  ) {
-    const animationFrames = installQueuedAnimationFrameMocks();
-    const olderPage = [
+    getMessageLayoutOffset: (messageId: string) => number = () => 0,
+    olderPage: Awaited<ReturnType<typeof client.session.messages>> = [
       { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
       {
         info: assistantMessage('older-assistant'),
         parts: [textPart('older-assistant-text', 'Older response')],
       },
-    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    ]
+  ) {
+    const animationFrames = installQueuedAnimationFrameMocks();
     let releasePage: ((page: typeof olderPage) => void) | undefined;
     const pendingPage = new Promise<typeof olderPage>((resolve) => {
       releasePage = resolve;
@@ -1872,6 +1872,12 @@ describe('MessageList history pagination', () => {
         }
         if (this.classList.contains('interactive-list-track')) {
           return new DOMRect(0, 0, 500, state.messages.length * 100);
+        }
+        if (this.dataset.assistantRenderKey) {
+          const messageId = this.closest<HTMLElement>('[data-msg-id]')?.dataset.msgId;
+          const index = state.messages.findIndex((message) => message.info.id === messageId);
+          const documentTop = index * 100 + getMessageLayoutOffset(messageId || '');
+          return new DOMRect(0, documentTop + 6 - scrollTopValue, 500, 40);
         }
         if (this.dataset.msgId) {
           const index = state.messages.findIndex(
@@ -1922,7 +1928,7 @@ describe('MessageList history pagination', () => {
         list!.dispatchEvent(new Event('scroll'));
         await vi.waitFor(() => {
           expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-            limit: 50,
+            limit: 200,
             before: 'cursor-1',
           });
         });
@@ -1941,7 +1947,7 @@ describe('MessageList history pagination', () => {
       },
       async waitForPrepend() {
         await vi.waitFor(() => {
-          expect(state.messages[0]?.info.id).toBe('older-user');
+          expect(state.messages[0]?.info.id).toBe(olderPage[0]?.info.id);
         });
         await Promise.resolve();
       },
@@ -1956,6 +1962,73 @@ describe('MessageList history pagination', () => {
     await harness.resolveLoad();
 
     expect(harness.getScrollTop()).toBe(200);
+    harness.animationFrames.restore();
+  });
+
+  it('keeps the visible message fixed when a prepended activity group moves to an older owner', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (
+      this: HTMLElement
+    ) {
+      if (!this.dataset.assistantRenderKey) return [] as unknown as DOMRectList;
+      return [this.getBoundingClientRect()] as unknown as DOMRectList;
+    });
+    const thought: Part = {
+      id: 'current-thought',
+      sessionID: 'session-1',
+      messageID: 'current-assistant',
+      type: 'reasoning',
+      text: 'Current thought',
+      time: { start: 3, end: 4 },
+    };
+    const command = toolPart('older-command', 'older-assistant', 'older-command-call');
+    command.state = {
+      status: 'completed',
+      input: { command: 'npm test' },
+      output: 'passed',
+      title: 'npm test',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const olderPage = [
+      { info: userMessage('shared-user'), parts: [textPart('shared-prompt', 'Inspect')] },
+      {
+        info: assistantMessage('older-assistant', { parentID: 'shared-user' }),
+        parts: [command],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    setCompactToolOutput(true);
+    const harness = await mountDeferredHistory(
+      [
+        {
+          info: assistantMessage('current-assistant', { parentID: 'shared-user' }),
+          parts: [thought],
+        },
+      ],
+      undefined,
+      olderPage
+    );
+    const currentRow = container?.querySelector<HTMLElement>(
+      '[data-msg-id="current-assistant"]'
+    );
+    expect(
+      container?.querySelector('.assistant-activity-group')?.closest('[data-msg-id]')?.getAttribute(
+        'data-msg-id'
+      )
+    ).toBe('current-assistant');
+
+    await harness.startLoad(0);
+    const topBefore = currentRow!.getBoundingClientRect().top;
+    harness.releaseLoad();
+    await harness.waitForPrepend();
+    expect(currentRow!.getBoundingClientRect().top).toBe(topBefore);
+    await harness.resolveLoad();
+
+    expect(
+      container?.querySelector('.assistant-activity-group')?.closest('[data-msg-id]')?.getAttribute(
+        'data-msg-id'
+      )
+    ).toBe('older-assistant');
+    expect(currentRow!.getBoundingClientRect().top).toBe(topBefore);
     harness.animationFrames.restore();
   });
 
@@ -2445,7 +2518,7 @@ describe('MessageList history pagination', () => {
     list.dispatchEvent(new Event('scroll'));
     await vi.waitFor(() => {
       expect(client.session.messages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-49',
       });
     });
@@ -2585,7 +2658,7 @@ describe('MessageList history pagination', () => {
     list.dispatchEvent(new Event('scroll'));
     await vi.waitFor(() => {
       expect(client.session.messages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-1',
       });
     });
@@ -2636,7 +2709,7 @@ describe('MessageList history pagination', () => {
 
     container?.querySelector<HTMLButtonElement>('.message-history-banner-retry')?.click();
     await vi.waitFor(() => {
-      expect(messagesSpy).toHaveBeenCalledWith('session-1', { limit: 50, before: 'cursor-1' });
+      expect(messagesSpy).toHaveBeenCalledWith('session-1', { limit: 200, before: 'cursor-1' });
     });
 
     setSessionHistoryCursor('session-2', 'cursor-2');
@@ -2689,7 +2762,7 @@ describe('MessageList history pagination', () => {
 
     await vi.waitFor(() => {
       expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-older',
       });
     });
@@ -2697,6 +2770,46 @@ describe('MessageList history pagination', () => {
       'older-user',
       'current-user',
     ]);
+  });
+
+  it('loads enough initial history to fill the viewport', async () => {
+    const firstPage = [
+      { info: userMessage('older-user-1'), parts: [textPart('older-text-1', 'Older prompt 1')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    firstPage.nextCursor = 'cursor-oldest';
+    const secondPage = [
+      { info: userMessage('older-user-2'), parts: [textPart('older-text-2', 'Older prompt 2')] },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const messagesSpy = vi
+      .spyOn(client.session, 'messages')
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    setState('activeSessionId', 'session-1');
+    setSessionHistoryCursor('session-1', 'cursor-older');
+    replaceMessages([
+      { info: userMessage('current-user'), parts: [textPart('current-text', 'Current prompt')] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => (state.messages.length < 3 ? 500 : 700),
+    });
+    Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 0 });
+
+    await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
+
+    expect(messagesSpy).toHaveBeenNthCalledWith(1, 'session-1', {
+      limit: 200,
+      before: 'cursor-older',
+    });
+    expect(messagesSpy).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 200,
+      before: 'cursor-oldest',
+    });
+    await vi.waitFor(() => expect(list.scrollTop).toBe(200));
   });
 
   it('continues ordinary pagination when a page advances the cursor without adding rows', async () => {
@@ -2721,7 +2834,7 @@ describe('MessageList history pagination', () => {
 
     await vi.waitFor(() => {
       expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-next',
       });
     });
@@ -2793,7 +2906,7 @@ describe('MessageList history pagination', () => {
 
     expect(messagesSpy).toHaveBeenCalledTimes(1);
     expect(messagesSpy).not.toHaveBeenCalledWith('session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-current',
     });
   });
@@ -2826,7 +2939,7 @@ describe('MessageList history pagination', () => {
 
     expect(messagesSpy).toHaveBeenCalledTimes(1);
     expect(messagesSpy).not.toHaveBeenCalledWith('session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-current',
     });
   });
@@ -2889,7 +3002,7 @@ describe('MessageList history pagination', () => {
     list.dispatchEvent(new Event('scroll'));
     await vi.waitFor(() => {
       expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-stale',
       });
     });
@@ -3023,11 +3136,11 @@ describe('MessageList prompt numbers', () => {
       ).toEqual(['13', '14']);
     });
     expect(messagesSpy).toHaveBeenNthCalledWith(1, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-12',
     });
     expect(messagesSpy).toHaveBeenNthCalledWith(2, 'session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-6',
     });
   });
@@ -3097,7 +3210,7 @@ describe('MessageList prompt numbers', () => {
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
     await vi.waitFor(() => {
       expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-reloaded',
       });
       expect(container?.querySelector('.prompt-number-badge')?.textContent).toBe('3');
@@ -3151,7 +3264,7 @@ describe('MessageList prompt numbers', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
       await vi.waitFor(() => {
         expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-stale',
         });
       });
@@ -3163,7 +3276,7 @@ describe('MessageList prompt numbers', () => {
 
       await vi.waitFor(() => {
         expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-current',
         });
       });
@@ -3683,7 +3796,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     }
 
     expect(client.session.messages).toHaveBeenCalledWith('session-1', {
-      limit: 50,
+      limit: 200,
       before: 'cursor-1',
     });
     const boundaryCard = container?.querySelector<HTMLElement>(
@@ -3756,7 +3869,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
       await vi.waitFor(() => expect(messagesSpy).toHaveBeenCalledTimes(2));
       expect(messagesSpy).toHaveBeenLastCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-stale',
       });
       await vi.waitFor(() => {
@@ -3817,7 +3930,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
       sticky?.click();
       await vi.waitFor(() => {
         expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-stale',
         });
       });
@@ -3844,7 +3957,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
       retry?.click();
       await vi.waitFor(() => {
         expect(messagesSpy).toHaveBeenCalledWith('session-1', {
-          limit: 50,
+          limit: 200,
           before: 'cursor-current',
         });
       });
@@ -4000,7 +4113,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
     await vi.waitFor(() => {
       expect(client.session.messages).toHaveBeenCalledWith('session-1', {
-        limit: 50,
+        limit: 200,
         before: 'cursor-1',
       });
     });
@@ -5225,7 +5338,7 @@ describe('MessageList sticky prompt preview', () => {
       container?.querySelector('[data-msg-id="assistant-1"] .assistant-dialog-summary')
     ).toBeNull();
     expect(
-      container?.querySelector('[data-msg-id="assistant-2"] .assistant-dialog-summary')?.textContent
+      container?.querySelector('.trailing-assistant-summary-row')?.textContent
     ).toContain('Worked for 5s - Tokens ↑ 600 ↓ 60 - Agents 1');
   });
 
@@ -5323,8 +5436,7 @@ describe('MessageList sticky prompt preview', () => {
       cacheSessionHistoryPage('session-1', 'bottom-range', [state.messages[0]!]);
       await Promise.resolve();
       expect(
-        container?.querySelector('[data-msg-id="assistant-29"] .assistant-dialog-summary')
-          ?.textContent
+        container?.querySelector('.trailing-assistant-summary-row')?.textContent
       ).toContain('Worked for 2s');
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
@@ -5342,8 +5454,7 @@ describe('MessageList sticky prompt preview', () => {
       list.dispatchEvent(new Event('scroll'));
       await Promise.resolve();
       expect(
-        container?.querySelector('[data-msg-id="assistant-29"] .assistant-dialog-summary')
-          ?.textContent
+        container?.querySelector('.trailing-assistant-summary-row')?.textContent
       ).toContain('Worked for 2s');
     } finally {
       animationFrames.restore();
@@ -7420,7 +7531,7 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.loading-elapsed')?.textContent).toBe('1h 9m');
   });
 
-  it('reserves the worked summary row while an existing chat loads', async () => {
+  it('replaces the reserved row with the worked summary when an existing chat loads', async () => {
     setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
     setState('activeSessionId', 'session-1');
     setState('messagesLoading', true);
@@ -7447,18 +7558,13 @@ describe('MessageList loading row', () => {
       },
     ]);
     setState('messagesLoading', false);
-    await Promise.resolve();
-
-    expect(container?.textContent).not.toContain('Worked for');
-    expect(
-      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
-    ).toBe(true);
-
-    vi.advanceTimersByTime(700);
+    stopLoading();
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
-    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+    expect(
+      container?.querySelector('.interactive-loading-row.trailing-assistant-summary-row')
+    ).toBeInstanceOf(HTMLDivElement);
   });
 
   it('marks the loading row as stale after prolonged inactivity', async () => {
@@ -7540,7 +7646,7 @@ describe('MessageList loading row', () => {
     expect(row?.classList.contains('is-reserved')).toBe(false);
   });
 
-  it('does not keep the loading row for older incomplete assistant replies', async () => {
+  it('does not keep the loading label for older incomplete assistant replies', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('user-text-1', 'First prompt')] },
@@ -7558,7 +7664,10 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
+      HTMLDivElement
+    );
   });
 
   it('reserves the loading row while visible text is streaming', async () => {
@@ -7571,6 +7680,50 @@ describe('MessageList loading row', () => {
     startLoading(1);
 
     cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('immediately hides a visible loading label when final text is committed', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: assistantMessage('message-1'), parts: [] }]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
+    ).toBe(false);
+
+    upsertPart({ ...textPart('text-1', 'Final answer'), messageID: 'message-1' });
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(true);
+    expect(row?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('hides the loading label when final text streams after a stale running tool', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: assistantMessage('assistant-1'), parts: [toolPart('tool-1', 'assistant-1')] },
+      {
+        info: assistantMessage('assistant-2'),
+        parts: [textPart('text-2', 'Final answer')],
+      },
+    ]);
+    startLoading(1);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    setState('streamingPartId', 'text-2');
+    setState('streamingText', 'Final answer');
     await Promise.resolve();
 
     const row = container?.querySelector('.interactive-loading-row');
@@ -7767,7 +7920,7 @@ describe('MessageList loading row', () => {
     ).toBe(false);
   });
 
-  it('waits until loading settles before showing the trailing worked summary', async () => {
+  it('replaces the loading row immediately when the trailing worked summary settles', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       {
@@ -7792,24 +7945,11 @@ describe('MessageList loading row', () => {
     stopLoading();
     await Promise.resolve();
 
-    expect(container?.textContent).not.toContain('Worked for');
-    expect(
-      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
-    ).toBe(true);
-
-    vi.advanceTimersByTime(699);
-    await Promise.resolve();
-
-    expect(container?.textContent).not.toContain('Worked for');
-    expect(
-      container?.querySelector('.interactive-loading-row')?.classList.contains('is-reserved')
-    ).toBe(true);
-
-    vi.advanceTimersByTime(1);
-    await Promise.resolve();
-
     expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
-    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(container?.querySelector('.trailing-assistant-summary-row .loading-indicator')).toBeNull();
   });
 
   it('does not show a trailing worked summary before the final text response', async () => {
@@ -7872,12 +8012,6 @@ describe('MessageList loading row', () => {
 
     setState('streamingPartId', null);
     setState('streamingText', '');
-    await Promise.resolve();
-    vi.advanceTimersByTime(699);
-    await Promise.resolve();
-    expect(container?.textContent).not.toContain('Worked for');
-
-    vi.advanceTimersByTime(1);
     await Promise.resolve();
 
     expect(container?.textContent).toContain('Worked for 12s - Tokens ↑ 50 ↓ 10');
@@ -8704,9 +8838,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    // The disclosure owner and latest diff-capable assistant retain provisional height. The eight
-    // collapsed follower rows are known to render no content and must not add 160px each.
-    expect(bottomSpacer() - bottomPadBefore).toBe(-680);
+    // The disclosure owner retains provisional height. Every collapsed follower row, including the
+    // latest assistant, is known to render no content and must not add 160px each.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-840);
     animationFrames.restore();
   });
 
@@ -8784,9 +8918,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    // Hidden historical reasoning rows have no rendered block size. Only the latest assistant keeps
-    // a provisional height because it may still receive an asynchronous diff summary.
-    expect(bottomSpacer() - bottomPadBefore).toBe(-840);
+    // Hidden reasoning rows have no rendered block size, including the latest assistant. A later
+    // asynchronous summary invalidates the zero-height classification and forces rehydration.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-1000);
     animationFrames.restore();
   });
 

@@ -106,6 +106,8 @@ export async function selectSessionWithDependencies(
   });
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
+  const statusSnapshotStartedAt = Date.now();
+  const statusSync = deps.loadSessionStatuses().catch(() => null);
 
   const isCurrentSelection = () =>
     deps.isCurrentSelectionGeneration(generation) && deps.getActiveSessionId() === id;
@@ -164,30 +166,29 @@ export async function selectSessionWithDependencies(
     deps.applySelectedModel(loadedModel, id);
   }
 
+  const statuses = await statusSync;
+  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
+  if (statuses) {
+    deps.mergeSessionStatuses(statuses, { snapshotStartedAt: statusSnapshotStartedAt });
+    deps.updateUsageLimitState(id, statuses[id], messages);
+    const statusType = statuses[id]?.type;
+    if (statusType === 'retry') {
+      deps.startLoading();
+    } else if (latestAssistantFinished(messages)) {
+      deps.stopLoading();
+    } else if (statusType === 'busy') {
+      deps.startLoading();
+    } else {
+      deps.stopLoading();
+    }
+  }
+
   await mcpSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await todoSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.loadQuestions().catch(() => {});
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-
-  const snapshotStartedAt = Date.now();
-  const statuses = await deps.loadSessionStatuses().catch(() => null);
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-  if (!statuses) return;
-
-  deps.mergeSessionStatuses(statuses, { snapshotStartedAt });
-  deps.updateUsageLimitState(id, statuses[id], messages);
-  const statusType = statuses[id]?.type;
-  if (statusType === 'retry') {
-    deps.startLoading();
-  } else if (latestAssistantFinished(messages)) {
-    deps.stopLoading();
-  } else if (statusType === 'busy') {
-    deps.startLoading();
-  } else {
-    deps.stopLoading();
-  }
 }
 
 export async function syncSessionMessagesWithDependencies(

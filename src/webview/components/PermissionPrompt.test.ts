@@ -39,6 +39,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  vi.unstubAllGlobals();
 });
 
 describe('PermissionPrompt', () => {
@@ -80,6 +81,32 @@ describe('PermissionPrompt', () => {
 
     expect(container?.querySelector('.permission-prompt-count')).toBeNull();
     expect(container?.querySelector('.permission-prompt-group-note')).toBeNull();
+  });
+
+  it('clamps long metadata values and copies their full text', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const parameters = { command: 'x'.repeat(1_300) };
+    const text = JSON.stringify(parameters);
+
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({ metadata: { parameters } }),
+        }),
+      container!
+    );
+
+    const value = container?.querySelector('.permission-meta-value');
+    expect(value?.classList).toContain('tool-text-clamped');
+    expect(value?.classList).toContain('is-truncated');
+    expect(value?.textContent).not.toBe(text);
+
+    const copy = container?.querySelector<HTMLButtonElement>('.permission-meta-entry button');
+    copy?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith(text);
   });
 
   it.each([
