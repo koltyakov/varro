@@ -250,8 +250,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   const finalSummaryBox = (await summary.boundingBox())!;
   const finalLoadingBox = (await loadingRow.locator('.loading-verb').boundingBox())!;
   const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
-  expect(settledGap).toBeGreaterThanOrEqual(8);
-  expect(settledGap).toBeLessThanOrEqual(11.5);
+  expect(settledGap).toBeGreaterThanOrEqual(5);
+  expect(settledGap).toBeLessThanOrEqual(8.5);
 });
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
@@ -278,6 +278,127 @@ test('keeps the active tool gap fixed through its entrance animation', async ({ 
     });
   });
   expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(0.5);
+  for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
+});
+
+test('keeps streamed response text fixed when it follows Explored', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards');
+  const summary = page.locator('.assistant-activity-summary').first();
+  await expect(summary).toContainText('Explored');
+  await page.addStyleTag({
+    content: '.assistant-activity-group-settling { animation: none !important; }',
+  });
+  const appendedInfo = await page.evaluate(() => {
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+      };
+    };
+    const original = harnessWindow.__varroE2E
+      ?.getSessionMessages?.('session-tool-cards')
+      .find((message) => message.info.role === 'assistant');
+    if (!original) throw new Error('Tool-card assistant fixture is missing');
+    const info = {
+      ...original.info,
+      id: 'message-streamed-after-explored',
+      time: { created: Date.now() },
+    };
+    const part = {
+      id: 'text-streamed-after-explored',
+      sessionID: 'session-tool-cards',
+      messageID: info.id,
+      type: 'text',
+      text: '',
+    };
+    window.postMessage(
+      { type: 'server/event', payload: { type: 'message.updated', properties: { info } } },
+      '*'
+    );
+    window.postMessage(
+      { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: part.sessionID,
+            messageID: part.messageID,
+            partID: part.id,
+            field: 'text',
+            delta: 'Streamed response after Explored.',
+          },
+        },
+      },
+      '*'
+    );
+    return info;
+  });
+
+  const response = page.getByText('Streamed response after Explored.', { exact: true });
+  await expect(response).toBeVisible();
+  const row = page.locator('[data-msg-id="message-streamed-after-explored"]');
+  await expect(row).not.toHaveClass(/interactive-item-render-empty/);
+  const samples = await response.evaluate(async (element, info) => {
+    if (!element.closest('.interactive-item-container')) {
+      throw new Error('Streamed response row is missing');
+    }
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const measure = () => {
+      const currentRow = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-streamed-after-explored"]'
+      );
+      const currentSummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+      if (!currentRow || !currentSummary) throw new Error('Streamed response geometry is missing');
+      const current = currentRow.querySelector<HTMLElement>('.rendered-markdown p');
+      if (!current) throw new Error('Streamed response content is missing');
+      const box = current.getBoundingClientRect();
+      return {
+        top: box.top,
+        gap: box.top - currentSummary.getBoundingClientRect().bottom,
+      };
+    };
+    const collectedSamples = [measure()];
+    const part = {
+      id: 'text-streamed-after-explored-followup',
+      sessionID: 'session-tool-cards',
+      messageID: info.id,
+      type: 'text',
+      text: '',
+    };
+    window.postMessage(
+      { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+      '*'
+    );
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: part.sessionID,
+            messageID: part.messageID,
+            partID: part.id,
+            field: 'text',
+            delta: 'Following streamed block.',
+          },
+        },
+      },
+      '*'
+    );
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      collectedSamples.push(measure());
+    }
+    return collectedSamples;
+  }, appendedInfo);
+
+  const tops = samples.map((sample) => sample.top);
+  const gaps = samples.map((sample) => sample.gap);
+  expect(Math.max(...tops) - Math.min(...tops), JSON.stringify(samples)).toBeLessThanOrEqual(0.5);
+  expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify(samples)).toBeLessThanOrEqual(0.5);
   for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
 });
 
@@ -931,10 +1052,10 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
       if (!loadingVerb) throw new Error('Thinking indicator is missing');
       return loadingVerb.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
     });
-  expect(await measureGap()).toBe(9);
+  expect(await measureGap()).toBe(6);
   expect(
     await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
-  ).toBe(21);
+  ).toBe(16);
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {
@@ -968,7 +1089,7 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
   await expect(emptyRow).toBeAttached();
   await expect(emptyRow).toHaveClass(/interactive-item-render-empty/);
   expect((await emptyRow.boundingBox())?.height).toBe(0);
-  expect(await measureGap()).toBe(9);
+  expect(await measureGap()).toBe(6);
 });
 
 test('keeps a debounced trailing tool row at zero height until the tool is visible', async ({

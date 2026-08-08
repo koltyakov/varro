@@ -310,7 +310,8 @@ export function getRenderEmptyAssistantMessageIds(
     visibleActive: ReadonlySet<string>;
     retained: ReadonlySet<string>;
     exiting: ReadonlySet<string>;
-  }
+  },
+  streaming?: { partId: string | null; text: string }
 ) {
   const result = new Set<string>();
 
@@ -328,7 +329,7 @@ export function getRenderEmptyAssistantMessageIds(
     for (const part of message.parts) {
       const visible =
         part.type === 'text'
-          ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
+          ? hasVisibleProjectedText(part, streaming)
           : shouldShowAssistantPartInline(part);
       if (!visible) continue;
       if (!isAssistantActivityPart(part)) {
@@ -358,6 +359,14 @@ export function getRenderEmptyAssistantMessageIds(
   }
 
   return result;
+}
+
+function hasVisibleProjectedText(
+  part: { id: string; text: string },
+  streaming?: { partId: string | null; text: string }
+) {
+  const text = part.id === streaming?.partId ? streaming.text || part.text : part.text;
+  return text.trim().length > 0 && !isWorkspaceDirectoryText(text);
 }
 
 export function getChangedInlinePreviewMessageIds(
@@ -2802,7 +2811,11 @@ export function MessageList() {
       ':scope > .assistant-active-activity-items > .assistant-active-activity-item:not(.is-exiting)'
     );
     const maxVisibleItems = Number.parseInt(itemViewport?.dataset.maxVisibleItems || '', 10);
-    if (remainingItems && Number.isFinite(maxVisibleItems) && remainingItems.length > maxVisibleItems) {
+    if (
+      remainingItems &&
+      Number.isFinite(maxVisibleItems) &&
+      remainingItems.length > maxVisibleItems
+    ) {
       preserveCurrentBottomTarget();
       const target = activityExitBottomTarget;
       requestAnimationFrame(() => {
@@ -4530,13 +4543,13 @@ export function MessageList() {
 
   const getTrailingVisibleAssistantPartKey = () => {
     let result: string | null = null;
+    const streaming = { partId: state.streamingPartId, text: state.streamingText };
     for (const message of compactActivityMessages()) {
       if (!isAssistantMessage(message.info)) continue;
       for (const part of message.parts) {
         if (
           !shouldShowAssistantPartInline(part) ||
-          (part.type === 'text' &&
-            (part.text.trim().length === 0 || isWorkspaceDirectoryText(part.text)))
+          (part.type === 'text' && !hasVisibleProjectedText(part, streaming))
         ) {
           continue;
         }
@@ -4678,9 +4691,10 @@ export function MessageList() {
         continue;
       }
 
-      const holdMs = state.streamingPartId && state.streamingText.length > 0
-        ? 0
-        : Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
+      const holdMs =
+        state.streamingPartId && state.streamingText.length > 0
+          ? 0
+          : Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
       setSetMembership(setRetainedActivityPartKeys, key, true);
       const beginExit = () => {
         reserveActivityExitSpace(key);
@@ -4721,35 +4735,105 @@ export function MessageList() {
     for (const key of activityCompletionTimers.keys()) clearActivityCompletionTimer(key);
     for (const key of activityShowTimers.keys()) clearActivityShowTimer(key);
   });
-  const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
+  const assistantActivityProjection = createMemo<{
+    groupMap: Map<string, AssistantActivityGroupInfo[]>;
+    immediatelyGroupedPartKeys: ReadonlySet<string>;
+  }>(
     (previous) => {
+      trackMessageBlockExpansionState();
       const activeMessageIds = activeActivityMessageIds();
       const activityMessages = compactActivityMessages();
-
-      return preserveAssistantActivityGroupKeys(
-        getAssistantActivityGroupMap(
-          activityMessages,
-          (part) =>
-            shouldShowAssistantPartInline(part) &&
-            (!isAssistantActivityPartRunning(part) ||
-              !activeMessageIds.has(part.messageID) ||
-              visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part))) &&
-            shouldCompactAssistantActivityPart(part, {
-              showInlineFileChanges: showInlineFileChanges(),
-              keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-            }) &&
-            (part.type !== 'tool' ||
-              (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part))),
-          (part) =>
-            part.type === 'text'
-              ? part.text.trim().length > 0 && !isWorkspaceDirectoryText(part.text)
-              : shouldShowAssistantPartInline(part)
-        ),
-        previous
+      const streaming = { partId: state.streamingPartId, text: state.streamingText };
+      const canCompactPart = (part: AssistantActivityPart) =>
+        shouldShowAssistantPartInline(part) &&
+        shouldCompactAssistantActivityPart(part, {
+          showInlineFileChanges: showInlineFileChanges(),
+          keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
+        }) &&
+        (part.type !== 'tool' ||
+          (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+      const isBoundaryPart = (part: Part) =>
+        part.type === 'text'
+          ? hasVisibleProjectedText(part, streaming)
+          : shouldShowAssistantPartInline(part);
+      const isNormallyIncluded = (part: AssistantActivityPart) =>
+        canCompactPart(part) &&
+        (!isAssistantActivityPartRunning(part) ||
+          !activeMessageIds.has(part.messageID) ||
+          visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
+      const regularGroupMap = preserveAssistantActivityGroupKeys(
+        getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
+        previous.groupMap
       );
+      const regularGroupByPartKey = new Map(
+        [...regularGroupMap.values()].flatMap((groups) =>
+          groups.flatMap((group) =>
+            group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
+          )
+        )
+      );
+      const immediatelyGroupedPartKeys = new Set<string>();
+      let expandedGroupKey: string | null = null;
+
+      for (const message of activityMessages) {
+        if (
+          message.info.role === 'user' ||
+          (isAssistantMessage(message.info) && message.info.mode === 'subagent')
+        ) {
+          expandedGroupKey = null;
+          continue;
+        }
+
+        for (const part of message.parts) {
+          if (isAssistantActivityPart(part) && canCompactPart(part)) {
+            const partKey = getAssistantActivityPartKey(part);
+            const regularGroup = regularGroupByPartKey.get(partKey);
+            if (regularGroup) {
+              expandedGroupKey = getMessageBlockExpanded(regularGroup.key)
+                ? regularGroup.key
+                : null;
+              continue;
+            }
+            if (
+              expandedGroupKey &&
+              isAssistantActivityPartRunning(part) &&
+              activeMessageIds.has(part.messageID)
+            ) {
+              immediatelyGroupedPartKeys.add(partKey);
+              continue;
+            }
+          }
+          if (isBoundaryPart(part)) expandedGroupKey = null;
+        }
+      }
+
+      if (immediatelyGroupedPartKeys.size === 0) {
+        return { groupMap: regularGroupMap, immediatelyGroupedPartKeys };
+      }
+
+      return {
+        groupMap: preserveAssistantActivityGroupKeys(
+          getAssistantActivityGroupMap(
+            activityMessages,
+            (part) =>
+              isNormallyIncluded(part) ||
+              immediatelyGroupedPartKeys.has(getAssistantActivityPartKey(part)),
+            isBoundaryPart
+          ),
+          regularGroupMap
+        ),
+        immediatelyGroupedPartKeys,
+      };
     },
-    new Map()
+    { groupMap: new Map(), immediatelyGroupedPartKeys: new Set() }
   );
+  const assistantActivityGroupMap = () => assistantActivityProjection().groupMap;
+  const displayedActiveActivityPartKeys = createMemo<ReadonlySet<string>>(() => {
+    const visible = visibleActiveActivityPartKeys();
+    const immediate = assistantActivityProjection().immediatelyGroupedPartKeys;
+    if (immediate.size === 0) return visible;
+    return new Set([...visible, ...immediate]);
+  });
   const compactActivityDisclosureLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
@@ -4757,7 +4841,7 @@ export function MessageList() {
       (key) => getMessageBlockExpanded(key) ?? false,
       (part) => {
         const key = getAssistantActivityPartKey(part);
-        if (visibleActiveActivityPartKeys().has(key)) return 'active';
+        if (displayedActiveActivityPartKeys().has(key)) return 'active';
         if (retainedActivityPartKeys().has(key)) return 'retained';
         if (exitingActivityPartKeys().has(key)) return 'exiting';
         return 'grouped';
@@ -4836,25 +4920,27 @@ export function MessageList() {
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
     const activityMessages = compactActivityMessages();
-    const delayedActivityPartKeys = new Set(activityShowTimers.keys());
+    const immediatelyGroupedPartKeys = assistantActivityProjection().immediatelyGroupedPartKeys;
+    const delayedActivityPartKeys = new Set(
+      [...activityShowTimers.keys()].filter((key) => !immediatelyGroupedPartKeys.has(key))
+    );
     const candidates = getRenderEmptyAssistantMessageIds(
       activityMessages,
       assistantActivityGroupMap(),
       (key) => getMessageBlockExpanded(key) ?? false,
       {
         delayed: delayedActivityPartKeys,
-        visibleActive: visibleActiveActivityPartKeys(),
+        visibleActive: displayedActiveActivityPartKeys(),
         retained: retainedActivityPartKeys(),
         exiting: exitingActivityPartKeys(),
-      }
+      },
+      { partId: state.streamingPartId, text: state.streamingText }
     );
     const modelChanges = modelChangeMap();
     const dialogSummaries = rowAssistantDialogSummaryMap();
     const next = new Set(
       [...candidates].filter(
-        (messageId) =>
-          !modelChanges.has(messageId) &&
-          !dialogSummaries.has(messageId)
+        (messageId) => !modelChanges.has(messageId) && !dialogSummaries.has(messageId)
       )
     );
     if (previous.size === next.size && [...next].every((messageId) => previous.has(messageId))) {
@@ -5452,7 +5538,7 @@ export function MessageList() {
               assistantActivityGroupMap={assistantActivityGroupMap()}
               retainedActivityPartKeys={retainedActivityPartKeys()}
               exitingActivityPartKeys={exitingActivityPartKeys()}
-              visibleActiveActivityPartKeys={visibleActiveActivityPartKeys()}
+              visibleActiveActivityPartKeys={displayedActiveActivityPartKeys()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

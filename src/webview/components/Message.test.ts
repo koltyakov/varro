@@ -1525,7 +1525,7 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
-  it('pulses the final mark when a mounted response becomes final', () => {
+  it('scales the final mark pulse duration with the rail height', async () => {
     const [info, setInfo] = createSignal({
       ...assistantMessage('message-final-pulse'),
       time: { created: 0 },
@@ -1548,10 +1548,20 @@ describe('Message assistant final answer rendering', () => {
 
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
 
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.classList.contains('assistant-message-flow-item-final') ? 400 : 0;
+        return DOMRect.fromRect({ height });
+      });
     setInfo(assistantMessage('message-final-pulse'));
     setHighlightFinalAnswer(true);
+    await Promise.resolve();
+    getBoundingClientRect.mockRestore();
 
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeInstanceOf(HTMLDivElement);
+    const pulse = container?.querySelector<HTMLElement>('.assistant-final-mark-pulse');
+    expect(pulse).toBeInstanceOf(HTMLDivElement);
+    expect(pulse?.style.getPropertyValue('--assistant-final-mark-pulse-duration')).toBe('2400ms');
     expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
       HTMLDivElement
     );
@@ -1559,8 +1569,10 @@ describe('Message assistant final answer rendering', () => {
     const animationEnd = new Event('animationend', { bubbles: true });
     Object.defineProperty(animationEnd, 'animationName', { value: 'assistant-final-mark-pulse' });
     container?.querySelector('.assistant-message-flow-item-final')?.dispatchEvent(animationEnd);
+    await Promise.resolve();
 
     expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
+    expect(pulse?.style.getPropertyValue('--assistant-final-mark-pulse-duration')).toBe('');
   });
 
   it('does not pulse an existing final response when a follow-up changes its highlight', () => {

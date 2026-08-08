@@ -64,6 +64,15 @@ export {
 export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
 export type { ParsedUserMessageContent } from './message/UserMessageContent';
 
+const FINAL_MARK_PULSE_MIN_DURATION_MS = 600;
+const FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS = 6;
+const FINAL_MARK_PULSE_DURATION_PROPERTY = '--assistant-final-mark-pulse-duration';
+const FINAL_MARK_RAIL_SELECTOR = [
+  '.assistant-turn-content-highlighted',
+  '.assistant-turn-content-planning',
+  '.assistant-message-flow-item-final',
+].join(', ');
+
 function isManagedSubagentSession() {
   return state.sessions.some(
     (session) => session.id === state.activeSessionId && Boolean(session.parentID)
@@ -97,6 +106,7 @@ export function Message(props: {
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
+  let turnRef: HTMLDivElement | undefined;
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
   let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
   let finalMarkPulsePending = false;
@@ -124,6 +134,24 @@ export function Message(props: {
     if (!props.highlightFinalAnswer) {
       setPulseFinalMark(false);
     }
+  });
+
+  createEffect(() => {
+    if (!pulseFinalMark()) {
+      turnRef?.style.removeProperty(FINAL_MARK_PULSE_DURATION_PROPERTY);
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (!pulseFinalMark() || !turnRef) return;
+      const rail = turnRef.querySelector<HTMLElement>(FINAL_MARK_RAIL_SELECTOR);
+      if (!rail) return;
+      const duration = Math.max(
+        FINAL_MARK_PULSE_MIN_DURATION_MS,
+        Math.round(rail.getBoundingClientRect().height * FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS)
+      );
+      turnRef.style.setProperty(FINAL_MARK_PULSE_DURATION_PROPERTY, `${duration}ms`);
+    });
   });
 
   const isUser = () => props.info.role === 'user';
@@ -333,6 +361,9 @@ export function Message(props: {
         fallback={<CompactionDivider part={compactionDivider()!} />}
       >
         <div
+          ref={(element) => {
+            turnRef = element;
+          }}
           class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}${pulseFinalMark() ? ' assistant-final-mark-pulse' : ''}`}
           onAnimationEnd={(event) => {
             if (event.animationName === 'assistant-final-mark-pulse') setPulseFinalMark(false);

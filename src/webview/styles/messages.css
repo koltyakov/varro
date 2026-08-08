@@ -281,7 +281,8 @@
   );
   filter: drop-shadow(0 0 3px var(--assistant-rail-color));
   pointer-events: none;
-  animation: assistant-final-mark-pulse 1.1s ease-in-out both;
+  animation: assistant-final-mark-pulse var(--assistant-final-mark-pulse-duration, 1.1s) ease-in-out
+    both;
 }
 
 @keyframes assistant-final-mark-pulse {

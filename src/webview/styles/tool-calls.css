@@ -2367,9 +2367,9 @@ kbd {
 }
 
 .interactive-loading-row {
-  height: 21px;
+  height: 16px;
   box-sizing: border-box;
-  padding-top: 3px;
+  padding-top: 0;
   overflow: hidden;
   overflow-anchor: none;
 }
@@ -2386,7 +2386,7 @@ kbd {
 
 .interactive-loading-row.trailing-assistant-summary-row {
   height: auto;
-  min-height: 21px;
+  min-height: 16px;
 }
 
 .trailing-assistant-summary-row .assistant-dialog-summary {

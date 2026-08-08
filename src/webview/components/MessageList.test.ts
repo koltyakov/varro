@@ -26,6 +26,7 @@ import type {
   Permission,
   QuestionRequest,
   Session,
+  TextPart,
   ToolPart,
   UserMessage,
 } from '../types';
@@ -962,6 +963,64 @@ describe('MessageList compact activity', () => {
     ]);
   });
 
+  it('does not classify projected streaming text after Explored as render-empty', async () => {
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const streamedText: TextPart = {
+      id: 'text-2',
+      sessionID: 'session-1',
+      messageID: 'assistant-2',
+      type: 'text',
+      text: '',
+    };
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect the code')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [read],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [streamedText],
+      },
+    ]);
+    batch(() => {
+      setState('streamingPartId', streamedText.id);
+      setState('streamingText', 'I found the relevant implementation.');
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+    expect(container?.textContent).toContain('I found the relevant implementation.');
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+      'interactive-item-render-empty'
+    );
+
+    batch(() => {
+      upsertPart({ ...streamedText, text: 'I found the relevant implementation.' });
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+      'interactive-item-render-empty'
+    );
+  });
+
   it('uses one disclosure for activity across primary assistant messages', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {
@@ -1098,6 +1157,59 @@ describe('MessageList compact activity', () => {
       'Explored: 1 file, 1 search'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+  });
+
+  it('adds running activity in a new message directly to expanded Explored', async () => {
+    const completed = toolPart('command-completed', 'assistant-1', 'call-command-completed');
+    completed.state = {
+      status: 'completed',
+      input: { command: 'npm run lint' },
+      output: 'passed',
+      title: 'npm run lint',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const running = toolPart('command-running', 'assistant-2', 'call-command-running');
+    running.state = {
+      status: 'running',
+      input: { command: 'npm run test' },
+      title: 'npm run test',
+      time: { start: 3 },
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run checks')] };
+    const first = {
+      info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+      parts: [completed],
+    };
+    const second = {
+      info: assistantMessage('assistant-2', { parentID: 'user-1', time: { created: 3 } }),
+      parts: [running],
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, first]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summary = container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    summary?.click();
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
+
+    replaceMessages([user, first, second]);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
+    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+    expect(summary?.textContent).toContain('Explored: 1 command');
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+      'interactive-item-render-empty'
+    );
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
+    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
   });
 
   it('skips the minimum visible hold when response text is already streaming', async () => {
@@ -2001,12 +2113,12 @@ describe('MessageList history pagination', () => {
   });
 
   it('keeps the visible message fixed when a prepended activity group moves to an older owner', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (
-      this: HTMLElement
-    ) {
-      if (!this.dataset.assistantRenderKey) return [] as unknown as DOMRectList;
-      return [this.getBoundingClientRect()] as unknown as DOMRectList;
-    });
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
+      function (this: HTMLElement) {
+        if (!this.dataset.assistantRenderKey) return [] as unknown as DOMRectList;
+        return [this.getBoundingClientRect()] as unknown as DOMRectList;
+      }
+    );
     const thought: Part = {
       id: 'current-thought',
       sessionID: 'session-1',
@@ -2041,13 +2153,12 @@ describe('MessageList history pagination', () => {
       undefined,
       olderPage
     );
-    const currentRow = container?.querySelector<HTMLElement>(
-      '[data-msg-id="current-assistant"]'
-    );
+    const currentRow = container?.querySelector<HTMLElement>('[data-msg-id="current-assistant"]');
     expect(
-      container?.querySelector('.assistant-activity-group')?.closest('[data-msg-id]')?.getAttribute(
-        'data-msg-id'
-      )
+      container
+        ?.querySelector('.assistant-activity-group')
+        ?.closest('[data-msg-id]')
+        ?.getAttribute('data-msg-id')
     ).toBe('current-assistant');
 
     await harness.startLoad(0);
@@ -2058,9 +2169,10 @@ describe('MessageList history pagination', () => {
     await harness.resolveLoad();
 
     expect(
-      container?.querySelector('.assistant-activity-group')?.closest('[data-msg-id]')?.getAttribute(
-        'data-msg-id'
-      )
+      container
+        ?.querySelector('.assistant-activity-group')
+        ?.closest('[data-msg-id]')
+        ?.getAttribute('data-msg-id')
     ).toBe('older-assistant');
     expect(currentRow!.getBoundingClientRect().top).toBe(topBefore);
     harness.animationFrames.restore();
@@ -5371,9 +5483,9 @@ describe('MessageList sticky prompt preview', () => {
     expect(
       container?.querySelector('[data-msg-id="assistant-1"] .assistant-dialog-summary')
     ).toBeNull();
-    expect(
-      container?.querySelector('.trailing-assistant-summary-row')?.textContent
-    ).toContain('Worked for 5s - Tokens ↑ 600 ↓ 60 - Agents 1');
+    expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
+      'Worked for 5s - Tokens ↑ 600 ↓ 60 - Agents 1'
+    );
   });
 
   it('keeps final assistant answers plain when virtualization hides the summary row', async () => {
@@ -5469,9 +5581,9 @@ describe('MessageList sticky prompt preview', () => {
 
       cacheSessionHistoryPage('session-1', 'bottom-range', [state.messages[0]!]);
       await Promise.resolve();
-      expect(
-        container?.querySelector('.trailing-assistant-summary-row')?.textContent
-      ).toContain('Worked for 2s');
+      expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
+        'Worked for 2s'
+      );
 
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
       list.scrollTop = 0;
@@ -5487,9 +5599,9 @@ describe('MessageList sticky prompt preview', () => {
       list.scrollTop = 9_200;
       list.dispatchEvent(new Event('scroll'));
       await Promise.resolve();
-      expect(
-        container?.querySelector('.trailing-assistant-summary-row')?.textContent
-      ).toContain('Worked for 2s');
+      expect(container?.querySelector('.trailing-assistant-summary-row')?.textContent).toContain(
+        'Worked for 2s'
+      );
     } finally {
       animationFrames.restore();
     }
@@ -7852,8 +7964,7 @@ describe('MessageList loading row', () => {
     patch.state = {
       status: 'running',
       input: {
-        patchText:
-          '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
+        patchText: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
       },
       title: 'Apply patch',
       time: { start: 1 },
@@ -8050,7 +8161,9 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
       HTMLDivElement
     );
-    expect(container?.querySelector('.trailing-assistant-summary-row .loading-indicator')).toBeNull();
+    expect(
+      container?.querySelector('.trailing-assistant-summary-row .loading-indicator')
+    ).toBeNull();
   });
 
   it('keeps the worked summary visible across post-completion signals until a new prompt', async () => {
