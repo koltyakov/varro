@@ -9,7 +9,7 @@ export type StickyUserMessagePreview = {
   imageCount: number;
 };
 
-export function getStickyUserMessageCounts(parts: Part[]): {
+function getStickyUserMessageCounts(parts: Part[]): {
   attachmentCount: number;
   imageCount: number;
 } {
@@ -30,10 +30,6 @@ export function getSubagentSessionIds(messages: readonly { info: Message }[]): R
     }
   }
   return result;
-}
-
-export function hasStickyUserMessageContent(parts: Part[]) {
-  return getUserMessagePreviewText(parts) !== EMPTY_USER_MESSAGE_PREVIEW;
 }
 
 export function getStickyUserMessagePreview(

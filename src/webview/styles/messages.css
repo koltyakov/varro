@@ -952,8 +952,7 @@ body.vscode-light
 }
 
 .interactive-item-container.interactive-response.interactive-response-follows-response:not(
-    .interactive-item-render-empty,
-    .interactive-response-file-edit-group
+    .interactive-item-render-empty
   ) {
   padding-top: 6px;
 }
@@ -1070,38 +1069,6 @@ body.vscode-light
 
 .assistant-file-edit-stack:has(.file-change-inline-diffs-unwrapped) {
   gap: 12px;
-}
-
-.interactive-item-container.interactive-response.interactive-response-file-edit-group-start {
-  padding-bottom: 0;
-}
-
-.interactive-item-container.interactive-response.interactive-response-file-edit-group-middle {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.interactive-item-container.interactive-response.interactive-response-file-edit-group-end {
-  padding-top: 0;
-}
-
-.assistant-turn-content.assistant-turn-file-edit-group-start {
-  border-bottom-left-radius: var(--radius-control);
-  border-bottom-right-radius: var(--radius-control);
-}
-
-.assistant-turn-content.assistant-turn-file-edit-group-middle,
-.assistant-turn-content.assistant-turn-file-edit-group-end {
-  margin-top: -1px;
-}
-
-.assistant-turn-content.assistant-turn-file-edit-group-middle {
-  border-radius: var(--radius-control);
-}
-
-.assistant-turn-content.assistant-turn-file-edit-group-end {
-  border-top-left-radius: var(--radius-control);
-  border-top-right-radius: var(--radius-control);
 }
 
 .chat-turn-content > :last-child,

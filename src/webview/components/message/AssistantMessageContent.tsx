@@ -33,8 +33,6 @@ import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
 
-export type AssistantFileEditStackGroup = 'start' | 'middle' | 'end';
-
 type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
   | { kind: 'file-edit-stack'; key: string; parts: ToolPart[] }
@@ -107,7 +105,6 @@ export function stripCompactionBoundaryMarkdown(text: string) {
 export function getAssistantContainerVariant(params: {
   isUser: boolean;
   visibleDiffCount: number;
-  fileEditStackGroup?: AssistantFileEditStackGroup | null;
   isSubagent: boolean;
   hasStructuredAssistantParts: boolean;
   layoutParts: Part[];
@@ -126,7 +123,6 @@ export function getAssistantContainerVariant(params: {
   }
 
   if (params.visibleDiffCount > 0) return 'plain';
-  if (params.fileEditStackGroup) return false;
   if (!params.highlightFinalAnswer) {
     return 'plain';
   }

@@ -173,7 +173,6 @@ export function VirtualizedContent(
               showPromptNumbers={props.showPromptNumbers}
               lastAssistantID={props.lastAssistantID}
               previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
-              fileEditStackGroupMap={props.fileEditStackGroupMap}
               assistantDialogSummaryMap={props.assistantDialogSummaryMap}
               isFinalAssistantMessage={props.isFinalAssistantMessage}
               assistantActivityGroupMap={props.assistantActivityGroupMap}
@@ -186,12 +185,8 @@ export function VirtualizedContent(
               claimMessageEntrance={props.claimMessageEntrance}
               claimAssistantItemReveal={props.claimAssistantItemReveal}
               observeMeasuredRow={props.observeMeasuredRow}
-              isPlanningAssistantMessage={props.isPlanningAssistantMessage}
               questionRequestForTool={props.questionRequestForTool}
               permissionMatchForTool={props.permissionMatchForTool}
-              shouldShowPlanImplementationAction={props.shouldShowPlanImplementationAction}
-              buildPlanImplementationPrompt={props.buildPlanImplementationPrompt}
-              buildPlanDocumentContent={props.buildPlanDocumentContent}
             />
           );
         }}

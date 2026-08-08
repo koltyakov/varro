@@ -7,7 +7,14 @@ import {
 import { resolveTaskSessionId } from '../../lib/task-session';
 import type { TaskSessionInfo } from '../../lib/task-session';
 import type { AssistantMessage, MessageEntry } from '../../types';
-import type { AssistantDialogSummaryInfo } from './MessageRows';
+
+export type AssistantDialogSummaryInfo = {
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  agentCount: number;
+  collectingStats?: boolean;
+};
 
 type AssistantDialogOptions = {
   sessions?: readonly TaskSessionInfo[];
@@ -32,55 +39,43 @@ export function getAssistantDialogSummaryMap(
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
   let currentUserRequestCreated: number | null = null;
+  const resetCurrentDialog = () => {
+    currentMessages = [];
+    currentPrimaryMessageIds = [];
+    currentSubagentHandoffCount = 0;
+    currentUserRequestCreated = null;
+  };
 
   const flush = (args?: { nextUserRequestCreated?: number; trailing?: boolean }) => {
     if (currentMessages.length === 0) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
     const lastMessage = currentMessages[currentMessages.length - 1];
     if (!lastMessage?.time.completed) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
     if (isContinuationAssistantFinish(lastMessage.finish)) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
     if (args?.trailing && options?.suppressTrailingSummary) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
     if (targetMessageIds && !targetMessageIds.has(lastMessage.id)) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
     const lastEntry = entriesById.get(lastMessage.id);
     if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
-      currentMessages = [];
-      currentPrimaryMessageIds = [];
-      currentSubagentHandoffCount = 0;
-      currentUserRequestCreated = null;
+      resetCurrentDialog();
       return;
     }
 
@@ -122,10 +117,7 @@ export function getAssistantDialogSummaryMap(
       collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,
     });
 
-    currentMessages = [];
-    currentPrimaryMessageIds = [];
-    currentSubagentHandoffCount = 0;
-    currentUserRequestCreated = null;
+    resetCurrentDialog();
   };
 
   for (const entry of messages) {

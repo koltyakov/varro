@@ -380,7 +380,10 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     expect(samples[0]?.editing).toBe(true);
-    expect(samples.some((sample) => sample.replacementVisible), JSON.stringify(samples)).toBe(true);
+    expect(
+      samples.some((sample) => sample.replacementVisible),
+      JSON.stringify(samples)
+    ).toBe(true);
     expect(
       samples.every((sample) => sample.editing || sample.replacementVisible),
       JSON.stringify(samples)
@@ -393,6 +396,131 @@ test.describe('auto-scroll', () => {
     await expect
       .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
       .toBeLessThan(2);
+  });
+
+  test('keeps the transcript fixed when streamed text moves reasoning into Explored', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => localStorage.setItem('varro.showThinking', 'true'));
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript&activeReasoningEntrance=1');
+    const anchor = page.locator('[data-msg-id="message-large-assistant-238"]');
+    const activeReasoning = page.locator('[data-activity-part-id="reasoning-stream-to-text"]');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
+
+    await page.evaluate(() => {
+      const part = {
+        id: 'reasoning-stream-to-text',
+        sessionID: 'session-large-transcript',
+        messageID: 'message-large-assistant-active',
+        type: 'reasoning' as const,
+        text: 'Preparing the streamed response.',
+        time: { start: Date.now() },
+      };
+      const harness = (
+        window as typeof window & {
+          __varroE2E?: { updateMessagePart?: (updatedPart: Record<string, unknown>) => void };
+        }
+      ).__varroE2E;
+      harness?.updateMessagePart?.(part);
+      window.postMessage(
+        { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+        '*'
+      );
+    });
+
+    await expect(activeReasoning).toBeVisible();
+    await activeReasoning.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    const beforeTop = await anchor.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+
+    const samples = await anchor.evaluate(async (element) => {
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      const harness = (
+        window as typeof window & {
+          __varroE2E?: {
+            getSessionMessages?: (
+              sessionId: string
+            ) => Array<{ parts: Array<Record<string, unknown>> }>;
+            updateMessagePart?: (updatedPart: Record<string, unknown>) => void;
+          };
+        }
+      ).__varroE2E;
+      const reasoning = harness
+        ?.getSessionMessages?.('session-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((part) => part.id === 'reasoning-stream-to-text');
+      if (!reasoning) throw new Error('Active reasoning fixture is missing');
+
+      const textPart = {
+        id: 'text-stream-after-reasoning',
+        sessionID: 'session-large-transcript',
+        messageID: 'message-large-assistant-active',
+        type: 'text' as const,
+        text: '',
+      };
+      harness?.updateMessagePart?.(textPart);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: textPart } },
+        },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.delta',
+            properties: {
+              sessionID: textPart.sessionID,
+              messageID: textPart.messageID,
+              partID: textPart.id,
+              field: 'text',
+              delta: 'Answer.',
+            },
+          },
+        },
+        '*'
+      );
+      const completedReasoning = {
+        ...reasoning,
+        time: { ...(reasoning.time as object), end: Date.now() },
+      };
+      harness?.updateMessagePart?.(completedReasoning);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.updated',
+            properties: { part: completedReasoning },
+          },
+        },
+        '*'
+      );
+
+      const tops: number[] = [];
+      for (let frame = 0; frame < 90; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        tops.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      return tops;
+    });
+
+    expect(
+      samples.every((top) => Math.abs(top - beforeTop) <= 1.5),
+      JSON.stringify({ beforeTop, samples })
+    ).toBe(true);
+    await expect(activeReasoning).toHaveCount(0);
+    await expect(page.locator('.assistant-activity-summary').last()).toContainText('Explored');
   });
 
   test('does not push a full transcript backward when send-time panels collapse', async ({

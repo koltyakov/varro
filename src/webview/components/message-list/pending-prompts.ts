@@ -4,17 +4,8 @@ import {
   getSessionTreeRootId,
 } from '../../lib/state';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
+import { getToolCallLookupKey } from '../../lib/tool-call-matching';
 import type { MessageEntry, Permission, QuestionRequest } from '../../types';
-
-function getLinkedToolCallKey(
-  sessionId: string,
-  messageId: string | null | undefined,
-  callId: string | null | undefined
-) {
-  if (!messageId || !callId) return null;
-
-  return `${sessionId}\u0000${messageId}\u0000${callId}`;
-}
 
 export function getLinkedToolCallKeys(messages: MessageEntry[]) {
   const keys = new Set<string>();
@@ -30,7 +21,7 @@ export function getLinkedToolCallKeys(messages: MessageEntry[]) {
       ) {
         continue;
       }
-      const key = getLinkedToolCallKey(sessionId, messageId, part.callID);
+      const key = getToolCallLookupKey(sessionId, messageId, part.callID);
       if (key) keys.add(key);
     }
   }
@@ -44,7 +35,7 @@ function hasLinkedToolCall(
   messageId: string | null | undefined,
   callId: string | null | undefined
 ) {
-  const key = getLinkedToolCallKey(sessionId, messageId, callId);
+  const key = getToolCallLookupKey(sessionId, messageId, callId);
   if (!key) return false;
 
   return linkedToolCalls.has(key);

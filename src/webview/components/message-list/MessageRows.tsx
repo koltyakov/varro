@@ -11,23 +11,15 @@ import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
-import type {
-  AssistantMessage,
-  Message,
-  MessageEntry,
-  Part,
-  QuestionRequest,
-  ToolPart,
-} from '../../types';
-import { Message as MessageComponent, type AssistantFileEditStackGroup } from '../Message';
-
-export type AssistantDialogSummaryInfo = {
-  durationMs: number;
-  inputTokens: number;
-  outputTokens: number;
-  agentCount: number;
-  collectingStats?: boolean;
-};
+import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
+import { Message as MessageComponent } from '../Message';
+import {
+  buildPlanDocumentContent,
+  buildPlanImplementationPrompt,
+  isPlanningAssistantMessage,
+  shouldShowPlanImplementationAction,
+} from './plan-actions';
+import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
@@ -37,7 +29,6 @@ export type MessageRowSharedProps = {
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
-  fileEditStackGroupMap: Map<string, AssistantFileEditStackGroup | null>;
   assistantDialogSummaryMap: Map<string, AssistantDialogSummaryInfo>;
   isFinalAssistantMessage(messageId: string): boolean;
   assistantActivityGroupMap?: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>;
@@ -49,16 +40,8 @@ export type MessageRowSharedProps = {
   claimMessageEntrance?: (messageId: string) => boolean;
   claimAssistantItemReveal?: (messageId: string, renderKey: string) => boolean;
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
-  isPlanningAssistantMessage: (info: AssistantMessage) => boolean;
   questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool: (part: ToolPart) => ToolCallPermissionMatch | null;
-  shouldShowPlanImplementationAction: (args: {
-    hasBuildAgent: boolean;
-    info: Message;
-    latestPlanImplementationMessageId: string | null;
-  }) => boolean;
-  buildPlanImplementationPrompt: (parts: Part[]) => string;
-  buildPlanDocumentContent: (parts: Part[]) => string;
 };
 
 export function MessageRows(props: { messages: MessageEntry[] } & MessageRowSharedProps) {
@@ -119,7 +102,6 @@ export function MessageRow(
     const ownIndex = messages.findIndex((entry) => entry.info.id === props.msg.info.id);
     return ownIndex > editedIndex;
   });
-  const fileEditStackGroup = () => props.fileEditStackGroupMap.get(props.msg.info.id) ?? null;
   const summary = () => props.assistantDialogSummaryMap.get(props.msg.info.id);
   const assistantActivityGroups = () =>
     props.assistantActivityGroupMap?.get(props.msg.info.id) ?? null;
@@ -140,7 +122,7 @@ export function MessageRow(
   const highlightPlanningAnswer = () =>
     props.isFinalAssistantMessage(props.msg.info.id) &&
     isAssistantMessage(props.msg.info) &&
-    props.isPlanningAssistantMessage(props.msg.info as AssistantMessage);
+    isPlanningAssistantMessage(props.msg.info);
 
   onMount(() => {
     if (rowRef && animateEntrance) {
@@ -166,11 +148,7 @@ export function MessageRow(
       style={{ height: isVirtualPlaceholder() ? `${props.virtualHeight ?? 0}px` : undefined }}
       class={`interactive-item-container ${
         props.msg.info.role === 'user' ? 'interactive-request' : 'interactive-response'
-      } ${
-        fileEditStackGroup()
-          ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
-          : ''
-      }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      } ${entrancePending() ? 'interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >
@@ -195,7 +173,6 @@ export function MessageRow(
             previousTrailingFileEventSignature={
               props.previousTrailingFileEventSignatureMap.get(props.msg.info.id) ?? null
             }
-            fileEditStackGroup={fileEditStackGroup()}
             streamingPartId={streamingPartId()}
             streamingText={streamingText()}
             allowInitialAssistantItemReveal={allowInitialAssistantItemReveal}
@@ -215,9 +192,6 @@ export function MessageRow(
               msg={props.msg}
               hasBuildAgent={props.hasBuildAgent}
               latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
-              shouldShowPlanImplementationAction={props.shouldShowPlanImplementationAction}
-              buildPlanImplementationPrompt={props.buildPlanImplementationPrompt}
-              buildPlanDocumentContent={props.buildPlanDocumentContent}
             />
           )}
         </Show>
@@ -230,31 +204,21 @@ export function AssistantDialogSummaryForMessage(
   props: {
     summary: AssistantDialogSummaryInfo;
     msg: MessageEntry;
-  } & Pick<
-    MessageRowSharedProps,
-    | 'hasBuildAgent'
-    | 'latestPlanImplementationMessageId'
-    | 'shouldShowPlanImplementationAction'
-    | 'buildPlanImplementationPrompt'
-    | 'buildPlanDocumentContent'
-  >
+  } & Pick<MessageRowSharedProps, 'hasBuildAgent' | 'latestPlanImplementationMessageId'>
 ) {
   return (
     <AssistantDialogSummary
       summary={props.summary}
-      showImplementPlanAction={props.shouldShowPlanImplementationAction({
+      showImplementPlanAction={shouldShowPlanImplementationAction({
         hasBuildAgent: props.hasBuildAgent,
         info: props.msg.info,
         latestPlanImplementationMessageId: props.latestPlanImplementationMessageId,
       })}
       onImplementPlan={() =>
-        void implementPlan(
-          props.buildPlanImplementationPrompt(props.msg.parts),
-          props.msg.info.sessionID
-        )
+        void implementPlan(buildPlanImplementationPrompt(props.msg.parts), props.msg.info.sessionID)
       }
       onOpenPlan={() =>
-        void openPlan(props.buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
+        void openPlan(buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
       }
       onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
     />

@@ -97,7 +97,6 @@ describe('MessageRows perf guards', () => {
           modelChangeMap: new Map(),
           lastAssistantID: null,
           previousTrailingFileEventSignatureMap: new Map(),
-          fileEditStackGroupMap: new Map(),
           assistantDialogSummaryMap: new Map(),
           isFinalAssistantMessage: () => false,
           promptNumberMap: new Map(),

@@ -31,16 +31,14 @@ import type {
   UserMessage,
 } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
+import { MessageList, getNewlyAppendedMessageIds, getPromptNumberMap } from './MessageList';
 import {
-  MessageList,
   getChangedInlinePreviewMessageIds,
   getCompactActivityDisclosureLayoutSignatures,
   getCompactActivityLayoutSignatures,
   getInlinePreviewLayoutSignatures,
-  getNewlyAppendedMessageIds,
-  getPromptNumberMap,
   getRenderEmptyAssistantMessageIds,
-} from './MessageList';
+} from './message-list/row-layout';
 import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,

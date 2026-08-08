@@ -38,7 +38,6 @@ import {
   deduplicateFileEdits,
   getAssistantContainerVariant,
   stripCompactionBoundaryMarkdown,
-  type AssistantFileEditStackGroup,
 } from './message/AssistantMessageContent';
 import { CompactionDivider } from './message/CompactionDivider';
 import { DiffSummary } from './message/DiffSummary';
@@ -61,7 +60,6 @@ export {
   hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
-export type { AssistantFileEditStackGroup } from './message/AssistantMessageContent';
 export type { ParsedUserMessageContent } from './message/UserMessageContent';
 
 const FINAL_MARK_PULSE_MIN_DURATION_MS = 600;
@@ -94,7 +92,6 @@ export function Message(props: {
   highlightFinalAnswer?: boolean;
   highlightPlanningAnswer?: boolean;
   previousTrailingFileEventSignature?: string | null;
-  fileEditStackGroup?: AssistantFileEditStackGroup | null;
   streamingPartId?: string | null;
   streamingText?: string;
   allowInitialAssistantItemReveal?: boolean;
@@ -308,7 +305,6 @@ export function Message(props: {
     return getAssistantContainerVariant({
       isUser: isUser(),
       visibleDiffCount: visibleDiffs().length,
-      fileEditStackGroup: props.fileEditStackGroup,
       isSubagent: isSubagent(),
       hasStructuredAssistantParts: hasStructuredAssistantParts(),
       layoutParts: layoutAssistantParts(),
@@ -372,11 +368,7 @@ export function Message(props: {
           <div
             class={`value chat-turn-content ${
               isUser() ? 'chat-turn-card user-message-card' : assistantContainerClass()
-            } ${isSubagent() ? 'chat-turn-subagent' : ''} ${
-              props.fileEditStackGroup
-                ? `assistant-turn-file-edit-group-${props.fileEditStackGroup}`
-                : ''
-            }${canEditUserMessage() && !isEditingUserMessage() ? ' user-message-card-editable' : ''}`}
+            } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
             onClick={handleUserCardClick}
             title={
               canEditUserMessage() && !isEditingUserMessage() ? 'Click to edit message' : undefined

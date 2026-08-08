@@ -38,29 +38,24 @@ export function hasCommittedVisibleTextAsLastPart(
   streamingPartId: string | null,
   loadingStartedAt: number | null
 ): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const entry = messages[i]!;
-    if (entry.info.role !== 'assistant') return false;
-    if (entry.info.error) return false;
-    const completedAt = entry.info.time.completed;
-    if (
-      typeof completedAt === 'number' &&
-      loadingStartedAt !== null &&
-      loadingStartedAt > completedAt
-    ) {
-      return false;
-    }
-    for (let j = entry.parts.length - 1; j >= 0; j--) {
-      const part = entry.parts[j]!;
-      if (!shouldShowAssistantPartInline(part)) continue;
-      if (part.id === streamingPartId) return false;
-      if (part.type === 'text') {
-        const text = part.text.trim();
-        return text.length > 0 && !isWorkspaceDirectoryText(text);
-      }
-      return false;
-    }
+  const entry = messages.at(-1);
+  if (!entry || entry.info.role !== 'assistant' || entry.info.error) return false;
+  const completedAt = entry.info.time.completed;
+  if (
+    typeof completedAt === 'number' &&
+    loadingStartedAt !== null &&
+    loadingStartedAt > completedAt
+  ) {
     return false;
   }
+
+  for (let index = entry.parts.length - 1; index >= 0; index -= 1) {
+    const part = entry.parts[index]!;
+    if (!shouldShowAssistantPartInline(part)) continue;
+    if (part.id === streamingPartId || part.type !== 'text') return false;
+    const text = part.text.trim();
+    return text.length > 0 && !isWorkspaceDirectoryText(text);
+  }
+
   return false;
 }

@@ -200,7 +200,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [
@@ -218,7 +217,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Updating the carousel layout.')],
@@ -233,7 +231,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [reasoningPart('reason-1', 'Inspecting'), textPart('text-1', 'Final answer.')],
@@ -248,7 +245,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Plan summary.')],
@@ -263,7 +259,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [
@@ -282,7 +277,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [
@@ -300,7 +294,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [
@@ -318,7 +311,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Final answer.')],
@@ -333,7 +325,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 2,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: false,
         layoutParts: [textPart('text-1', 'Final answer with changed files.')],
@@ -348,7 +339,6 @@ describe('getAssistantContainerVariant', () => {
       getAssistantContainerVariant({
         isUser: false,
         visibleDiffCount: 0,
-        fileEditStackGroup: null,
         isSubagent: false,
         hasStructuredAssistantParts: true,
         layoutParts: [reasoningPart('reason-1', 'Inspecting')],

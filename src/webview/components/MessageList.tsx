@@ -14,12 +14,10 @@ import {
   isSessionAwaitingInput,
   state,
   isLoading,
-  stopLoading,
   hasActiveQuestion,
   hasActivePermission,
   isSessionCompacting,
   loadingStartedAt,
-  loadingLastActivityAt,
   messageListScrollRequestKey,
   requestMessageListScrollToBottom,
   getActiveUsageLimitNotice,
@@ -47,13 +45,11 @@ import {
 import { isAssistantMessage, isContinuationAssistantFinish } from '../lib/message-metrics';
 import {
   getFinalAssistantTextPartId,
-  hasVisibleReasoningContent,
   isWorkspaceDirectoryText,
   shouldShowAssistantPartInline,
 } from '../lib/part-utils';
 import { shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
-import type { AssistantFileEditStackGroup } from './Message';
 import { editingMessage } from '../lib/message-edit-state';
 import { hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import {
@@ -68,18 +64,13 @@ import {
   markSessionHistoryLoadFailed,
   mergeOlderHistory,
 } from '../lib/message-window';
-import {
-  loadOlderSessionHistoryPage,
-  loadOlderSessionPrompts,
-  recheckSessionStatus,
-} from '../hooks/useOpenCode';
+import { loadOlderSessionHistoryPage, loadOlderSessionPrompts } from '../hooks/useOpenCode';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { formatLabelWithProvider, formatModelName, formatVariantLabel } from '../lib/format';
 import {
   collapseLeadingDuplicateFileEvents,
   getTrailingFileEventSignature,
 } from '../lib/message-event-collapse';
-import { getToolInlineFileChangesLayoutSignature } from '../lib/tool-file-change';
 import {
   buildPermissionRequestLookup,
   buildQuestionRequestLookup,
@@ -91,6 +82,7 @@ import {
 } from '../lib/tool-call-expansion-state';
 import {
   ChatContentBottomFade,
+  LoadingRow,
   PendingActionRows,
   StickyUserMessagePreviewCard,
 } from './message-list/MessageListChrome';
@@ -113,6 +105,7 @@ import {
   calculateVirtualRangeFromMetrics,
   getFirstVisibleMessageIndexFromVirtualMetrics,
   pruneMeasuredHeights,
+  VIRTUALIZE_THRESHOLD,
   type VisibleRange,
   type VirtualMetrics,
 } from './message-list/virtualization';
@@ -137,14 +130,17 @@ import {
   getVisibleThreadMessages,
   hasVisibleRunningToolPart,
 } from './message-list/thread-visibility';
-import {
-  buildPlanDocumentContent,
-  buildPlanImplementationPrompt,
-  getLatestPlanImplementationMessageId,
-  isPlanningAssistantMessage,
-  shouldShowPlanImplementationAction,
-} from './message-list/plan-actions';
+import { getLatestPlanImplementationMessageId } from './message-list/plan-actions';
 import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
+import {
+  getChangedInlinePreviewMessageIds,
+  getCompactActivityDisclosureLayoutSignatures,
+  getCompactActivityLayoutSignatures,
+  getInlinePreviewLayoutSignatures,
+  getRenderEmptyAssistantMessageIds,
+  getThinkingLayoutSignatures,
+  hasVisibleProjectedText,
+} from './message-list/row-layout';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
@@ -153,8 +149,6 @@ function showTruncatedHistoryBanner() {
 function historyLoadFailed() {
   return !editingMessage() && isSessionHistoryLoadFailed(state.activeSessionId);
 }
-
-const VIRTUALIZE_THRESHOLD = 50;
 
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_COLLISION_BUFFER_PX = 8;
@@ -217,173 +211,6 @@ function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
 
 function waitForAnimationFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-}
-
-export function getInlinePreviewLayoutSignatures(
-  messages: readonly { info: { id: string }; parts: readonly Part[] }[],
-  enabled: boolean
-) {
-  const signatures = new Map<string, string>();
-  if (!enabled) return signatures;
-
-  for (const message of messages) {
-    const partSignatures: string[] = [];
-    for (const part of message.parts) {
-      if (part.type !== 'tool') continue;
-      const signature = getToolInlineFileChangesLayoutSignature(part.tool, part.state);
-      if (signature) {
-        const cardLayout = part.state.status === 'completed' ? 'preview-only' : 'preview-with-card';
-        partSignatures.push(`${part.id}:${cardLayout}:${signature}`);
-      }
-    }
-    if (partSignatures.length > 0) {
-      signatures.set(message.info.id, partSignatures.join('\u0000'));
-    }
-  }
-  return signatures;
-}
-
-export function getCompactActivityLayoutSignatures(
-  messages: readonly {
-    info: { id: string; role: 'user' | 'assistant' };
-    parts: readonly Part[];
-  }[]
-) {
-  const signatures = new Map<string, string>();
-
-  for (const message of messages) {
-    if (message.info.role !== 'assistant') continue;
-    const activityPartIds = message.parts.flatMap((part) =>
-      isAssistantActivityPart(part) ? [part.id] : []
-    );
-    if (activityPartIds.length > 0) {
-      signatures.set(message.info.id, activityPartIds.join('\u0000'));
-    }
-  }
-  return signatures;
-}
-
-function getThinkingLayoutSignatures(
-  messages: readonly {
-    info: { id: string; role: 'user' | 'assistant' };
-    parts: readonly Part[];
-  }[],
-  enabled: boolean
-) {
-  const signatures = new Map<string, string>();
-  if (!enabled) return signatures;
-
-  for (const message of messages) {
-    if (message.info.role !== 'assistant') continue;
-    const reasoningPartIds = message.parts.flatMap((part) =>
-      part.type === 'reasoning' && hasVisibleReasoningContent(part.text) ? [part.id] : []
-    );
-    if (reasoningPartIds.length > 0) {
-      signatures.set(message.info.id, reasoningPartIds.join('\u0000'));
-    }
-  }
-  return signatures;
-}
-
-export function getCompactActivityDisclosureLayoutSignatures(
-  groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  isExpanded: (key: string) => boolean,
-  getPartLayoutState?: (part: AssistantActivityPart) => string
-) {
-  return new Map(
-    [...groups].map(([messageId, messageGroups]) => [
-      messageId,
-      messageGroups
-        .map((group) => {
-          const partSignature = group.parts
-            .map(
-              (part) => `${part.messageID}\u0000${part.id}\u0000${getPartLayoutState?.(part) ?? ''}`
-            )
-            .join('\u0002');
-          return `${group.key}\u0000${group.ownerMessageId}\u0000${group.ownerPartId}\u0000${isExpanded(group.key) ? 'expanded' : 'collapsed'}\u0000${partSignature}`;
-        })
-        .join('\u0001'),
-    ])
-  );
-}
-
-export function getRenderEmptyAssistantMessageIds(
-  messages: readonly MessageEntry[],
-  groups: ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>,
-  isExpanded: (key: string) => boolean,
-  transitionActivityPartKeys?: {
-    delayed: ReadonlySet<string>;
-    visibleActive: ReadonlySet<string>;
-    retained: ReadonlySet<string>;
-    exiting: ReadonlySet<string>;
-  },
-  streaming?: { partId: string | null; text: string }
-) {
-  const result = new Set<string>();
-
-  for (const message of messages) {
-    if (!isAssistantMessage(message.info) || message.info.error) continue;
-    const messageGroups = groups.get(message.info.id) ?? [];
-
-    const groupByPartKey = new Map(
-      messageGroups.flatMap((group) =>
-        group.parts.map((part) => [`${part.messageID}\u0000${part.id}`, group] as const)
-      )
-    );
-    let hasVisibleRowContent = false;
-
-    for (const part of message.parts) {
-      const visible =
-        part.type === 'text'
-          ? hasVisibleProjectedText(part, streaming)
-          : shouldShowAssistantPartInline(part);
-      if (!visible) continue;
-      if (!isAssistantActivityPart(part)) {
-        hasVisibleRowContent = true;
-        break;
-      }
-
-      const partKey = getAssistantActivityPartKey(part);
-      if (transitionActivityPartKeys?.delayed.has(partKey)) continue;
-      if (
-        transitionActivityPartKeys?.visibleActive.has(partKey) ||
-        transitionActivityPartKeys?.retained.has(partKey) ||
-        transitionActivityPartKeys?.exiting.has(partKey)
-      ) {
-        hasVisibleRowContent = true;
-        break;
-      }
-
-      const group = groupByPartKey.get(partKey);
-      if (!group || group.ownerMessageId === message.info.id || isExpanded(group.key)) {
-        hasVisibleRowContent = true;
-        break;
-      }
-    }
-
-    if (!hasVisibleRowContent) result.add(message.info.id);
-  }
-
-  return result;
-}
-
-function hasVisibleProjectedText(
-  part: { id: string; text: string },
-  streaming?: { partId: string | null; text: string }
-) {
-  const text = part.id === streaming?.partId ? streaming.text || part.text : part.text;
-  return text.trim().length > 0 && !isWorkspaceDirectoryText(text);
-}
-
-export function getChangedInlinePreviewMessageIds(
-  previous: ReadonlyMap<string, string>,
-  current: ReadonlyMap<string, string>,
-  currentMessageIds: ReadonlySet<string>
-) {
-  return [...new Set([...previous.keys(), ...current.keys()])].filter(
-    (messageId) =>
-      currentMessageIds.has(messageId) && previous.get(messageId) !== current.get(messageId)
-  );
 }
 
 export function getNewlyAppendedMessageIds(
@@ -2002,8 +1829,7 @@ export function MessageList() {
     const hasLayoutMeasurements = measuredHeightsFromLayout.some((height) => height > 0);
     const noLayoutFallbackHeight = hasLayoutMeasurements
       ? 0
-      : Math.max(1, Math.floor((containerRef?.scrollHeight || 0) / Math.max(1, items.length))) ||
-        160;
+      : Math.max(1, Math.floor((containerRef?.scrollHeight || 0) / Math.max(1, items.length)));
     let changed = false;
     items.forEach((el, index) => {
       const id = el.dataset.msgId;
@@ -4927,6 +4753,15 @@ export function MessageList() {
     });
   };
 
+  const canCompactActivityPart = (part: AssistantActivityPart) =>
+    shouldShowAssistantPartInline(part) &&
+    shouldCompactAssistantActivityPart(part, {
+      showInlineFileChanges: showInlineFileChanges(),
+      keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
+    }) &&
+    (part.type !== 'tool' ||
+      (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
+
   createComputed(() => {
     const activityMessages = compactActivityMessages();
     const candidates: AssistantActivityPart[] = [];
@@ -4939,16 +4774,7 @@ export function MessageList() {
     for (const message of activityMessages) {
       if (!isAssistantMessage(message.info)) continue;
       for (const part of message.parts) {
-        if (
-          !isAssistantActivityPart(part) ||
-          !shouldShowAssistantPartInline(part) ||
-          !shouldCompactAssistantActivityPart(part, {
-            showInlineFileChanges: showInlineFileChanges(),
-            keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-          }) ||
-          (part.type === 'tool' &&
-            (getQuestionRequestForTool(part) || getPermissionMatchForTool(part)))
-        ) {
+        if (!isAssistantActivityPart(part) || !canCompactActivityPart(part)) {
           continue;
         }
 
@@ -5088,20 +4914,12 @@ export function MessageList() {
       const activeMessageIds = activeActivityMessageIds();
       const activityMessages = compactActivityMessages();
       const streaming = { partId: state.streamingPartId, text: state.streamingText };
-      const canCompactPart = (part: AssistantActivityPart) =>
-        shouldShowAssistantPartInline(part) &&
-        shouldCompactAssistantActivityPart(part, {
-          showInlineFileChanges: showInlineFileChanges(),
-          keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
-        }) &&
-        (part.type !== 'tool' ||
-          (!getQuestionRequestForTool(part) && !getPermissionMatchForTool(part)));
       const isBoundaryPart = (part: Part) =>
         part.type === 'text'
           ? hasVisibleProjectedText(part, streaming)
           : shouldShowAssistantPartInline(part);
       const isNormallyIncluded = (part: AssistantActivityPart) =>
-        canCompactPart(part) &&
+        canCompactActivityPart(part) &&
         (!isAssistantActivityPartRunning(part) ||
           !activeMessageIds.has(part.messageID) ||
           visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
@@ -5138,7 +4956,7 @@ export function MessageList() {
         }
 
         for (const part of message.parts) {
-          if (isAssistantActivityPart(part) && canCompactPart(part)) {
+          if (isAssistantActivityPart(part) && canCompactActivityPart(part)) {
             const partKey = getAssistantActivityPartKey(part);
             const regularGroup = regularGroupByPartKey.get(partKey);
             if (regularGroup) {
@@ -5217,10 +5035,6 @@ export function MessageList() {
     );
     previousCompactActivityDisclosureLayoutSignatures = new Map(current);
   });
-
-  const assistantStackGroupMap = createMemo(
-    () => new Map<string, AssistantFileEditStackGroup | null>()
-  );
 
   const assistantDialogMessages = createMemo(() => {
     messageStructureVersion();
@@ -5912,7 +5726,6 @@ export function MessageList() {
               lastAssistantID={lastAssistantID()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
-              fileEditStackGroupMap={assistantStackGroupMap()}
               assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}
               isFinalAssistantMessage={(messageId) =>
                 assistantDialogSummaryMap().has(messageId) ||
@@ -5948,12 +5761,8 @@ export function MessageList() {
               claimMessageEntrance={claimMessageEntrance}
               claimAssistantItemReveal={claimAssistantItemReveal}
               observeMeasuredRow={observeMeasuredRow}
-              isPlanningAssistantMessage={isPlanningAssistantMessage}
               questionRequestForTool={getQuestionRequestForTool}
               permissionMatchForTool={getPermissionMatchForTool}
-              shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-              buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-              buildPlanDocumentContent={buildPlanDocumentContent}
             />
           </Show>
           <Show when={!editingMessage()}>
@@ -5977,9 +5786,6 @@ export function MessageList() {
                   msg={trailing().message}
                   hasBuildAgent={hasBuildAgent()}
                   latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
-                  shouldShowPlanImplementationAction={shouldShowPlanImplementationAction}
-                  buildPlanImplementationPrompt={buildPlanImplementationPrompt}
-                  buildPlanDocumentContent={buildPlanDocumentContent}
                 />
               </div>
             )}
@@ -6020,136 +5826,6 @@ export function MessageList() {
           </svg>
         </button>
       </Show>
-    </div>
-  );
-}
-
-function LoadingRow(props: { compacting: boolean; visible: boolean }) {
-  const [now, setNow] = createSignal(Date.now());
-  const STALE_TOTAL_THRESHOLD_MS = 90_000;
-  const STALE_INACTIVITY_THRESHOLD_MS = 60_000;
-
-  const isStale = () => {
-    const currentNow = now();
-    const startedAt = loadingStartedAt();
-    if (startedAt === null) return false;
-    const total = currentNow - startedAt;
-    if (total < STALE_TOTAL_THRESHOLD_MS) return false;
-    const lastActivity = loadingLastActivityAt() ?? startedAt;
-    return currentNow - lastActivity >= STALE_INACTIVITY_THRESHOLD_MS;
-  };
-
-  const timer = setInterval(() => {
-    setNow(Date.now());
-    if (isStale()) {
-      clearInterval(timer);
-    }
-  }, 1000);
-  onCleanup(() => clearInterval(timer));
-
-  const totalElapsedMs = () => {
-    const startedAt = loadingStartedAt();
-    return startedAt === null ? 0 : Math.max(0, now() - startedAt);
-  };
-  const elapsedSeconds = () => Math.floor(totalElapsedMs() / 1000);
-
-  const verbs = [
-    'Thinking',
-    'Analyzing',
-    'Considering',
-    'Pondering',
-    'Musing',
-    'Reasoning',
-    'Evaluating',
-    'Deliberating',
-    'Reflecting',
-    'Processing',
-    'Synthesizing',
-    'Formulating',
-    'Examining',
-    'Interpreting',
-    'Inferring',
-    'Deducing',
-    'Contemplating',
-    'Investigating',
-    'Deciphering',
-    'Integrating',
-    'Discerning',
-    'Ideating',
-    'Refining',
-    'Cogitating',
-    'Computing',
-    'Brainstorming',
-    'Percolating',
-    'Unraveling',
-    'Calculating',
-  ];
-  const verb = () => verbs[Math.floor(elapsedSeconds() / 6) % verbs.length];
-
-  const formatElapsed = () => {
-    const s = elapsedSeconds();
-    if (s < 10) return null;
-    if (s < 60) return `${s}s`;
-    if (s >= 60 * 60) {
-      const hours = Math.floor(s / (60 * 60));
-      const minutes = Math.floor((s % (60 * 60)) / 60);
-      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return `${m}m ${rem.toString().padStart(2, '0')}s`;
-  };
-
-  return (
-    <div
-      class={`interactive-item-container interactive-response interactive-loading-row${
-        props.visible ? '' : ' is-reserved'
-      }`}
-      aria-hidden={props.visible ? undefined : true}
-    >
-      <div
-        class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
-      >
-        <Show
-          when={!props.compacting && isStale()}
-          fallback={
-            <Show
-              when={props.compacting}
-              fallback={
-                <span class="shimmer-progress loading-verb">
-                  {verb()}
-                  <span class="chat-animated-ellipsis" />
-                </span>
-              }
-            >
-              <span class="loading-verb">Compacting conversation context…</span>
-            </Show>
-          }
-        >
-          <span>Session may be stale</span>
-        </Show>
-        <Show when={formatElapsed()}>
-          <span class="loading-elapsed">{formatElapsed()}</span>
-        </Show>
-        <Show when={isStale()}>
-          <button
-            class="loading-action"
-            onClick={() => {
-              if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
-            }}
-            title="Check if session is still running"
-          >
-            Recheck
-          </button>
-          <button
-            class="loading-action"
-            onClick={() => stopLoading()}
-            title="Dismiss loading indicator"
-          >
-            Dismiss
-          </button>
-        </Show>
-      </div>
     </div>
   );
 }

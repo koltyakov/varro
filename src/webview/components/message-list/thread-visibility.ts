@@ -1,7 +1,7 @@
 import { state } from '../../lib/state';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
-import type { Message, MessageEntry, Part, Session } from '../../types';
+import type { MessageEntry, Part, Session } from '../../types';
 
 export function getRenderedMessages(
   messages: MessageEntry[],
@@ -35,10 +35,6 @@ export function getVisibleThreadMessages(
   return messages.filter(
     (entry) => !shouldHideThreadMessage(entry, activeSessionId, activeTreeIds, sessions)
   );
-}
-
-export function getMessageIdSet(messages: Array<{ info: Message }>) {
-  return new Set(messages.map((message) => message.info.id));
 }
 
 export function hasVisibleRunningToolPart(messages: Array<{ parts: Part[] }>) {
