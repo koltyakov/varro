@@ -748,10 +748,9 @@ describe('useOpenCode session state flows', () => {
       throw new Error('Expected an assistant message fixture');
     }
     completedAssistant.time.completed = 3;
-    const resynced = [
-      latest[0]!,
-      { info: completedAssistant, parts: [] },
-    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    const resynced = [latest[0]!, { info: completedAssistant, parts: [] }] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
     resynced.nextCursor = 'cursor-1';
     const boundary = [
       {

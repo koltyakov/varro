@@ -57,10 +57,7 @@ describe('getAssistantDialogSummaryMap', () => {
       3_000
     );
     intermediate.info.finish = 'tool-calls';
-    const messages: MessageEntry[] = [
-      userMessage('user-1', 'session-parent', 1_000),
-      intermediate,
-    ];
+    const messages: MessageEntry[] = [userMessage('user-1', 'session-parent', 1_000), intermediate];
 
     expect(
       getAssistantDialogSummaryMap(messages, undefined, {

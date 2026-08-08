@@ -1759,5 +1759,4 @@ describe('state helpers', () => {
 
     expect(stateModule.desktopSessionPaneSide()).toBe('right');
   });
-
 });

@@ -11,8 +11,5 @@ export type ExtensionConfigState = {
 
 export type WebviewConfigUpdatePayload = Pick<
   ExtensionConfigState,
-  | 'showInlineFileChanges'
-  | 'showChangedFiles'
-  | 'desktopSessionPaneSide'
-  | 'defaultPermissionMode'
+  'showInlineFileChanges' | 'showChangedFiles' | 'desktopSessionPaneSide' | 'defaultPermissionMode'
 >;

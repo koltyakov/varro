@@ -170,7 +170,7 @@ export function MessageRow(
         fileEditStackGroup()
           ? `interactive-response-file-edit-group interactive-response-file-edit-group-${fileEditStackGroup()}`
           : ''
-       }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
+      }${entrancePending() ? ' interactive-item-entering' : ''}${isAbandonedByEdit() ? ' interactive-item-edit-abandoned' : ''}${
         isEditingThisMessage() ? ' interactive-request-editing' : ''
       }${props.followsVisibleAssistantResponse ? ' interactive-response-follows-response' : ''}${props.continuesVisibleActivityGroup ? ' interactive-response-continues-activity-group' : ''}${isOffCore() ? ' interactive-item-off-core' : ''}${isVirtualPlaceholder() ? ' interactive-item-virtual-placeholder' : ''}${props.renderEmpty ? ' interactive-item-render-empty' : ''}`}
     >

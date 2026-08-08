@@ -122,7 +122,9 @@ function ReasoningBlock(props: {
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
-  const [expanded, setExpanded] = createSignal(getMessageBlockExpanded(currentExpansionKey) ?? false);
+  const [expanded, setExpanded] = createSignal(
+    getMessageBlockExpanded(currentExpansionKey) ?? false
+  );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
   const reasoningBody = createMemo(() => splitReasoningText(reasoningText()).body);

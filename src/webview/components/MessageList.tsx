@@ -2005,10 +2005,10 @@ export function MessageList() {
           ? (messageIndexById().get(widthResizeAnchor.messageId) ?? null)
           : lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
             ? (messageIndexById().get(lastDetachedVisibleAnchor.messageId) ?? null)
-          : getFirstVisibleMessageIndexFromVirtualMetrics({
-              metrics: metricsBefore,
-              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
-            });
+            : getFirstVisibleMessageIndexFromVirtualMetrics({
+                metrics: metricsBefore,
+                scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+              });
     }
     let scrollAdjustment = 0;
     let changed = false;

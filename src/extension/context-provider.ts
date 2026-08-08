@@ -79,7 +79,7 @@ export class ContextProvider implements vscode.Disposable {
           this.debouncedDiagnosticsUpdate();
         }
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.update())
     );
 
     this.update();
@@ -352,10 +352,9 @@ export class ContextProvider implements vscode.Disposable {
     if (doc.isUntitled || doc.uri.scheme === 'untitled') {
       this._context.activeFile = null;
       const selection = editor.selection;
-      this._context.selection =
-        !selection.isEmpty
-          ? { startLine: selection.start.line + 1, endLine: selection.end.line + 1 }
-          : null;
+      this._context.selection = !selection.isEmpty
+        ? { startLine: selection.start.line + 1, endLine: selection.end.line + 1 }
+        : null;
       this._context.editorText = this.createEditorTextContext(editor, null, doc.fileName);
       if (!this.captureContextSnapshot()) return;
       this.refreshDiagnosticsIfNeeded();

@@ -1390,7 +1390,7 @@ describe('Message assistant final answer rendering', () => {
     expect(resizeObserverObserveMock).toHaveBeenCalledTimes(1);
     expect(resizeObserverObserveMock).toHaveBeenCalledWith(
       container?.querySelector('.assistant-message-flow'),
-      undefined,
+      undefined
     );
 
     host.remove();

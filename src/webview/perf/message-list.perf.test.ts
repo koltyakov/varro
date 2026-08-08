@@ -32,6 +32,9 @@ vi.mock('../components/message-list/MessageRows', async () => {
 
       return null;
     },
+    AssistantDialogSummaryForMessage() {
+      return null;
+    },
   };
 });
 

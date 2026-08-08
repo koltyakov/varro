@@ -120,8 +120,8 @@ export function ManagedSubagentFooter(props: {
       current.modelName
     );
   });
-  const showProviderLimit = createMemo(
-    () => hasProviderLimitWindowWithinThreshold(compactProviderLimit(), 100)
+  const showProviderLimit = createMemo(() =>
+    hasProviderLimitWindowWithinThreshold(compactProviderLimit(), 100)
   );
   const providerLimitBadges = createMemo(() =>
     showProviderLimit() ? getProviderLimitCompactBadges(compactProviderLimit()) : []
