@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { batch } from 'solid-js';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import {
@@ -1102,6 +1103,60 @@ describe('MessageList compact activity', () => {
       'Explored: 1 file, 1 search'
     );
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
+  });
+
+  it('skips the minimum visible hold when response text is already streaming', async () => {
+    const search = toolPart('search-streaming', 'assistant-1', 'call-search-streaming');
+    search.tool = 'grep';
+    search.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Searching',
+      time: { start: 1 },
+    };
+    const completedSearch: ToolPart = {
+      ...search,
+      state: {
+        status: 'completed',
+        input: { pattern: 'activity' },
+        output: 'Found matches',
+        title: 'Searching',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
+    };
+    const response = {
+      ...textPart('response-streaming', 'Streaming response'),
+      messageID: 'assistant-1',
+    };
+    const user = { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] };
+    const info = assistantMessage('assistant-1', { parentID: 'user-1' });
+    setCompactToolOutput(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([user, { info, parts: [search] }]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).not.toBeNull();
+
+    batch(() => {
+      replaceMessages([user, { info, parts: [completedSearch, response] }]);
+      setState('streamingPartId', response.id);
+      setState('streamingText', 'Streaming response');
+    });
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-activity-part-id="search-streaming"].is-exiting')
+    ).not.toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="search-streaming"].is-completed')
+    ).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 search'
+    );
   });
 
   it('retains activity while it joins a group owned by an earlier message', async () => {

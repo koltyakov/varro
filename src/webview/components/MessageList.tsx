@@ -2884,15 +2884,29 @@ export function MessageList() {
     const target = activityExitBottomTarget;
     const reserve = untrack(activityExitBottomReserve);
     activityExitBottomTarget = null;
-    if (
-      target === null ||
-      reserve <= 0.5 ||
-      !containerRef ||
-      !autoScroll() ||
-      !pinnedToBottom ||
-      stickyNavigationOwnsScroll()
-    ) {
+    const canPreserveTarget =
+      target !== null &&
+      !!containerRef &&
+      autoScroll() &&
+      (pinnedToBottom || getDistanceFromBottom(containerRef) <= 2) &&
+      !stickyNavigationOwnsScroll();
+    if (!canPreserveTarget) {
       if (reserve > 0.5) setActivityExitBottomReserve(0);
+      return;
+    }
+    if (reserve <= 0.5) {
+      const sessionId = state.activeSessionId;
+      requestAnimationFrame(() => {
+        if (
+          !containerRef ||
+          state.activeSessionId !== sessionId ||
+          !autoScroll() ||
+          userScrollRecentlyActive()
+        ) {
+          return;
+        }
+        setPreservedScrollTop(target);
+      });
       return;
     }
 
@@ -4597,7 +4611,9 @@ export function MessageList() {
         continue;
       }
 
-      const holdMs = Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
+      const holdMs = state.streamingPartId && state.streamingText.length > 0
+        ? 0
+        : Math.max(0, firstSeenAt + ACTIVITY_MIN_VISIBLE_MS - now);
       setSetMembership(setRetainedActivityPartKeys, key, true);
       const beginExit = () => {
         reserveActivityExitSpace(key);
@@ -5537,7 +5553,7 @@ function LoadingRow(props: { compacting: boolean; visible: boolean }) {
     'Unraveling',
     'Calculating',
   ];
-  const verb = () => verbs[Math.floor(elapsedSeconds() / 3) % verbs.length];
+  const verb = () => verbs[Math.floor(elapsedSeconds() / 6) % verbs.length];
 
   const formatElapsed = () => {
     const s = elapsedSeconds();

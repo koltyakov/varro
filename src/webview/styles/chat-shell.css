@@ -481,7 +481,8 @@ input:focus-visible {
   overflow-anchor: none;
 }
 
-.append-scroll-bottom-reserve {
+.append-scroll-bottom-reserve,
+.activity-exit-bottom-reserve {
   flex: 0 0 auto;
   min-height: 0;
   pointer-events: none;

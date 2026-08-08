@@ -232,11 +232,16 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     updateQueued = false;
     if (!element.isConnected) return;
 
-    const items = [
-      ...element.querySelectorAll<HTMLElement>(
-        ':scope > .assistant-active-activity-item:not(.is-exiting)'
-      ),
-    ];
+    const expandedItem = element.querySelector<HTMLElement>(
+      ':scope > .assistant-active-activity-item:has(.tool-invocation-chevron.expanded, .thinking-chevron.expanded)'
+    );
+    const items = expandedItem
+      ? [expandedItem]
+      : [
+          ...element.querySelectorAll<HTMLElement>(
+            ':scope > .assistant-active-activity-item:not(.is-exiting)'
+          ),
+        ];
     for (const item of items) {
       if (observedItems.has(item)) continue;
       observedItems.add(item);
@@ -286,7 +291,12 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
   const resizeObserver =
     typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueUpdate);
   const mutationObserver = new MutationObserver(queueUpdate);
-  mutationObserver.observe(element, { childList: true });
+  mutationObserver.observe(element, {
+    attributes: true,
+    attributeFilter: ['class'],
+    childList: true,
+    subtree: true,
+  });
   queueUpdate();
 
   return () => {
@@ -1132,27 +1142,29 @@ function AssistantActivitySummaryCandidate(props: {
     <>
       <span class="assistant-activity-summary-main">
         Explored:{' '}
-        <For each={props.items}>
-          {(item, index) => (
-            <>
-              <Show when={index() > 0}>, </Show>
-              <span class="assistant-activity-summary-item">
-                {item.count}{' '}
-                <Show
-                  when={index() < compactFrom()}
-                  fallback={<AssistantActivityKindIcon kind={item.kind} />}
-                >
-                  <span class="assistant-activity-summary-noun">
-                    {item.label.slice(String(item.count).length + 1)}
-                  </span>
-                </Show>
-                <Show when={props.measureIcons}>
-                  <AssistantActivityKindIcon kind={item.kind} measure />
-                </Show>
-              </span>
-            </>
-          )}
-        </For>
+        <span class="assistant-activity-summary-counts">
+          <For each={props.items}>
+            {(item, index) => (
+              <>
+                <Show when={index() > 0}>, </Show>
+                <span class="assistant-activity-summary-item">
+                  {item.count}{' '}
+                  <Show
+                    when={index() < compactFrom()}
+                    fallback={<AssistantActivityKindIcon kind={item.kind} />}
+                  >
+                    <span class="assistant-activity-summary-noun">
+                      {item.label.slice(String(item.count).length + 1)}
+                    </span>
+                  </Show>
+                  <Show when={props.measureIcons}>
+                    <AssistantActivityKindIcon kind={item.kind} measure />
+                  </Show>
+                </span>
+              </>
+            )}
+          </For>
+        </span>
       </span>
       <Show when={props.aborted > 0}>
         <span>

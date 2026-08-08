@@ -359,6 +359,16 @@
   display: none;
 }
 
+.assistant-active-activity-items:has(
+    > .assistant-active-activity-item
+      :is(.tool-invocation-chevron.expanded, .thinking-chevron.expanded)
+  )
+  > .assistant-active-activity-item:not(
+    :has(:is(.tool-invocation-chevron.expanded, .thinking-chevron.expanded))
+  ) {
+  display: none;
+}
+
 .assistant-active-activity-tray.has-active-summary {
   gap: 0;
 }
@@ -372,6 +382,7 @@
   )
   > .assistant-active-activity-summary {
   margin-bottom: 0;
+  animation: assistant-active-activity-summary-gap-out 0.42s cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 
 .assistant-active-activity-summary {
@@ -435,6 +446,16 @@
   to {
     grid-template-rows: 0fr;
     opacity: 0;
+  }
+}
+
+@keyframes assistant-active-activity-summary-gap-out {
+  from {
+    margin-bottom: var(--assistant-activity-item-gap);
+  }
+
+  to {
+    margin-bottom: 0;
   }
 }
 
@@ -502,6 +523,10 @@
 .assistant-activity-summary-item {
   display: inline-flex;
   align-items: center;
+}
+
+.assistant-activity-summary-counts {
+  opacity: 0.68;
 }
 
 .assistant-activity-summary-noun {

@@ -148,7 +148,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   });
 
   await expect(completedItem).toHaveClass(/is-(?:completed|exiting)/);
-  const transition = await completedItem.evaluate(async (element) => {
+  const transition = await completedItem.evaluate(async (element, initialLoadingTop) => {
     await new Promise<void>((resolve) => {
       if (element.classList.contains('is-exiting')) {
         resolve();
@@ -172,29 +172,45 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     const summaryMaskBackground = getComputedStyle(summaryMask).backgroundColor;
     const trayWidth = activityTray.getBoundingClientRect().width;
     const trayGap = getComputedStyle(activityTray).rowGap;
-    const samples = [element.getBoundingClientRect().height];
-    const loadingTops: number[] = [];
-    while (element.isConnected && samples.length < 20) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      samples.push(element.getBoundingClientRect().height);
+    const samples: number[] = [];
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const getLoadingTop = () => {
       const loading = document.querySelector<HTMLElement>('.interactive-loading-row');
       const container = loading?.closest<HTMLElement>('.interactive-list');
-      if (loading && container) {
-        loadingTops.push(
-          loading.getBoundingClientRect().top - container.getBoundingClientRect().top
-        );
-      }
+      return loading && container
+        ? loading.getBoundingClientRect().top - container.getBoundingClientRect().top
+        : null;
+    };
+    const exitAnimations = [...element.getAnimations(), ...summaryMask.getAnimations()];
+    for (const animation of exitAnimations) {
+      animation.pause();
+      animation.currentTime = 0;
+    }
+    samples.push(element.getBoundingClientRect().height);
+    const loadingTops = [initialLoadingTop, getLoadingTop()].filter(
+      (top): top is number => top !== null
+    );
+    for (const animation of exitAnimations) animation.play();
+    let framesAfterRemoval = 0;
+    for (let frame = 0; frame < 80 && framesAfterRemoval < 4; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      samples.push(element.isConnected ? element.getBoundingClientRect().height : 0);
+      const loadingTop = getLoadingTop();
+      if (loadingTop !== null) loadingTops.push(loadingTop);
+      if (!element.isConnected) framesAfterRemoval += 1;
     }
     return {
       heights: samples,
+      itemWasRemoved: !element.isConnected,
       loadingTops,
+      synchronizedExitAnimationCount: exitAnimations.length,
       summaryMaskBackground,
       summaryMaskWidth,
       summaryTop,
       trayGap,
       trayWidth,
     };
-  });
+  }, loadingTopBefore);
   expect(transition.heights[0]).toBeGreaterThan(0);
   expect(
     transition.heights.every(
@@ -202,6 +218,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     )
   ).toBe(true);
   expect(transition.heights.at(-1)).toBeLessThan(transition.heights[0]! - 5);
+  expect(transition.itemWasRemoved).toBe(true);
+  expect(transition.synchronizedExitAnimationCount).toBeGreaterThanOrEqual(2);
   expect(Math.abs(transition.summaryTop - placeholderTop)).toBeLessThanOrEqual(1);
   expect(transition.summaryMaskBackground).not.toBe('rgba(0, 0, 0, 0)');
   expect(Math.abs(transition.summaryMaskWidth - transition.trayWidth)).toBeLessThanOrEqual(1);
@@ -212,14 +230,20 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     ),
     JSON.stringify({ loadingTopBefore, samples: transition.loadingTops })
   ).toBe(true);
+  expect(Math.abs(transition.loadingTops[1]! - transition.loadingTops[0]!)).toBeLessThanOrEqual(1.5);
+  expect(
+    transition.loadingTops.every(
+      (top, index) => index === 0 || transition.loadingTops[index - 1]! - top <= 5
+    ),
+    JSON.stringify(transition.loadingTops)
+  ).toBe(true);
   expect(transition.loadingTops.at(-1)).toBeLessThan(loadingTopBefore - 5);
-  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(1);
+  await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
+  await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
 
-  await expect(completedItem).toHaveClass(/is-exiting/);
   const summary = page.locator('.assistant-activity-summary');
   await expect(summary).toContainText('Explored: 1 search');
   expect(Math.abs((await summary.boundingBox())!.y - transition.summaryTop)).toBeLessThanOrEqual(1);
-  await page.waitForTimeout(150);
   const finalSummaryBox = (await summary.boundingBox())!;
   const finalLoadingBox = (await loadingRow.locator('.loading-verb').boundingBox())!;
   const settledGap = finalLoadingBox.y - (finalSummaryBox.y + finalSummaryBox.height);
@@ -252,6 +276,30 @@ test('keeps the active tool gap fixed through its entrance animation', async ({ 
   });
   expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(0.5);
   for (const gap of gaps) expect(gap).toBeCloseTo(12, 0);
+});
+
+test('hides sibling active tools while one tool is expanded', async ({ page }) => {
+  await page.goto(
+    '/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1&activeTray=1&activeTrayCount=3'
+  );
+  const items = page.locator('.assistant-active-activity-item');
+  await expect(items).toHaveCount(3);
+  const firstItem = items.first();
+  const firstHeader = firstItem.locator('.tool-invocation-header');
+  await firstHeader.click();
+  await expect(firstItem.locator('.tool-invocation-chevron')).toHaveClass(/expanded/);
+
+  const visiblePartIds = () =>
+    items.evaluateAll((elements) =>
+      elements
+        .filter((element) => element.getClientRects().length > 0)
+        .map((element) => element.getAttribute('data-activity-part-id'))
+    );
+  await expect.poll(visiblePartIds).toEqual(['tool-active-0']);
+
+  await firstHeader.click();
+  await expect(firstItem.locator('.tool-invocation-chevron')).not.toHaveClass(/expanded/);
+  await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1', 'tool-active-2']);
 });
 
 test('keeps the inline diff-to-next-block gap consistent', async ({ page }) => {
