@@ -1583,6 +1583,7 @@ describe('state helpers', () => {
       { info: assistantMessage('assistant-2', 'session-1', 4, 'default', 'user-2'), parts: [] },
     ];
     stateModule.setMessagesIncremental(messages);
+    const retainedEntries = stateModule.state.messages.slice(0, 2);
 
     const restore = stateModule.pruneMessagesFrom('session-1', 'user-2');
 
@@ -1590,6 +1591,8 @@ describe('state helpers', () => {
       'user-1',
       'assistant-1',
     ]);
+    expect(stateModule.state.messages[0]).toBe(retainedEntries[0]);
+    expect(stateModule.state.messages[1]).toBe(retainedEntries[1]);
 
     restore?.();
 

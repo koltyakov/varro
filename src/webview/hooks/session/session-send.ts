@@ -78,6 +78,7 @@ export type QueuedAttachmentSnapshot = Pick<
 type SessionSendOptions = SendFlowOptions & {
   agent?: string;
   optimisticModel?: SelectedModel;
+  preserveScrollPosition?: boolean;
   queuedAttachments?: QueuedAttachmentSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
@@ -756,7 +757,7 @@ export async function sendMessageWithDependencies(
     }
 
     deps.clearSessionUsageLimit(sessionId);
-    if (deps.getActiveSessionId() === sessionId) {
+    if (deps.getActiveSessionId() === sessionId && !options?.preserveScrollPosition) {
       deps.requestMessageListScrollToBottom();
     }
     if (optimisticMessage) {

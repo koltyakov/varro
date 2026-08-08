@@ -423,15 +423,24 @@ export function replaceMessages(incoming: MessageEntry[]) {
 
 export function pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null {
   flushPendingStreamingDeltas();
-  const previousMessages = cloneMessageEntries(state.messages);
+  const currentMessages = state.messages;
+  const previousMessages = cloneMessageEntries(currentMessages);
   materializeStreamingText(previousMessages, getStreamingTextSnapshot());
 
-  const targetIndex = previousMessages.findIndex(
+  const targetIndex = currentMessages.findIndex(
     (entry) => entry.info.sessionID === sessionId && entry.info.id === messageId
   );
   if (targetIndex === -1) return null;
 
-  replaceMessages(previousMessages.slice(0, targetIndex));
+  const retainedMessages = currentMessages.slice(0, targetIndex);
+  streamingDeltaQueue.reset();
+  batch(() => {
+    setState('messages', retainedMessages);
+    if (state.streamingPartId !== null) setState('streamingPartId', null);
+    if (state.streamingText !== '') setState('streamingText', '');
+  });
+  messageIndex.invalidate();
+  recordSettledAssistantMarkers(retainedMessages);
   return () => replaceMessages(previousMessages);
 }
 

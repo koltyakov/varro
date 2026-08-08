@@ -326,21 +326,29 @@ test.describe('auto-scroll', () => {
         reserveHeight: number;
         replacementVisible: boolean;
       }> = [];
+      let replacementVisibleFrames = 0;
+      const scheduleSample = () => {
+        // Sample after all frame callbacks so pre-paint anchor corrections are included.
+        requestAnimationFrame(() => setTimeout(sample, 0));
+      };
       const sample = () => {
+        const replacementVisible =
+          replacementMessageId !== null &&
+          [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].some(
+            (element) => element.dataset.msgId === replacementMessageId
+          );
+        const reserveHeight =
+          container
+            .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
+            ?.getBoundingClientRect().height ?? 0;
         samples.push({
           top: anchor.getBoundingClientRect().top - container.getBoundingClientRect().top,
           editing: container.classList.contains('editing-message'),
-          reserveHeight:
-            container
-              .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
-              ?.getBoundingClientRect().height ?? 0,
-          replacementVisible:
-            replacementMessageId !== null &&
-            [...container.querySelectorAll<HTMLElement>('[data-msg-id]')].some(
-              (element) => element.dataset.msgId === replacementMessageId
-            ),
+          reserveHeight,
+          replacementVisible,
         });
-        if (samples.length < 50) requestAnimationFrame(sample);
+        replacementVisibleFrames = replacementVisible ? replacementVisibleFrames + 1 : 0;
+        if (samples.length < 120 && replacementVisibleFrames < 12) scheduleSample();
         else harness.editReplacementSamples = samples;
       };
       sample();
@@ -372,11 +380,11 @@ test.describe('auto-scroll', () => {
       JSON.stringify(samples)
     ).toBe(true);
     expect(samples[0]?.editing).toBe(true);
+    expect(samples.some((sample) => sample.replacementVisible), JSON.stringify(samples)).toBe(true);
     expect(
       samples.every((sample) => sample.editing || sample.replacementVisible),
       JSON.stringify(samples)
     ).toBe(true);
-    expect(samples.at(-1)?.reserveHeight).toBe(0);
     await expect(
       page.getByText('Corrected final prompt without a viewport jump.', { exact: true })
     ).toBeVisible();

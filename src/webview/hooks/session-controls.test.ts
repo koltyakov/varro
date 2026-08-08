@@ -235,8 +235,8 @@ describe('session-controls helpers', () => {
       'defer-removals',
       'delete:assistant-1',
       'delete:user-1',
-      'prune',
       'publish',
+      'prune',
       'release-removals',
       'send',
     ]);

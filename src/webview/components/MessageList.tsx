@@ -159,6 +159,7 @@ const VIRTUALIZE_THRESHOLD = 50;
 const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_COLLISION_BUFFER_PX = 8;
 const STICKY_NAVIGATION_SETTLE_FRAME_LIMIT = 32;
+const STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const APPEND_SCROLL_TRANSITION_MS = 180;
@@ -658,6 +659,11 @@ export function MessageList() {
     anchor: VisibleScrollAnchor;
     sessionId: string | null;
     ownershipEpoch: number;
+    preserveBottom: boolean;
+    attempts: number;
+    stableFrames: number;
+    rafId: number;
+    observer: MutationObserver | null;
   } | null = null;
   let pointerScrollOwnershipActive = false;
   let diffFocusPauseActive = false;
@@ -760,7 +766,7 @@ export function MessageList() {
       previousVisibleStructureMessageIds !== null &&
       previousVisibleStructureSessionId === sessionId &&
       untrack(() => genericStructuralAnchorCanOwnScroll(sessionId));
-    const anchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
+    const visibleAnchor = canCaptureAnchor ? captureMountedVisibleScrollAnchor() : null;
     const visibleMessages = getVisibleThreadMessages(state.messages, sessionId, state.sessions);
     const currentIds = visibleMessages.map((entry) => entry.info.id);
     const previousIds = previousVisibleStructureMessageIds;
@@ -775,8 +781,30 @@ export function MessageList() {
     previousVisibleStructureSessionId = sessionId;
     previousVisibleStructureMessageIds = currentIds;
 
-    if (structureChanged && !pureAppend && anchor && !pendingStructuralScrollAnchor) {
-      scheduleStructuralScrollAnchorRestore(anchor, sessionId);
+    const structuralAnchor =
+      structureChanged && !pureAppend
+        ? (captureLastRetainedVisibleScrollAnchor(previousIds, currentIds) ?? visibleAnchor)
+        : null;
+    if (structuralAnchor && !pendingStructuralScrollAnchor) {
+      const preserveBottom = !!containerRef && getDistanceFromBottom(containerRef) <= 2;
+      scheduleStructuralScrollAnchorRestore(structuralAnchor, sessionId, preserveBottom);
+    }
+    const pendingStructure = pendingStructuralScrollAnchor;
+    if (structureChanged && pendingStructure) {
+      queueMicrotask(() => {
+        if (
+          pendingStructuralScrollAnchor !== pendingStructure ||
+          state.activeSessionId !== pendingStructure.sessionId ||
+          userScrollOwnershipEpoch !== pendingStructure.ownershipEpoch ||
+          !genericStructuralAnchorCanOwnScroll(pendingStructure.sessionId)
+        ) {
+          return;
+        }
+        restoreVisibleScrollAnchor(pendingStructure.anchor, {
+          useMessageOffsetFallback: true,
+          reserveBottomOverflow: pendingStructure.preserveBottom,
+        });
+      });
     }
     return visibleMessages;
   });
@@ -1682,10 +1710,17 @@ export function MessageList() {
       });
       const sessionId = state.activeSessionId;
       const pendingAnchor = sessionId ? getCurrentPendingHistoryAnchor(sessionId) : undefined;
+      const structuralAnchor =
+        pendingStructuralScrollAnchor?.sessionId === sessionId &&
+        pendingStructuralScrollAnchor.ownershipEpoch === userScrollOwnershipEpoch
+          ? pendingStructuralScrollAnchor.anchor
+          : null;
       const anchorIndex =
         pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
           ? messageIndexById().get(pendingAnchor.anchor.messageId)
-          : undefined;
+          : structuralAnchor
+            ? messageIndexById().get(structuralAnchor.messageId)
+            : undefined;
       if (anchorIndex === undefined) return range;
 
       // A prepend can temporarily place the old viewport thousands of provisional pixels away.
@@ -2238,6 +2273,34 @@ export function MessageList() {
     return captureMountedVisibleScrollAnchorWithTopPad(0);
   }
 
+  function captureLastRetainedVisibleScrollAnchor(
+    previousIds: readonly string[] | null,
+    currentIds: readonly string[]
+  ) {
+    if (!containerRef || !previousIds) return null;
+    let sharedPrefixLength = 0;
+    while (
+      sharedPrefixLength < previousIds.length &&
+      previousIds[sharedPrefixLength] === currentIds[sharedPrefixLength]
+    ) {
+      sharedPrefixLength += 1;
+    }
+
+    const containerRect = containerRef.getBoundingClientRect();
+    for (let index = sharedPrefixLength - 1; index >= 0; index -= 1) {
+      const messageId = previousIds[index];
+      if (!messageId) continue;
+      const row =
+        mountedMessageRows.get(messageId) ??
+        containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(messageId)}"]`);
+      if (!row) continue;
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
+      return captureMessageScrollAnchor(messageId);
+    }
+    return null;
+  }
+
   function captureDetachedVisibleScrollAnchor(containerScrollTop: number) {
     if (!shouldVirtualize()) return captureMountedVisibleScrollAnchor();
 
@@ -2273,29 +2336,110 @@ export function MessageList() {
 
   function scheduleStructuralScrollAnchorRestore(
     anchor: VisibleScrollAnchor,
-    sessionId: string | null
+    sessionId: string | null,
+    preserveBottom: boolean
   ) {
-    const pending = {
+    const pending: NonNullable<typeof pendingStructuralScrollAnchor> = {
       anchor,
       sessionId,
       ownershipEpoch: userScrollOwnershipEpoch,
+      preserveBottom,
+      attempts: 0,
+      stableFrames: 0,
+      rafId: 0,
+      observer: null,
     };
     pendingStructuralScrollAnchor = pending;
-    queueMicrotask(() => {
-      if (pendingStructuralScrollAnchor !== pending) return;
-      try {
+
+    // A replacement can temporarily shorten the track and clamp scrollTop. Restore on each DOM
+    // mutation before paint; the frame loop below bounds ownership and handles measurement-only work.
+    if (trackRef && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(() => {
         if (
+          pendingStructuralScrollAnchor !== pending ||
           state.activeSessionId !== sessionId ||
           userScrollOwnershipEpoch !== pending.ownershipEpoch ||
           !genericStructuralAnchorCanOwnScroll(sessionId)
         ) {
+          clearPendingStructuralScrollAnchor(pending);
           return;
         }
-        restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true });
-      } finally {
-        if (pendingStructuralScrollAnchor === pending) pendingStructuralScrollAnchor = null;
+        restoreVisibleScrollAnchor(anchor, {
+          useMessageOffsetFallback: true,
+          reserveBottomOverflow: preserveBottom,
+        });
+      });
+      pending.observer = observer;
+      observer.observe(trackRef, {
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    const settle = () => {
+      pending.rafId = 0;
+      if (pendingStructuralScrollAnchor !== pending) return;
+      if (
+        state.activeSessionId !== sessionId ||
+        userScrollOwnershipEpoch !== pending.ownershipEpoch ||
+        !genericStructuralAnchorCanOwnScroll(sessionId)
+      ) {
+        clearPendingStructuralScrollAnchor(pending);
+        return;
       }
-    });
+
+      pending.attempts += 1;
+      restoreVisibleScrollAnchor(anchor, {
+        useMessageOffsetFallback: true,
+        reserveBottomOverflow: preserveBottom,
+      });
+
+      const element = getMountedScrollAnchorElement(anchor);
+      if (element && containerRef) {
+        const targetTop =
+          element.dataset.msgId === anchor.messageId
+            ? (anchor.messageTop ?? anchor.top)
+            : anchor.top;
+        const currentTop =
+          element.getBoundingClientRect().top - containerRef.getBoundingClientRect().top;
+        pending.stableFrames =
+          Math.abs(currentTop - targetTop) <= 0.5 ? pending.stableFrames + 1 : 0;
+      } else {
+        pending.stableFrames = 0;
+      }
+
+      const stableLongEnough =
+        pending.stableFrames >= 2 &&
+        (!preserveBottom || pending.attempts >= STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT);
+      if (stableLongEnough || pending.attempts >= STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT) {
+        clearPendingStructuralScrollAnchor(pending);
+        if (preserveBottom && sessionId) {
+          appendBottomReserveTarget = 0;
+          if (untrack(appendBottomReserve) > 0.5) setAppendBottomReserve(0);
+          pinnedToBottom = true;
+          setAutoScroll(true);
+          queueMicrotask(() => {
+            if (state.activeSessionId !== sessionId || !autoScroll()) return;
+            performScroll({ force: true });
+            startFollowLoop(sessionId);
+          });
+        }
+        return;
+      }
+
+      pending.rafId = requestAnimationFrame(settle);
+    };
+
+    queueMicrotask(settle);
+  }
+
+  function clearPendingStructuralScrollAnchor(pending = pendingStructuralScrollAnchor) {
+    if (!pending || pendingStructuralScrollAnchor !== pending) return;
+    pending.observer?.disconnect();
+    if (pending.rafId) cancelAnimationFrame(pending.rafId);
+    pendingStructuralScrollAnchor = null;
   }
 
   function captureMessageScrollAnchor(messageId: string) {
@@ -2392,7 +2536,7 @@ export function MessageList() {
 
   function restoreVisibleScrollAnchor(
     anchor: VisibleScrollAnchor | null,
-    options?: { useMessageOffsetFallback?: boolean }
+    options?: { useMessageOffsetFallback?: boolean; reserveBottomOverflow?: boolean }
   ) {
     if (!containerRef) return false;
     let delta: number | null = null;
@@ -2422,7 +2566,30 @@ export function MessageList() {
     }
 
     if (delta === null) return false;
-    if (Math.abs(delta) > 0.5) setPreservedScrollTop(containerRef.scrollTop + delta);
+    if (Math.abs(delta) > 0.5) {
+      const nextScrollTop = containerRef.scrollTop + delta;
+      let waitForReserveMount = false;
+      if (options?.reserveBottomOverflow) {
+        // Keep the target reachable while replacement content consumes the temporary deficit.
+        const currentReserve = untrack(appendBottomReserve);
+        const unreservedBottom = Math.max(0, bottomScrollTop() - currentReserve);
+        const requiredReserve = Math.max(0, nextScrollTop - unreservedBottom);
+        if (requiredReserve > currentReserve + 0.5) {
+          appendBottomReserveTarget = Math.max(appendBottomReserveTarget, nextScrollTop);
+          setAppendBottomReserve(requiredReserve);
+          waitForReserveMount = true;
+        }
+      }
+      if (waitForReserveMount) {
+        queueMicrotask(() => {
+          if (!disposed) {
+            setPreservedScrollTop(nextScrollTop);
+          }
+        });
+      } else {
+        setPreservedScrollTop(nextScrollTop);
+      }
+    }
     expectedScrollTop = -1;
     ignoreScrollUntil = 0;
     return true;
@@ -3490,6 +3657,9 @@ export function MessageList() {
       historyAnchorSettleOwner.generation === activeSessionGeneration &&
       historyAnchorSettleOwner.windowVersion ===
         getSessionMessageWindowStateVersion(historyAnchorSettleOwner.sessionId);
+    let structuralAnchorSettling =
+      pendingStructuralScrollAnchor?.sessionId === state.activeSessionId &&
+      pendingStructuralScrollAnchor.ownershipEpoch === userScrollOwnershipEpoch;
     const userScrollInputActive =
       pointerScrollOwnershipActive ||
       now - lastWheelAt <= ACTIVE_WHEEL_WINDOW_MS ||
@@ -3500,12 +3670,22 @@ export function MessageList() {
       historyAnchorSettleOwner = null;
       historyAnchorSettling = false;
     }
+    if (actualScrollMovement && structuralAnchorSettling && userScrollInputActive) {
+      clearPendingStructuralScrollAnchor();
+      structuralAnchorSettling = false;
+    }
     // Layout-driven scroll events during history settling belong to the history anchor, not the
-    // wheel gesture that originally reached the boundary.
-    if (actualScrollMovement && !historyAnchorSettling) {
+    // wheel gesture that originally reached the boundary. Structural reconciliation has the same
+    // ownership until direct input supersedes it.
+    if (actualScrollMovement && !historyAnchorSettling && !structuralAnchorSettling) {
       userScrollOwnershipEpoch += 1;
     }
-    if (actualScrollMovement && userScrollInputActive && !historyAnchorSettling) {
+    if (
+      actualScrollMovement &&
+      userScrollInputActive &&
+      !historyAnchorSettling &&
+      !structuralAnchorSettling
+    ) {
       lastUserOwnedScrollMovementAt = now;
       releaseOffscreenBottomReserve();
     }
@@ -4138,6 +4318,7 @@ export function MessageList() {
       cancelScheduledStickyPreviewFrame();
       cancelWidthResize();
       cancelAppendScrollTransition();
+      clearPendingStructuralScrollAnchor();
       activeFollowLoopSessionId = null;
     });
   });

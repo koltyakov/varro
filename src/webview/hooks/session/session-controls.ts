@@ -172,8 +172,8 @@ export async function editMessageWithDependencies(
   const publishReplacement = () => {
     if (replacementPublished) return;
     replacementPublished = true;
-    pruneHistory();
     options?.onOptimisticPublish?.();
+    pruneHistory();
     releaseRemovals();
   };
   try {

@@ -616,6 +616,7 @@ describe('session-send helpers', () => {
   it('publishes the optimistic turn before the session becomes observably busy', async () => {
     const observedStates: Array<{ busy: boolean; trailingUserId: string }> = [];
     const sendAsync = vi.fn(async (_sessionId: string, _body: SessionSendBody) => {});
+    const requestMessageListScrollToBottom = vi.fn();
     let setBusy: (busy: boolean) => void;
     let setTrailingUserId: (messageId: string) => void;
     const dispose = createRoot((rootDispose) => {
@@ -642,7 +643,7 @@ describe('session-send helpers', () => {
             body: { parts: [{ type: 'text', text: 'follow up' }] },
             effectiveModel: null,
           }),
-          requestMessageListScrollToBottom: vi.fn(),
+          requestMessageListScrollToBottom,
           startLoading: vi.fn(),
           setError: vi.fn(),
           applyEffectiveModel: vi.fn(),
@@ -667,7 +668,10 @@ describe('session-send helpers', () => {
           shouldClearComposerAfterSend: () => true,
         },
         'follow up',
-        { optimisticModel: { providerID: 'openai', modelID: 'gpt-4o' } }
+        {
+          optimisticModel: { providerID: 'openai', modelID: 'gpt-4o' },
+          preserveScrollPosition: true,
+        }
       );
 
       expect(observedStates).not.toContainEqual({
@@ -675,6 +679,7 @@ describe('session-send helpers', () => {
         trailingUserId: 'completed-user',
       });
       expect(observedStates.every((state) => state.trailingUserId !== 'pruned-user')).toBe(true);
+      expect(requestMessageListScrollToBottom).not.toHaveBeenCalled();
       expect(sendAsync.mock.calls[0]?.[1]).not.toHaveProperty('model');
     } finally {
       dispose();

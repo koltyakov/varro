@@ -1537,6 +1537,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         targetSessionId: sessionId,
         queuedAttachments,
         optimisticModel,
+        preserveScrollPosition: true,
       }),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
     upsertSession,
