@@ -552,6 +552,48 @@ test('places a new turn at the transcript inset while its response space is empt
     .toBeLessThanOrEqual(2);
 });
 
+test('keeps first-turn Thinking at the bottom while its response space is empty', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 504, height: 1272 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const list = page.locator('.interactive-list');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.fill('First turn positioning');
+  await delayPromptRequest(page, 1_000);
+  await page.getByTitle('Send (Enter)').click();
+
+  const newTurn = page.locator('.user-message-card').filter({ hasText: 'First turn positioning' });
+  const loadingRow = page.locator('.interactive-loading-row');
+  await expect(newTurn).toBeVisible();
+  await expect(loadingRow.locator('.loading-indicator')).toBeVisible();
+
+  const geometry = await list.evaluate((element) => {
+    const prompt = element.querySelector<HTMLElement>('.user-message-card');
+    const loading = element.querySelector<HTMLElement>('.interactive-loading-row');
+    const track = element.querySelector<HTMLElement>('.interactive-list-track');
+    if (!prompt || !loading || !track) throw new Error('First-turn geometry is unavailable');
+    const containerRect = element.getBoundingClientRect();
+    const promptRect = prompt.getBoundingClientRect();
+    const loadingRect = loading.getBoundingClientRect();
+    const inset = Number.parseFloat(
+      getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+    );
+    return {
+      promptTop: promptRect.top - containerRect.top - inset,
+      responseSpace: loadingRect.top - promptRect.bottom,
+      loadingBottomGap: containerRect.bottom - loadingRect.bottom,
+    };
+  });
+
+  expect(geometry.promptTop).toBeGreaterThanOrEqual(0);
+  expect(geometry.promptTop).toBeLessThanOrEqual(16);
+  expect(geometry.responseSpace).toBeGreaterThan(400);
+  expect(geometry.loadingBottomGap).toBeGreaterThanOrEqual(0);
+  expect(geometry.loadingBottomGap).toBeLessThanOrEqual(40);
+});
+
 test('yields new-turn placement to direct upward transcript input', async ({ page }) => {
   await page.setViewportSize({ width: 504, height: 1272 });
   await page.goto('/e2e/harness/index.html?scenario=new-turn-placement');

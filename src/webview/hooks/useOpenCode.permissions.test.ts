@@ -477,6 +477,56 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('resolves the full session ancestry before handling an inherited auto permission', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    clientMocks.sessionGet.mockImplementation(async (sessionId: string) => {
+      if (sessionId === 'grandchild-1') {
+        return { ...session('grandchild-1'), parentID: 'child-1' };
+      }
+      if (sessionId === 'child-1') {
+        return { ...session('child-1'), parentID: 'session-1' };
+      }
+      throw new Error(`Unexpected session: ${sessionId}`);
+    });
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-grandchild'), sessionID: 'grandchild-1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('grandchild-1');
+        expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1');
+      });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+
+      judge.resolve({ decision: 'allow', reason: 'Safe nested child action.' });
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'grandchild-1',
+          'perm-grandchild',
+          'once'
+        )
+      );
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
   it.each([
     { userResponse: 'always' as const, judgeDecision: 'allow' as const, autoResponse: 'once' },
     { userResponse: 'reject' as const, judgeDecision: 'reject' as const, autoResponse: 'reject' },

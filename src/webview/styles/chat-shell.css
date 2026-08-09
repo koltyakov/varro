@@ -493,6 +493,15 @@ input:focus-visible {
   overflow-anchor: none;
 }
 
+.interactive-list-track.new-turn-response-space > .interactive-loading-row {
+  order: 1;
+  margin-top: auto;
+}
+
+.interactive-list-track.new-turn-response-space > .activity-exit-bottom-reserve {
+  order: 2;
+}
+
 /* An empty message row (no rendered content) must not contribute any
    vertical space - otherwise it inflates the gap between two adjacent
    non-empty rows from the canonical 12px to ~24px. */

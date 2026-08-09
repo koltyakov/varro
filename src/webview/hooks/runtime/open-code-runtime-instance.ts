@@ -220,10 +220,19 @@ function showPermissionAfterJudge(attempt: PermissionJudgeAttempt) {
 }
 
 function isPermissionSessionKnown(sessionId: string): boolean {
-  return (
-    Object.hasOwn(appStore.state.sessionPermissionModes, sessionId) ||
-    appStore.state.sessions.some((session) => session.id === sessionId)
-  );
+  const visited = new Set<string>();
+  let currentSessionId: string | undefined = sessionId;
+
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return true;
+    visited.add(currentSessionId);
+
+    const session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+    if (!session) return false;
+    currentSessionId = session.parentID;
+  }
+
+  return true;
 }
 
 export function createSessionStatusSnapshotCoordinator(
@@ -1220,8 +1229,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
-    if (isPermissionSessionKnown(sessionId)) return Promise.resolve();
+  function syncPermissionSession(sessionId: string): Promise<void> {
     const existing = permissionSessionSyncs.get(sessionId);
     if (existing) return existing;
 
@@ -1243,6 +1251,23 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       }
     );
     return sessionSync;
+  }
+
+  async function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
+    const visited = new Set<string>();
+    let currentSessionId: string | undefined = sessionId;
+
+    while (currentSessionId && !visited.has(currentSessionId)) {
+      if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return;
+      visited.add(currentSessionId);
+
+      let session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+      if (!session) {
+        await syncPermissionSession(currentSessionId);
+        session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+      }
+      currentSessionId = session?.parentID;
+    }
   }
 
   function judgeAndRespondPermission(permission: Permission): Promise<void> {

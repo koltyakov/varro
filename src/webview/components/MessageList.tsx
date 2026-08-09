@@ -1149,6 +1149,16 @@ export function MessageList() {
   // Bootstrap exact heights once, then keep virtualization active as new rows arrive. Newly added
   // rows use provisional heights until mounted instead of remounting the full transcript.
   const shouldMeasureRows = createMemo(() => messages().length >= VIRTUALIZE_THRESHOLD);
+  const keepsNewTurnResponseSpace = createMemo(() => {
+    const targetMessageId = messageListScrollTargetMessageId();
+    return (
+      !!targetMessageId &&
+      !shouldMeasureRows() &&
+      isLoading() &&
+      autoScroll() &&
+      messageIds().includes(targetMessageId)
+    );
+  });
 
   function hasMeasuredEveryMessage() {
     if (!shouldMeasureRows()) return false;
@@ -5826,7 +5836,7 @@ export function MessageList() {
       >
         <div
           ref={trackRef}
-          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}`}
+          class={`interactive-list-track${shouldVirtualize() ? ' virtualized' : ''}${editingMessage() ? ' editing-message' : ''}${keepsNewTurnResponseSpace() ? ' new-turn-response-space' : ''}`}
         >
           <Show when={displayedStickyUserMessagePreview()}>
             {(preview) => (
