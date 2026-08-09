@@ -8929,6 +8929,110 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('ignores delayed resize entries from unmounted rows', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const rowHeight = 100;
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 50 * rowHeight);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * rowHeight - scrollTopValue, 500, rowHeight);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 50 * rowHeight });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    const staleRow = container?.querySelector('[data-msg-id="assistant-49"]') as HTMLDivElement;
+    const rowObserver = observers.find((observer) => observer.targets.has(staleRow));
+    expect(staleRow).toBeInstanceOf(HTMLDivElement);
+    expect(rowObserver).toBeDefined();
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 0;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    expect(container?.querySelector('[data-msg-id="assistant-49"]')).toBeNull();
+
+    const bottomSpacer = () =>
+      Number.parseFloat(
+        container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height || '0'
+      );
+    const bottomPadBefore = bottomSpacer();
+    document.body.append(staleRow);
+    rowObserver!.callback(
+      [
+        {
+          target: staleRow,
+          borderBoxSize: [{ blockSize: 500, inlineSize: 500 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+    await Promise.resolve();
+
+    expect(bottomSpacer()).toBe(bottomPadBefore);
+    staleRow.remove();
+    animationFrames.restore();
+  });
+
   it('yields pending width measurement anchoring to direct user scroll input', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{

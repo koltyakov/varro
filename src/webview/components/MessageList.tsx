@@ -1999,7 +1999,14 @@ export function MessageList() {
       const rect = borderBoxSize ? null : element.getBoundingClientRect();
       const measuredHeight = borderBoxSize?.blockSize ?? rect?.height ?? 0;
       const inlineSize = borderBoxSize?.inlineSize ?? rect?.width ?? 0;
-      if (!messageId || !element.isConnected || measuredHeight < 0) continue;
+      if (
+        !messageId ||
+        !element.isConnected ||
+        mountedMessageRows.get(messageId) !== element ||
+        measuredHeight < 0
+      ) {
+        continue;
+      }
 
       const previousInlineSize = measuredRowInlineSizes.get(element);
       const inlineSizeChanged =
@@ -2025,7 +2032,9 @@ export function MessageList() {
         beginWidthResize({ fontChanged: true });
       }
     }
-    let widthReflowOnly = everyInlineSizeChanged || fontChanged || widthResizeIncludesFontChange;
+    let widthReflowOnly =
+      measurements.length > 0 &&
+      (everyInlineSizeChanged || fontChanged || widthResizeIncludesFontChange);
 
     if (state.streamingPartId || state.streamingText.length > 0 || pendingExpansionScrollAnchor) {
       widthReflowOnly = false;

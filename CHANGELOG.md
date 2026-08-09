@@ -4,11 +4,11 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 
 ## 0.24.x - August 2026
 
-- Streamlined assistant activity into compact, responsive summaries with clearer live progress and expandable details, and removed the obsolete alternate-view setting.
-- Made thinking blocks start collapsed and removed the obsolete default-expansion setting.
-- Added reported session cost to context details.
-- Made provider and authentication changes non-disruptive by applying queued refreshes after active work finishes and showing pending status.
-- Improved long-conversation scrolling, history loading, sticky prompt navigation, read mode, and session switching.
+- Streamlined assistant activity and loading with compact summaries, clearer progress, smoother transitions, expandable details, and collapsed thinking blocks; removed obsolete view settings.
+- Added session cost details and Models-view assignments for commit-message generation and automatic permission judging.
+- Queued provider and authentication refreshes until active work finishes, with visible pending status.
+- Improved permissions with sequential progress, responsive actions, reliable tool matching, and safer contextual auto-decisions.
+- Made message edits immediate and recoverable while improving long-conversation scrolling, history loading, sticky navigation, read mode, session switching, and viewport preservation.
 - Improved active-session deletion, first-run sidebar reveal, model-management discovery, markdown readability, and rejected image-paste feedback.
 
 ## 0.23.x - July-August 2026
