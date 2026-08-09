@@ -90,8 +90,8 @@ export async function selectSessionWithDependencies(
     const knownSession = deps.getSession(id);
     const sessionModel =
       options?.selectedModel ??
-      (knownSession ? deps.resolveSessionModel(knownSession) : null) ??
-      persistedModel;
+      persistedModel ??
+      (knownSession ? deps.resolveSessionModel(knownSession) : null);
     if (sessionModel) {
       deps.applySelectedModel(sessionModel, id);
     } else {
@@ -158,10 +158,10 @@ export async function selectSessionWithDependencies(
   }
 
   const loadedModel =
-    deps.deriveSelectedModelFromMessages(messages) ??
     options?.selectedModel ??
-    deps.resolveSessionModel(session) ??
-    persistedModel;
+    persistedModel ??
+    deps.deriveSelectedModelFromMessages(messages) ??
+    deps.resolveSessionModel(session);
   if (loadedModel) {
     deps.applySelectedModel(loadedModel, id);
   }

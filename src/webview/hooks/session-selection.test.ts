@@ -107,7 +107,7 @@ function createSelectionDependencies(
 }
 
 describe('session-selection helpers', () => {
-  it('prefers actual session and message models over a persisted selection', async () => {
+  it('keeps a persisted selection over session and message models', async () => {
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
@@ -202,8 +202,8 @@ describe('session-selection helpers', () => {
       1,
       {
         providerID: 'openai',
-        modelID: 'gpt-5.6-luna',
-        variant: 'max',
+        modelID: 'gpt-5.6-sol',
+        variant: 'high',
       },
       'session-1'
     );
@@ -211,14 +211,14 @@ describe('session-selection helpers', () => {
       2,
       {
         providerID: 'openai',
-        modelID: 'gpt-5.6-codex',
-        variant: 'low',
+        modelID: 'gpt-5.6-sol',
+        variant: 'high',
       },
       'session-1'
     );
     expect(resolvePersistedModel).toHaveBeenCalledWith('session-1');
     expect(resolveFallbackModel).not.toHaveBeenCalled();
-    expect(deriveSelectedModelFromMessages).toHaveBeenCalledTimes(1);
+    expect(deriveSelectedModelFromMessages).not.toHaveBeenCalled();
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
   });

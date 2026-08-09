@@ -2925,6 +2925,37 @@ describe('registerSessionEventHandlers', () => {
     loadingStartedAt.mockReturnValue(null);
   });
 
+  it('ignores trailing busy status after an explicitly terminal assistant finish', () => {
+    const handlers = installHandlers();
+    const setSessionStatusEntry = vi.fn();
+    const terminalAssistant = createCompletedAssistantEntry(1, 2);
+    terminalAssistant.info.finish = 'stop';
+
+    loadingStartedAt.mockReturnValue(1);
+    startLoading.mockClear();
+    stopLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [terminalAssistant],
+        getSessionStatus: () => ({ type: 'busy' }),
+        setSessionStatusEntry,
+      })
+    );
+
+    handlers.get('session.status')?.({
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(setSessionStatusEntry).toHaveBeenCalledWith('session-1', { type: 'idle' });
+    expect(setSessionStatusEntry).not.toHaveBeenCalledWith('session-1', { type: 'busy' });
+    expect(startLoading).not.toHaveBeenCalled();
+    expect(stopLoading).toHaveBeenCalledTimes(1);
+
+    loadingStartedAt.mockReturnValue(null);
+  });
+
   it('rechecks status after the final text quiets without clearing active loading', () => {
     vi.useFakeTimers();
     try {
@@ -4056,6 +4087,36 @@ describe('registerSessionEventHandlers', () => {
 
     expect(stopLoading).toHaveBeenCalledTimes(1);
     expect(startLoading).not.toHaveBeenCalled();
+  });
+
+  it('applies late part updates after completion without restarting loading', () => {
+    const handlers = installHandlers();
+    const completedAssistant = createCompletedAssistantEntry(1, 2);
+    const latePart: Part = {
+      id: 'text-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'text',
+      text: 'done',
+    };
+    completedAssistant.parts = [latePart];
+
+    loadingStartedAt.mockReturnValue(1);
+    upsertPart.mockClear();
+    startLoading.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [completedAssistant],
+      })
+    );
+
+    handlers.get('message.part.updated')?.({ properties: { part: latePart } });
+
+    expect(upsertPart).toHaveBeenCalledWith(latePart);
+    expect(startLoading).not.toHaveBeenCalled();
+    loadingStartedAt.mockReturnValue(null);
   });
 
   it('applies late part deltas after completion without marking the session busy', () => {

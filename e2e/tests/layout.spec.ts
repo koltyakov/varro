@@ -1163,6 +1163,11 @@ test('keeps the hidden Thinking slot fixed while an active tool is visible', asy
   expect(
     await page.locator('.interactive-loading-row').evaluate((element) => element.clientHeight)
   ).toBe(24);
+  const loadingSlotStyle = await page.locator('.interactive-loading-row').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { flexShrink: style.flexShrink, minHeight: style.minHeight };
+  });
+  expect(loadingSlotStyle).toEqual({ flexShrink: '0', minHeight: '24px' });
 
   await page.evaluate(() => {
     const harnessWindow = window as typeof window & {

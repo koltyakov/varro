@@ -574,12 +574,30 @@ test('keeps first-turn Thinking directly after the prompt', async ({ page }) => 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('First turn positioning');
   await delayPromptRequest(page, 1_000);
+  await page.evaluate(() => {
+    const gapSamples: number[] = [];
+    const sample = () => {
+      const prompt = document.querySelector<HTMLElement>('.user-message-card');
+      const loading = document.querySelector<HTMLElement>(
+        '.interactive-loading-row .loading-indicator'
+      );
+      if (prompt && loading) {
+        const promptRect = prompt.getBoundingClientRect();
+        const loadingRect = loading.getBoundingClientRect();
+        gapSamples.push(loadingRect.top - promptRect.bottom);
+      }
+      requestAnimationFrame(sample);
+    };
+    Object.assign(window, { firstTurnThinkingGapSamples: gapSamples });
+    requestAnimationFrame(sample);
+  });
   await page.getByTitle('Send (Enter)').click();
 
   const newTurn = page.locator('.user-message-card').filter({ hasText: 'First turn positioning' });
   const loadingRow = page.locator('.interactive-loading-row');
   await expect(newTurn).toBeVisible();
   await expect(loadingRow.locator('.loading-indicator')).toBeVisible();
+  await waitForAnimationFrames(page, 15);
 
   const geometry = await list.evaluate((element) => {
     const prompt = element.querySelector<HTMLElement>('.user-message-card');
@@ -602,6 +620,18 @@ test('keeps first-turn Thinking directly after the prompt', async ({ page }) => 
   expect(geometry.promptTop).toBeLessThanOrEqual(16);
   expect(geometry.responseSpace).toBeGreaterThanOrEqual(0);
   expect(geometry.responseSpace).toBeLessThanOrEqual(40);
+  const thinkingGapSamples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          firstTurnThinkingGapSamples?: number[];
+        }
+      ).firstTurnThinkingGapSamples ?? []
+  );
+  expect(thinkingGapSamples.length).toBeGreaterThan(1);
+  expect(Math.max(...thinkingGapSamples) - Math.min(...thinkingGapSamples)).toBeLessThanOrEqual(
+    0.5
+  );
 });
 
 test('yields new-turn placement to direct upward transcript input', async ({ page }) => {

@@ -135,7 +135,10 @@ import {
   hasVisibleRunningToolPart,
 } from './message-list/thread-visibility';
 import { getLatestPlanImplementationMessageId } from './message-list/plan-actions';
-import { getAssistantDialogSummaryMap } from './message-list/assistant-dialog';
+import {
+  getAssistantDialogSummaryMap,
+  type AssistantDialogSummaryInfo,
+} from './message-list/assistant-dialog';
 import {
   getChangedInlinePreviewMessageIds,
   getCompactActivityDisclosureLayoutSignatures,
@@ -1372,7 +1375,7 @@ export function MessageList() {
     return !!latest && isAssistantMessage(latest) && !latest.time.completed && !latest.error;
   });
 
-  const structurallyTrailingFinalResponseMessageId = createMemo(() => {
+  const structurallyTrailingFinalResponseCandidateMessageId = createMemo(() => {
     messageStructureVersion();
     messageInfoVersion();
 
@@ -1381,7 +1384,6 @@ export function MessageList() {
       const entry = entries[index]!;
       if (entry.info.role === 'user') return null;
       if (entry.info.mode === 'subagent') continue;
-      if (!entry.info.time.completed) return null;
       if (isContinuationAssistantFinish(entry.info.finish)) return null;
 
       const finalTextPartId = getFinalAssistantTextPartId(entry.parts, true);
@@ -1396,10 +1398,29 @@ export function MessageList() {
     }
     return null;
   });
+  const structurallyTrailingFinalResponseMessageId = createMemo(() => {
+    const messageId = structurallyTrailingFinalResponseCandidateMessageId();
+    if (!messageId) return null;
+    const info = messages().find((entry) => entry.info.id === messageId)?.info;
+    return info && isAssistantMessage(info) && info.time.completed ? messageId : null;
+  });
   const trailingFinalResponseMessageId = createMemo(() => {
     if (state.streamingPartId || state.streamingText.length > 0) return null;
     return structurallyTrailingFinalResponseMessageId();
   });
+  const explicitTerminalFinalResponseMessageId = createMemo(() => {
+    const messageId = structurallyTrailingFinalResponseMessageId();
+    if (!messageId) return null;
+    const info = messages().find((entry) => entry.info.id === messageId)?.info;
+    return info?.role === 'assistant' &&
+      !!info.finish &&
+      !isContinuationAssistantFinish(info.finish)
+      ? messageId
+      : null;
+  });
+  const trailingSummaryMessageId = createMemo(
+    () => explicitTerminalFinalResponseMessageId() ?? trailingSummaryOwner()?.messageId ?? null
+  );
 
   const loadingRowEligible = createMemo(
     () =>
@@ -1684,10 +1705,11 @@ export function MessageList() {
 
   createEffect(() => {
     const sessionId = state.activeSessionId;
-    const structuralMessageId = structurallyTrailingFinalResponseMessageId();
     const owner = trailingSummaryOwner();
     const ownerMatchesCurrentResponse =
-      owner && owner.sessionId === sessionId && owner.messageId === structuralMessageId;
+      owner &&
+      owner.sessionId === sessionId &&
+      owner.messageId === structurallyTrailingFinalResponseCandidateMessageId();
     if (ownerMatchesCurrentResponse) {
       const streaming = !!state.streamingPartId || state.streamingText.length > 0;
       if (streaming && !trailingSummaryOwnerConfirmed()) {
@@ -5241,7 +5263,7 @@ export function MessageList() {
 
   const assistantDialogSummaryMap = createMemo(() => {
     messageStructureVersion();
-    const suppressTrailingSummary = trailingSummaryOwner() === null;
+    const suppressTrailingSummary = trailingSummaryMessageId() === null;
     const sessions = state.sessions.map((session) => ({
       id: session.id,
       parentID: session.parentID,
@@ -5262,13 +5284,18 @@ export function MessageList() {
       })
     );
   });
-  const trailingAssistantDialogSummary = createMemo(() => {
-    const messageId = trailingSummaryOwner()?.messageId;
+  const trailingAssistantDialogSummary = createMemo<{
+    message: MessageEntry;
+    summary: AssistantDialogSummaryInfo;
+  } | null>((previous) => {
+    const messageId = trailingSummaryMessageId();
     if (!messageId) return null;
     const summary = assistantDialogSummaryMap().get(messageId);
-    if (!summary) return null;
     const message = messages().find((entry) => entry.info.id === messageId);
-    return message ? { message, summary } : null;
+    if (message && summary) return { message, summary };
+    return previous?.message.info.id === messageId && message
+      ? { message, summary: previous.summary }
+      : null;
   });
   const rowAssistantDialogSummaryMap = createMemo(() => {
     const summaries = assistantDialogSummaryMap();

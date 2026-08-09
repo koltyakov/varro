@@ -2368,6 +2368,8 @@ kbd {
 
 .interactive-loading-row {
   height: 24px;
+  min-height: 24px;
+  flex-shrink: 0;
   box-sizing: border-box;
   padding: 6px 0 0;
   overflow: hidden;

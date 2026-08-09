@@ -8471,6 +8471,22 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
     expect(container?.querySelector('.loading-indicator')).toBeNull();
 
+    replaceMessages([
+      completedDialog[0]!,
+      {
+        info: assistantMessage('assistant-1', {
+          time: { created: 2_000 },
+          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Final response')],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBe(workedRow);
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
+
     batch(() => {
       setState('streamingPartId', null);
       setState('streamingText', '');
@@ -8486,6 +8502,36 @@ describe('MessageList loading row', () => {
 
     expect(container?.querySelector('.trailing-assistant-summary-row')).toBeNull();
     expect(container?.querySelector('.loading-indicator')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('keeps an explicitly terminal worked summary visible while stale busy state settles', async () => {
+    setState('activeSessionId', 'session-1');
+    const terminalAssistant = assistantMessage('assistant-1', {
+      time: { created: 2_000, completed: 11_000 },
+      tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    terminalAssistant.finish = 'stop';
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: terminalAssistant,
+        parts: [textPart('text-assistant-1', 'Final response')],
+      },
+    ]);
+    startLoading(1_000);
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(container?.querySelector('.loading-indicator')).toBeNull();
   });
 
   it('does not show a trailing worked summary before the final text response', async () => {

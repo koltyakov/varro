@@ -4,6 +4,7 @@ import { serverEvents } from '../../lib/client';
 import {
   hasUnsettledToolPart,
   isAssistantMessage,
+  isContinuationAssistantFinish,
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
@@ -322,6 +323,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   const isStaleProgressAfterFinishedAssistant = (sessionId: string) =>
     isSessionInActiveTree(sessionId) &&
     latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt());
+  const latestAssistantHasExplicitTerminalFinish = () => {
+    const latest = deps.getMessages().at(-1)?.info;
+    return (
+      latest?.role === 'assistant' &&
+      !!latest.time.completed &&
+      !!latest.finish &&
+      !isContinuationAssistantFinish(latest.finish)
+    );
+  };
   const scheduleMessageSync = (sessionId: string, ensureLatest = false) => {
     if (disposed) return;
     if (messageSyncs.has(sessionId)) {
@@ -1009,15 +1019,15 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         handleSessionIdle(sessionID, abortedRetry);
         return;
       }
-      // opencode can emit a trailing `busy` after a turn already settled. Only
-      // suppress it for the active tree once canonical status says this session is
-      // no longer working; a completed assistant step may still be followed by
-      // another tool/model step.
+      // opencode emits `busy` immediately after both continuation and terminal
+      // assistant messages. A terminal finish is already authoritative; allowing
+      // that trailing status to restart loading flashes Thinking before idle arrives.
       if (
         status.type === 'busy' &&
         isSessionInActiveTree(sessionID) &&
         latestAssistantFinishedBeforeLoading(deps.getMessages(), uiStore.loadingStartedAt()) &&
-        !isRunningSessionStatus(deps.getSessionStatus(sessionID))
+        (!isRunningSessionStatus(deps.getSessionStatus(sessionID)) ||
+          latestAssistantHasExplicitTerminalFinish())
       ) {
         deps.setSessionStatusEntry(sessionID, { type: 'idle' });
         if (!isActiveTreeWorking()) uiStore.stopLoading();
@@ -1178,14 +1188,20 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const applyPart = () => {
         if (!isSessionInActiveTree(rawPart.sessionID)) return;
         const part = applyToolExecutionTime(rawPart);
+        const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(
+          part.sessionID,
+          part.messageID
+        );
         sessionStore.upsertPart(part);
         if (part.type === 'tool') deps.syncTodosFromMessages();
         if (settleAssistantStepFinishPart(part, getEventTimestamp(data.properties || {}))) {
           handleSessionIdle(part.sessionID, deps.hasPendingAbort(part.sessionID));
           return;
         }
-        uiStore.startLoading();
-        if (part.type === 'text') scheduleStreamedCompletionSettle(part.sessionID);
+        if (!staleCompletedMessage) {
+          uiStore.startLoading();
+          if (part.type === 'text') scheduleStreamedCompletionSettle(part.sessionID);
+        }
       };
 
       if (!deps.getMessages().some((message) => message.info.id === rawPart.messageID)) {
