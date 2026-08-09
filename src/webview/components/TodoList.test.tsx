@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { TodoList } from './TodoList';
 import { resetDefaultAppState, setState } from '../lib/state';
+import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import type { UserMessage } from '../types';
 
 let container: HTMLDivElement | null = null;
@@ -17,6 +18,7 @@ describe('TodoList', () => {
       'scrollIntoView'
     );
     resetDefaultAppState();
+    writeStored(STORAGE_KEYS.todoListCollapsed, null);
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -41,6 +43,7 @@ describe('TodoList', () => {
       ).scrollIntoView;
     }
     resetDefaultAppState();
+    writeStored(STORAGE_KEYS.todoListCollapsed, null);
   });
 
   it('renders an empty todo list with accessible list semantics', () => {
@@ -119,6 +122,46 @@ describe('TodoList', () => {
     expect(container?.querySelector('.todo-block-active')).toBeNull();
     items = container?.querySelectorAll('li.todo-block-item');
     expect(items).toHaveLength(4);
+  });
+
+  it('remembers a manual collapse for active todos until the list is expanded', async () => {
+    setState('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+    let toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBe(true);
+
+    cleanup();
+    cleanup = undefined;
+    container?.replaceChildren();
+    cleanup = render(() => TodoList(), container!);
+    toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    setState('todos', (todos) => [
+      ...todos,
+      { id: 'todo-2', content: 'Next task', status: 'pending', priority: 'medium' },
+    ]);
+    await Promise.resolve();
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBeNull();
+
+    cleanup();
+    cleanup = undefined;
+    container?.replaceChildren();
+    cleanup = render(() => TodoList(), container!);
+
+    expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
   });
 
   it('hides resolved todos on the next prompt and reappears for new work', async () => {
@@ -287,6 +330,7 @@ describe('TodoList', () => {
 
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('ul.todo-block-list')).toBeNull();
+    expect(readStored(STORAGE_KEYS.todoListCollapsed)).toBeNull();
 
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');

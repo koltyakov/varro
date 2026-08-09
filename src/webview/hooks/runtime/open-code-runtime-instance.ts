@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   WebviewThemeKind,
 } from '../../../shared/protocol';
+import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
@@ -203,6 +204,23 @@ export type SessionStatusSnapshot = {
   statuses: Record<string, SessionStatus>;
   startedAt: number;
 };
+
+type PermissionJudgeAttempt = {
+  permission: Permission;
+  status: 'judging' | 'visible' | 'responded';
+  timeout: ReturnType<typeof setTimeout> | undefined;
+  promise: Promise<void>;
+};
+
+type PermissionJudgeOutcome =
+  | { type: 'decision'; response: Awaited<ReturnType<typeof client.varro.judgePermission>> }
+  | { type: 'error'; error: unknown }
+  | { type: 'timeout' };
+
+function showPermissionAfterJudge(attempt: PermissionJudgeAttempt) {
+  attempt.status = 'visible';
+  permissionsStore.addPermission(attempt.permission);
+}
 
 export function createSessionStatusSnapshotCoordinator(
   loadSessionStatuses: () => Promise<Record<string, SessionStatus>>,
@@ -715,7 +733,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let workspaceGeneration = 0;
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
-  let approvedPermissionReferences: AutoApproveJudgeReference[] = [];
+  const permissionDecisionReferencesBySession = new Map<string, AutoApproveJudgeReference[]>();
+  const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
   let permissionSyncGeneration = 0;
   let latestPermissionSyncGeneration = 0;
   let permissionSnapshotGeneration = 0;
@@ -862,13 +881,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       repairSessionTitle,
       sessionApprovalOperations: {
         respondPermission: sessionApprovalOperations.respondPermission,
-        judgePermission: (permission) => {
-          const snapshotGeneration = permissionSnapshotGeneration;
-          return judgeAndRespondPermission(
-            permission,
-            () => snapshotGeneration === permissionSnapshotGeneration
-          );
-        },
+        judgePermission: judgeAndRespondPermission,
+        permissionReplied: markPermissionJudgeResponded,
       },
       syncPendingPermissions,
       reconcileServerState,
@@ -909,7 +923,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           void loadMcps();
         },
         refreshProviders: () => {
-          void Promise.all([loadProviders(), loadCompatibilityState()]);
+          void refreshRoutingState();
         },
         revalidateProviderAuth: sessionSendOperations.revalidateProviderAuth,
         applyTheme,
@@ -935,7 +949,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           void recheckSessionStatus(sessionId);
         },
         refreshProviders: () => {
-          void Promise.all([loadProviders(), loadCompatibilityState()]);
+          void refreshRoutingState();
         },
       });
 
@@ -1102,6 +1116,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const snapshotGeneration = ++permissionSnapshotGeneration;
       const isCurrent = () => snapshotGeneration === permissionSnapshotGeneration;
       const visiblePermissions: Permission[] = [];
+      const pendingPermissionHandlers: Promise<void>[] = [];
 
       for (const item of pendingPermissions) {
         if (!isCurrent()) return;
@@ -1109,24 +1124,28 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (!permission) continue;
         const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
         if (mode === 'full') {
-          await sessionApprovalOperations
-            .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
-            .catch(() => {
-              if (
-                isCurrent() &&
-                permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
-              ) {
-                permissionsStore.addPermission(permission);
-              }
-            });
+          pendingPermissionHandlers.push(
+            sessionApprovalOperations
+              .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
+              .catch(() => {
+                if (
+                  isCurrent() &&
+                  permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
+                ) {
+                  permissionsStore.addPermission(permission);
+                }
+              })
+          );
           continue;
         }
         if (mode === 'auto') {
-          await judgeAndRespondPermission(permission, isCurrent);
+          pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
         visiblePermissions.push(permission);
       }
+
+      await Promise.all(pendingPermissionHandlers);
 
       if (isCurrent()) {
         permissionsStore.reconcilePermissions(visiblePermissions, reconciliation);
@@ -1136,40 +1155,88 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
-  async function judgeAndRespondPermission(permission: Permission, isCurrent = () => true) {
-    try {
-      const model = resolvePermissionJudgeModel(permission.sessionID);
-      const response = await client.varro.judgePermission({
-        permission,
-        approvedReferences: approvedPermissionReferences,
-        ...(model ? { model } : {}),
-      });
-      if (
-        !isCurrent() ||
-        permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'auto'
-      ) {
+  function judgeAndRespondPermission(permission: Permission): Promise<void> {
+    const existingAttempt = permissionJudgeAttempts.get(permission.id);
+    if (existingAttempt) return existingAttempt.promise;
+
+    permissionsStore.removePermission(permission.id, { removeGroup: true });
+    const attempt: PermissionJudgeAttempt = {
+      permission,
+      status: 'judging',
+      timeout: undefined,
+      promise: Promise.resolve(),
+    };
+    permissionJudgeAttempts.set(permission.id, attempt);
+
+    const judge = Promise.resolve()
+      .then(async (): Promise<PermissionJudgeOutcome> => {
+        const model = resolvePermissionJudgeModel(permission.sessionID);
+        const response = await client.varro.judgePermission({
+          permission,
+          approvedReferences: permissionDecisionReferencesBySession.get(permission.sessionID) || [],
+          ...(model ? { model } : {}),
+        });
+        return { type: 'decision', response };
+      })
+      .catch((error: unknown): PermissionJudgeOutcome => ({ type: 'error', error }));
+    const timeout = new Promise<PermissionJudgeOutcome>((resolve) => {
+      attempt.timeout = setTimeout(
+        () => resolve({ type: 'timeout' }),
+        AUTO_APPROVE_JUDGE_TIMEOUT_MS
+      );
+    });
+
+    attempt.promise = Promise.race([judge, timeout]).then(async (outcome) => {
+      if (attempt.timeout) clearTimeout(attempt.timeout);
+      attempt.timeout = undefined;
+      if (permissionJudgeAttempts.get(permission.id) !== attempt || attempt.status !== 'judging') {
         return;
       }
-      if (response.decision === 'allow') {
+
+      const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+      if (mode !== 'auto') {
+        attempt.status = mode === 'default' ? 'visible' : 'responded';
+        if (mode === 'default') permissionsStore.addPermission(permission);
+        return;
+      }
+      if (outcome.type === 'timeout') {
+        showPermissionAfterJudge(attempt);
+        return;
+      }
+      if (outcome.type === 'error') {
+        logError('autoApproveJudge', outcome.error);
+        showPermissionAfterJudge(attempt);
+        return;
+      }
+      if (outcome.response.decision === 'ask') {
+        showPermissionAfterJudge(attempt);
+        return;
+      }
+
+      attempt.status = 'responded';
+      try {
         await sessionApprovalOperations.respondPermission(
           permission.sessionID,
           permission.id,
-          'once',
-          {
-            rethrow: true,
-          }
+          outcome.response.decision === 'allow' ? 'once' : 'reject',
+          { rethrow: true }
         );
-        return;
+      } catch (err) {
+        logError('autoApproveJudge', err);
+        if (permissionJudgeAttempts.get(permission.id) === attempt) {
+          showPermissionAfterJudge(attempt);
+        }
       }
-    } catch (err) {
-      logError('autoApproveJudge', err);
-    }
-    if (
-      isCurrent() &&
-      permissionsStore.getPermissionModeForSession(permission.sessionID) === 'auto'
-    ) {
-      permissionsStore.addPermission(permission);
-    }
+    });
+    return attempt.promise;
+  }
+
+  function markPermissionJudgeResponded(permissionId: string) {
+    const attempt = permissionJudgeAttempts.get(permissionId);
+    if (!attempt) return;
+    attempt.status = 'responded';
+    if (attempt.timeout) clearTimeout(attempt.timeout);
+    attempt.timeout = undefined;
   }
 
   function initConnection() {
@@ -1263,7 +1330,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     historyPageLoads.clear();
     promptHistoryLoads.clear();
     promptHistoryPageLoads.clear();
-    approvedPermissionReferences = [];
+    permissionDecisionReferencesBySession.clear();
+    for (const attempt of permissionJudgeAttempts.values()) {
+      if (attempt.timeout) clearTimeout(attempt.timeout);
+    }
+    permissionJudgeAttempts.clear();
   }
 
   function invalidateConnection() {
@@ -1308,6 +1379,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         loadMcps(),
         loadQuestions(),
         loadRecycleBin(),
+        syncPendingPermissions().catch((err) => logError('permission.list', err)),
       ]);
     },
     hydrateSessionStatuses,
@@ -1904,25 +1976,47 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     options?: { rethrow?: boolean }
   ) {
     const permission = appStore.state.permissions.find((item) => item.id === permissionId);
-    await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
-      ...options,
-      ...(response === 'reject' && permission
-        ? { groupMembers: permissionsStore.getPermissionGroupMembers(permission) }
-        : {}),
-    });
-    if (permission && response !== 'reject' && !options?.rethrow) {
-      recordApprovedPermissionReference(permission, response);
+    const decisionReference = permission
+      ? toApprovedPermissionReference(permission, response)
+      : null;
+    try {
+      for (const member of permission
+        ? permissionsStore.getPermissionGroupMembers(permission)
+        : []) {
+        const attempt = permissionJudgeAttempts.get(member.id);
+        if (!attempt) continue;
+        attempt.status = 'responded';
+        if (attempt.timeout) clearTimeout(attempt.timeout);
+        attempt.timeout = undefined;
+      }
+      await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
+        ...options,
+        rethrow: true,
+        ...(response === 'reject' && permission
+          ? { groupMembers: permissionsStore.getPermissionGroupMembers(permission) }
+          : {}),
+      });
+    } catch (err) {
+      for (const member of permission
+        ? permissionsStore.getPermissionGroupMembers(permission)
+        : []) {
+        const attempt = permissionJudgeAttempts.get(member.id);
+        if (attempt?.status === 'responded') attempt.status = 'visible';
+      }
+      if (options?.rethrow) throw err;
+      return;
+    }
+    if (permission && decisionReference) {
+      recordPermissionDecisionReference(permission.sessionID, decisionReference);
     }
   }
 
-  function recordApprovedPermissionReference(
-    permission: Permission,
-    response: AutoApproveJudgeReference['response']
+  function recordPermissionDecisionReference(
+    sessionId: string,
+    reference: AutoApproveJudgeReference
   ) {
-    approvedPermissionReferences = [
-      ...approvedPermissionReferences,
-      toApprovedPermissionReference(permission, response),
-    ].slice(-20);
+    const references = permissionDecisionReferencesBySession.get(sessionId) || [];
+    permissionDecisionReferencesBySession.set(sessionId, [...references, reference].slice(-20));
   }
 
   async function respondQuestion(

@@ -73,12 +73,13 @@ export function isPermissionMode(value: unknown): value is PermissionMode {
   return value === 'default' || value === 'auto' || value === 'full';
 }
 
-export type AutoApproveJudgeDecision = 'allow' | 'ask';
+export type AutoApproveJudgeDecision = 'allow' | 'reject' | 'ask';
+export const AUTO_APPROVE_JUDGE_TIMEOUT_MS = 20_000;
 
 export type AutoApproveJudgeReference = {
   type: string;
   title: string;
-  response: 'once' | 'always';
+  response: 'once' | 'always' | 'reject';
   pattern?: string | string[];
   metadata?: Record<string, unknown>;
 };

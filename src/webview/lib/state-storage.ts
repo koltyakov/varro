@@ -24,6 +24,7 @@ export const STORAGE_KEYS = {
   lastActiveSessionId: 'varro.lastActiveSessionId',
   lastOpenedView: 'varro.lastOpenedView',
   showThinking: 'varro.showThinking',
+  todoListCollapsed: 'varro.todoListCollapsed',
 } as const;
 
 const browserPersistence = new BrowserPersistence();

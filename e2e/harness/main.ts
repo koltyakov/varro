@@ -35,6 +35,7 @@ type RequestLog = { method: string; path: string; body?: unknown };
 const SCENARIO_NAMES = [
   'blank',
   'pending-permission',
+  'returning-linked-permission',
   'hidden-linked-permission',
   'missed-permission-event',
   'restored-session',
@@ -82,6 +83,7 @@ const SCENARIO_NAMES = [
   'row-archive',
   'tool-card-errors',
   'grouped-permissions',
+  'sequential-permissions',
   'tool-open-actions',
   'todo-completion',
   'message-rendering',
@@ -947,6 +949,93 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         },
         patterns: ['npm test'],
         time: { created: BASE_TIME - 500 },
+      },
+    ];
+    state.nextSequence = 20;
+    return state;
+  }
+
+  if (name === 'returning-linked-permission') {
+    const session = makeSession(
+      'session-returning-linked-permission',
+      'Returning linked permission',
+      BASE_TIME - 1_000
+    );
+    const user = makeUserMessage(
+      session.id,
+      'message-returning-permission-user',
+      ['Remove the temporary sandbox after checking the implementation.'],
+      BASE_TIME - 6_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-returning-permission-assistant',
+      user.info.id,
+      'The implementation is ready. I need approval to clean up the sandbox.',
+      BASE_TIME - 5_000
+    );
+    assistant.parts = [
+      {
+        id: 'tool-returning-activity-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'returning-activity-call-1',
+        tool: 'grep',
+        state: {
+          status: 'running',
+          input: { pattern: 'permission' },
+          title: 'Search permission flow',
+          metadata: {},
+          time: { start: BASE_TIME - 4_500 },
+        },
+      },
+      {
+        id: 'tool-returning-permission-1',
+        sessionID: session.id,
+        messageID: assistant.info.id,
+        type: 'tool',
+        callID: 'returning-permission-call-1',
+        tool: 'bash',
+        state: {
+          status: 'running',
+          input: { command: 'rm -rf /tmp/varro-sandbox' },
+          title: 'Remove temporary sandbox',
+          metadata: {},
+          time: { start: BASE_TIME - 4_000 },
+        },
+      },
+    ];
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'busy' };
+    const history: MessageEntry[] = [];
+    for (let index = 0; index < 26; index += 1) {
+      const historicalUser = makeUserMessage(
+        session.id,
+        `message-returning-history-user-${index}`,
+        [`Historical permission verification request ${index + 1}.`],
+        BASE_TIME - 100_000 + index * 2_000
+      );
+      const historicalAssistant = makeAssistantMessage(
+        session.id,
+        `message-returning-history-assistant-${index}`,
+        historicalUser.info.id,
+        `Historical verification response ${index + 1}.`,
+        BASE_TIME - 99_000 + index * 2_000
+      );
+      history.push(historicalUser, historicalAssistant);
+    }
+    state.messagesBySessionId[session.id] = [...history, user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.pendingPermissions = [
+      {
+        id: 'permission-returning-1',
+        permission: 'external_directory',
+        sessionID: session.id,
+        title: 'Allow access to the temporary sandbox?',
+        metadata: { path: '/tmp/varro-sandbox' },
+        tool: { messageID: assistant.info.id, callID: 'returning-permission-call-1' },
+        time: { created: BASE_TIME - 3_900 },
       },
     ];
     state.nextSequence = 20;
@@ -2697,6 +2786,42 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       },
     ];
     state.nextSequence = 340;
+    return state;
+  }
+
+  if (name === 'sequential-permissions') {
+    const session = makeSession(
+      'session-sequential-permissions',
+      'Sequential permissions',
+      BASE_TIME - 500
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [];
+    state.persistedActiveSessionId = session.id;
+    state.pendingPermissions = [
+      {
+        id: 'permission-sequence-1',
+        permission: 'bash',
+        sessionID: session.id,
+        messageID: 'message-sequence-1',
+        title: 'Allow running npm test?',
+        metadata: { command: 'npm test' },
+        patterns: ['npm test'],
+        time: { created: BASE_TIME - 100 },
+      },
+      {
+        id: 'permission-sequence-2',
+        permission: 'bash',
+        sessionID: session.id,
+        messageID: 'message-sequence-2',
+        title: 'Allow running npm run build?',
+        metadata: { command: 'npm run build' },
+        patterns: ['npm run build'],
+        time: { created: BASE_TIME - 99 },
+      },
+    ];
+    state.nextSequence = 341;
     return state;
   }
 
@@ -4933,6 +5058,57 @@ async function handleApiRequest(
           properties: { permissionID: id, sessionID: sessionId },
         },
       });
+    }
+    if (
+      state.scenarioName === 'returning-linked-permission' &&
+      permissionId === 'permission-returning-1'
+    ) {
+      const assistant = state.messagesBySessionId[sessionId]?.find(
+        (entry) => entry.info.id === 'message-returning-permission-assistant'
+      );
+      for (const partId of ['tool-returning-activity-1', 'tool-returning-permission-1']) {
+        const partIndex = assistant?.parts.findIndex((part) => part.id === partId) ?? -1;
+        const part = partIndex >= 0 ? assistant?.parts[partIndex] : undefined;
+        if (
+          !assistant ||
+          partIndex < 0 ||
+          part?.type !== 'tool' ||
+          part.state.status !== 'running'
+        ) {
+          continue;
+        }
+        const completedPart: Part = {
+          ...part,
+          state: {
+            status: 'completed',
+            input: part.state.input,
+            output: '',
+            title: part.state.title ?? '',
+            metadata: part.state.metadata ?? {},
+            time: { start: part.state.time.start, end: Date.now() },
+          },
+        };
+        assistant.parts[partIndex] = completedPart;
+        dispatchToWebview({
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: completedPart } },
+        });
+      }
+      window.setTimeout(() => {
+        const permission = {
+          id: 'permission-returning-2',
+          permission: 'bash',
+          sessionID: sessionId,
+          title: 'Allow removing the temporary sandbox?',
+          metadata: { command: 'rm -rf /tmp/varro-sandbox' },
+          time: { created: BASE_TIME - 3_800 },
+        };
+        state.pendingPermissions = [permission];
+        dispatchToWebview({
+          type: 'server/event',
+          payload: { type: 'permission.asked', properties: permission },
+        });
+      }, 10);
     }
     return true;
   }

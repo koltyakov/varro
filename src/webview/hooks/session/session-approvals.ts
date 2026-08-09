@@ -12,6 +12,10 @@ type PermissionModeFreshness = {
   onConfirmed?(session: Session): void;
 };
 
+function isMissingPermissionRequestError(error: unknown): boolean {
+  return error instanceof Error && /^404\b.*permission request not found/i.test(error.message);
+}
+
 function applyPermissionModeSelection(
   deps: {
     setPermissionModeForSession(sessionId: string | null | undefined, mode: PermissionMode): void;
@@ -49,7 +53,13 @@ export async function respondPermissionWithDependencies(
         ? options.groupMembers
         : [{ id: permissionId, sessionID: sessionId }];
     await Promise.all(
-      targets.map((target) => deps.respondPermission(target.sessionID, target.id, response))
+      targets.map(async (target) => {
+        try {
+          await deps.respondPermission(target.sessionID, target.id, response);
+        } catch (err) {
+          if (!isMissingPermissionRequestError(err)) throw err;
+        }
+      })
     );
     deps.removePermission(permissionId, { removeGroup: response !== 'once' });
   } catch (err) {

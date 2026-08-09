@@ -24,6 +24,7 @@ import {
   isActiveSessionWorking,
   isSessionTreeStatusWorking,
   getSessionTreeRootId,
+  getPermissionGroupMembers,
   messageStructureVersion,
   messageInfoVersion,
   onBeforeShowThinkingPreferenceChange,
@@ -124,6 +125,8 @@ import {
   getLinkedToolCallKeys,
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
+  reconcilePendingPermissionSequence,
+  type PendingPermissionSequence,
 } from './message-list/pending-prompts';
 import {
   getRenderedMessages,
@@ -1607,22 +1610,68 @@ export function MessageList() {
     messageStructureVersion();
     return getLinkedToolCallKeys(renderedMessages());
   });
-  const standalonePermissions = createMemo(() =>
-    getStandalonePermissionPrompts(
+  const pendingPermissionSequence = createMemo<PendingPermissionSequence>((previous) =>
+    reconcilePendingPermissionSequence(previous, state.permissions, state.activeSessionId)
+  );
+  let previousActivePermissionId: string | null | undefined;
+  createEffect(() => {
+    const permissionId = pendingPermissionSequence().activePermission?.id ?? null;
+    if (previousActivePermissionId === undefined) {
+      previousActivePermissionId = permissionId;
+      return;
+    }
+    if (!permissionId || permissionId === previousActivePermissionId) {
+      previousActivePermissionId = permissionId;
+      return;
+    }
+    previousActivePermissionId = permissionId;
+
+    queueMicrotask(() => {
+      if (
+        pendingPermissionSequence().activePermission?.id !== permissionId ||
+        (!autoScroll() && !pinnedToBottom)
+      ) {
+        return;
+      }
+      clearActivityExitReserve();
+      requestMessageListScrollToBottom();
+    });
+  });
+  const standalonePermissions = createMemo(() => {
+    const activePermission = pendingPermissionSequence().activePermission;
+    if (!activePermission) return [];
+    const owner = getPermissionGroupMembers(activePermission)[0];
+    if (
+      state.messagesLoading &&
+      getToolCallLookupKey(owner?.sessionID, owner?.messageID, owner?.callID) !== null
+    ) {
+      return [];
+    }
+    return getStandalonePermissionPrompts(
       untrack(() => state.messages),
-      state.permissions,
+      [activePermission],
       state.activeSessionId,
       linkedToolCalls()
-    )
-  );
-  const standaloneQuestions = createMemo(() =>
-    getStandaloneQuestionPrompts(
+    );
+  });
+  const standaloneQuestions = createMemo(() => {
+    const questions = getStandaloneQuestionPrompts(
       untrack(() => state.messages),
       state.questions,
       state.activeSessionId,
       linkedToolCalls()
-    )
-  );
+    );
+    if (!state.messagesLoading) return questions;
+
+    return questions.filter(
+      (question) =>
+        getToolCallLookupKey(
+          question.sessionID,
+          question.tool?.messageID,
+          question.tool?.callID
+        ) === null
+    );
+  });
   const activeSessionRootId = createMemo(
     () => getSessionTreeRootId(state.activeSessionId) || state.activeSessionId
   );
@@ -1669,9 +1718,15 @@ export function MessageList() {
   const questionRequestsByToolCall = createMemo(() =>
     buildQuestionRequestLookup(state.questions, activeSessionRootId())
   );
-  const permissionRequestsByToolCall = createMemo(() =>
-    buildPermissionRequestLookup(state.permissions, activeSessionRootId())
-  );
+  const permissionRequestsByToolCall = createMemo(() => {
+    const sequence = pendingPermissionSequence();
+    return buildPermissionRequestLookup(
+      sequence.activePermission ? [sequence.activePermission] : [],
+      activeSessionRootId(),
+      sequence.position,
+      sequence.total
+    );
+  });
 
   function getQuestionRequestForTool(part: Extract<Part, { type: 'tool' }>) {
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
@@ -5769,6 +5824,8 @@ export function MessageList() {
             <PendingActionRows
               questions={standaloneQuestions()}
               permissions={standalonePermissions()}
+              permissionPosition={pendingPermissionSequence().position}
+              permissionTotal={pendingPermissionSequence().total}
             />
           </Show>
           <Show

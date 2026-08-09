@@ -95,9 +95,13 @@ describe('SidebarProvider local config routing', () => {
     vscodeMock.workspace.fs.stat.mockRejectedValueOnce({ code: 'FileNotFound' });
     vscodeMock.workspace.fs.stat.mockRejectedValueOnce({ code: 'FileNotFound' });
 
-    const { provider } = await createSidebarProviderInstance({
-      server: createServer({ getWorkspaceCwd: vi.fn(() => '/repo') }),
+    const server = createServer({
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
     });
+    const { provider } = await createSidebarProviderInstance({ server });
     const { posted } = attachTestView(provider);
 
     await provider.handleMessage({
@@ -134,6 +138,7 @@ describe('SidebarProvider local config routing', () => {
         },
       },
     });
+    expect(server.restart).toHaveBeenCalledOnce();
   });
 
   it.each([

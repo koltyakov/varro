@@ -152,6 +152,28 @@ describe('session-approvals helpers', () => {
     expect(setError).toHaveBeenCalledWith('Failed to respond to permission');
   });
 
+  it('clears a permission that was already resolved remotely', async () => {
+    const removePermission = vi.fn();
+    const setError = vi.fn();
+
+    await respondPermissionWithDependencies(
+      {
+        respondPermission: vi.fn(async () => {
+          throw new Error('404 Permission request not found: perm-stale');
+        }),
+        removePermission,
+        setError,
+      },
+      'session-1',
+      'perm-stale',
+      'once',
+      { rethrow: true }
+    );
+
+    expect(removePermission).toHaveBeenCalledWith('perm-stale', { removeGroup: false });
+    expect(setError).not.toHaveBeenCalled();
+  });
+
   it('answers and rejects questions through the question API', async () => {
     const removeQuestion = vi.fn();
 

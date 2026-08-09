@@ -32,6 +32,7 @@ type ModelContextMenuState = {
   modelID: string;
 };
 type ModelRouteTag = {
+  kind: 'agent' | 'small' | 'approve' | 'commit';
   text: string;
   label: string;
 };
@@ -547,26 +548,26 @@ function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, mo
   const tags: ModelRouteTag[] = [];
 
   if (routing.smallModel?.providerID === providerID && routing.smallModel.modelID === modelID) {
-    tags.push({ text: 'small', label: 'Small model' });
+    tags.push({ kind: 'small', text: 'small', label: 'Small model' });
   }
 
   if (
     routing.commitMessageModel?.providerID === providerID &&
     routing.commitMessageModel.modelID === modelID
   ) {
-    tags.push({ text: 'commit', label: 'Commit message model' });
+    tags.push({ kind: 'commit', text: 'commit', label: 'Commit message model' });
   }
 
   if (
     routing.autoApproveModel?.providerID === providerID &&
     routing.autoApproveModel.modelID === modelID
   ) {
-    tags.push({ text: 'auto', label: 'Auto-approve model' });
+    tags.push({ kind: 'approve', text: 'approve', label: 'Auto-approve model' });
   }
 
   for (const [agentName, route] of Object.entries(routing.agentModels ?? {})) {
     if (route.providerID === providerID && route.modelID === modelID) {
-      tags.push({ text: agentName, label: `Agent model: ${agentName}` });
+      tags.push({ kind: 'agent', text: agentName, label: `Agent model: ${agentName}` });
     }
   }
 
@@ -576,7 +577,7 @@ function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, mo
 function ModelRouteBadge(props: { tag: ModelRouteTag }) {
   return (
     <span
-      class="model-capability-tag settings-route-tag"
+      class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}`}
       title={props.tag.label}
       aria-label={props.tag.label}
     >

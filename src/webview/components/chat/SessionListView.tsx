@@ -423,7 +423,7 @@ export function getPrimarySessionsForFilter(
 
     switch (filter) {
       case 'running':
-        return isRunning(session.id);
+        return isRunning(session.id) || isNeedingAttention(session.id);
       case 'attention':
         return isNeedingAttention(session.id);
       case 'failed':

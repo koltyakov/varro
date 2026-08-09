@@ -222,6 +222,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
+      refreshOpenCodeConfig: () => this.refreshProviderState(),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       postApiResponse: (requestGeneration, payload) =>
         this.webviewSession.postApiResponse(payload, requestGeneration),

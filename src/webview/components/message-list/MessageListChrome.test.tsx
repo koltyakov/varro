@@ -9,8 +9,14 @@ vi.mock('../QuestionPrompt', () => ({
 }));
 
 vi.mock('../PermissionPrompt', () => ({
-  PermissionPrompt: (props: { permission: Permission }) => (
-    <div class="mock-permission-prompt">permission:{props.permission.id}</div>
+  PermissionPrompt: (props: {
+    permission: Permission;
+    queuePosition?: number;
+    queueTotal?: number;
+  }) => (
+    <div class="mock-permission-prompt">
+      permission:{props.permission.id}:{props.queuePosition}/{props.queueTotal}
+    </div>
   ),
 }));
 
@@ -316,10 +322,27 @@ describe('MessageListChrome', () => {
         metadata: {},
         time: { created: 1 },
       },
+      {
+        id: 'permission-2',
+        type: 'edit',
+        sessionID: 'session-1',
+        messageID: 'message-2',
+        callID: 'call-2',
+        title: 'Edit file',
+        metadata: {},
+        time: { created: 2 },
+      },
     ];
 
     cleanup = render(
-      () => <PendingActionRows questions={questions} permissions={permissions} />,
+      () => (
+        <PendingActionRows
+          questions={questions}
+          permissions={permissions}
+          permissionPosition={1}
+          permissionTotal={2}
+        />
+      ),
       container!
     );
 
@@ -330,7 +353,7 @@ describe('MessageListChrome', () => {
     expect(rows.map((row) => row.textContent)).toEqual([
       'question:question-1',
       'question:question-2',
-      'permission:permission-1',
+      'permission:permission-1:1/2',
     ]);
   });
 });

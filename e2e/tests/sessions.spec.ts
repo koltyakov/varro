@@ -86,9 +86,10 @@ test('filters sessions by running, failed, attention, and plan ready status', as
   await expect(page.getByText('Filtered:')).toBeVisible();
   await expect(page.getByText('Running', { exact: true })).toBeVisible();
   await expect(page.locator('.session-item:visible .session-item-title-text')).toHaveText([
+    'Waiting on permission',
     'Running lint repair',
   ]);
-  await expect(page.locator('.session-item')).toHaveCount(1);
+  await expect(page.locator('.session-item')).toHaveCount(2);
   await page.getByRole('button', { name: 'Clear Running filter' }).click();
   await expect(page.getByRole('button', { name: 'Failed sessions' })).toBeVisible();
 

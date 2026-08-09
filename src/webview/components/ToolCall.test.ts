@@ -952,6 +952,55 @@ describe('ToolCall', () => {
     ]);
   });
 
+  it('uses the resolved task metadata model before stale agent or parent state', () => {
+    setState('allAgents', [
+      {
+        name: 'explore',
+        mode: 'subagent',
+        permission: [],
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        ...completedState(
+          {
+            subagent_type: 'explore',
+            prompt: 'Inspect the repository',
+          },
+          'Inspect the repository'
+        ),
+        metadata: {
+          sessionId: 'subagent-session-1',
+          model: { providerID: 'openai', modelID: 'gpt-5.6-terra' },
+        },
+      },
+    };
+    setState('messages', [
+      {
+        info: assistantMessage('message-1', {
+          mode: 'default',
+          providerID: 'openai',
+          modelID: 'gpt-5.6-sol',
+          variant: 'high',
+        }),
+        parts: [part],
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const detail = container?.querySelector('.structured-tool-card')?.textContent || '';
+    expect(detail).toContain('modelopenai/gpt-5.6-terra');
+    expect(detail).toContain('reasoningdefault');
+  });
+
   it('shows inherited model details for agents without a configured model', () => {
     setState('allAgents', [
       {
@@ -1470,6 +1519,46 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
     expect(container?.textContent).toContain('Permission Required');
+  });
+
+  it('keeps later linked tool cards visible until their permission reaches the front', () => {
+    const part: ToolPart = {
+      id: 'tool-2',
+      sessionID: 'session-1',
+      messageID: 'message-2',
+      type: 'tool',
+      callID: 'call-2',
+      tool: 'bash',
+      state: completedState({ command: 'npm test' }, 'npm test'),
+    };
+
+    setState('permissions', [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'bash git status',
+        metadata: {},
+        time: { created: 1 },
+      },
+      {
+        id: 'perm-2',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-2',
+        callID: 'call-2',
+        title: 'bash npm test',
+        metadata: {},
+        time: { created: 2 },
+      },
+    ]);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
   });
 
   it('shows one linked permission prompt for duplicate permission requests', () => {

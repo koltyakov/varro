@@ -17,6 +17,54 @@ const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 Object.assign(bridgeMocks, { onMessage: bridgeOnMessage });
 
 describe('useOpenCode initialization', () => {
+  it('reconciles restored permissions during startup', async () => {
+    let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
+    bridgeOnMessage.mockImplementation((handler) => {
+      bridgeHandler = handler;
+      return () => {
+        bridgeHandler = undefined;
+      };
+    });
+
+    clientMocks.health.mockResolvedValue({ healthy: true, version: '1.0.0' });
+    clientMocks.sessionList.mockResolvedValue([]);
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.agentList.mockResolvedValue([]);
+    clientMocks.providerList.mockResolvedValue({ providers: [], default: {} });
+    clientMocks.questionList.mockResolvedValue([]);
+    clientMocks.permissionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.addPermission({
+      id: 'perm-stale',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      title: 'Run command',
+      metadata: {},
+      time: { created: 1 },
+    });
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      if (!bridgeHandler) throw new Error('Expected webview bridge handler to be registered');
+
+      bridgeHandler({
+        type: 'server/status',
+        payload: { state: 'running', url: 'http://127.0.0.1:4096' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+      expect(stateModule.connectionInitialized()).toBe(true);
+    } finally {
+      dispose();
+    }
+  });
+
   it('defaults the extension toolbar agent to build on startup', async () => {
     let bridgeHandler: Parameters<BridgeOnMessage>[0] | undefined;
     bridgeOnMessage.mockImplementation((handler) => {

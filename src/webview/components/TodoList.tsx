@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { defaultAppState } from '../lib/state';
+import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import type { NormalizedTodo } from '../types';
 
 const todos = () => defaultAppState.state.todos;
@@ -38,7 +39,9 @@ export function TodoList() {
       radius: diameter / 2,
     }));
   };
-  const [collapsed, setCollapsed] = createSignal(allDone());
+  const [collapsed, setCollapsed] = createSignal(
+    allDone() || readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true
+  );
   const [listMaxHeight, setListMaxHeight] = createSignal(DEFAULT_TODO_LIST_HEIGHT);
   const [listScrollable, setListScrollable] = createSignal(false);
   let previousTodoIds = new Set(todos().map((todo) => todo.id));
@@ -82,7 +85,7 @@ export function TodoList() {
     if (nextAllDone && !previousAllDone) {
       setAutomaticCollapsed(true);
     } else if (hasNewTodo) {
-      setAutomaticCollapsed(false);
+      setAutomaticCollapsed(readStored<boolean>(STORAGE_KEYS.todoListCollapsed) === true);
     } else if (nextUserMessageCount > previousUserMessageCount && nextAllDone) {
       setAutomaticCollapsed(true);
     }
@@ -173,6 +176,11 @@ export function TodoList() {
   const toggleCollapsed = () => {
     const nextCollapsed = !collapsed();
     manuallyExpanded = !nextCollapsed;
+    if (nextCollapsed && activeTodo()) {
+      writeStored(STORAGE_KEYS.todoListCollapsed, true);
+    } else if (!nextCollapsed) {
+      writeStored(STORAGE_KEYS.todoListCollapsed, null);
+    }
     setCollapsed(nextCollapsed);
   };
 

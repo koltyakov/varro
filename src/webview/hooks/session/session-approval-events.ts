@@ -8,6 +8,7 @@ type ApprovalEventDependencies = {
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   judgePermission?(permission: Permission): Promise<void>;
+  permissionReplied?(permissionId: string): void;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -77,7 +78,10 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       const props = data.properties;
       if (!props) return;
       const pid = getPermissionReplyId(props);
-      if (pid) permissionsStore.removePermission(pid);
+      if (pid) {
+        deps.permissionReplied?.(pid);
+        permissionsStore.removePermission(pid);
+      }
     })
   );
 
@@ -86,7 +90,10 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       const props = data.properties;
       if (!props) return;
       const pid = getPermissionReplyId(props);
-      if (pid) permissionsStore.removePermission(pid);
+      if (pid) {
+        deps.permissionReplied?.(pid);
+        permissionsStore.removePermission(pid);
+      }
     })
   );
 

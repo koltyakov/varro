@@ -42,6 +42,7 @@ import {
 import {
   getStandalonePermissionPrompts,
   getStandaloneQuestionPrompts,
+  reconcilePendingPermissionSequence,
 } from './message-list/pending-prompts';
 import { getVisibleThreadMessages } from './message-list/thread-visibility';
 import {
@@ -592,6 +593,80 @@ describe('MessageList loading states', () => {
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
 
     setState('messagesLoading', false);
+  });
+
+  it('waits to place a linked question until its message loads', async () => {
+    const question: QuestionRequest = {
+      id: 'question-1',
+      sessionID: 'session-1',
+      tool: { messageID: 'message-1', callID: 'call-1' },
+      questions: [{ question: 'Choose one', header: 'Question', options: [] }],
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('questions', [question]);
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    expect(container?.querySelector('.question-prompt-card')).toBeNull();
+
+    batch(() => {
+      replaceMessages([
+        {
+          info: assistantMessage('message-1'),
+          parts: [{ ...toolPart('tool-1'), tool: 'question' }],
+        },
+      ]);
+      setState('messagesLoading', false);
+    });
+    await Promise.resolve();
+
+    const messageRow = container?.querySelector('[data-msg-id="message-1"]');
+    expect(messageRow?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+    expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
+  });
+
+  it('waits to place a linked permission until its message loads', async () => {
+    const permission: Permission = {
+      id: 'permission-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'Allow command',
+      metadata: { command: 'pwd' },
+      time: { created: 1 },
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('permissions', [permission]);
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
+
+    batch(() => {
+      replaceMessages([
+        {
+          info: assistantMessage('message-1'),
+          parts: [toolPart('tool-1')],
+        },
+      ]);
+      setState('messagesLoading', false);
+    });
+    await Promise.resolve();
+
+    const messageRow = container?.querySelector('[data-msg-id="message-1"]');
+    expect(messageRow?.querySelectorAll('.permission-prompt')).toHaveLength(1);
+    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
   });
 
   it('shows a retry action in the history banner when loading earlier messages failed', async () => {
@@ -5009,6 +5084,63 @@ describe('shouldShowPlanImplementationAction', () => {
 });
 
 describe('standalone action prompts', () => {
+  it('sequences distinct permissions and skips requests resolved before their turn', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'Allow first command',
+        metadata: {},
+        time: { created: 1 },
+      },
+      {
+        id: 'perm-2',
+        type: 'edit',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'Allow edit',
+        metadata: {},
+        time: { created: 2 },
+      },
+      {
+        id: 'perm-3',
+        type: 'websearch',
+        sessionID: 'session-1',
+        messageID: '',
+        title: 'Allow search',
+        metadata: {},
+        time: { created: 3 },
+      },
+    ];
+
+    let sequence = reconcilePendingPermissionSequence(undefined, permissions, 'session-1');
+    expect(sequence).toMatchObject({
+      activePermission: expect.objectContaining({ id: 'perm-1' }),
+      position: 1,
+      total: 3,
+    });
+
+    sequence = reconcilePendingPermissionSequence(
+      sequence,
+      [permissions[0]!, permissions[1]!],
+      'session-1'
+    );
+    expect(sequence).toMatchObject({
+      activePermission: expect.objectContaining({ id: 'perm-1' }),
+      position: 1,
+      total: 2,
+    });
+
+    sequence = reconcilePendingPermissionSequence(sequence, [permissions[1]!], 'session-1');
+    expect(sequence).toMatchObject({
+      activePermission: expect.objectContaining({ id: 'perm-2' }),
+      position: 2,
+      total: 2,
+    });
+  });
+
   it('keeps unmatched permissions visible as standalone prompts', () => {
     const permissions: Permission[] = [
       {

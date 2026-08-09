@@ -1,7 +1,6 @@
 import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
-import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
 
 function formatMetadataValue(value: unknown): string {
@@ -10,7 +9,11 @@ function formatMetadataValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function PermissionPrompt(props: { permission: Permission }) {
+export function PermissionPrompt(props: {
+  permission: Permission;
+  queuePosition?: number;
+  queueTotal?: number;
+}) {
   const sessionId = () => props.permission.sessionID;
   const [responding, setResponding] = createSignal(false);
   const duplicateCount = () =>
@@ -45,18 +48,30 @@ export function PermissionPrompt(props: { permission: Permission }) {
           />
         </svg>
         <span class="permission-prompt-label">Permission Required</span>
-        <Show when={duplicateCount() > 1}>
-          <span
-            class="permission-prompt-count"
-            title={`${duplicateCount()} identical requests grouped`}
-            aria-label={`${duplicateCount()} identical requests grouped`}
-          >
-            ×{duplicateCount()}
-          </span>
+        <Show when={(props.queueTotal ?? 0) > 1 || duplicateCount() > 1}>
+          <div class="permission-prompt-indicators">
+            <Show when={(props.queueTotal ?? 0) > 1}>
+              <span class="permission-prompt-step">
+                {props.queuePosition ?? 1} / {props.queueTotal}
+              </span>
+            </Show>
+            <Show when={duplicateCount() > 1}>
+              <span
+                class="permission-prompt-count"
+                title={`${duplicateCount()} identical requests grouped`}
+                aria-label={`${duplicateCount()} identical requests grouped`}
+              >
+                ×{duplicateCount()}
+              </span>
+            </Show>
+          </div>
         </Show>
       </div>
 
-      <div class="permission-prompt-text">{props.permission.title}</div>
+      <div class="permission-prompt-text-shell">
+        <span class="permission-prompt-text">{props.permission.title}</span>
+        <CopyIconButton text={props.permission.title} label="permission request" />
+      </div>
 
       <Show when={metadataEntries().length > 0}>
         <div class="permission-prompt-meta">
@@ -66,11 +81,7 @@ export function PermissionPrompt(props: { permission: Permission }) {
               <div class="permission-meta-entry">
                 <span class="permission-meta-key">{key}</span>
                 <div class="permission-meta-value-shell">
-                  <ClampedToolText
-                    content={text}
-                    title={`Permission request (${key})`}
-                    class="permission-meta-value"
-                  />
+                  <span class="permission-meta-value">{text}</span>
                   <CopyIconButton text={text} label={key} />
                 </div>
               </div>
@@ -87,25 +98,43 @@ export function PermissionPrompt(props: { permission: Permission }) {
 
       <div class="permission-prompt-actions">
         <button
-          class="question-btn question-btn-secondary"
-          disabled={responding()}
-          onClick={() => handleRespond('reject')}
-        >
-          Reject
-        </button>
-        <button
-          class="question-btn question-btn-secondary"
+          class="question-btn question-btn-primary"
+          aria-label="Allow once"
           disabled={responding()}
           onClick={() => handleRespond('once')}
         >
-          Once
+          <span class="permission-action-label permission-action-label-full" aria-hidden="true">
+            Allow once
+          </span>
+          <span class="permission-action-label permission-action-label-short" aria-hidden="true">
+            Once
+          </span>
         </button>
         <button
-          class="question-btn question-btn-primary"
+          class="question-btn question-btn-secondary"
+          aria-label="Allow always"
           disabled={responding()}
           onClick={() => handleRespond('always')}
         >
-          Always
+          <span class="permission-action-label permission-action-label-full" aria-hidden="true">
+            Allow always
+          </span>
+          <span class="permission-action-label permission-action-label-short" aria-hidden="true">
+            Always
+          </span>
+        </button>
+        <button
+          class="question-btn question-btn-danger"
+          aria-label="Reject"
+          disabled={responding()}
+          onClick={() => handleRespond('reject')}
+        >
+          <span class="permission-action-label permission-action-label-full" aria-hidden="true">
+            Reject
+          </span>
+          <span class="permission-action-label permission-action-label-short" aria-hidden="true">
+            Reject
+          </span>
         </button>
       </div>
     </div>

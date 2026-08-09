@@ -63,6 +63,23 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('AutoApproveJudge', () => {
+  it('allows webfetch without creating a judge session', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-webfetch',
+          type: 'webfetch',
+          sessionID: 'session-1',
+          title: 'webfetch',
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Web fetch.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('allows workspace file edits without creating a judge session', async () => {
     const { workspace } = createTemporaryWorkspace();
     const filePath = join(workspace, 'src', 'app.ts');
@@ -627,10 +644,11 @@ describe('AutoApproveJudge', () => {
       '/session/judge-session-1/message',
       expect.objectContaining({
         model: { providerID: 'openai', modelID: 'gpt-5-mini' },
+        system: expect.stringContaining('An always decision is strong evidence'),
         format: expect.objectContaining({ type: 'json_schema' }),
         parts: [
           expect.objectContaining({
-            text: expect.stringContaining('bash git status --short'),
+            text: expect.stringContaining('priorUserDecisions'),
           }),
         ],
       })
@@ -870,6 +888,59 @@ describe('AutoApproveJudge', () => {
     expect(sessionCount).toBe(1);
   });
 
+  it('returns and reuses a reject verdict for an identical permission', async () => {
+    let sessionCount = 0;
+    let messageBody: Record<string, unknown> | undefined;
+    const request = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === 'POST' && path === '/session') {
+        sessionCount += 1;
+        return { id: `judge-session-${sessionCount}` };
+      }
+      if (method === 'GET' && path === '/config') return {};
+      if (method === 'POST' && path.endsWith('/message')) {
+        messageBody = body as Record<string, unknown>;
+        return {
+          info: { structured_output: { decision: 'reject', reason: 'Previously denied.' } },
+        };
+      }
+      if (method === 'DELETE') return true;
+      throw new Error(`Unexpected request: ${method} ${path}`);
+    });
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const approvedReferences = [
+      { type: 'bash', title: 'bash npm publish', response: 'reject' as const },
+    ];
+    const permission = {
+      id: 'perm-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      title: 'Run command: npm publish',
+      metadata: { command: 'npm publish' },
+    };
+
+    await expect(judge.judge({ permission, approvedReferences })).resolves.toEqual({
+      decision: 'reject',
+      reason: 'Previously denied.',
+    });
+    await expect(
+      judge.judge({ permission: { ...permission, id: 'perm-2' }, approvedReferences })
+    ).resolves.toEqual({ decision: 'reject', reason: 'Previously denied.' });
+
+    expect(sessionCount).toBe(1);
+    expect(messageBody).toEqual(
+      expect.objectContaining({
+        format: expect.objectContaining({
+          schema: expect.objectContaining({
+            properties: expect.objectContaining({
+              decision: expect.objectContaining({ enum: ['allow', 'reject', 'ask'] }),
+            }),
+          }),
+        }),
+        parts: [expect.objectContaining({ text: expect.stringContaining('"response": "reject"') })],
+      })
+    );
+  });
+
   it('does not cache an allow verdict that arrives after the judge times out', async () => {
     vi.useFakeTimers();
     try {
@@ -900,7 +971,7 @@ describe('AutoApproveJudge', () => {
         expect.anything()
       );
 
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(20_000);
       await expect(timedOut).resolves.toEqual({
         decision: 'ask',
         reason: 'Judge failed; asking user.',
@@ -1002,10 +1073,10 @@ describe('AutoApproveJudge', () => {
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
     const permission = {
       id: 'perm-1',
-      type: 'webfetch',
+      type: 'websearch',
       sessionID: 'session-1',
-      title: 'Fetch documentation',
-      metadata: { url: 'https://example.com/one' },
+      title: 'Search documentation',
+      metadata: { query: 'one' },
     };
 
     await judge.judge({ permission });
@@ -1013,7 +1084,7 @@ describe('AutoApproveJudge', () => {
       permission: {
         ...permission,
         id: 'perm-2',
-        metadata: { url: 'https://example.com/two' },
+        metadata: { query: 'two' },
       },
     });
 

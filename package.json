@@ -47,6 +47,7 @@
     "test:compatibility": "node scripts/opencode-compatibility/run.mjs --check-floor --report artifacts/opencode-compatibility.json --summary scripts/opencode-compatibility/verified.json",
     "compatibility:discover": "node scripts/opencode-compatibility/run.mjs --report artifacts/opencode-compatibility.json",
     "test:e2e": "playwright test",
+    "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "package:vsix": "node scripts/package-vsix.mjs",

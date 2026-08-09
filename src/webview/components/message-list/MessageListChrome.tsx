@@ -173,6 +173,8 @@ export function ChatContentBottomFade() {
 export function PendingActionRows(props: {
   questions: QuestionRequest[];
   permissions: Permission[];
+  permissionPosition?: number;
+  permissionTotal?: number;
 }) {
   return (
     <>
@@ -183,13 +185,17 @@ export function PendingActionRows(props: {
           </div>
         )}
       </For>
-      <For each={props.permissions}>
+      <Show when={props.permissions[0]}>
         {(permission) => (
           <div class="interactive-item-container interactive-response">
-            <PermissionPrompt permission={permission} />
+            <PermissionPrompt
+              permission={permission()}
+              queuePosition={props.permissionPosition}
+              queueTotal={props.permissionTotal}
+            />
           </div>
         )}
-      </For>
+      </Show>
     </>
   );
 }

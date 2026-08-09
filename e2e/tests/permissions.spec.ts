@@ -6,7 +6,7 @@ test('responds to a pending permission request', async ({ page }) => {
 
   await expect(page.getByText('Permission Required')).toBeVisible();
   await expect(page.getByText('Allow running npm test?')).toBeVisible();
-  await page.getByRole('button', { name: 'Always' }).click();
+  await page.getByRole('button', { name: 'Allow always' }).click();
 
   await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
   await expect
@@ -45,6 +45,45 @@ test('rejects a pending permission request', async ({ page }) => {
     .toBe('reject');
 });
 
+test('restores a linked permission to full flow after its tool starts compacting', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 504, height: 900 });
+  await page.goto('/e2e/harness/index.html?scenario=returning-linked-permission');
+
+  await expect(page.getByText('Allow access to the temporary sandbox?')).toBeVisible();
+  await expect(page.locator('.assistant-active-activity-item')).toBeVisible();
+  await page.waitForTimeout(2_100);
+  await page.getByRole('button', { name: 'Allow once' }).click();
+  await expect(page.getByText('Allow removing the temporary sandbox?')).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+  const geometry = await page.locator('.permission-prompt').evaluate((prompt) => {
+    const promptRect = prompt.getBoundingClientRect();
+    const messageList = document.querySelector<HTMLElement>('.interactive-list');
+    const listRect = messageList?.getBoundingClientRect();
+    const actionsRect = prompt
+      .querySelector<HTMLElement>('.permission-prompt-actions')
+      ?.getBoundingClientRect();
+    return {
+      actionCount: prompt.querySelectorAll('.permission-prompt-actions button').length,
+      promptHeight: promptRect.height,
+      promptFullyVisible:
+        !!listRect && promptRect.top >= listRect.top && promptRect.bottom <= listRect.bottom,
+      actionsFullyVisible:
+        !!listRect &&
+        !!actionsRect &&
+        actionsRect.top >= listRect.top &&
+        actionsRect.bottom <= listRect.bottom,
+    };
+  });
+
+  expect(geometry.actionCount).toBe(3);
+  expect(geometry.promptHeight).toBeGreaterThan(100);
+  expect(geometry.promptFullyVisible).toBe(true);
+  expect(geometry.actionsFullyVisible).toBe(true);
+});
+
 test('keeps a linked permission visible when its tool row is hidden in chat', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=hidden-linked-permission');
 
@@ -52,7 +91,7 @@ test('keeps a linked permission visible when its tool row is hidden in chat', as
   await expect(page.getByText('Allow running npm test?')).toBeVisible();
   await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Once' }).click();
+  await page.getByRole('button', { name: 'Allow once' }).click();
 
   await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
   await expect
@@ -176,7 +215,7 @@ test('keeps a grouped permission prompt visible after a one-time approval', asyn
   await expect(page.getByText('Allow running npm test?')).toBeVisible();
   await expect(page.locator('.permission-prompt-count')).toContainText('2');
 
-  await page.getByRole('button', { name: 'Once' }).click();
+  await page.getByRole('button', { name: 'Allow once' }).click();
 
   await expect(page.getByText('Allow running npm test?')).toBeVisible();
   await expect(page.locator('.permission-prompt-count')).toHaveCount(0);
@@ -226,4 +265,73 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
       { permissionId: 'permission-group-1', response: 'reject' },
       { permissionId: 'permission-group-2', response: 'reject' },
     ]);
+});
+
+test('shows distinct permission requests one at a time', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=sequential-permissions');
+
+  await expect(page.locator('.permission-prompt')).toHaveCount(1);
+  await expect(page.locator('.permission-prompt-step')).toHaveText('1 / 2');
+  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.getByText('Allow running npm run build?')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Allow once' }).click();
+
+  await expect(page.locator('.permission-prompt')).toHaveCount(1);
+  await expect(page.locator('.permission-prompt-step')).toHaveText('2 / 2');
+  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.getByText('Allow running npm run build?')).toBeVisible();
+  await page.getByRole('button', { name: 'Reject' }).click();
+
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{ permissionId: string; response: string }>;
+            };
+          }
+        ).__varroE2E;
+        return (value?.permissionResponses || []).map(({ permissionId, response }) => ({
+          permissionId,
+          response,
+        }));
+      })
+    )
+    .toEqual([
+      { permissionId: 'permission-sequence-1', response: 'once' },
+      { permissionId: 'permission-sequence-2', response: 'reject' },
+    ]);
+});
+
+test('keeps permission actions on one responsive row', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=pending-permission');
+
+  const fullLabels = page.locator('.permission-action-label-full');
+  const shortLabels = page.locator('.permission-action-label-short');
+  await expect(fullLabels.first()).toBeVisible();
+  await expect(shortLabels.first()).toBeHidden();
+
+  await page.setViewportSize({ width: 400, height: 600 });
+  await expect(fullLabels.first()).toBeHidden();
+  await expect(shortLabels).toHaveText(['Once', 'Always', 'Reject']);
+
+  await page.setViewportSize({ width: 260, height: 600 });
+  const layout = await page.locator('.permission-prompt-actions').evaluate((actions) => {
+    const actionsRect = actions.getBoundingClientRect();
+    const buttons = [...actions.querySelectorAll('button')];
+    const buttonRects = buttons.map((button) => button.getBoundingClientRect());
+    const labels = [...actions.querySelectorAll<HTMLElement>('.permission-action-label-short')];
+    return {
+      oneRow: buttonRects.every((rect) => Math.abs(rect.top - buttonRects[0]!.top) < 1),
+      contained: buttonRects.every(
+        (rect) => rect.left >= actionsRect.left - 1 && rect.right <= actionsRect.right + 1
+      ),
+      usesEllipsis: labels.every((label) => getComputedStyle(label).textOverflow === 'ellipsis'),
+    };
+  });
+
+  expect(layout).toEqual({ oneRow: true, contained: true, usesEllipsis: true });
 });

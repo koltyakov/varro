@@ -567,6 +567,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
   flex: 0 0 auto;
   align-items: center;
   gap: 2px;
+  margin-left: 3px;
 }
 
 .session-action-feedback-actions button {
@@ -593,6 +594,7 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 }
 
 .session-action-feedback-actions .session-action-feedback-dismiss {
+  position: relative;
   width: 22px;
   height: 22px;
   min-height: 22px;
@@ -607,8 +609,12 @@ body:not(.vscode-light):not(.vscode-high-contrast):not(.vscode-high-contrast-lig
 
 .session-action-feedback-dismiss svg {
   display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 13px;
   height: 13px;
+  transform: translate(-50%, -50%);
 }
 
 @keyframes session-action-feedback-in {

@@ -45,6 +45,8 @@ While iterating, run the narrowest relevant command for the area you changed. Us
 
 The Playwright suite is browser-level webview E2E coverage. It runs the real Solid webview in Chromium through `e2e/harness/index.html`, while the harness mocks the VS Code message bridge and the OpenCode/Varro request and event boundary. It does not launch VS Code, an extension host, or a real OpenCode CLI/server.
 
+For first-run and recovery checks in a disposable real Extension Host, run `npm run test:vscode-sandbox`. See [Onboarding Verification](onboarding-verification.md) for the scenario matrix and manual non-happy-path checks.
+
 For message-list scrolling, pagination, sticky prompts, row measurement, attachments, or inline
 editing, read [Message List Virtualization](message-list-virtualization.md) before making changes.
 That guide defines the required invariants and exact-data debugging workflow for this coupled area.
@@ -411,6 +413,7 @@ docs/
 | `npm run fmt` | Format `src/` with oxfmt |
 | `npm run test` | Run the Vitest suite |
 | `npm run test:e2e` | Run the Playwright webview E2E suite |
+| `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
 | `npm run test:coverage` | Run tests with coverage output |
 | `npm run test:compatibility` | Test the declared OpenCode compatibility range with Docker |
 | `npm run compatibility:discover` | Probe selected published OpenCode versions with Docker |

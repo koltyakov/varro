@@ -492,8 +492,26 @@
 
 .settings-route-tag {
   padding: 0 4px;
-  background: color-mix(in srgb, var(--color-vscode-accent) 20%, transparent);
-  color: var(--color-vscode-accent);
+}
+
+.settings-route-tag-agent {
+  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 18%, transparent);
+  color: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 78%, var(--color-vscode-fg));
+}
+
+.settings-route-tag-small {
+  background: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 18%, transparent);
+  color: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 78%, var(--color-vscode-fg));
+}
+
+.settings-route-tag-approve {
+  background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
+  color: color-mix(in srgb, var(--color-vscode-success) 78%, var(--color-vscode-fg));
+}
+
+.settings-route-tag-commit {
+  background: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 18%, transparent);
+  color: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 78%, var(--color-vscode-fg));
 }
 
 .settings-model-ctx {

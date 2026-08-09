@@ -11,6 +11,7 @@ import {
   onMount,
 } from 'solid-js';
 import { isAbortedToolError } from '../../shared/error-classification';
+import { asRecord } from '../../shared/type-utils';
 import type {
   AssistantMessage,
   QuestionRequest,
@@ -445,20 +446,27 @@ export function ToolCall(props: {
   const fallbackPermissionMatch = createMemo<ToolCallPermissionMatch | null>(() => {
     const currentTool = tool();
     const sessionRootId = toolSessionRootId();
+    const permissions = appState.permissions
+      .filter(
+        (permission) =>
+          (getSessionTreeRootId(permission.sessionID) || permission.sessionID) === sessionRootId
+      )
+      .toSorted((left, right) => left.time.created - right.time.created);
+    const permission = permissions[0];
+    if (!permission) return null;
 
-    for (const permission of appState.permissions) {
-      const members = getPermissionGroupMembers(permission);
-      for (const [index, member] of members.entries()) {
-        if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId)
-          continue;
-        if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
-          continue;
-        }
-        return {
-          permission,
-          isPrimaryOwner: index === 0,
-        };
+    const members = getPermissionGroupMembers(permission);
+    for (const [index, member] of members.entries()) {
+      if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId) continue;
+      if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
+        continue;
       }
+      return {
+        permission,
+        isPrimaryOwner: index === 0,
+        queuePosition: 1,
+        queueTotal: permissions.length,
+      };
     }
 
     return null;
@@ -587,7 +595,13 @@ export function ToolCall(props: {
       <Show when={!shouldHideToolCard()}>{toolContent()}</Show>
       <Show when={questionRequest()}>{(question) => <QuestionPrompt request={question()} />}</Show>
       <Show when={showPermission()}>
-        {(permission) => <PermissionPrompt permission={permission()} />}
+        {(permission) => (
+          <PermissionPrompt
+            permission={permission()}
+            queuePosition={permissionMatch()?.queuePosition}
+            queueTotal={permissionMatch()?.queueTotal}
+          />
+        )}
       </Show>
     </>
   );
@@ -1173,11 +1187,28 @@ function GenericToolCall(props: {
         : null;
     const parentEntry = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
     const parent = parentEntry?.info.role === 'assistant' ? parentEntry.info : null;
-    const model = latest || agent?.model || parent;
+    const metadata = 'metadata' in props.state ? props.state.metadata : undefined;
+    const metadataModel = asRecord(asRecord(metadata)?.model);
+    const metadataProviderID =
+      typeof metadataModel?.providerID === 'string' ? metadataModel.providerID : '';
+    const metadataModelID = typeof metadataModel?.modelID === 'string' ? metadataModel.modelID : '';
+    const resolvedMetadataModel =
+      metadataProviderID && metadataModelID
+        ? { providerID: metadataProviderID, modelID: metadataModelID }
+        : null;
+    const model = latest || resolvedMetadataModel || agent?.model || parent;
     if (!model) return [];
+    const metadataInheritsParent =
+      !!resolvedMetadataModel &&
+      resolvedMetadataModel.providerID === parent?.providerID &&
+      resolvedMetadataModel.modelID === parent.modelID;
     const reasoning = latest
       ? latest.variant
-      : agent?.variant || agent?.model?.variant || (!agent?.model ? parent?.variant : undefined);
+      : resolvedMetadataModel
+        ? metadataInheritsParent
+          ? parent?.variant
+          : undefined
+        : agent?.variant || agent?.model?.variant || (!agent?.model ? parent?.variant : undefined);
 
     return [
       ['model', `${model.providerID}/${model.modelID}`],

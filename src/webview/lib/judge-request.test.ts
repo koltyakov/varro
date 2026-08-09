@@ -60,6 +60,14 @@ describe('judge-request', () => {
     });
   });
 
+  it('builds reject decision references', () => {
+    const state = createStoreState();
+
+    expect(toApprovedPermissionReference(state.permissions[0]!, 'reject')).toEqual(
+      expect.objectContaining({ response: 'reject' })
+    );
+  });
+
   it('builds judge models that survive structured clone', () => {
     const state = createStoreState();
 

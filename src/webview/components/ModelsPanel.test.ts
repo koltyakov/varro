@@ -304,7 +304,15 @@ describe('ModelsPanel', () => {
       true
     );
     expect(tags.map((tag) => tag.textContent)).toEqual(
-      expect.arrayContaining(['small', 'commit', 'auto', 'build'])
+      expect.arrayContaining(['small', 'commit', 'approve', 'build'])
+    );
+    expect(tags.map((tag) => tag.className)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('settings-route-tag-small'),
+        expect.stringContaining('settings-route-tag-commit'),
+        expect.stringContaining('settings-route-tag-approve'),
+        expect.stringContaining('settings-route-tag-agent'),
+      ])
     );
   });
 

@@ -725,6 +725,20 @@ describe('getPrimarySessionsForFilter', () => {
       ).map((item) => item.id)
     ).toEqual(['completed-primary']);
   });
+
+  it('includes sessions waiting for input in the running filter', () => {
+    expect(
+      getPrimarySessionsForFilter(
+        sessions,
+        'running',
+        (sessionId) => sessionId === 'running-primary' || sessionId === 'running-subagent',
+        (sessionId) => sessionId === 'attention-primary',
+        () => false,
+        () => false,
+        () => false
+      ).map((item) => item.id)
+    ).toEqual(['running-primary', 'attention-primary']);
+  });
 });
 
 describe('getAutoOpenSessionIdForFilter', () => {

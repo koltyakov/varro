@@ -46,11 +46,19 @@ describe('PermissionPrompt', () => {
   it('renders all permission response buttons', () => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
-    const buttons = [...(container?.querySelectorAll('button') || [])].map((button) =>
-      button.textContent?.trim()
-    );
+    const buttons = [...(container?.querySelectorAll('.permission-prompt-actions button') || [])];
 
-    expect(buttons).toEqual(['Reject', 'Once', 'Always']);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Allow once',
+      'Allow always',
+      'Reject',
+    ]);
+    expect(
+      buttons.map((button) => button.querySelector('.permission-action-label-short')?.textContent)
+    ).toEqual(['Once', 'Always', 'Reject']);
+    expect(buttons[0]?.classList).toContain('question-btn-primary');
+    expect(buttons[1]?.classList).toContain('question-btn-secondary');
+    expect(buttons[2]?.classList).toContain('question-btn-danger');
   });
 
   it('explains grouped requests and that one response applies to all', () => {
@@ -63,10 +71,13 @@ describe('PermissionPrompt', () => {
               { id: 'permission-2', sessionID: 'session-1', messageID: 'message-2' },
             ],
           }),
+          queuePosition: 1,
+          queueTotal: 2,
         }),
       container!
     );
 
+    expect(container?.querySelector('.permission-prompt-step')?.textContent).toContain('1 / 2');
     const count = container?.querySelector('.permission-prompt-count');
     expect(count?.textContent).toBe('×2');
     expect(count?.getAttribute('title')).toBe('2 identical requests grouped');
@@ -83,24 +94,32 @@ describe('PermissionPrompt', () => {
     expect(container?.querySelector('.permission-prompt-group-note')).toBeNull();
   });
 
-  it('clamps long metadata values and copies their full text', async () => {
+  it('renders single-line title and metadata values with full-text copy controls', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     const parameters = { command: 'x'.repeat(1_300) };
     const text = JSON.stringify(parameters);
+    const title = `external_directory ${'/tmp/'.repeat(100)}*`;
 
     cleanup = render(
       () =>
         PermissionPrompt({
-          permission: createPermission({ metadata: { parameters } }),
+          permission: createPermission({ title, metadata: { parameters } }),
         }),
       container!
     );
 
     const value = container?.querySelector('.permission-meta-value');
-    expect(value?.classList).toContain('tool-text-clamped');
-    expect(value?.classList).toContain('is-truncated');
-    expect(value?.textContent).not.toBe(text);
+    expect(value?.textContent).toBe(text);
+    expect(value?.tagName).toBe('SPAN');
+
+    const titleCopy = container?.querySelector<HTMLButtonElement>(
+      '.permission-prompt-text-shell button'
+    );
+    titleCopy?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith(title);
 
     const copy = container?.querySelector<HTMLButtonElement>('.permission-meta-entry button');
     copy?.click();
@@ -111,13 +130,13 @@ describe('PermissionPrompt', () => {
 
   it.each([
     ['Reject', 'reject'],
-    ['Once', 'once'],
-    ['Always', 'always'],
+    ['Allow once', 'once'],
+    ['Allow always', 'always'],
   ] as const)('%s sends the %s response', (label, response) => {
     cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
 
     const buttons = [...(container?.querySelectorAll('button') || [])];
-    const button = buttons.find((candidate) => candidate.textContent?.trim() === label);
+    const button = buttons.find((candidate) => candidate.getAttribute('aria-label') === label);
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);

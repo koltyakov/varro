@@ -118,6 +118,7 @@ export interface RestProxyCallbacks {
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
   ensureServerStarted(): Promise<string | undefined>;
+  refreshOpenCodeConfig?(): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
 }
@@ -1403,6 +1404,7 @@ export class RestProxy {
       );
     }
     await vscode.workspace.fs.writeFile(uri, encoded);
+    await this.callbacks.refreshOpenCodeConfig?.();
     let effectiveConfig = files.reduce<Record<string, unknown>>(
       (merged, file) =>
         mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
@@ -1881,7 +1883,13 @@ function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeRefe
     const type = typeof record.type === 'string' ? record.type.trim() : '';
     const title = typeof record.title === 'string' ? record.title.trim() : '';
     const response =
-      record.response === 'always' ? 'always' : record.response === 'once' ? 'once' : null;
+      record.response === 'always'
+        ? 'always'
+        : record.response === 'once'
+          ? 'once'
+          : record.response === 'reject'
+            ? 'reject'
+            : null;
     if (!type || !title || !response) continue;
     const patternValue = record.pattern;
     const pattern = Array.isArray(patternValue)
