@@ -59,7 +59,9 @@ describe('PermissionPrompt', () => {
     expect(buttons[0]?.classList).toContain('question-btn-primary');
     expect(buttons[1]?.classList).toContain('question-btn-secondary');
     expect(buttons[2]?.classList).toContain('question-btn-danger');
-    expect(container?.querySelector('.permission-prompt')?.classList).not.toContain('animate-fade-in');
+    expect(container?.querySelector('.permission-prompt')?.classList).not.toContain(
+      'animate-fade-in'
+    );
     expect(buttons[1]?.getAttribute('title')).toContain('matching future requests');
     expect(container?.querySelector('.permission-prompt-scope-note')?.textContent).toContain(
       'guides AI review toward similar non-destructive actions'

@@ -5157,10 +5157,7 @@ export function MessageList() {
           visibleActiveActivityPartKeys().has(getAssistantActivityPartKey(part)));
       const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
         const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
-        return (
-          retainedActivityPartKeys().has(ownerKey) ||
-          exitingActivityPartKeys().has(ownerKey)
-        );
+        return retainedActivityPartKeys().has(ownerKey) || exitingActivityPartKeys().has(ownerKey);
       };
       const regularGroupMap = preserveAssistantActivityGroupKeys(
         getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
