@@ -81,6 +81,7 @@ const SCENARIO_NAMES = [
   'tool-cards',
   'tool-cards-large-transcript',
   'subagent-sessions',
+  'subagent-permissions',
   'row-archive',
   'tool-card-errors',
   'grouped-permissions',
@@ -145,7 +146,7 @@ type ScenarioState = {
   storedState: {
     sessionSelectedAgents?: Record<string, string>;
     sessionSelectedMcps?: Record<string, string[]>;
-    sessionPermissionModes?: Record<string, 'default' | 'full'>;
+    sessionPermissionModes?: Record<string, 'default' | 'auto' | 'full'>;
     lastSeenSessions?: Record<string, number>;
     lastOpenedView?:
       | { type: 'new-session'; timestamp: number }
@@ -186,6 +187,7 @@ type HarnessWindow = Window & {
     releaseNextHistoryRequest?: () => boolean;
     pendingHistoryRequestCount?: () => number;
     getSessionMessages?: (sessionId: string) => MessageEntry[];
+    getPendingPermissions?: () => Array<Record<string, unknown>>;
   };
 };
 
@@ -1255,7 +1257,11 @@ function createScenarioState(name: ScenarioName): ScenarioState {
   }
 
   if (name === 'new-turn-placement') {
-    const session = makeSession('session-new-turn-placement', 'New turn placement', BASE_TIME - 500);
+    const session = makeSession(
+      'session-new-turn-placement',
+      'New turn placement',
+      BASE_TIME - 500
+    );
     const user = makeUserMessage(
       session.id,
       'message-new-turn-placement-user',
@@ -2707,6 +2713,72 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = null;
     persistRecentSessionsListView(state);
     state.nextSequence = 310;
+    return state;
+  }
+
+  if (name === 'subagent-permissions') {
+    const parent = makeSession(
+      'session-parent-permissions',
+      'Parent permission orchestration',
+      BASE_TIME - 500
+    );
+    const child = {
+      ...makeSession('session-child-permissions', 'Child verification', BASE_TIME - 400),
+      parentID: parent.id,
+    };
+    const childUser = makeUserMessage(
+      child.id,
+      'message-child-permission-user',
+      ['Verify the implementation by running the targeted browser checks.'],
+      BASE_TIME - 3_000
+    );
+    const childAssistant = makeAssistantMessage(
+      child.id,
+      'message-child-permission-assistant',
+      childUser.info.id,
+      'Waiting for approval before running the child verification.',
+      BASE_TIME - 2_000
+    );
+    markAssistantInProgress(childAssistant);
+    childAssistant.parts = [
+      {
+        id: 'tool-child-permission-1',
+        sessionID: child.id,
+        messageID: childAssistant.info.id,
+        type: 'tool',
+        callID: 'child-permission-call-1',
+        tool: 'bash',
+        state: {
+          status: 'running',
+          input: { command: 'npm run test:e2e -- child-verification' },
+          title: 'Run child verification',
+          metadata: {},
+          time: { start: BASE_TIME - 1_500 },
+        },
+      },
+    ];
+    state.sessions = [child, parent];
+    state.sessionStatuses[parent.id] = { type: 'busy' };
+    state.sessionStatuses[child.id] = { type: 'busy' };
+    state.messagesBySessionId[parent.id] = [];
+    state.messagesBySessionId[child.id] = [childUser, childAssistant];
+    state.persistedActiveSessionId = parent.id;
+    state.pendingPermissions = [
+      {
+        id: 'permission-child-verification',
+        permission: 'bash',
+        sessionID: child.id,
+        title: 'Allow child verification to run?',
+        metadata: { command: 'npm run test:e2e -- child-verification' },
+        patterns: ['npm run test:e2e -- child-verification'],
+        tool: { messageID: childAssistant.info.id, callID: 'child-permission-call-1' },
+        time: { created: BASE_TIME - 1_400 },
+      },
+    ];
+    if (new URLSearchParams(window.location.search).get('mode') === 'auto') {
+      state.storedState.sessionPermissionModes = { [parent.id]: 'auto' };
+    }
+    state.nextSequence = 315;
     return state;
   }
 
@@ -4661,6 +4733,12 @@ async function handleApiRequest(
     return state.pendingPermissions;
   }
 
+  if (method === 'POST' && path === '/varro/permission/judge') {
+    const decision =
+      new URLSearchParams(window.location.search).get('judge') === 'ask' ? 'ask' : 'allow';
+    return { decision, reason: `Harness judge returned ${decision}.` };
+  }
+
   if (method === 'GET' && path === '/vcs/status') {
     return [];
   }
@@ -5088,6 +5166,54 @@ async function handleApiRequest(
       });
     }
     if (
+      state.scenarioName === 'subagent-permissions' &&
+      permissionId === 'permission-child-verification'
+    ) {
+      const childAssistant = state.messagesBySessionId[sessionId]?.find(
+        (entry) => entry.info.id === 'message-child-permission-assistant'
+      );
+      const part = childAssistant?.parts.find((item) => item.id === 'tool-child-permission-1');
+      if (
+        childAssistant?.info.role === 'assistant' &&
+        part?.type === 'tool' &&
+        part.state.status === 'running'
+      ) {
+        const completedPart: Part = {
+          ...part,
+          state: {
+            status: 'completed',
+            input: part.state.input,
+            output: 'Child verification completed.',
+            title: part.state.title ?? '',
+            metadata: part.state.metadata ?? {},
+            time: { start: part.state.time.start, end: Date.now() },
+          },
+        };
+        childAssistant.parts[childAssistant.parts.indexOf(part)] = completedPart;
+        childAssistant.info.time.completed = Date.now();
+        childAssistant.info.finish = 'stop';
+        state.sessionStatuses[sessionId] = { type: 'idle' };
+        state.sessionStatuses['session-parent-permissions'] = { type: 'idle' };
+        dispatchToWebview({
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: completedPart } },
+        });
+        dispatchToWebview({
+          type: 'server/event',
+          payload: { type: 'message.updated', properties: { info: childAssistant.info } },
+        });
+        for (const completedSessionId of [sessionId, 'session-parent-permissions']) {
+          dispatchToWebview({
+            type: 'server/event',
+            payload: {
+              type: 'session.status',
+              properties: { sessionID: completedSessionId, status: { type: 'idle' } },
+            },
+          });
+        }
+      }
+    }
+    if (
       state.scenarioName === 'returning-linked-permission' &&
       permissionId === 'permission-returning-1'
     ) {
@@ -5448,6 +5574,7 @@ function setUpHarness() {
     pendingHistoryRequestCount: () => deferredHistoryRequestResolves.length,
     getSessionMessages: (sessionId) =>
       structuredClone(scenarioState.messagesBySessionId[sessionId] || []),
+    getPendingPermissions: () => structuredClone(scenarioState.pendingPermissions),
     updateMessageInfo: (info) => {
       const messages = scenarioState.messagesBySessionId[info.sessionID];
       const message = messages?.find((entry) => entry.info.id === info.id);

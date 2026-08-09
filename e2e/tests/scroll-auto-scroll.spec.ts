@@ -1770,7 +1770,34 @@ test.describe('auto-scroll', () => {
         });
       };
       const violations: Array<Record<string, unknown>> = [];
-      let peakMountedRows = 0;
+      // Track mutation peaks as well as painted frames. A pinned history gap must not briefly
+      // materialize one placeholder MessageRow per skipped message between frame samples.
+      // oxlint-disable-next-line unicorn/consistent-function-scoping -- Playwright serializes this scope.
+      const countRows = (node: Node) => {
+        if (!(node instanceof Element)) return 0;
+        return (
+          (node.matches('[data-msg-id]') ? 1 : 0) + node.querySelectorAll('[data-msg-id]').length
+        );
+      };
+      let mountedRows = element.querySelectorAll('[data-msg-id]').length;
+      let peakMountedRows = mountedRows;
+      let pinnedGapMounts = 0;
+      const mountObserver = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.removedNodes) mountedRows -= countRows(node);
+          for (const node of record.addedNodes) {
+            mountedRows += countRows(node);
+            peakMountedRows = Math.max(peakMountedRows, mountedRows);
+            if (
+              node instanceof Element &&
+              (node.matches('.virtual-pinned-gap') || node.querySelector('.virtual-pinned-gap'))
+            ) {
+              pinnedGapMounts += 1;
+            }
+          }
+        }
+      });
+      mountObserver.observe(element, { childList: true, subtree: true });
       let releasedPages = 0;
       let steps = 0;
 
@@ -1819,8 +1846,8 @@ test.describe('auto-scroll', () => {
           const currentRow = element.querySelector<HTMLElement>(
             `[data-msg-id="${CSS.escape(messageId)}"]`
           );
-          const mountedRows = element.querySelectorAll('[data-msg-id]').length;
-          peakMountedRows = Math.max(peakMountedRows, mountedRows);
+          const sampledMountedRows = element.querySelectorAll('[data-msg-id]').length;
+          peakMountedRows = Math.max(peakMountedRows, sampledMountedRows);
           if (!currentRow) {
             frameTops.push(null);
             continue;
@@ -1865,9 +1892,11 @@ test.describe('auto-scroll', () => {
         }
       }
 
+      mountObserver.disconnect();
       return {
         violations,
         peakMountedRows,
+        pinnedGapMounts,
         releasedPages,
         requestCount: getRequestCount(),
         steps,
@@ -1880,6 +1909,7 @@ test.describe('auto-scroll', () => {
     expect(result.requestCount).toBe(3);
     expect(result.finalScrollTop).toBeLessThan(2);
     expect(result.peakMountedRows).toBeLessThan(100);
+    expect(result.pinnedGapMounts).toBeGreaterThanOrEqual(2);
   });
 
   test('preserves the same row through exact 200 plus 200 plus final pagination', async ({

@@ -397,24 +397,16 @@ describe('MessageList entrance animation', () => {
     ).toContain('assistant-message-flow-item-streamed');
   });
 
-  it('animates a newly appended message row only once while pinned to the bottom', async () => {
+  it('does not collapse a newly appended user message during canonical replacement', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([{ info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] }]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
-
-    replaceMessages([
-      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
-      { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
-    ]);
+    startLoading(1);
+    requestMessageListScrollToBottom();
     await Promise.resolve();
 
-    expect(container?.querySelector('[data-msg-id="user-2"]')?.classList).toContain(
-      'interactive-item-entering'
-    );
-
-    // Recreating the transcript with fresh entry objects must not replay the entrance.
     replaceMessages([
       { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
       { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
@@ -424,6 +416,17 @@ describe('MessageList entrance animation', () => {
     expect(container?.querySelector('[data-msg-id="user-2"]')?.classList).not.toContain(
       'interactive-item-entering'
     );
+
+    // A canonical replacement remount must keep the sent row at its final geometry.
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
+      { info: userMessage('user-2'), parts: [textPart('text-2', 'Second prompt')] },
+    ]);
+    await Promise.resolve();
+
+    const appendedRow = container?.querySelector('[data-msg-id="user-2"]');
+    expect(appendedRow?.classList).not.toContain('measured-entrance-active');
+    expect(appendedRow?.classList).not.toContain('interactive-item-entering');
   });
 
   it('shows newly appended image messages immediately', async () => {
@@ -630,7 +633,7 @@ describe('MessageList loading states', () => {
     expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
   });
 
-  it('waits to place a linked permission until its message loads', async () => {
+  it('keeps a linked permission actionable while its message loads', async () => {
     const permission: Permission = {
       id: 'permission-1',
       type: 'bash',
@@ -651,7 +654,7 @@ describe('MessageList loading states', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
-    expect(container?.querySelector('.permission-prompt')).toBeNull();
+    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
 
     batch(() => {
       replaceMessages([
@@ -2025,6 +2028,41 @@ describe('MessageList compact activity', () => {
     );
   });
 
+  it('keeps pending apply_patch calls out of shared activity summaries', async () => {
+    const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
+    patch.tool = 'apply_patch';
+    patch.state = { status: 'pending', input: {}, raw: '' };
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [patch, read],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'edit'
+    );
+    expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
+  });
+
   it('keeps an expanded activity group open when history extends it backward', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {
@@ -2196,6 +2234,30 @@ describe('MessageList history pagination', () => {
     harness.animationFrames.restore();
   });
 
+  it('does not publish a cached history prepend inside the native scroll event', async () => {
+    const olderPage = [
+      { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
+      {
+        info: assistantMessage('older-assistant'),
+        parts: [textPart('older-assistant-text', 'Older response')],
+      },
+    ] as Awaited<ReturnType<typeof client.session.messages>>;
+    const harness = await mountDeferredHistory(undefined, undefined, olderPage);
+    cacheSessionHistoryPage('session-1', 'cursor-1', olderPage);
+    harness.setScrollTop(100);
+    harness.list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    harness.setScrollTop(0);
+    harness.list.dispatchEvent(new Event('scroll'));
+
+    expect(state.messages[0]?.info.id).toBe('current-user');
+    await Promise.resolve();
+    expect(state.messages[0]?.info.id).toBe('current-user');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(state.messages[0]?.info.id).toBe('older-user'));
+    await harness.resolveLoad();
+    harness.animationFrames.restore();
+  });
+
   it('keeps the visible message fixed when a prepended activity group moves to an older owner', async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
       function (this: HTMLElement) {
@@ -2289,6 +2351,7 @@ describe('MessageList history pagination', () => {
     let scrollTopValue = 0;
     let scrollTopWrites = 0;
     let rowRectReads = 0;
+    let misreportVirtualPlaceholderHeight = false;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2306,7 +2369,13 @@ describe('MessageList history pagination', () => {
           const index = state.messages.findIndex(
             (message) => message.info.id === this.dataset.msgId
           );
-          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+          const height =
+            misreportVirtualPlaceholderHeight &&
+            (this.dataset.msgId === 'older-30' || this.dataset.msgId === 'older-49') &&
+            this.classList.contains('interactive-item-virtual-placeholder')
+              ? 123
+              : 100;
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, height);
         }
         return new DOMRect(0, 0, 500, 40);
       }
@@ -2341,7 +2410,7 @@ describe('MessageList history pagination', () => {
     expect(normalOverscanRow?.classList).not.toContain('interactive-item-virtual-placeholder');
     expect(normalOverscanRow?.childElementCount).toBeGreaterThan(0);
 
-    scrollTopValue = 0;
+    scrollTopValue = 20;
     scrollTopWrites = 0;
     rowRectReads = 0;
     list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
@@ -2351,16 +2420,47 @@ describe('MessageList history pagination', () => {
     const anchor = container?.querySelector<HTMLElement>('[data-msg-id="current-0"]');
     const anchorTopBefore = anchor?.getBoundingClientRect().top;
     expect(anchor).toBeInstanceOf(HTMLDivElement);
+    let mountedRows = list.querySelectorAll('[data-msg-id]').length;
+    let peakMountedRows = mountedRows;
+    let sawPinnedGap = false;
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Kept beside the observer it measures.
+    const countRows = (node: Node) => {
+      if (!(node instanceof Element)) return 0;
+      return (
+        (node.matches('[data-msg-id]') ? 1 : 0) + node.querySelectorAll('[data-msg-id]').length
+      );
+    };
+    const mountObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) mountedRows -= countRows(node);
+        for (const node of record.addedNodes) {
+          mountedRows += countRows(node);
+          peakMountedRows = Math.max(peakMountedRows, mountedRows);
+          if (
+            node instanceof Element &&
+            (node.matches('.virtual-pinned-gap') || node.querySelector('.virtual-pinned-gap'))
+          ) {
+            sawPinnedGap = true;
+          }
+        }
+      }
+    });
+    mountObserver.observe(list, { childList: true, subtree: true });
+    misreportVirtualPlaceholderHeight = true;
     releasePage?.(olderPage);
     await vi.waitFor(() => expect(state.messages).toHaveLength(100));
+    mountObserver.disconnect();
     expect(scrollTopWrites).toBeLessThan(30);
     expect(anchor?.isConnected).toBe(true);
     expect(anchor?.getBoundingClientRect().top).toBe(anchorTopBefore);
 
+    expect(sawPinnedGap).toBe(true);
+    expect(peakMountedRows).toBeLessThan(50);
     const offCoreRow = container?.querySelector<HTMLElement>('[data-msg-id="older-30"]');
     expect(offCoreRow?.classList).toContain('interactive-item-off-core');
     expect(offCoreRow?.childElementCount).toBe(0);
-    expect(offCoreRow?.style.height).toBe('100px');
+    const provisionalPlaceholderHeight = offCoreRow?.style.height;
+    expect(provisionalPlaceholderHeight).toBe('160px');
     expect(container?.querySelector('[data-msg-id="current-0"]')?.classList).not.toContain(
       'interactive-item-off-core'
     );
@@ -2371,9 +2471,10 @@ describe('MessageList history pagination', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
-    expect(
-      container?.querySelector<HTMLElement>('[data-msg-id="older-30"]')?.style.height
-    ).not.toBe('100px');
+    const forcedGapRow = container?.querySelector<HTMLElement>('[data-msg-id="older-30"]');
+    expect(forcedGapRow).toBeInstanceOf(HTMLDivElement);
+    expect(forcedGapRow?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(forcedGapRow?.childElementCount).toBeGreaterThan(0);
 
     const touchStart = new MouseEvent('pointerdown', { bubbles: true, button: 0 });
     Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
@@ -2385,29 +2486,30 @@ describe('MessageList history pagination', () => {
       await Promise.resolve();
       animationFrames.flush();
     }
-    const retainedPlaceholder = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
-    expect(retainedPlaceholder?.classList).toContain('interactive-item-virtual-placeholder');
-
     await vi.advanceTimersByTimeAsync(600);
     animationFrames.flush(performance.now());
     await Promise.resolve();
-    expect(retainedPlaceholder?.classList).toContain('interactive-item-virtual-placeholder');
+    expect(container?.querySelectorAll('[data-msg-id]').length).toBeLessThan(50);
 
-    scrollTopValue = 4_950;
+    scrollTopValue = 7_800;
     list.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
     animationFrames.flush(performance.now());
     await Promise.resolve();
-    expect(retainedPlaceholder?.getBoundingClientRect().bottom).toBeGreaterThan(0);
-    expect(retainedPlaceholder?.classList).not.toContain('interactive-item-virtual-placeholder');
-    expect(retainedPlaceholder?.childElementCount).toBeGreaterThan(0);
+    const retainedRow = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
+    expect(retainedRow).toBeInstanceOf(HTMLDivElement);
+    expect(retainedRow?.classList).toContain('interactive-item-virtual-placeholder');
+    expect(retainedRow?.style.height).toBe(provisionalPlaceholderHeight);
+    expect(retainedRow?.childElementCount).toBe(0);
 
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
     animationFrames.flush(performance.now());
     await Promise.resolve();
-    expect(retainedPlaceholder?.classList).not.toContain('interactive-item-virtual-placeholder');
-    expect(retainedPlaceholder?.childElementCount).toBeGreaterThan(0);
+    const hydratedRow = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
+    expect(hydratedRow).toBeInstanceOf(HTMLDivElement);
+    expect(hydratedRow?.classList).not.toContain('interactive-item-virtual-placeholder');
+    expect(hydratedRow?.childElementCount).toBeGreaterThan(0);
     animationFrames.restore();
   });
 
@@ -3028,7 +3130,9 @@ describe('MessageList history pagination', () => {
     );
     const secondRetryEnabled = secondRetry?.disabled === false;
     secondRetry?.click();
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(messagesSpy.mock.calls.some(([sessionId]) => sessionId === 'session-2')).toBe(true);
+    });
     const secondSessionRequested = messagesSpy.mock.calls.some(
       ([sessionId]) => sessionId === 'session-2'
     );
@@ -5386,6 +5490,36 @@ describe('standalone action prompts', () => {
       },
     ];
 
+    expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
+  });
+
+  it('keeps unresolved-session permissions visible from the active session', () => {
+    setSessions([
+      {
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/',
+        title: 'Session 1',
+        version: '1',
+        time: { created: 0, updated: 10 },
+      },
+    ]);
+
+    const permissions: Permission[] = [
+      {
+        id: 'perm-unresolved-child',
+        type: 'bash',
+        sessionID: 'child-unknown',
+        messageID: '',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+
+    expect(
+      reconcilePendingPermissionSequence(undefined, permissions, 'session-1').activePermission
+    ).toEqual(permissions[0]);
     expect(getStandalonePermissionPrompts([], permissions, 'session-1')).toEqual(permissions);
   });
 

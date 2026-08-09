@@ -118,6 +118,13 @@ export function shouldCompactAssistantActivityPart(
   part: AssistantActivityPart,
   options: { showInlineFileChanges: boolean; keepEditInline: boolean }
 ) {
+  if (
+    part.type === 'tool' &&
+    normalizeToolName(part.tool) === 'apply_patch' &&
+    isAssistantActivityPartRunning(part)
+  ) {
+    return false;
+  }
   return (
     !options.showInlineFileChanges || !isAssistantEditActivityPart(part) || !options.keepEditInline
   );

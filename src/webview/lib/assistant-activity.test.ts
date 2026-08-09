@@ -164,6 +164,35 @@ describe('assistant activity summaries', () => {
     ).toBe(true);
   });
 
+  it('keeps active apply_patch calls outside compact activity', () => {
+    const patch: ToolPart = {
+      ...completedTool('patch-1', 'functions.apply_patch'),
+      state: { status: 'pending', input: {}, raw: '' },
+    };
+
+    expect(
+      shouldCompactAssistantActivityPart(patch, {
+        showInlineFileChanges: false,
+        keepEditInline: false,
+      })
+    ).toBe(false);
+
+    patch.state = {
+      status: 'completed',
+      input: {},
+      output: 'Done',
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    expect(
+      shouldCompactAssistantActivityPart(patch, {
+        showInlineFileChanges: false,
+        keepEditInline: false,
+      })
+    ).toBe(true);
+  });
+
   it('groups routine activity across primary assistant messages in one user turn', () => {
     const command = completedTool('bash-1', 'bash');
     const thought = { ...reasoning('reasoning-1', 2), messageID: 'assistant-2' };

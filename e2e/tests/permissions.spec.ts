@@ -1,6 +1,67 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
+test('renders a child permission in its active parent and completes child work after manual approval', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/e2e/harness/index.html?scenario=subagent-permissions');
+
+  await expect(
+    page.locator('.interactive-session > .chat-header .chat-header-title-text')
+  ).toHaveText('Parent permission orchestration');
+  await expect(page.getByText('Allow child verification to run?')).toBeVisible();
+  await expect(page.getByTitle('Send (Enter)')).toBeDisabled();
+  await page.getByRole('button', { name: 'Allow once' }).click();
+
+  await expect(page.getByText('Allow child verification to run?')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const state = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{
+                sessionId: string;
+                permissionId: string;
+                response: string;
+              }>;
+              getSessionMessages?: (sessionId: string) => Array<{
+                info: { time: { completed?: number } };
+                parts: Array<{ id: string; type: string; state?: { status: string } }>;
+              }>;
+            };
+          }
+        ).__varroE2E;
+        const child = state?.getSessionMessages?.('session-child-permissions')[1];
+        return {
+          response: state?.permissionResponses[0] || null,
+          completed: child?.info.time.completed !== undefined,
+          toolStatus: child?.parts.find((part) => part.id === 'tool-child-permission-1')?.state
+            ?.status,
+        };
+      })
+    )
+    .toEqual({
+      response: {
+        sessionId: 'session-child-permissions',
+        permissionId: 'permission-child-verification',
+        response: 'once',
+      },
+      completed: true,
+      toolStatus: 'completed',
+    });
+  await page.getByTitle('Back to sessions').click();
+  await expect(
+    page
+      .locator('.session-item')
+      .filter({ hasText: 'Parent permission orchestration' })
+      .locator('.session-item-indicator.is-running')
+  ).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
 test('responds to a pending permission request', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=pending-permission');
 
@@ -265,6 +326,39 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
       { permissionId: 'permission-group-1', response: 'reject' },
       { permissionId: 'permission-group-2', response: 'reject' },
     ]);
+});
+
+test('clears every covered grouped permission after allowing always', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=grouped-permissions');
+
+  await expect(page.locator('.permission-prompt-count')).toContainText('2');
+  await page.getByRole('button', { name: 'Allow always' }).click();
+
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: {
+              permissionResponses: Array<{ permissionId: string; response: string }>;
+              getPendingPermissions?: () => unknown[];
+            };
+          }
+        ).__varroE2E;
+        return {
+          pending: value?.getPendingPermissions?.().length ?? -1,
+          responses: (value?.permissionResponses || []).map(({ permissionId, response }) => ({
+            permissionId,
+            response,
+          })),
+        };
+      })
+    )
+    .toEqual({
+      pending: 0,
+      responses: [{ permissionId: 'permission-group-1', response: 'always' }],
+    });
 });
 
 test('shows distinct permission requests one at a time', async ({ page }) => {

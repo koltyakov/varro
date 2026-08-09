@@ -527,43 +527,231 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
     .toBeLessThanOrEqual(15);
 });
 
-test('places a new turn at the transcript inset while its response space is empty', async ({
-  page,
-}) => {
+test('keeps existing transcript context visible while placing a new turn', async ({ page }) => {
   await page.setViewportSize({ width: 504, height: 1272 });
   await page.goto('/e2e/harness/index.html?scenario=new-turn-placement');
 
   const list = page.locator('.interactive-list');
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  const previousResponse = page.locator('[data-msg-id="message-new-turn-placement-assistant"]');
   await expect(list.locator('[data-msg-id]')).toHaveCount(2);
+  await expect(previousResponse).toBeInViewport();
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
     .toBeLessThanOrEqual(2);
 
   await composer.fill('Test message');
-  await delayPromptRequest(page, 1_000);
+  await delayPromptRequest(page, 2_000);
+  await page.evaluate(() => {
+    const samples: number[] = [];
+    let frames = 0;
+    const sample = () => {
+      const cards = document.querySelectorAll<HTMLElement>('.user-message-card');
+      const card = cards.item(cards.length - 1);
+      const container = card?.closest<HTMLElement>('.interactive-list');
+      if (card && container && cards.length > 1) {
+        samples.push(card.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      frames += 1;
+      if (frames < 90) requestAnimationFrame(sample);
+    };
+    Object.assign(window, { newTurnTopSamples: samples });
+    requestAnimationFrame(sample);
+  });
   await page.getByTitle('Send (Enter)').click();
 
   const newTurn = page.locator('.user-message-card').filter({ hasText: 'Test message' });
   await expect(newTurn).toBeVisible();
-  await expect
-    .poll(() =>
-      newTurn.evaluate((element) => {
-        const container = element.closest<HTMLElement>('.interactive-list');
-        const track = element.closest<HTMLElement>('.interactive-list-track');
-        if (!container || !track) throw new Error('New turn geometry is unavailable');
-        const inset = Number.parseFloat(
-          getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
-        );
-        return element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset;
-      })
-    )
-    .toBeLessThanOrEqual(2);
+  await waitForAnimationFrames(page, 70);
+
+  const placement = await list.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    samples:
+      (
+        window as Window & {
+          newTurnTopSamples?: number[];
+        }
+      ).newTurnTopSamples ?? [],
+  }));
+  expect(placement.samples.length).toBeGreaterThan(1);
+  expect(Math.min(...placement.samples)).toBeGreaterThan(placement.clientHeight / 2);
+  await expect(previousResponse).toBeInViewport();
 
   await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
     .toBeLessThanOrEqual(2);
+});
+
+test('keeps the sent card and previous Worked summary stable through Thinking', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 504, height: 792 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-completion');
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  const text = 'Keep this message continuously visible';
+  await expect(page.getByRole('button', { name: /Todos/i })).toContainText('1/1');
+  await page.evaluate(() => {
+    window.postMessage(
+      {
+        type: 'server/event',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'message-todo-completion-final-text',
+              sessionID: 'session-todo-completion',
+              messageID: 'message-todo-completion-assistant',
+              type: 'text',
+              text: 'All completed work is verified.',
+            },
+          },
+        },
+      },
+      '*'
+    );
+  });
+  await expect(
+    page.locator('.trailing-assistant-summary-row .assistant-dialog-summary')
+  ).toContainText('Worked for');
+  await delayPromptRequest(page, 500);
+  await composer.fill(text);
+  await page.evaluate((promptText) => {
+    const harness = window as Window & {
+      sentUserCardPaintSamples?: Array<{
+        visibleRatio: number;
+        thinking: boolean;
+        top: number | null;
+        managed: boolean;
+      }>;
+      previousWorkedSamples?: Array<{
+        top: number | null;
+        owner: 'trailing' | 'row' | null;
+        count: number;
+      }>;
+    };
+    const samples: Array<{
+      visibleRatio: number;
+      thinking: boolean;
+      top: number | null;
+      managed: boolean;
+    }> = [];
+    harness.sentUserCardPaintSamples = samples;
+    const previousWorkedSamples: Array<{
+      top: number | null;
+      owner: 'trailing' | 'row' | null;
+      count: number;
+    }> = [];
+    harness.previousWorkedSamples = previousWorkedSamples;
+    let seen = false;
+    let frames = 0;
+    const sample = () => {
+      const list = document.querySelector<HTMLElement>('.interactive-list');
+      const rowSummary = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-todo-completion-assistant"] > .assistant-dialog-summary'
+      );
+      const trailingSummary = document.querySelector<HTMLElement>(
+        '.trailing-assistant-summary-row .assistant-dialog-summary'
+      );
+      const workedSummaries = [rowSummary, trailingSummary].filter(
+        (summary): summary is HTMLElement => !!summary?.textContent?.includes('Worked for')
+      );
+      const workedSummary = workedSummaries[0];
+      previousWorkedSamples.push({
+        top:
+          workedSummary && list
+            ? workedSummary.getBoundingClientRect().top - list.getBoundingClientRect().top
+            : null,
+        owner:
+          rowSummary === workedSummary
+            ? 'row'
+            : trailingSummary === workedSummary
+              ? 'trailing'
+              : null,
+        count: workedSummaries.length,
+      });
+
+      const cards = [...document.querySelectorAll<HTMLElement>('.user-message-card')];
+      const card = cards.findLast((candidate) => candidate.textContent?.includes(promptText));
+      const row = card?.closest<HTMLElement>('[data-msg-id]');
+      const container = card?.closest<HTMLElement>('.interactive-list');
+      const thinking = !!document.querySelector('.interactive-loading-row .loading-indicator');
+      if (card && row && container) {
+        seen = true;
+        const cardRect = card.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const paintedHeight = Math.max(
+          0,
+          Math.min(cardRect.bottom, rowRect.bottom) - Math.max(cardRect.top, rowRect.top)
+        );
+        samples.push({
+          visibleRatio: cardRect.height > 0 ? paintedHeight / cardRect.height : 0,
+          thinking,
+          top: cardRect.top - container.getBoundingClientRect().top,
+          managed: container.classList.contains('managed-scroll-anchor'),
+        });
+      } else if (seen) {
+        samples.push({ visibleRatio: 0, thinking, top: null, managed: false });
+      }
+      frames += 1;
+      if (frames < 60) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, text);
+
+  await page.getByTitle('Send (Enter)').click();
+  await expect(page.getByText(text, { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { sentUserCardPaintSamples?: unknown[] }).sentUserCardPaintSamples
+            ?.length ?? 0
+      )
+    )
+    .toBeGreaterThan(40);
+
+  const samples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          sentUserCardPaintSamples?: Array<{
+            visibleRatio: number;
+            thinking: boolean;
+            top: number | null;
+            managed: boolean;
+          }>;
+        }
+      ).sentUserCardPaintSamples ?? []
+  );
+  expect(samples.some((sample) => sample.thinking)).toBe(true);
+  expect(Math.min(...samples.map((sample) => sample.visibleRatio))).toBeGreaterThan(0.95);
+  expect(samples.every((sample) => sample.managed)).toBe(true);
+  const tops = samples.flatMap((sample) => (sample.top === null ? [] : [sample.top]));
+  for (let index = 1; index < tops.length; index += 1) {
+    expect(tops[index]!).toBeLessThanOrEqual(tops[index - 1]! + 0.5);
+  }
+
+  const workedSamples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          previousWorkedSamples?: Array<{
+            top: number | null;
+            owner: 'trailing' | 'row' | null;
+            count: number;
+          }>;
+        }
+      ).previousWorkedSamples ?? []
+  );
+  expect(workedSamples.some((sample) => sample.owner === 'trailing')).toBe(true);
+  expect(workedSamples.some((sample) => sample.owner === 'row')).toBe(true);
+  expect(workedSamples.every((sample) => sample.count === 1 && sample.top !== null)).toBe(true);
+  const workedTops = workedSamples.map((sample) => sample.top!);
+  for (let index = 1; index < workedTops.length; index += 1) {
+    expect(workedTops[index]!).toBeLessThanOrEqual(workedTops[index - 1]! + 0.5);
+  }
 });
 
 test('keeps first-turn Thinking directly after the prompt', async ({ page }) => {
@@ -634,7 +822,7 @@ test('keeps first-turn Thinking directly after the prompt', async ({ page }) => 
   );
 });
 
-test('yields new-turn placement to direct upward transcript input', async ({ page }) => {
+test('yields send-triggered bottom follow to direct upward transcript input', async ({ page }) => {
   await page.setViewportSize({ width: 504, height: 1272 });
   await page.goto('/e2e/harness/index.html?scenario=new-turn-placement');
 

@@ -516,6 +516,32 @@
   --settings-route-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2a759);
 }
 
+.settings-route-tag-old {
+  border-style: dashed;
+  background: transparent;
+  opacity: 0.72;
+}
+
+.settings-route-tag-new {
+  border-color: color-mix(in srgb, var(--settings-route-color) 72%, var(--color-vscode-border));
+}
+
+.settings-route-tag-removed {
+  border-style: dashed;
+  background: transparent;
+  text-decoration: line-through;
+  opacity: 0.58;
+}
+
+.settings-route-tag-change {
+  margin-left: 3px;
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
 .settings-model-ctx {
   flex-shrink: 0;
   font-size: 10px;

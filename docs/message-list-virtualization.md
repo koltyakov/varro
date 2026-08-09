@@ -117,9 +117,9 @@ the shared invariants below remain true.
   against the existing pinned bottom target.
 - Scrollbar inset is layout geometry. Track padding, sticky chrome, and bottom overlays must use the
   same current `offsetWidth - clientWidth` inset.
-- Disable native browser scroll anchoring whenever Varro owns measurement, history loading, activity
-  exit, or edit geometry. Native anchoring and explicit anchor correction must not compensate the same
-  mutation.
+- Disable native browser scroll anchoring whenever Varro owns bottom-follow, measurement, history
+  loading, activity exit, or edit geometry. Native anchoring and explicit anchor correction must not
+  compensate the same mutation.
 
 ### Coordinate Spaces
 
@@ -223,19 +223,28 @@ Direct input acquires ownership only when it can affect the transcript:
 - Detached follow reattaches only after genuine downward movement reaches the reattachment threshold.
   Zero-delta and resize-generated scroll events cannot reattach. Downward input at the physical bottom
   does not interrupt follow.
-- Pure bottom-followed appends below the virtualization threshold may claim a one-time row entrance,
-  except image rows. Once measurement is active, append rows publish final heights immediately and any
-  reveal transition moves only the viewport. Remounting history must not replay entrance animation.
-- A normal send below the virtualization threshold aligns its new user card to the message-jump inset
-  and creates only enough trailing reserve to make that destination reachable. Assistant growth
-  consumes that reserve while direct transcript input cancels destination settling. Measured appends
-  retain their viewport-only transition so provisional row reconciliation cannot create a large jump.
+- Pure bottom-followed assistant appends below the virtualization threshold may claim a one-time row
+  entrance. Sent user rows and image rows mount at their final geometry immediately: a user card must
+  remain continuously painted through optimistic acknowledgement and the Thinking handoff. Once
+  measurement is active, append rows publish final heights immediately and any reveal transition moves
+  only the viewport. Remounting history must not replay entrance animation.
+- Sending in an existing chat preserves the conversational context: the new user card enters from the
+  bottom while the preceding response remains visible. It must never align the new card to the
+  transcript top. This established behavior applies to typed prompts, generated actions such as
+  "Implement plan", and queued follow-ups, and must not change at the virtualization threshold.
+- Only the first turn in an empty chat may align its user card to the message-jump inset and create
+  enough trailing reserve to make that destination reachable. Assistant growth consumes that reserve
+  while direct transcript input cancels destination settling. Measured appends retain their
+  viewport-only transition so provisional row reconciliation cannot create a large jump.
 - The append reserve is general bottom-pinned flow geometry, not only activity-exit state. It may
   replace space lost from trays, todo collapse, external panels, or local container changes. Real
   appended growth consumes it while its original bottom target remains fixed.
 - The trailing Thinking, loading, empty-reserve, and Worked states share one post-message slot. The
   slot may remain invisibly reserved while visible streaming text or tools replace its label. Debounce
   label reappearance and reserve release so short transitions do not collapse and regrow the bottom.
+- Starting the next turn moves the previous Worked summary from the shared trailing slot into its
+  assistant row. Its painted top must remain fixed across that ownership handoff; row-local spacing
+  must match the spacing previously supplied by the assistant row boundary.
 - While inline editing is active, the edited row top may not move above the sticky message-jump inset.
   Clamp native and wheel movement at that boundary and settle for bounded frames. Editing never
   re-enables bottom follow.

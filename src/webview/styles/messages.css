@@ -53,6 +53,7 @@
 .interactive-session .managed-subagent-info-chip {
   cursor: default;
   flex: 0 1 auto;
+  padding-right: 9px;
 }
 
 .interactive-session .managed-subagent-info-chip:hover {
@@ -973,6 +974,10 @@ body.vscode-light
   display: block;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.interactive-item-container[data-msg-id] > .assistant-dialog-summary {
+  margin-top: 6px;
 }
 
 .model-change-indicator.assistant-dialog-summary:has(.assistant-dialog-summary-actions) {

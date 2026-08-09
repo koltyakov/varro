@@ -255,6 +255,8 @@ Browser preferences and drafts use `BrowserPersistence`, which reads VS Code web
 
 `src/webview/hooks/useOpenCode.ts` is the stable public API. Runtime composition lives in `src/webview/hooks/runtime/open-code-runtime-instance.ts`, with focused operations and effects under `src/webview/hooks/session/`.
 
+Permission handling is governed by the lifecycle, inheritance, timeout, and visibility invariants in [Permission Lifecycle And Safety](permission-lifecycle.md). Read that contract before changing permission rules, automatic judging, pending snapshots, or child-session approvals.
+
 - Initializes the UI once the server reports `running`
 - Loads sessions, agents, providers, MCP status, and questions
 - Subscribes to extension messages and OpenCode server events

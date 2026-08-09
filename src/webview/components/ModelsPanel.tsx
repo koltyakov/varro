@@ -35,6 +35,7 @@ type ModelRouteTag = {
   kind: 'agent' | 'small' | 'approve' | 'commit';
   text: string;
   label: string;
+  change?: 'old' | 'new' | 'removed';
 };
 
 const MIN_RELOAD_INDICATOR_MS = 500;
@@ -50,6 +51,7 @@ export function ModelsPanel() {
 
   const [query, setQuery] = createSignal('');
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
+  const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
@@ -66,6 +68,13 @@ export function ModelsPanel() {
     return Object.entries(state.sessionStatus).filter(
       ([sessionId, status]) => parentSessionIds.has(sessionId) && isRunningSessionStatus(status)
     ).length;
+  });
+  let refreshWasPending = state.providerRefreshPending;
+
+  createEffect(() => {
+    const refreshIsPending = state.providerRefreshPending;
+    if (refreshWasPending && !refreshIsPending) setPreviousRouting(null);
+    refreshWasPending = refreshIsPending;
   });
 
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
@@ -116,11 +125,17 @@ export function ModelsPanel() {
     agentName?: string;
     unset?: boolean;
   }) {
+    const updatesOpenCodeConfig = body.target === 'small_model' || body.target === 'agent';
+    if (updatesOpenCodeConfig && !previousRouting()) setPreviousRouting(routing());
     setIsSaving(true);
     try {
       const nextRouting = normalizeModelRouting(await client.varro.saveModelRouting(body));
       setRouting(nextRouting);
+      if (updatesOpenCodeConfig && !state.providerRefreshPending) setPreviousRouting(null);
       await refreshRoutingState();
+    } catch (error) {
+      if (updatesOpenCodeConfig && !state.providerRefreshPending) setPreviousRouting(null);
+      throw error;
     } finally {
       setIsSaving(false);
       setContextMenu(null);
@@ -247,6 +262,10 @@ export function ModelsPanel() {
             <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
             {runningAgentCount()} running{' '}
             {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
+            <Show when={previousRouting()}>
+              {' '}
+              Old and new assignments are labeled in the model list.
+            </Show>
           </span>
         </div>
       </Show>
@@ -309,6 +328,7 @@ export function ModelsPanel() {
                     models={models}
                     forceExpanded={normalizedQuery().length > 0}
                     routing={routing()}
+                    previousRouting={state.providerRefreshPending ? previousRouting() : null}
                     onOpenContextMenu={(next) => setContextMenu(next)}
                   />
                 )}
@@ -424,6 +444,7 @@ function ProviderSection(props: {
   models: SettingsModel[];
   forceExpanded: boolean;
   routing: OpenCodeModelRouting;
+  previousRouting: OpenCodeModelRouting | null;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
 }) {
   const allModels = () => Object.values(props.provider.models);
@@ -490,7 +511,13 @@ function ProviderSection(props: {
                 modelSupportsVariants(props.provider.id, model.id, state.providers);
               const supportsVision = () =>
                 modelSupportsVision(props.provider.id, model.id, state.providers);
-              const routeTags = () => getModelRouteTags(props.routing, props.provider.id, model.id);
+              const routeTags = () =>
+                getModelRouteTags(
+                  props.routing,
+                  props.provider.id,
+                  model.id,
+                  props.previousRouting
+                );
               const releaseDate = () => formatModelReleaseDate(model.release_date);
 
               return (
@@ -569,10 +596,31 @@ function ProviderSection(props: {
   );
 }
 
-function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, modelID: string) {
+function getModelRouteTags(
+  routing: OpenCodeModelRouting,
+  providerID: string,
+  modelID: string,
+  previousRouting: OpenCodeModelRouting | null
+) {
   const tags: ModelRouteTag[] = [];
 
-  if (routing.smallModel?.providerID === providerID && routing.smallModel.modelID === modelID) {
+  if (previousRouting && !areModelRoutesEqual(previousRouting.smallModel, routing.smallModel)) {
+    if (isModelRoute(previousRouting.smallModel, providerID, modelID)) {
+      tags.push(
+        routing.smallModel
+          ? { kind: 'small', text: 'small', label: 'Small model (old)', change: 'old' }
+          : {
+              kind: 'small',
+              text: 'small',
+              label: 'Small model (will be removed)',
+              change: 'removed',
+            }
+      );
+    }
+    if (isModelRoute(routing.smallModel, providerID, modelID)) {
+      tags.push({ kind: 'small', text: 'small', label: 'Small model (new)', change: 'new' });
+    }
+  } else if (isModelRoute(routing.smallModel, providerID, modelID)) {
     tags.push({ kind: 'small', text: 'small', label: 'Small model' });
   }
 
@@ -590,8 +638,33 @@ function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, mo
     tags.push({ kind: 'approve', text: 'approve', label: 'Auto-approve model' });
   }
 
-  for (const [agentName, route] of Object.entries(routing.agentModels ?? {})) {
-    if (route.providerID === providerID && route.modelID === modelID) {
+  const agentNames = new Set([
+    ...Object.keys(routing.agentModels ?? {}),
+    ...Object.keys(previousRouting?.agentModels ?? {}),
+  ]);
+  for (const agentName of agentNames) {
+    const route = routing.agentModels[agentName];
+    const previousRoute = previousRouting?.agentModels[agentName];
+    if (previousRouting && !areModelRoutesEqual(previousRoute, route)) {
+      if (isModelRoute(previousRoute, providerID, modelID)) {
+        tags.push({
+          kind: 'agent',
+          text: agentName,
+          label: route
+            ? `Agent model: ${agentName} (old)`
+            : `Agent model: ${agentName} (will be removed)`,
+          change: route ? 'old' : 'removed',
+        });
+      }
+      if (isModelRoute(route, providerID, modelID)) {
+        tags.push({
+          kind: 'agent',
+          text: agentName,
+          label: `Agent model: ${agentName} (new)`,
+          change: 'new',
+        });
+      }
+    } else if (isModelRoute(route, providerID, modelID)) {
       tags.push({ kind: 'agent', text: agentName, label: `Agent model: ${agentName}` });
     }
   }
@@ -607,14 +680,27 @@ function isModelRoute(
   return route?.providerID === providerID && route.modelID === modelID;
 }
 
+function areModelRoutesEqual(
+  left: { providerID: string; modelID: string } | null | undefined,
+  right: { providerID: string; modelID: string } | null | undefined
+) {
+  if (!left || !right) return left == null && right == null;
+  return left.providerID === right.providerID && left.modelID === right.modelID;
+}
+
 function ModelRouteBadge(props: { tag: ModelRouteTag }) {
   return (
     <span
-      class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}`}
+      class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}${
+        props.tag.change ? ` settings-route-tag-${props.tag.change}` : ''
+      }`}
       title={props.tag.label}
       aria-label={props.tag.label}
     >
       {props.tag.text}
+      <Show when={props.tag.change !== 'removed' ? props.tag.change : undefined}>
+        {(change) => <span class="settings-route-tag-change">{change()}</span>}
+      </Show>
     </span>
   );
 }

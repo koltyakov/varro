@@ -290,6 +290,119 @@ describe('ModelsPanel', () => {
     expect(notice?.textContent).toContain('when 1 running agent finishes.');
   });
 
+  it('labels old and new queued small-model assignments in the model list', async () => {
+    setState('sessions', [session('session-1')]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    clientMocks.saveModelRouting.mockImplementation(async () => {
+      setState('providerRefreshPending', true);
+      return {
+        smallModel: { providerID: 'openai', modelID: 'gpt-5' },
+        agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
+        commitMessageModel: { providerID: 'openai', modelID: 'gpt-5' },
+        autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      };
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    ) as HTMLElement;
+    nextRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const assignButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    ).find((item) => item.textContent === 'Use as small model');
+    assignButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[aria-label="Small model (old)"]')?.textContent).toBe(
+      'smallold'
+    );
+    expect(container?.querySelector('[aria-label="Small model (new)"]')?.textContent).toBe(
+      'smallnew'
+    );
+    expect(container?.querySelector('.settings-provider-refresh-notice')?.textContent).toContain(
+      'Old and new assignments are labeled in the model list.'
+    );
+
+    setState('providerRefreshPending', false);
+    expect(container?.querySelector('[aria-label="Small model (old)"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Small model"]')?.textContent).toBe('small');
+  });
+
+  it('labels old and new queued agent assignments in the model list', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      agentModels: { review: { providerID: 'openai', modelID: 'gpt-5-mini' } },
+      commitMessageModel: null,
+      autoApproveModel: null,
+    });
+    setState('sessions', [session('session-1')]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    clientMocks.saveModelRouting.mockImplementation(async () => {
+      setState('providerRefreshPending', true);
+      return {
+        smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+        agentModels: { review: { providerID: 'openai', modelID: 'gpt-5' } },
+        commitMessageModel: null,
+        autoApproveModel: null,
+      };
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    ) as HTMLElement;
+    nextRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const assignButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    ).find((item) => item.textContent === 'Use for review agent');
+    assignButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector('[aria-label="Agent model: review (old)"]')?.textContent).toBe(
+      'reviewold'
+    );
+    expect(container?.querySelector('[aria-label="Agent model: review (new)"]')?.textContent).toBe(
+      'reviewnew'
+    );
+  });
+
+  it('strikes through a queued assignment removal instead of labeling it old', async () => {
+    setState('sessions', [session('session-1')]);
+    setState('sessionStatus', { 'session-1': { type: 'busy' } });
+    clientMocks.saveModelRouting.mockImplementation(async () => {
+      setState('providerRefreshPending', true);
+      return {
+        smallModel: null,
+        agentModels: { build: { providerID: 'openai', modelID: 'gpt-5' } },
+        commitMessageModel: { providerID: 'openai', modelID: 'gpt-5' },
+        autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      };
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const currentRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    ) as HTMLElement;
+    currentRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const removeButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    ).find((item) => item.textContent === "Don't use as small model");
+    removeButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const removedTag = container?.querySelector('[aria-label="Small model (will be removed)"]');
+    expect(removedTag?.textContent).toBe('small');
+    expect(removedTag?.classList.contains('settings-route-tag-removed')).toBe(true);
+    expect(container?.querySelector('[aria-label="Small model (old)"]')).toBeNull();
+  });
+
   it('renders an inline release date for desktop layouts', async () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();

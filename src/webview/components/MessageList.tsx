@@ -25,7 +25,6 @@ import {
   isActiveSessionWorking,
   isSessionTreeStatusWorking,
   getSessionTreeRootId,
-  getPermissionGroupMembers,
   messageStructureVersion,
   messageInfoVersion,
   onBeforeShowThinkingPreferenceChange,
@@ -1667,13 +1666,6 @@ export function MessageList() {
   const standalonePermissions = createMemo(() => {
     const activePermission = pendingPermissionSequence().activePermission;
     if (!activePermission) return [];
-    const owner = getPermissionGroupMembers(activePermission)[0];
-    if (
-      state.messagesLoading &&
-      getToolCallLookupKey(owner?.sessionID, owner?.messageID, owner?.callID) !== null
-    ) {
-      return [];
-    }
     return getStandalonePermissionPrompts(
       untrack(() => state.messages),
       [activePermission],
@@ -1943,7 +1935,9 @@ export function MessageList() {
       const rect = element.getBoundingClientRect();
       measuredRowInlineSizes.set(element, rect.width);
       if (rect.height <= 0) return [];
-      return [{ messageId, height: alignMeasuredRowBlockSize(element, rect.height) }];
+      const height = alignMeasuredRowBlockSize(element, rect.height);
+      if (!shouldAcceptRowHeight(element, messageId, height)) return [];
+      return [{ messageId, height }];
     });
     if (!applyRowHeightMeasurements(measurements)) return false;
     if (publish) scheduleMeasurementPublish('content');
@@ -4627,7 +4621,9 @@ export function MessageList() {
       return requestKey;
     }
 
-    const shouldAlignNewTurn = !!targetMessageId && !shouldMeasureRows();
+    // Existing chats keep the preceding response visible.
+    // Only an empty chat may top-align its first turn.
+    const shouldAlignNewTurn = !!targetMessageId && !shouldMeasureRows() && messages().length === 1;
     pendingScrollToBottomRequest = true;
     pendingNewTurnMessageId = shouldAlignNewTurn ? targetMessageId : null;
     followModeLocked = true;
@@ -5685,12 +5681,16 @@ export function MessageList() {
       return;
     }
     const loadingOwner: HistoryLoadingOwner = { windowVersion };
-    const load = loadOlderHistoryPreservingScroll(
-      sessionId,
-      generation,
-      windowVersion,
-      loadingOwner,
-      container
+    // A prefetched page can publish synchronously. Let the native wheel/scroll event finish first,
+    // then capture history ownership before the cached page is allowed to mutate the DOM.
+    const load = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() =>
+      loadOlderHistoryPreservingScroll(
+        sessionId,
+        generation,
+        windowVersion,
+        loadingOwner,
+        container
+      )
     );
     const activeLoad = { generation, windowVersion, promise: load };
     activeOlderHistoryLoads.set(sessionId, activeLoad);
@@ -5844,7 +5844,7 @@ export function MessageList() {
     <div class="interactive-list-shell min-h-0 flex-1">
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
         role="log"
         aria-live="polite"
         aria-label="Chat messages"

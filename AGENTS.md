@@ -23,6 +23,7 @@
 - Error handling: throw informative `Error`s, preserve actionable messages, and silently ignore only intentional best-effort cleanup/parsing fallbacks.
 - In Solid code, follow existing signal/memo/effect patterns and signal accessors like `value()`, not React-style state APIs.
 - Before changing message-list virtualization, pagination, sticky navigation, row measurement, attachments, or inline editing, read `docs/message-list-virtualization.md` and preserve its identity, height, visible-anchor, and scroll-ownership invariants.
+- Before changing permission modes or rules, auto-approval, permission events or snapshots, prompt grouping, attention state, or child-session approvals, read `docs/permission-lifecycle.md` and preserve its pending-request visibility and server-acknowledgement invariants.
 - UI design: never use a decorative accent rail on only one edge of a component, such as a thick left border or inset edge shadow. Use full-perimeter borders, backgrounds, or shadows instead; structural dividers between internal sections are allowed.
 - Post-change actions: after code changes, run the narrowest relevant verification commands you can (`npm run lint` or `npm run lint:check`, targeted `npm run test -- ...`, and `npm run typecheck` when types changed). Do not stop after implementation without reporting what you ran and the result.
 - Repo-local Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.

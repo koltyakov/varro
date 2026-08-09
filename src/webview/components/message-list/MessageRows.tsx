@@ -85,7 +85,7 @@ export function MessageRow(
   const hasImage = props.msg.parts.some(
     (part) => part.type === 'file' && part.mime.startsWith('image/')
   );
-  const animateEntrance = claimedEntrance && !hasImage;
+  const animateEntrance = claimedEntrance && !hasImage && props.msg.info.role !== 'user';
   const allowInitialAssistantItemReveal = animateEntrance || props.msg.parts.length === 0;
   const isOffCore = () => !!props.outerListVirtualized && props.nearViewport === false;
   const isVirtualPlaceholder = () => isOffCore() && !!props.virtualPlaceholder;

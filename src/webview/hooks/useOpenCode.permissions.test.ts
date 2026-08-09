@@ -641,6 +641,45 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('reveals a child-session permission when ancestry resolution times out', async () => {
+    vi.useFakeTimers();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const childSession = deferred<ReturnType<typeof session>>();
+    clientMocks.sessionGet.mockReturnValue(childSession.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-child-timeout'), sessionID: 'child-1' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1'));
+      expect(stateModule.state.permissions).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-child-timeout', sessionID: 'child-1' }),
+      ]);
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-child-timeout' },
+      });
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a child-session judge fallback in the root session and accepts it', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();

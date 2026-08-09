@@ -1273,19 +1273,35 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   }
 
   async function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
-    const visited = new Set<string>();
-    let currentSessionId: string | undefined = sessionId;
+    const ancestryResolution = (async () => {
+      const visited = new Set<string>();
+      let currentSessionId: string | undefined = sessionId;
 
-    while (currentSessionId && !visited.has(currentSessionId)) {
-      if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return;
-      visited.add(currentSessionId);
+      while (currentSessionId && !visited.has(currentSessionId)) {
+        if (Object.hasOwn(appStore.state.sessionPermissionModes, currentSessionId)) return;
+        visited.add(currentSessionId);
 
-      let session = appStore.state.sessions.find((item) => item.id === currentSessionId);
-      if (!session) {
-        await syncPermissionSession(currentSessionId);
-        session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+        let session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+        if (!session) {
+          await syncPermissionSession(currentSessionId);
+          session = appStore.state.sessions.find((item) => item.id === currentSessionId);
+        }
+        currentSessionId = session?.parentID;
       }
-      currentSessionId = session?.parentID;
+    })();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      await Promise.race([
+        ancestryResolution,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(new Error(`Timed out resolving permission session ancestry for ${sessionId}`));
+          }, AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 

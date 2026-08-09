@@ -2,6 +2,7 @@ import {
   getPermissionGroupMembers,
   getSessionTreeIds,
   getSessionTreeRootId,
+  state,
 } from '../../lib/state';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
 import { getToolCallLookupKey } from '../../lib/tool-call-matching';
@@ -33,6 +34,14 @@ function hasOverlappingMemberIds(left: readonly string[], right: readonly string
   return left.some((id) => rightIds.has(id));
 }
 
+function isPermissionSessionInScope(permissionSessionId: string, sessionIds: ReadonlySet<string>) {
+  // Permission events can precede child-session metadata; keep that fallback actionable.
+  return (
+    sessionIds.has(permissionSessionId) ||
+    !state.sessions.some((session) => session.id === permissionSessionId)
+  );
+}
+
 /**
  * Keeps visible progress stable while the reactive permission list shrinks.
  * The first unresolved entry advances the sequence; later entries that vanish
@@ -48,7 +57,7 @@ export function reconcilePendingPermissionSequence(
   const scopeId = getSessionTreeRootId(activeSessionId) || activeSessionId;
   const sessionIds = new Set(getSessionTreeIds(scopeId));
   const currentPermissions = permissions
-    .filter((permission) => sessionIds.has(permission.sessionID))
+    .filter((permission) => isPermissionSessionInScope(permission.sessionID, sessionIds))
     .toSorted((left, right) => left.time.created - right.time.created);
   if (currentPermissions.length === 0) return emptyPermissionSequence(scopeId);
 
@@ -159,7 +168,7 @@ export function getStandalonePermissionPrompts(
   const sessionIds = new Set(getSessionTreeIds(rootId));
 
   return permissions.filter((permission) => {
-    if (!sessionIds.has(permission.sessionID)) return false;
+    if (!isPermissionSessionInScope(permission.sessionID, sessionIds)) return false;
     const owner = getPermissionGroupMembers(permission)[0];
     return (
       !owner || !hasLinkedToolCall(linkedToolCalls, owner.sessionID, owner.messageID, owner.callID)
