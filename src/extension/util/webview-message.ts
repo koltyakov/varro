@@ -86,6 +86,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'workspace/select': true,
   'commands/state': true,
   'webview/focus': true,
+  'permission/reveal': true,
   'providers/watch': true,
   'providers/refresh': true,
   'terminal-selection/clear': true,
@@ -239,6 +240,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return typeof payload?.focused === 'boolean'
         ? { type, payload: { focused: payload.focused } }
         : null;
+    }
+
+    case 'permission/reveal': {
+      const payload = asRecord(message?.payload);
+      const permissionId = getBoundedString(payload?.permissionId, 512);
+      return permissionId ? { type, payload: { permissionId } } : null;
     }
 
     case 'providers/watch': {

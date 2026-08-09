@@ -1119,7 +1119,14 @@ kbd {
   color: var(--color-vscode-fg);
 }
 
+.chat-tool-invocation-part :is(.tool-invocation-duration, .tool-invocation-token-stats) {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
+}
+
 .chat-tool-invocation-part .tool-invocation-duration {
+  transform: translateY(1px);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.2;
@@ -1130,9 +1137,6 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-token-stats {
-  display: inline-flex;
-  align-items: center;
-  transform: translateY(-1px);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
@@ -1438,7 +1442,7 @@ kbd {
   display: grid;
   grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
   column-gap: var(--space-6);
-  align-items: start;
+  align-items: center;
 }
 
 /* Each row is its own grid, so a per-row max-content label column would leave

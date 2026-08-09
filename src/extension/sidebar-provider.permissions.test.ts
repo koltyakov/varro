@@ -153,7 +153,10 @@ describe('SidebarProvider permission replay', () => {
     statusBarItem.hide.mockClear();
 
     const providerState = provider as unknown as {
-      sessionState: { handleServerEvent(event: unknown): void };
+      sessionState: {
+        handleServerEvent(event: unknown): void;
+        revealPermission(permissionId: string): void;
+      };
     };
 
     providerState.sessionState.handleServerEvent({
@@ -186,6 +189,9 @@ describe('SidebarProvider permission replay', () => {
         title: 'Run Bash command',
       },
     });
+
+    expect(statusBarItem.show).not.toHaveBeenCalled();
+    providerState.sessionState.revealPermission('perm-local');
 
     expect(statusBarItem.show).toHaveBeenCalled();
     expect(statusBarItem.text).toBe('$(bell-dot) Varro: 1 waiting');

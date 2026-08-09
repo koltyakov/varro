@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { friendlyErrorName, isAbortedAssistantError } from '../shared/error-classification';
 import type { Persistence } from '../shared/persistence';
 import type { ExtensionMessage, ServerEvent } from '../shared/protocol';
+import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../shared/protocol';
 import type {
   PermissionEventProperties,
   PermissionV2AskedProperties,
@@ -93,6 +94,7 @@ export class SessionStateManager {
   private readonly sessionModes = new Map<string, string>();
   private readonly busyStartedAt = new Map<string, number>();
   private readonly pendingAttention = new Map<string, PendingAttentionEntry>();
+  private readonly deferredPermissionAttention = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly trailingBusyAfterCompletion = new Set<string>();
   private readonly blockingRequestMutations = new Set<string>();
   private readonly pendingAttentionRevisions: Record<PendingAttentionKind, number> = {
@@ -160,6 +162,23 @@ export class SessionStateManager {
 
   get pending(): ReadonlyMap<string, PendingAttentionEntry> {
     return this.pendingAttention;
+  }
+
+  get pendingForUser(): ReadonlyMap<string, PendingAttentionEntry> {
+    return new Map(
+      [...this.pendingAttention].filter(([id]) => !this.deferredPermissionAttention.has(id))
+    );
+  }
+
+  revealPermission(requestID: string): void {
+    const request = this.pendingAttention.get(requestID);
+    if (request?.kind !== 'permission') return;
+    const timer = this.deferredPermissionAttention.get(requestID);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.deferredPermissionAttention.delete(requestID);
+    this.showBlockingNotification('permission', request.sessionID, request.label);
+    this.listener.onStatusChange();
   }
 
   titleFor(sessionID: string): string | undefined {
@@ -565,6 +584,7 @@ export class SessionStateManager {
         continue;
       }
       this.blockingRequestMutations.add(id);
+      this.clearDeferredPermissionAttention(id);
       this.pendingAttention.delete(id);
       changed = true;
     }
@@ -621,6 +641,7 @@ export class SessionStateManager {
         directory: trimOptionalString(item.directory),
         ...(item.eventType ? { eventType: item.eventType } : {}),
       });
+      if (item.kind === 'permission') this.deferPermissionAttention(item.id);
       const directory = trimOptionalString(item.directory);
       if (directory) {
         this.setSessionMetadata(this.sessionDirectories, item.sessionID, directory);
@@ -877,7 +898,8 @@ export class SessionStateManager {
       ...(eventType ? { eventType } : {}),
     });
     this.completedSessions.delete(sessionID);
-    this.showBlockingNotification(kind, sessionID, label);
+    if (kind === 'permission') this.deferPermissionAttention(requestID);
+    else this.showBlockingNotification(kind, sessionID, label);
     return true;
   }
 
@@ -901,6 +923,7 @@ export class SessionStateManager {
     for (const [requestID, request] of this.pendingAttention.entries()) {
       if (request.sessionID !== sessionID) continue;
       this.recordBlockingRequestMutation(request.kind, requestID);
+      this.clearDeferredPermissionAttention(requestID);
       this.pendingAttention.delete(requestID);
       changed = true;
     }
@@ -910,7 +933,20 @@ export class SessionStateManager {
   private clearBlockingRequest(kind: PendingAttentionKind, requestID: string | undefined): boolean {
     if (!requestID) return false;
     this.recordBlockingRequestMutation(kind, requestID);
+    this.clearDeferredPermissionAttention(requestID);
     return this.pendingAttention.delete(requestID);
+  }
+
+  private deferPermissionAttention(requestID: string): void {
+    if (this.deferredPermissionAttention.has(requestID)) return;
+    const timer = setTimeout(() => this.revealPermission(requestID), AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+    this.deferredPermissionAttention.set(requestID, timer);
+  }
+
+  private clearDeferredPermissionAttention(requestID: string): void {
+    const timer = this.deferredPermissionAttention.get(requestID);
+    if (timer) clearTimeout(timer);
+    this.deferredPermissionAttention.delete(requestID);
   }
 
   private recordBlockingRequestMutation(kind: PendingAttentionKind, requestID: string): void {

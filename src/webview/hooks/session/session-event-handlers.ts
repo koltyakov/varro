@@ -124,6 +124,7 @@ type EventHandlerDependencies = {
   syncPermissionSession?(sessionId: string): Promise<void>;
   judgePermission?(permission: Permission): Promise<void>;
   permissionReplied?(permissionId: string): void;
+  permissionVisible?(permissionId: string): void;
   syncPendingPermissions?(): Promise<void>;
   reconcileServerState?(): Promise<void>;
   invalidateMessageSync?(sessionId: string): void;
@@ -166,6 +167,7 @@ type EventHandlerOperationDependencies = {
     | 'respondPermission'
     | 'judgePermission'
     | 'permissionReplied'
+    | 'permissionVisible'
     | 'isPermissionSessionKnown'
     | 'syncPermissionSession'
   >;
@@ -225,6 +227,7 @@ export class SessionEventHandlerOperations {
       syncPermissionSession: this.deps.sessionApprovalOperations.syncPermissionSession,
       judgePermission: this.deps.sessionApprovalOperations.judgePermission,
       permissionReplied: this.deps.sessionApprovalOperations.permissionReplied,
+      permissionVisible: this.deps.sessionApprovalOperations.permissionVisible,
       syncPendingPermissions: this.deps.syncPendingPermissions,
       reconcileServerState: this.deps.reconcileServerState,
       invalidateMessageSync: this.deps.invalidateMessageSync,

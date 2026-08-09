@@ -23,6 +23,7 @@ const { loggerMock, vscodeMock } = vi.hoisted(() => ({
 vi.mock('./logger', () => ({ logger: loggerMock }));
 vi.mock('vscode', () => vscodeMock);
 
+import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../shared/protocol';
 import { SessionStateManager } from './session-state-manager';
 
 type WorkspaceStateMock = {
@@ -55,7 +56,7 @@ describe('SessionStateManager notifications', () => {
     vi.clearAllMocks();
   });
 
-  it('shows a permission warning when allowed', () => {
+  it('defers a permission warning until the webview reveals it', () => {
     const manager = createManager();
 
     manager.handleServerEvent({
@@ -67,6 +68,12 @@ describe('SessionStateManager notifications', () => {
       },
     });
 
+    expect(manager.pendingForUser.size).toBe(0);
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+
+    manager.revealPermission('perm-1');
+
+    expect(manager.pendingForUser.size).toBe(1);
     expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
       'Varro needs permission approval.',
       'Open Chat'
@@ -85,6 +92,9 @@ describe('SessionStateManager notifications', () => {
         resources: ['*'],
       },
     });
+
+    expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    manager.revealPermission('perm-1');
 
     expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
       'Varro needs permission approval.',
@@ -110,6 +120,53 @@ describe('SessionStateManager notifications', () => {
     });
 
     expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it('reveals deferred permission attention after the judge timeout', async () => {
+    vi.useFakeTimers();
+    const manager = createManager();
+
+    try {
+      manager.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id: 'perm-timeout', sessionID: 'session-1', title: 'Use Bash' },
+      });
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS - 1);
+      expect(manager.pendingForUser.size).toBe(0);
+      expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(manager.pendingForUser.size).toBe(1);
+      expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+        'Varro needs permission approval.',
+        'Open Chat'
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never reveals a permission resolved before the judge timeout', async () => {
+    vi.useFakeTimers();
+    const manager = createManager();
+
+    try {
+      manager.handleServerEvent({
+        type: 'permission.asked',
+        properties: { id: 'perm-approved', sessionID: 'session-1', title: 'Use Bash' },
+      });
+      manager.handleServerEvent({
+        type: 'permission.replied',
+        properties: { id: 'perm-approved', sessionID: 'session-1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      expect(manager.pendingForUser.size).toBe(0);
+      expect(vscodeMock.window.showWarningMessage).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows a plan-ready notification for completed terminal plan steps', () => {

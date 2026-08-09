@@ -580,6 +580,7 @@ export type WebviewMessage =
       };
     }
   | { type: 'webview/focus'; payload: { focused: boolean } }
+  | { type: 'permission/reveal'; payload: { permissionId: string } }
   | { type: 'providers/watch'; payload: { active: boolean } }
   | { type: 'providers/refresh' }
   | { type: 'terminal-selection/clear' }

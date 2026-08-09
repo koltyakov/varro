@@ -33,6 +33,7 @@ export interface MessageRouterCallbacks {
     model: CommandStatePayload['model']
   ): void;
   setWebviewFocus(focused: boolean): void;
+  revealPermission(permissionId: string): void;
   setProviderWatchActive(active: boolean): void;
   requestContext(): void;
   selectWorkspace(path: string): Promise<void>;
@@ -85,6 +86,9 @@ export class MessageRouter {
           break;
         case 'webview/focus':
           this.handleWebviewFocusMessage(msg);
+          break;
+        case 'permission/reveal':
+          this.callbacks.revealPermission(msg.payload.permissionId);
           break;
         case 'providers/watch':
           this.handleProvidersWatchMessage(msg);

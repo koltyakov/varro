@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   WebviewThemeKind,
 } from '../../../shared/protocol';
+import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../../shared/protocol';
 import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/provider-limit-config';
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
@@ -212,11 +213,16 @@ type PermissionJudgeAttempt = {
 
 type PermissionJudgeOutcome =
   | { type: 'decision'; response: Awaited<ReturnType<typeof client.varro.judgePermission>> }
-  | { type: 'error'; error: unknown };
+  | { type: 'error'; error: unknown }
+  | { type: 'timeout' };
 
 function showPermissionAfterJudge(attempt: PermissionJudgeAttempt) {
   attempt.status = 'visible';
   permissionsStore.addPermission(attempt.permission);
+  postMessage({
+    type: 'permission/reveal',
+    payload: { permissionId: attempt.permission.id },
+  });
 }
 
 function isPermissionSessionKnown(sessionId: string): boolean {
@@ -899,6 +905,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         respondPermission: sessionApprovalOperations.respondPermission,
         judgePermission: judgeAndRespondPermission,
         permissionReplied: markPermissionJudgeResponded,
+        permissionVisible: (permissionId) => {
+          postMessage({ type: 'permission/reveal', payload: { permissionId } });
+        },
         isPermissionSessionKnown,
         syncPermissionSession: ensurePermissionSessionKnown,
       },
@@ -1177,6 +1186,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
                   permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'full'
                 ) {
                   permissionsStore.addPermission(permission);
+                  postMessage({
+                    type: 'permission/reveal',
+                    payload: { permissionId: permission.id },
+                  });
                 }
               })
           );
@@ -1187,6 +1200,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           continue;
         }
         visiblePermissions.push(permission);
+        postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
       }
 
       await Promise.all(pendingPermissionHandlers);
@@ -1202,7 +1216,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           const hasJudgeAttempt = permissionsStore
             .getPermissionGroupMembers(permission)
             .some((member) => permissionJudgeAttempts.has(member.id));
-          if (mode !== 'full' && !hasJudgeAttempt) permissionsStore.addPermission(permission);
+          if (mode !== 'full' && !hasJudgeAttempt) {
+            permissionsStore.addPermission(permission);
+            postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
+          }
         }
       }
       throw err;
@@ -1270,6 +1287,55 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
   }
 
+  async function applyPermissionJudgeOutcome(
+    attempt: PermissionJudgeAttempt,
+    outcome: PermissionJudgeOutcome,
+    acceptVisible: boolean
+  ): Promise<void> {
+    const { permission } = attempt;
+    if (permissionJudgeAttempts.get(permission.id) !== attempt) return;
+    const wasVisible = attempt.status === 'visible';
+    if (attempt.status !== 'judging' && !(acceptVisible && wasVisible)) return;
+
+    const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
+    if (mode !== 'auto') {
+      if (!wasVisible) {
+        attempt.status = mode === 'default' ? 'visible' : 'responded';
+        if (mode === 'default') showPermissionAfterJudge(attempt);
+      }
+      return;
+    }
+    if (outcome.type === 'timeout') {
+      if (!wasVisible) showPermissionAfterJudge(attempt);
+      return;
+    }
+    if (outcome.type === 'error') {
+      logError('autoApproveJudge', outcome.error);
+      if (!wasVisible) showPermissionAfterJudge(attempt);
+      return;
+    }
+    if (outcome.response.decision === 'ask') {
+      if (!wasVisible) showPermissionAfterJudge(attempt);
+      return;
+    }
+
+    attempt.status = 'responded';
+    if (wasVisible) permissionsStore.removePermission(permission.id, { removeGroup: true });
+    try {
+      await sessionApprovalOperations.respondPermission(
+        permission.sessionID,
+        permission.id,
+        outcome.response.decision === 'allow' ? 'once' : 'reject',
+        { rethrow: true }
+      );
+    } catch (err) {
+      logError('autoApproveJudge', err);
+      if (permissionJudgeAttempts.get(permission.id) === attempt) {
+        showPermissionAfterJudge(attempt);
+      }
+    }
+  }
+
   function judgeAndRespondPermission(permission: Permission): Promise<void> {
     const existingAttempt = permissionJudgeAttempts.get(permission.id);
     if (existingAttempt) return existingAttempt.promise;
@@ -1282,7 +1348,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     };
     permissionJudgeAttempts.set(permission.id, attempt);
 
-    const judge = Promise.resolve()
+    const judgeRequest = Promise.resolve()
       .then(async (): Promise<PermissionJudgeOutcome> => {
         const model = resolvePermissionJudgeModel(permission.sessionID);
         const response = await client.varro.judgePermission({
@@ -1293,42 +1359,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         return { type: 'decision', response };
       })
       .catch((error: unknown): PermissionJudgeOutcome => ({ type: 'error', error }));
+    let timedOut = false;
+    let judgeTimeout: ReturnType<typeof setTimeout>;
+    const judge = Promise.race([
+      judgeRequest,
+      new Promise<PermissionJudgeOutcome>((resolve) => {
+        judgeTimeout = setTimeout(() => {
+          timedOut = true;
+          resolve({ type: 'timeout' });
+        }, AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(judgeTimeout));
 
-    attempt.promise = judge.then(async (outcome) => {
-      if (permissionJudgeAttempts.get(permission.id) !== attempt || attempt.status !== 'judging') {
-        return;
-      }
-
-      const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
-      if (mode !== 'auto') {
-        attempt.status = mode === 'default' ? 'visible' : 'responded';
-        if (mode === 'default') permissionsStore.addPermission(permission);
-        return;
-      }
-      if (outcome.type === 'error') {
-        logError('autoApproveJudge', outcome.error);
-        showPermissionAfterJudge(attempt);
-        return;
-      }
-      if (outcome.response.decision === 'ask') {
-        showPermissionAfterJudge(attempt);
-        return;
-      }
-
-      attempt.status = 'responded';
-      try {
-        await sessionApprovalOperations.respondPermission(
-          permission.sessionID,
-          permission.id,
-          outcome.response.decision === 'allow' ? 'once' : 'reject',
-          { rethrow: true }
-        );
-      } catch (err) {
-        logError('autoApproveJudge', err);
-        if (permissionJudgeAttempts.get(permission.id) === attempt) {
-          showPermissionAfterJudge(attempt);
-        }
-      }
+    attempt.promise = judge.then((outcome) => applyPermissionJudgeOutcome(attempt, outcome, false));
+    void judgeRequest.then(async (outcome) => {
+      if (timedOut) await applyPermissionJudgeOutcome(attempt, outcome, true);
     });
     return attempt.promise;
   }

@@ -266,6 +266,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         setActiveChatModel: (model) => {
           this.activeChatModel = model;
         },
+        revealPermission: (permissionId) => this.sessionState.revealPermission(permissionId),
         contextFilesState: this.contextFilesState,
         sessionExportService: this.sessionExportService,
         usageReportService: this.usageReportService,
@@ -383,7 +384,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   hasPendingAttention() {
-    return this.sessionState.pending.size > 0;
+    return this.sessionState.pendingForUser.size > 0;
   }
 
   openAttentionSessions() {
@@ -598,7 +599,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return { visible: false };
     }
 
-    const pendingRequests = [...this.sessionState.pending.values()].filter(
+    const pendingRequests = [...this.sessionState.pendingForUser.values()].filter(
       (request) =>
         !this.sessionTrash.isHidden(request.sessionID) &&
         !this.hiddenSessions.isHidden(request.sessionID) &&

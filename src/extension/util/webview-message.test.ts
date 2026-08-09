@@ -455,6 +455,18 @@ describe('webview message validation', () => {
     });
   });
 
+  it('accepts bounded permission reveal IDs', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-1' },
+      })
+    ).toEqual({ type: 'permission/reveal', payload: { permissionId: 'perm-1' } });
+    expect(
+      parseWebviewMessage({ type: 'permission/reveal', payload: { permissionId: '' } })
+    ).toBeNull();
+  });
+
   it('accepts session export messages with a valid session id', () => {
     expect(
       parseWebviewMessage({ type: 'session/export', payload: { sessionId: 'session-1' } })

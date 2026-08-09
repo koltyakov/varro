@@ -11,6 +11,7 @@ type ApprovalEventDependencies = {
   syncPermissionSession?(sessionId: string): Promise<void>;
   judgePermission?(permission: Permission): Promise<void>;
   permissionReplied?(permissionId: string): void;
+  permissionVisible?(permissionId: string): void;
   respondPermission(
     sessionId: string,
     permissionId: string,
@@ -33,6 +34,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
         .catch(() => {
           if (!deps.shouldAutoApprovePermissions(permission.sessionID)) {
             permissionsStore.addPermission(permission);
+            deps.permissionVisible?.(permission.id);
           }
         });
       return;
@@ -45,6 +47,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
         .catch((err) => {
           deps.logError('autoApproveJudge', err);
           permissionsStore.addPermission(permission);
+          deps.permissionVisible?.(permission.id);
         })
         .finally(() => {
           autoJudgingPermissionIds.delete(permission.id);
@@ -52,6 +55,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       return;
     }
     permissionsStore.addPermission(permission);
+    deps.permissionVisible?.(permission.id);
   }
 
   function handlePermissionEvent(props: Record<string, unknown>) {
@@ -77,6 +81,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
             pendingSessionPermissions.delete(permission.id);
             deps.logError('permission.session', err);
             permissionsStore.addPermission(pending);
+            deps.permissionVisible?.(pending.id);
           }
         );
       return;

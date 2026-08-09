@@ -240,6 +240,10 @@ describe('useOpenCode permission and config flows', () => {
           expect.objectContaining({ id: 'perm-restored-child', sessionID: 'child-1' }),
         ])
       );
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-restored-child' },
+      });
     } finally {
       dispose();
     }
@@ -388,7 +392,7 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
-  it('keeps an unanswered permission hidden until the judge allows it', async () => {
+  it('auto-approves a visible timed-out permission when the judge responds late', async () => {
     vi.useFakeTimers();
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
@@ -411,12 +415,22 @@ describe('useOpenCode permission and config flows', () => {
       await Promise.resolve();
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
       expect(stateModule.state.permissions).toEqual([]);
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-timeout' },
+      });
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS - 1);
       expect(stateModule.state.permissions).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(stateModule.state.permissions).toEqual([]);
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout' }),
+      ]);
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-timeout' },
+      });
 
       judge.resolve({ decision: 'allow', reason: 'Late approval.' });
       await vi.waitFor(() =>
@@ -426,6 +440,55 @@ describe('useOpenCode permission and config flows', () => {
           'once'
         )
       );
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores a late judge response after the user accepts a timed-out permission', async () => {
+    vi.useFakeTimers();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    const userResponse = deferred<void>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+    clientMocks.sessionRespondPermission.mockReturnValue(userResponse.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-user-first'),
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-user-first' }),
+      ]);
+
+      const response = hookModule.respondPermission('session-1', 'perm-user-first', 'once');
+      await Promise.resolve();
+      judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+        'session-1',
+        'perm-user-first',
+        'once'
+      );
+      userResponse.resolve(undefined);
+      await response;
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
@@ -462,6 +525,10 @@ describe('useOpenCode permission and config flows', () => {
       childSession.resolve({ ...session('child-1'), parentID: 'session-1' });
       await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
       expect(stateModule.state.permissions).toEqual([]);
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-child' },
+      });
 
       judge.resolve({ decision: 'allow', reason: 'Safe child action.' });
       await vi.waitFor(() =>
@@ -470,6 +537,112 @@ describe('useOpenCode permission and config flows', () => {
           'perm-child',
           'once'
         )
+      );
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('shows a child-session judge fallback in the root session and accepts it', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.sessionGet.mockResolvedValue({
+      ...session('child-1'),
+      parentID: 'session-1',
+    });
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    const { getStandalonePermissionPrompts } =
+      await import('../components/message-list/pending-prompts');
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-child-ask'), sessionID: 'child-1' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+      expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-child-ask' },
+      });
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-child-ask', sessionID: 'child-1' }),
+        ])
+      );
+      expect(
+        getStandalonePermissionPrompts([], stateModule.state.permissions, 'session-1')
+      ).toEqual([expect.objectContaining({ id: 'perm-child-ask' })]);
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-child-ask' },
+      });
+
+      await hookModule.respondPermission('child-1', 'perm-child-ask', 'once');
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+        'child-1',
+        'perm-child-ask',
+        'once'
+      );
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores an actionable prompt when an automatic permission response fails', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.varroJudgePermission.mockResolvedValue({
+      decision: 'allow',
+      reason: 'Safe action.',
+    });
+    clientMocks.sessionRespondPermission
+      .mockRejectedValueOnce(new Error('Permission backend unavailable'))
+      .mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-response-failed'),
+      });
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-response-failed' }),
+        ])
+      );
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-response-failed' },
+      });
+
+      await hookModule.respondPermission('session-1', 'perm-response-failed', 'once');
+      expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(2);
+      expect(clientMocks.sessionRespondPermission).toHaveBeenLastCalledWith(
+        'session-1',
+        'perm-response-failed',
+        'once'
       );
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
@@ -961,6 +1134,10 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ])
       );
+      expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
+        type: 'permission/reveal',
+        payload: { permissionId: 'perm-live-1' },
+      });
     } finally {
       dispose();
     }

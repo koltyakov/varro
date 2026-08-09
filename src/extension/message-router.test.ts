@@ -17,6 +17,7 @@ function createCallbacks(): MessageRouterCallbacks {
     ready: vi.fn(() => Promise.resolve()),
     updateCommandState: vi.fn(),
     setWebviewFocus: vi.fn(),
+    revealPermission: vi.fn(),
     setProviderWatchActive: vi.fn(),
     requestContext: vi.fn(),
     selectWorkspace: vi.fn(() => Promise.resolve()),
@@ -62,6 +63,16 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'webview/focus', payload: { focused: true } });
     expect(cb.setWebviewFocus).toHaveBeenCalledWith(true);
+  });
+
+  it('dispatches permission reveal', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({
+      type: 'permission/reveal',
+      payload: { permissionId: 'perm-1' },
+    });
+    expect(cb.revealPermission).toHaveBeenCalledWith('perm-1');
   });
 
   it('dispatches command state with the active chat model', async () => {

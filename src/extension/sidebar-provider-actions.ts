@@ -27,6 +27,7 @@ export interface SidebarProviderActionDeps {
   };
   setProviderWatchActive(active: boolean): void;
   setActiveChatModel(model: ChatModelSelection | null): void;
+  revealPermission(permissionId: string): void;
   contextFilesState: SidebarProviderContextFiles;
   sessionExportService: SessionExportService;
   usageReportService: UsageReportService;
@@ -84,6 +85,7 @@ export function createSidebarProviderActions(
     setWebviewFocus: (focused) => {
       deps.webviewSession.setFocus(focused);
     },
+    revealPermission: (permissionId) => deps.revealPermission(permissionId),
     setProviderWatchActive: (active) => {
       deps.setProviderWatchActive(active);
     },
