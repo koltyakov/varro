@@ -1196,7 +1196,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           continue;
         }
         if (mode === 'auto') {
-          pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
+          const attempt = permissionJudgeAttempts.get(permission.id);
+          if (attempt?.status === 'visible') visiblePermissions.push(permission);
+          else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
         visiblePermissions.push(permission);
@@ -1320,7 +1322,6 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
 
     attempt.status = 'responded';
-    if (wasVisible) permissionsStore.removePermission(permission.id, { removeGroup: true });
     try {
       await sessionApprovalOperations.respondPermission(
         permission.sessionID,

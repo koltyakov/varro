@@ -447,6 +447,103 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('keeps a visible timed-out permission through a pending permission resync', async () => {
+    vi.useFakeTimers();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([permissionListItem('perm-timeout-sync')]);
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-timeout-sync'),
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout-sync' }),
+      ]);
+
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() =>
+        expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
+      );
+
+      expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout-sync' }),
+      ]);
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout-sync' }),
+      ]);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a visible timed-out permission until a late approval is acknowledged', async () => {
+    vi.useFakeTimers();
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    const response = deferred<void>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+    clientMocks.sessionRespondPermission.mockReturnValue(response.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-timeout-response'),
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout-response' }),
+      ]);
+
+      judge.resolve({ decision: 'allow', reason: 'Late approval.' });
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'session-1',
+          'perm-timeout-response',
+          'once'
+        )
+      );
+      expect(stateModule.state.permissions).toEqual([
+        expect.objectContaining({ id: 'perm-timeout-response' }),
+      ]);
+
+      response.resolve(undefined);
+      await vi.waitFor(() => expect(stateModule.state.permissions).toEqual([]));
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores a late judge response after the user accepts a timed-out permission', async () => {
     vi.useFakeTimers();
     const serverEventHandlers = captureServerEventHandlers();
