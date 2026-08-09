@@ -1,5 +1,22 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { getScrollMetrics, waitForAnimationFrames } from './helpers';
+
+async function delayPromptRequest(page: Page, delayMs: number) {
+  await page.evaluate((delay) => {
+    const harness = window as Window & {
+      __sendToExtension?: (message: unknown) => void | Promise<void>;
+    };
+    const originalSend = harness.__sendToExtension;
+    harness.__sendToExtension = async (message) => {
+      const request = message as { type?: string; payload?: { path?: string } };
+      if (request.type === 'api/request' && request.payload?.path?.endsWith('/prompt_async')) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      await originalSend?.(message);
+    };
+  }, delayMs);
+}
 
 test('creates a session and sends a prompt through the mocked bridge', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
@@ -99,7 +116,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   );
 });
 
-test('keeps an optimistic steer visible through metadata and stale history handoff', async ({
+test('keeps an optimistic steer visible through canonical parts and stale history handoff', async ({
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue&stalePromptSync=1');
@@ -494,6 +511,79 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   await expect
     .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
     .toBeLessThanOrEqual(15);
+});
+
+test('places a new turn at the transcript inset while its response space is empty', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 504, height: 1272 });
+  await page.goto('/e2e/harness/index.html?scenario=new-turn-placement');
+
+  const list = page.locator('.interactive-list');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await expect(list.locator('[data-msg-id]')).toHaveCount(2);
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+
+  await composer.fill('Test message');
+  await delayPromptRequest(page, 1_000);
+  await page.getByTitle('Send (Enter)').click();
+
+  const newTurn = page.locator('.user-message-card').filter({ hasText: 'Test message' });
+  await expect(newTurn).toBeVisible();
+  await expect
+    .poll(() =>
+      newTurn.evaluate((element) => {
+        const container = element.closest<HTMLElement>('.interactive-list');
+        const track = element.closest<HTMLElement>('.interactive-list-track');
+        if (!container || !track) throw new Error('New turn geometry is unavailable');
+        const inset = Number.parseFloat(
+          getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+        );
+        return element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset;
+      })
+    )
+    .toBeLessThanOrEqual(2);
+
+  await expect(page.locator('.append-scroll-bottom-reserve')).toHaveCount(0);
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+});
+
+test('yields new-turn placement to direct upward transcript input', async ({ page }) => {
+  await page.setViewportSize({ width: 504, height: 1272 });
+  await page.goto('/e2e/harness/index.html?scenario=new-turn-placement');
+
+  const list = page.locator('.interactive-list');
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await expect
+    .poll(async () => (await getScrollMetrics(page, '.interactive-list')).distanceFromBottom)
+    .toBeLessThanOrEqual(2);
+
+  await composer.fill('Cancel placement with direct input');
+  await delayPromptRequest(page, 1_000);
+  await page.getByTitle('Send (Enter)').click();
+  const newTurn = page
+    .locator('.user-message-card')
+    .filter({ hasText: 'Cancel placement with direct input' });
+  await expect(newTurn).toBeVisible();
+
+  await list.hover();
+  await page.mouse.wheel(0, -160);
+  await waitForAnimationFrames(page, 12);
+
+  const offset = await newTurn.evaluate((element) => {
+    const container = element.closest<HTMLElement>('.interactive-list');
+    const track = element.closest<HTMLElement>('.interactive-list-track');
+    if (!container || !track) throw new Error('New turn geometry is unavailable');
+    const inset = Number.parseFloat(
+      getComputedStyle(track).getPropertyValue('--latest-user-message-sticky-gap')
+    );
+    return element.getBoundingClientRect().top - container.getBoundingClientRect().top - inset;
+  });
+  expect(offset).toBeGreaterThan(40);
 });
 
 test('upward scroll disables follow until the list reaches bottom again', async ({ page }) => {

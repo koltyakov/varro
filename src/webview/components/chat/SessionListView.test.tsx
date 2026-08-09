@@ -1426,6 +1426,18 @@ describe('SessionListView load errors', () => {
     expect(container.textContent).not.toContain('Load more');
   });
 
+  it('does not paginate beyond recent sessions for a status filter', () => {
+    setState('sessions', [session('running', Date.now())]);
+    setState('sessionStatus', { running: { type: 'busy' } });
+    setState('sessionsHasMore', true);
+
+    cleanup = render(() => <SessionListView sessionFilter="running" />, container);
+
+    expect(container.querySelector('.session-item-title-text')?.textContent).toBe('running');
+    expect(container.querySelector('.session-list-continuation')).toBeNull();
+    expect(loadMoreSessionsMock).not.toHaveBeenCalled();
+  });
+
   it('shows a lower-bound archive count and loads another session window', async () => {
     const callbacks = new Map<Element, IntersectionObserverCallback>();
     class TestIntersectionObserver {

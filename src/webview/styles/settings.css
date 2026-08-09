@@ -491,27 +491,29 @@
 }
 
 .settings-route-tag {
+  --settings-route-color: var(--color-vscode-muted);
+
   padding: 0 4px;
+  border-color: color-mix(in srgb, var(--settings-route-color) 42%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--settings-route-color) 16%, transparent);
+  color: color-mix(in srgb, var(--settings-route-color) 52%, var(--color-vscode-fg));
+  font-weight: 600;
 }
 
 .settings-route-tag-agent {
-  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 18%, transparent);
-  color: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 78%, var(--color-vscode-fg));
+  --settings-route-color: var(--vscode-charts-purple, #b180d7);
 }
 
 .settings-route-tag-small {
-  background: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 18%, transparent);
-  color: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 78%, var(--color-vscode-fg));
+  --settings-route-color: var(--vscode-charts-blue, #75beff);
 }
 
 .settings-route-tag-approve {
-  background: color-mix(in srgb, var(--color-vscode-success) 18%, transparent);
-  color: color-mix(in srgb, var(--color-vscode-success) 78%, var(--color-vscode-fg));
+  --settings-route-color: var(--color-vscode-success);
 }
 
 .settings-route-tag-commit {
-  background: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 18%, transparent);
-  color: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 78%, var(--color-vscode-fg));
+  --settings-route-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2a759);
 }
 
 .settings-model-ctx {

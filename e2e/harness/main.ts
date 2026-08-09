@@ -47,6 +47,7 @@ const SCENARIO_NAMES = [
   'sticky-preview-first-image',
   'sticky-preview-large-transcript',
   'sticky-preview-terminal-attachment',
+  'new-turn-placement',
   'todo-queue',
   'status-filters',
   'file-search',
@@ -1250,6 +1251,33 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.persistedActiveSessionId = session.id;
     addDenseSearchModels(state);
     state.nextSequence = 50;
+    return state;
+  }
+
+  if (name === 'new-turn-placement') {
+    const session = makeSession('session-new-turn-placement', 'New turn placement', BASE_TIME - 500);
+    const user = makeUserMessage(
+      session.id,
+      'message-new-turn-placement-user',
+      ['Verify the current implementation and summarize the result.'],
+      BASE_TIME - 8_000
+    );
+    const assistant = makeAssistantMessage(
+      session.id,
+      'message-new-turn-placement-assistant',
+      user.info.id,
+      Array.from(
+        { length: 28 },
+        (_, index) =>
+          `Verification result ${index + 1}: the implementation remains stable under the current checks.`
+      ).join('\n\n'),
+      BASE_TIME - 6_000
+    );
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = [user, assistant];
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 55;
     return state;
   }
 
@@ -4925,7 +4953,7 @@ async function handleApiRequest(
             payload: { type: 'message.part.updated', properties: { part } },
           });
         }
-      }, 200);
+      }, 50);
     }
 
     if (

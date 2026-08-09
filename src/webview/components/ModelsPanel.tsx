@@ -59,9 +59,14 @@ export function ModelsPanel() {
   const workspaceStatusText = createMemo(() =>
     state.workspaceStatuses.map((entry) => `${entry.workspaceID} (${entry.status})`).join(', ')
   );
-  const runningAgentCount = createMemo(
-    () => Object.values(state.sessionStatus).filter(isRunningSessionStatus).length
-  );
+  const runningAgentCount = createMemo(() => {
+    const parentSessionIds = new Set(
+      state.sessions.filter((session) => !session.parentID).map((session) => session.id)
+    );
+    return Object.entries(state.sessionStatus).filter(
+      ([sessionId, status]) => parentSessionIds.has(sessionId) && isRunningSessionStatus(status)
+    ).length;
+  });
 
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
 
@@ -109,6 +114,7 @@ export function ModelsPanel() {
     providerID: string;
     modelID: string;
     agentName?: string;
+    unset?: boolean;
   }) {
     setIsSaving(true);
     try {
@@ -222,7 +228,7 @@ export function ModelsPanel() {
         </div>
       </div>
 
-      <Show when={state.providerRefreshPending}>
+      <Show when={state.providerRefreshPending && runningAgentCount() > 0}>
         <div class="settings-provider-refresh-notice" role="status">
           <svg
             viewBox="0 0 24 24"
@@ -238,14 +244,9 @@ export function ModelsPanel() {
             <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" />
           </svg>
           <span>
-            <strong>Provider update queued.</strong>{' '}
-            <Show
-              when={runningAgentCount() > 0}
-              fallback="Changes will appear automatically when active work finishes."
-            >
-              Changes will appear automatically when {runningAgentCount()} running{' '}
-              {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
-            </Show>
+            <strong>Configuration update queued.</strong> Changes will appear automatically when{' '}
+            {runningAgentCount()} running{' '}
+            {runningAgentCount() === 1 ? 'agent finishes' : 'agents finish'}.
           </span>
         </div>
       </Show>
@@ -334,10 +335,16 @@ export function ModelsPanel() {
                     target: 'small_model',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
+                    ...(isModelRoute(routing().smallModel, menu.providerID, menu.modelID)
+                      ? { unset: true }
+                      : {}),
                   })
                 }
               >
-                Use as <strong>small</strong> model
+                {isModelRoute(routing().smallModel, menu.providerID, menu.modelID)
+                  ? "Don't use as "
+                  : 'Use as '}
+                <strong>small</strong> model
               </button>
               <button
                 type="button"
@@ -348,10 +355,16 @@ export function ModelsPanel() {
                     target: 'commit_message',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
+                    ...(isModelRoute(routing().commitMessageModel, menu.providerID, menu.modelID)
+                      ? { unset: true }
+                      : {}),
                   })
                 }
               >
-                Use for <strong>commit messages</strong>
+                {isModelRoute(routing().commitMessageModel, menu.providerID, menu.modelID)
+                  ? "Don't use for "
+                  : 'Use for '}
+                <strong>commit messages</strong>
               </button>
               <button
                 type="button"
@@ -362,29 +375,41 @@ export function ModelsPanel() {
                     target: 'auto_approve',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
+                    ...(isModelRoute(routing().autoApproveModel, menu.providerID, menu.modelID)
+                      ? { unset: true }
+                      : {}),
                   })
                 }
               >
-                Use for <strong>auto-approve</strong>
+                {isModelRoute(routing().autoApproveModel, menu.providerID, menu.modelID)
+                  ? "Don't use for "
+                  : 'Use for '}
+                <strong>auto-approve</strong>
               </button>
               <For each={routableAgents()}>
-                {(agent) => (
-                  <button
-                    type="button"
-                    class="settings-context-menu-item"
-                    disabled={isSaving()}
-                    onClick={() =>
-                      void saveRouting({
-                        target: 'agent',
-                        agentName: agent.name,
-                        providerID: menu.providerID,
-                        modelID: menu.modelID,
-                      })
-                    }
-                  >
-                    Use for <strong>{agent.name}</strong> agent
-                  </button>
-                )}
+                {(agent) => {
+                  const isAssigned = () =>
+                    isModelRoute(routing().agentModels[agent.name], menu.providerID, menu.modelID);
+                  return (
+                    <button
+                      type="button"
+                      class="settings-context-menu-item"
+                      disabled={isSaving()}
+                      onClick={() =>
+                        void saveRouting({
+                          target: 'agent',
+                          agentName: agent.name,
+                          providerID: menu.providerID,
+                          modelID: menu.modelID,
+                          ...(isAssigned() ? { unset: true } : {}),
+                        })
+                      }
+                    >
+                      {isAssigned() ? "Don't use for " : 'Use for '}
+                      <strong>{agent.name}</strong> agent
+                    </button>
+                  );
+                }}
               </For>
             </div>
           </Portal>
@@ -572,6 +597,14 @@ function getModelRouteTags(routing: OpenCodeModelRouting, providerID: string, mo
   }
 
   return tags;
+}
+
+function isModelRoute(
+  route: { providerID: string; modelID: string } | null | undefined,
+  providerID: string,
+  modelID: string
+) {
+  return route?.providerID === providerID && route.modelID === modelID;
 }
 
 function ModelRouteBadge(props: { tag: ModelRouteTag }) {

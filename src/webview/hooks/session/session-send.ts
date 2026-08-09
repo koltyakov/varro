@@ -31,6 +31,10 @@ import { modelSupportsVision } from '../../lib/model-capabilities';
 import { getPreferredVariant } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
+import {
+  clearPendingOptimisticUserMessage,
+  trackPendingOptimisticUserMessage,
+} from '../../lib/state-messages';
 import type {
   MessageEntry,
   Part,
@@ -678,7 +682,7 @@ export async function sendMessageWithDependencies(
       text: string,
       options?: SessionSendOptions
     ): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null;
-    requestMessageListScrollToBottom(): void;
+    requestMessageListScrollToBottom(targetMessageId?: string): void;
     startLoading(): void;
     setError(message: string | null): void;
     applyEffectiveModel(model: SelectedModel, sessionId: string): void;
@@ -758,7 +762,9 @@ export async function sendMessageWithDependencies(
 
     deps.clearSessionUsageLimit(sessionId);
     if (deps.getActiveSessionId() === sessionId && !options?.preserveScrollPosition) {
-      deps.requestMessageListScrollToBottom();
+      deps.requestMessageListScrollToBottom(
+        expectsAssistantReply && optimisticMessage ? messageId : undefined
+      );
     }
     if (optimisticMessage) {
       deps.appendOptimisticMessage?.(optimisticMessage);
@@ -832,11 +838,16 @@ function clearSessionUsageLimitForSessionTree(sessionId: string) {
 
 function appendOptimisticMessageToActiveSession(entry: OptimisticMessageEntry) {
   if (appStore.state.activeSessionId !== entry.info.sessionID) return;
+  trackPendingOptimisticUserMessage(entry.info.sessionID, entry.info.id);
   appStore.setState('messages', (messages) => [...messages, entry]);
   appStore.defaultAppState.messageIndex.invalidate();
 }
 
 function removeOptimisticMessageFromActiveSession(messageId: string) {
+  const optimisticEntry = appStore.state.messages.find((message) => message.info.id === messageId);
+  if (optimisticEntry) {
+    clearPendingOptimisticUserMessage(optimisticEntry.info.sessionID, messageId);
+  }
   const nextMessages = appStore.state.messages.filter((entry) => entry.info.id !== messageId);
   if (nextMessages.length === appStore.state.messages.length) return;
   appStore.setState('messages', nextMessages);

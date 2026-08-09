@@ -201,7 +201,150 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
-  it('shows an unanswered permission after 20 seconds and ignores a late allow', async () => {
+  it('ignores a late judge result after the permission is no longer pending', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([]);
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-canceled'),
+      });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() =>
+        expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
+      );
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('keeps judging a permission received while an empty snapshot is loading', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const pendingPermissions = deferred<ReturnType<typeof permissionListItem>[]>();
+    clientMocks.permissionList.mockReturnValue(pendingPermissions.promise);
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-current'),
+      });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      pendingPermissions.resolve([]);
+      await vi.waitFor(() =>
+        expect(stateModule.getPermissionReconciliationMetadataSize().activeReconciliations).toBe(0)
+      );
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-current' }),
+        ])
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('hides a restored auto-mode permission before the permission list resolves', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const pendingPermissions = deferred<ReturnType<typeof permissionListItem>[]>();
+    clientMocks.permissionList.mockReturnValue(pendingPermissions.promise);
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    const { deriveSessionIndicators } = await import('../components/chat/SessionListView');
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    stateModule.addPermission(permission('perm-restored'));
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(stateModule.state.permissions).toEqual([]);
+      expect(deriveSessionIndicators(stateModule.state.sessions).attentionIds).not.toContain(
+        'session-1'
+      );
+
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(clientMocks.permissionList).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+
+      pendingPermissions.resolve([permissionListItem('perm-restored')]);
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-restored' }),
+        ])
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('restores a hidden auto-mode permission when permission sync fails', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockRejectedValue(new Error('Permission list failed'));
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    stateModule.addPermission(permission('perm-restored'));
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(stateModule.state.permissions).toEqual([]);
+      serverEventHandlers.get('server.connected')?.({});
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-restored' }),
+        ])
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it('keeps an unanswered permission hidden until the judge allows it', async () => {
     vi.useFakeTimers();
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
@@ -229,17 +372,17 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.permissions).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({ id: 'perm-timeout' }),
-      ]);
+      expect(stateModule.state.permissions).toEqual([]);
 
       judge.resolve({ decision: 'allow', reason: 'Late approval.' });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
-      expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({ id: 'perm-timeout' }),
-      ]);
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'session-1',
+          'perm-timeout',
+          'once'
+        )
+      );
+      expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
       vi.useRealTimers();

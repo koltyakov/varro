@@ -199,6 +199,8 @@ export interface AppStateInstance {
   setSessionSearchFocusKey: Setter<number>;
   messageListScrollRequestKey: Accessor<number>;
   setMessageListScrollRequestKey: Setter<number>;
+  messageListScrollTargetMessageId: Accessor<string | null>;
+  setMessageListScrollTargetMessageId: Setter<string | null>;
   messageStructureVersion: Accessor<number>;
   setMessageStructureVersion: Setter<number>;
   messageInfoVersion: Accessor<number>;
@@ -366,6 +368,9 @@ export function createAppState(): AppStateInstance {
   const [openAttentionSessionsKey, setOpenAttentionSessionsKey] = createSignal(0);
   const [sessionSearchFocusKey, setSessionSearchFocusKey] = createSignal(0);
   const [messageListScrollRequestKey, setMessageListScrollRequestKey] = createSignal(0);
+  const [messageListScrollTargetMessageId, setMessageListScrollTargetMessageId] = createSignal<
+    string | null
+  >(null);
   const [messageStructureVersion, setMessageStructureVersion] = createSignal(0);
   const [messageInfoVersion, setMessageInfoVersion] = createSignal(0);
   const [sessionUsageLimitVersion, setSessionUsageLimitVersion] = createSignal(0);
@@ -437,6 +442,8 @@ export function createAppState(): AppStateInstance {
     setSessionSearchFocusKey,
     messageListScrollRequestKey,
     setMessageListScrollRequestKey,
+    messageListScrollTargetMessageId,
+    setMessageListScrollTargetMessageId,
     messageStructureVersion,
     setMessageStructureVersion,
     messageInfoVersion,
@@ -523,6 +530,9 @@ export const sessionSearchFocusKey = defaultAppState.sessionSearchFocusKey;
 export const setSessionSearchFocusKey = defaultAppState.setSessionSearchFocusKey;
 export const messageListScrollRequestKey = defaultAppState.messageListScrollRequestKey;
 export const setMessageListScrollRequestKey = defaultAppState.setMessageListScrollRequestKey;
+export const messageListScrollTargetMessageId = defaultAppState.messageListScrollTargetMessageId;
+export const setMessageListScrollTargetMessageId =
+  defaultAppState.setMessageListScrollTargetMessageId;
 export const messageStructureVersion = defaultAppState.messageStructureVersion;
 export const setMessageStructureVersion = defaultAppState.setMessageStructureVersion;
 export const messageInfoVersion = defaultAppState.messageInfoVersion;
@@ -564,6 +574,7 @@ export function resetDefaultAppState() {
   setOpenAttentionSessionsKey(next.openAttentionSessionsKey());
   setSessionSearchFocusKey(next.sessionSearchFocusKey());
   setMessageListScrollRequestKey(next.messageListScrollRequestKey());
+  setMessageListScrollTargetMessageId(next.messageListScrollTargetMessageId());
   setMessageStructureVersion(next.messageStructureVersion());
   setMessageInfoVersion(next.messageInfoVersion());
   setSessionUsageLimitVersion((value) => value + 1);

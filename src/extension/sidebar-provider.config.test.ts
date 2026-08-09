@@ -138,7 +138,48 @@ describe('SidebarProvider local config routing', () => {
         },
       },
     });
-    expect(server.restart).toHaveBeenCalledOnce();
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
+  });
+
+  it('removes small_model routing from project opencode.json', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.json'
+        ? Promise.resolve(
+            new TextEncoder().encode(
+              JSON.stringify({ small_model: 'openai/gpt-5-mini', theme: 'system' })
+            )
+          )
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 21,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: {
+          target: 'small_model',
+          providerID: 'openai',
+          modelID: 'gpt-5-mini',
+          unset: true,
+        },
+      },
+    });
+
+    const writeCall = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown[] | undefined;
+    const encoded = writeCall?.[1] as Uint8Array;
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toEqual({ theme: 'system' });
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 21,
+        data: expect.objectContaining({ smallModel: null }),
+      },
+    });
   });
 
   it.each([
@@ -172,6 +213,36 @@ describe('SidebarProvider local config routing', () => {
     });
   });
 
+  it.each([
+    ['commit_message', 'commitMessage.model', 'commitMessageModel'],
+    ['auto_approve', 'chat.autoApproveModel', 'autoApproveModel'],
+  ] as const)('clears %s routing from VS Code user settings', async (target, key, responseKey) => {
+    const config = vscodeMock.workspace.getConfiguration('varro');
+    await config.update(key, 'openai/gpt-5-mini', vscodeMock.ConfigurationTarget.Global);
+    vscodeMock.workspace.fs.readFile.mockRejectedValue({ code: 'FileNotFound' });
+    const { provider } = await createSidebarProviderInstance();
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 22,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: { target, providerID: 'openai', modelID: 'gpt-5-mini', unset: true },
+      },
+    });
+
+    expect(getConfigurationValue(key)).toBeUndefined();
+    expect(posted).toContainEqual({
+      type: 'api/response',
+      payload: {
+        id: 22,
+        data: expect.objectContaining({ [responseKey]: null }),
+      },
+    });
+  });
+
   it('writes agent model routing while preserving existing config keys', async () => {
     vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
       uri.fsPath === '/repo/opencode.json'
@@ -190,9 +261,13 @@ describe('SidebarProvider local config routing', () => {
     vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 10, type: 0, ctime: 0 });
     vscodeMock.workspace.fs.stat.mockResolvedValueOnce({ mtime: 1, size: 10, type: 0, ctime: 0 });
 
-    const { provider } = await createSidebarProviderInstance({
-      server: createServer({ getWorkspaceCwd: vi.fn(() => '/repo') }),
+    const server = createServer({
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
     });
+    const { provider } = await createSidebarProviderInstance({ server });
 
     await provider.handleMessage({
       type: 'api/request',
@@ -223,6 +298,41 @@ describe('SidebarProvider local config routing', () => {
         review: { model: 'anthropic/claude-sonnet-4' },
       },
     });
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
+  });
+
+  it('removes an agent model assignment and its empty config objects', async () => {
+    vscodeMock.workspace.fs.readFile.mockImplementation((uri: { fsPath: string }) =>
+      uri.fsPath === '/repo/opencode.json'
+        ? Promise.resolve(
+            new TextEncoder().encode(
+              JSON.stringify({ agent: { review: { model: 'openai/gpt-5-mini' } } })
+            )
+          )
+        : Promise.reject({ code: 'FileNotFound' })
+    );
+
+    const { provider } = await createSidebarProviderInstance();
+    await provider.handleMessage({
+      type: 'api/request',
+      payload: {
+        id: 23,
+        method: 'POST',
+        path: '/varro/opencode-config/model-routing',
+        body: {
+          target: 'agent',
+          agentName: 'review',
+          providerID: 'openai',
+          modelID: 'gpt-5-mini',
+          unset: true,
+        },
+      },
+    });
+
+    const writeCall = vscodeMock.workspace.fs.writeFile.mock.lastCall as unknown[] | undefined;
+    const encoded = writeCall?.[1] as Uint8Array;
+    expect(JSON.parse(new TextDecoder().decode(encoded))).toEqual({});
   });
 
   it('rejects config updates when opencode.json changes concurrently', async () => {

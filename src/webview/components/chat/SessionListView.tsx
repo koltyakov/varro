@@ -1302,7 +1302,7 @@ export function SessionListView(props: {
   const renderScrollableContent = () => (
     <div class="session-list-scroll">
       {renderSessionItems(visibleSessions)}
-      <Show when={!trimmedSearchQuery() && !props.subagentParentId}>
+      <Show when={!trimmedSearchQuery() && !props.subagentParentId && !props.sessionFilter}>
         <SessionListContinuation />
       </Show>
     </div>

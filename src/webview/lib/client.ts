@@ -292,6 +292,7 @@ export const client = {
       providerID: string;
       modelID: string;
       agentName?: string;
+      unset?: boolean;
     }): Promise<OpenCodeModelRouting> {
       return apiCall('POST', VARRO_API_ENDPOINTS.openCodeConfigModelRouting, body);
     },

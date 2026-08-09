@@ -222,7 +222,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
-      refreshOpenCodeConfig: () => this.refreshProviderState(),
+      refreshOpenCodeConfig: () => this.refreshOpenCodeWorkspaceState(),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       postApiResponse: (requestGeneration, payload) =>
         this.webviewSession.postApiResponse(payload, requestGeneration),
@@ -240,10 +240,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       {
         server,
         persistence,
-        hasLocallyActiveWork: () =>
-          this.sessionState.busy.size > 0 ||
-          this.sessionState.pending.size > 0 ||
-          this.ralphHost.getStatePayload().activeIds.length > 0,
         clearProviderLimitCache: () => this.providerLimitService.clearCache(),
         postRefresh: (options) =>
           this.post(
@@ -419,6 +415,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async refreshProviderState(generation?: number, requireSignatureChange = false) {
     await this.providerFileRefresh.refreshState(generation, requireSignatureChange);
+  }
+
+  private async refreshOpenCodeWorkspaceState() {
+    await this.providerFileRefresh.refreshWorkspaceState();
   }
 
   private async readProviderFilesSignature() {

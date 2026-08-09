@@ -19,6 +19,7 @@ import {
   isSessionCompacting,
   loadingStartedAt,
   messageListScrollRequestKey,
+  messageListScrollTargetMessageId,
   requestMessageListScrollToBottom,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -157,6 +158,8 @@ const STICKY_PREVIEW_DISPLAY_DEBOUNCE_MS = 90;
 const STICKY_PREVIEW_COLLISION_BUFFER_PX = 8;
 const STICKY_NAVIGATION_SETTLE_FRAME_LIMIT = 32;
 const STRUCTURAL_ANCHOR_SETTLE_FRAME_LIMIT = 24;
+const NEW_TURN_ALIGNMENT_FRAME_LIMIT = 64;
+const NEW_TURN_ALIGNMENT_MAX_STEP_PX = 24;
 const BOTTOM_FOLLOW_SETTLE_FRAME_COUNT = 2;
 const WIDTH_RESIZE_SETTLE_MS = 100;
 const APPEND_SCROLL_TRANSITION_MS = 180;
@@ -397,6 +400,9 @@ export function MessageList() {
   let pendingMeasuredAppendScroll = false;
   let pendingMeasuredAppendAnchor: VisibleScrollAnchor | null = null;
   let pendingScrollToBottomRequest = false;
+  let pendingNewTurnMessageId: string | null = null;
+  let newTurnAlignmentRafId = 0;
+  let newTurnReserveSessionId: string | null = null;
   let deferredScrollToBottomRequestKey: number | null = null;
   let followModeLocked = false;
   let previousStickyPreviewId: string | null = null;
@@ -3325,7 +3331,104 @@ export function MessageList() {
     if (activeFollowLoopSessionId) {
       activeFollowLoopSessionId = null;
     }
+    pendingNewTurnMessageId = null;
+    if (newTurnAlignmentRafId) {
+      cancelAnimationFrame(newTurnAlignmentRafId);
+      newTurnAlignmentRafId = 0;
+    }
     cancelAppendScrollTransition();
+  }
+
+  function startNewTurnAlignment(sessionId: string, messageId: string) {
+    if (!containerRef || !trackRef || state.activeSessionId !== sessionId) return false;
+    pendingNewTurnMessageId = messageId;
+    reserveLostBottomSpace();
+    const appendAnchor = pendingMeasuredAppendAnchor;
+    cancelAppendScrollTransition();
+    restoreVisibleScrollAnchor(appendAnchor, { useMessageOffsetFallback: true });
+    if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
+    initialScrollRafId = 0;
+    activeFollowLoopSessionId = null;
+    if (newTurnAlignmentRafId) cancelAnimationFrame(newTurnAlignmentRafId);
+
+    const inputEpoch = directScrollInputEpoch;
+    let attempts = 0;
+    let stableFrames = 0;
+    const tick = () => {
+      newTurnAlignmentRafId = 0;
+      if (
+        !containerRef ||
+        !trackRef ||
+        state.activeSessionId !== sessionId ||
+        pendingNewTurnMessageId !== messageId ||
+        directScrollInputEpoch !== inputEpoch ||
+        stickyNavigationOwnsScroll() ||
+        editingMessage()
+      ) {
+        if (pendingNewTurnMessageId === messageId) pendingNewTurnMessageId = null;
+        return;
+      }
+
+      attempts += 1;
+      const row = mountedMessageRows.get(messageId);
+      const card = row?.querySelector<HTMLElement>('.user-message-card');
+      if (!row || !card || row.classList.contains('interactive-item-virtual-placeholder')) {
+        if (attempts < NEW_TURN_ALIGNMENT_FRAME_LIMIT) {
+          newTurnAlignmentRafId = requestAnimationFrame(tick);
+        } else {
+          pendingNewTurnMessageId = null;
+          performScroll({ force: true });
+          startFollowLoop(sessionId);
+        }
+        return;
+      }
+
+      const containerRect = containerRef.getBoundingClientRect();
+      const offset =
+        card.getBoundingClientRect().top - containerRect.top - getMessageJumpTopInset();
+      const targetScrollTop = Math.max(0, containerRef.scrollTop + offset);
+      const currentReserve = untrack(appendBottomReserve);
+      const unreservedBottom = Math.max(
+        0,
+        containerRef.scrollHeight - currentReserve - containerRef.clientHeight
+      );
+      const requiredReserve = Math.max(0, targetScrollTop - unreservedBottom);
+      appendBottomReserveTarget = targetScrollTop;
+      if (Math.abs(requiredReserve - currentReserve) > 0.5) {
+        const preservedScrollTop = containerRef.scrollTop;
+        setAppendBottomReserve(requiredReserve);
+        setPreservedScrollTop(preservedScrollTop);
+      }
+      if (requiredReserve > 0.5) newTurnReserveSessionId = sessionId;
+
+      if (requiredReserve <= currentReserve + 0.5) {
+        const scrollDelta = targetScrollTop - containerRef.scrollTop;
+        const nextScrollTop =
+          containerRef.scrollTop +
+          Math.sign(scrollDelta) * Math.min(Math.abs(scrollDelta), NEW_TURN_ALIGNMENT_MAX_STEP_PX);
+        setPreservedScrollTop(nextScrollTop);
+        expectedScrollTop = nextScrollTop;
+        ignoreScrollUntil = performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS;
+        lastAutoScrolledTrackHeight = trackRef.getBoundingClientRect().height;
+        lastAutoScrolledBottomScrollTop = targetScrollTop;
+        pinnedToBottom = true;
+      }
+
+      const alignedOffset =
+        card.getBoundingClientRect().top -
+        containerRef.getBoundingClientRect().top -
+        getMessageJumpTopInset();
+      stableFrames = Math.abs(alignedOffset) <= 0.5 ? stableFrames + 1 : 0;
+      if (stableFrames >= 2 || attempts >= NEW_TURN_ALIGNMENT_FRAME_LIMIT) {
+        pendingNewTurnMessageId = null;
+        startFollowLoop(sessionId);
+        return;
+      }
+      newTurnAlignmentRafId = requestAnimationFrame(tick);
+    };
+
+    newTurnAlignmentRafId = requestAnimationFrame(tick);
+    return true;
   }
 
   function disengageBottomFollow() {
@@ -4397,6 +4500,7 @@ export function MessageList() {
     setAppendBottomReserve(0);
     clearActivityExitReserve();
     appendBottomReserveTarget = 0;
+    newTurnReserveSessionId = null;
     lastVirtualContentOrigin = 0;
     lastDetachedVisibleAnchor = null;
     directMovementAnchor = null;
@@ -4448,6 +4552,9 @@ export function MessageList() {
           pendingScrollToBottomRequest = false;
           setAutoScroll(true);
         }
+        if (pendingNewTurnMessageId && startNewTurnAlignment(sessionId, pendingNewTurnMessageId)) {
+          return;
+        }
         if (startPendingAppendScrollTransition(sessionId)) return;
         performScroll();
         startFollowLoop(sessionId);
@@ -4482,6 +4589,7 @@ export function MessageList() {
   createEffect((previousRequestKey: number | undefined) => {
     const sessionId = state.activeSessionId;
     const requestKey = messageListScrollRequestKey();
+    const targetMessageId = messageListScrollTargetMessageId();
     if (previousRequestKey === undefined) return requestKey;
     if (!sessionId || !containerRef) return requestKey;
     const requestChanged = requestKey !== previousRequestKey;
@@ -4497,7 +4605,9 @@ export function MessageList() {
       return requestKey;
     }
 
+    const shouldAlignNewTurn = !!targetMessageId && !shouldMeasureRows();
     pendingScrollToBottomRequest = true;
+    pendingNewTurnMessageId = shouldAlignNewTurn ? targetMessageId : null;
     followModeLocked = true;
     if (shouldMeasureRows()) {
       pendingMeasuredAppendAnchor ??= captureVisibleScrollAnchor();
@@ -4518,7 +4628,14 @@ export function MessageList() {
     lastScrollInputAt = Number.NEGATIVE_INFINITY;
     setAutoScroll(true);
     queueMicrotask(() => {
-      if (state.activeSessionId !== sessionId) return;
+      if (
+        state.activeSessionId !== sessionId ||
+        messageListScrollRequestKey() !== requestKey ||
+        (shouldAlignNewTurn && pendingNewTurnMessageId !== targetMessageId)
+      ) {
+        return;
+      }
+      if (shouldAlignNewTurn && startNewTurnAlignment(sessionId, targetMessageId)) return;
       if (startPendingAppendScrollTransition(sessionId)) return;
       performScroll({ force: true });
       startFollowLoop(sessionId);
@@ -4543,8 +4660,17 @@ export function MessageList() {
     const loading = isLoading();
     if (prevLoading && !loading && autoScroll()) {
       const sessionId = state.activeSessionId;
+      if (sessionId && newTurnReserveSessionId === sessionId) {
+        pendingNewTurnMessageId = null;
+        if (newTurnAlignmentRafId) cancelAnimationFrame(newTurnAlignmentRafId);
+        newTurnAlignmentRafId = 0;
+        newTurnReserveSessionId = null;
+        appendBottomReserveTarget = 0;
+        if (untrack(appendBottomReserve) > 0.5) setAppendBottomReserve(0);
+      }
       queueMicrotask(() => {
         if (!sessionId || state.activeSessionId !== sessionId) return;
+        if (startPendingAppendScrollTransition(sessionId)) return;
         performScroll();
       });
     }

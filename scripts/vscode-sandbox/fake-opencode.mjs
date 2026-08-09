@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import http from 'node:http';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const mode = process.env.VARRO_SANDBOX_FAKE_MODE || 'healthy';
@@ -12,12 +12,18 @@ if (args.includes('--version') && mode === 'version-error') {
   process.exit(3);
 }
 
+if (args.includes('--version') && mode === 'malformed-version') {
+  process.stdout.write('OpenCode development build\n');
+  process.exit(0);
+}
+
 if (args.includes('--version')) {
   process.stdout.write(`${version}\n`);
   process.exit(0);
 }
 
 if (args[0] === 'upgrade') {
+  if (mode === 'upgrade-no-change') process.exit(0);
   process.stderr.write('The fake OpenCode CLI does not perform upgrades.\n');
   process.exit(1);
 }
@@ -29,6 +35,9 @@ if (args[0] !== 'serve') {
 
 const launchFile = process.env.VARRO_SANDBOX_LAUNCH_FILE;
 if (launchFile) appendFileSync(launchFile, `${String(process.pid)}\n`);
+const launchCount = launchFile
+  ? readFileSync(launchFile, 'utf8').trim().split(/\r?\n/).filter(Boolean).length
+  : 1;
 
 if (mode === 'startup-exit') {
   process.stderr.write('Simulated OpenCode startup failure.\n');
@@ -59,6 +68,10 @@ const server = http.createServer((request, response) => {
     return;
   }
   if (request.method === 'GET' && path === '/global/event') {
+    if (mode === 'event-error') {
+      sendJson(response, { error: 'Simulated event stream failure.' }, 503);
+      return;
+    }
     response.writeHead(200, {
       'cache-control': 'no-cache',
       connection: 'keep-alive',
@@ -110,6 +123,9 @@ server.on('error', (error) => {
 
 server.listen(port, '127.0.0.1', () => {
   process.stdout.write(`Fake OpenCode listening on http://127.0.0.1:${port}\n`);
+  if (mode === 'crash-once' && launchCount === 1) {
+    setTimeout(() => process.exit(17), 1500).unref();
+  }
 });
 
 function shutdown() {

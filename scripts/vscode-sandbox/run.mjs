@@ -16,10 +16,14 @@ const SCENARIOS = [
   'invalid-cli-path',
   'auto-start-disabled',
   'version-command-failure',
+  'malformed-cli-version',
   'startup-process-exit',
+  'runtime-crash-recovery',
+  'event-stream-failure',
   'port-conflict-fallback',
   'required-update-disabled',
   'required-update-failure',
+  'required-update-no-change',
   'healthy-first-run',
 ];
 
@@ -167,11 +171,28 @@ function getScenarioEnvironment(scenario, root) {
   if (scenario === 'version-command-failure') {
     return { VARRO_SANDBOX_FAKE_MODE: 'version-error', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
   }
+  if (scenario === 'malformed-cli-version') {
+    return { VARRO_SANDBOX_FAKE_MODE: 'malformed-version', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
+  }
   if (scenario === 'startup-process-exit') {
     return { VARRO_SANDBOX_FAKE_MODE: 'startup-exit', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
   }
-  if (scenario === 'required-update-disabled' || scenario === 'required-update-failure') {
-    return { VARRO_SANDBOX_FAKE_MODE: 'healthy', VARRO_SANDBOX_FAKE_VERSION: '1.15.0' };
+  if (scenario === 'runtime-crash-recovery') {
+    return { VARRO_SANDBOX_FAKE_MODE: 'crash-once', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
+  }
+  if (scenario === 'event-stream-failure') {
+    return { VARRO_SANDBOX_FAKE_MODE: 'event-error', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
+  }
+  if (
+    scenario === 'required-update-disabled' ||
+    scenario === 'required-update-failure' ||
+    scenario === 'required-update-no-change'
+  ) {
+    return {
+      VARRO_SANDBOX_FAKE_MODE:
+        scenario === 'required-update-no-change' ? 'upgrade-no-change' : 'healthy',
+      VARRO_SANDBOX_FAKE_VERSION: '1.15.0',
+    };
   }
   return { VARRO_SANDBOX_FAKE_MODE: 'healthy', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
 }

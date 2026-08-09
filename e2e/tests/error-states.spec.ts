@@ -1,11 +1,24 @@
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 
-test('shows the missing-cli error state and opens install docs', async ({ page }) => {
+test('shows the missing-cli error state and offers install actions', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=server-error-missing-cli');
 
   await expect(page.getByText('OpenCode is not installed', { exact: true })).toBeVisible();
   await expect(page.getByText('npm i -g opencode-ai', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open terminal and install' }).click();
+
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (window as Window & {
+          __varroE2E?: { terminalCommands?: Array<{ command: string; title?: string }> };
+        }).__varroE2E;
+        return value?.terminalCommands?.[0] || null;
+      })
+    )
+    .toEqual({ command: 'npm i -g opencode-ai', title: 'OpenCode Install' });
+
   await page.getByRole('button', { name: 'Learn more at opencode.ai' }).click();
 
   await expect

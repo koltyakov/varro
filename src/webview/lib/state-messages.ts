@@ -16,6 +16,8 @@ import { flushPendingStreamingDeltasFor, shouldUseStreamingText } from './stream
 
 const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<string, Array<MessageEntry<AssistantMessage>>>();
 const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
+// Canonical parts can replace local part IDs before an older transcript request resolves.
+const pendingOptimisticUserMessageKeys = new Set<string>();
 
 let cachedChildRunsByParentIdMessages: MessageEntry[] | null = null;
 let cachedChildRunsByParentIdVersion = -1;
@@ -27,6 +29,9 @@ function flushPendingStreamingDeltas() {
 
 export function upsertMessage(msg: MessageEntry) {
   flushPendingStreamingDeltas();
+  if (isOptimisticUserMessage(msg) && !isOptimisticUserMessageId(msg.info.id)) {
+    trackPendingOptimisticUserMessage(msg.info.sessionID, msg.info.id);
+  }
   setState(
     'messages',
     produce((msgs) => {
@@ -115,6 +120,24 @@ function isOptimisticUserMessageId(id: string) {
 
 function isLocalOptimisticPartId(partId: string, messageId: string) {
   return partId.startsWith(`${messageId}-part-`);
+}
+
+function getPendingOptimisticUserMessageKey(sessionId: string, messageId: string) {
+  return `${sessionId}\0${messageId}`;
+}
+
+export function trackPendingOptimisticUserMessage(sessionId: string, messageId: string) {
+  pendingOptimisticUserMessageKeys.add(getPendingOptimisticUserMessageKey(sessionId, messageId));
+}
+
+export function clearPendingOptimisticUserMessage(sessionId: string, messageId: string) {
+  pendingOptimisticUserMessageKeys.delete(getPendingOptimisticUserMessageKey(sessionId, messageId));
+}
+
+function isPendingOptimisticUserMessage(entry: MessageEntry) {
+  return pendingOptimisticUserMessageKeys.has(
+    getPendingOptimisticUserMessageKey(entry.info.sessionID, entry.info.id)
+  );
 }
 
 export function upsertPart(part: Part) {
@@ -394,6 +417,7 @@ export function clearStreamingState() {
 
 export function clearMessages() {
   streamingDeltaQueue.reset();
+  pendingOptimisticUserMessageKeys.clear();
   batch(() => {
     setState('messages', []);
     setState('todos', []);
@@ -588,12 +612,18 @@ function reconcileMessageInsertion(
 }
 
 function preserveMissingOptimisticUserMessages(current: MessageEntry[], incoming: MessageEntry[]) {
-  const incomingIds = new Set(incoming.map((entry) => entry.info.id));
+  const incomingKeys = new Set(
+    incoming.map((entry) => {
+      const key = getPendingOptimisticUserMessageKey(entry.info.sessionID, entry.info.id);
+      pendingOptimisticUserMessageKeys.delete(key);
+      return key;
+    })
+  );
   const pending = current.filter(
     (entry) =>
-      isOptimisticUserMessage(entry) &&
+      (isOptimisticUserMessage(entry) || isPendingOptimisticUserMessage(entry)) &&
       !isOptimisticUserMessageId(entry.info.id) &&
-      !incomingIds.has(entry.info.id)
+      !incomingKeys.has(getPendingOptimisticUserMessageKey(entry.info.sessionID, entry.info.id))
   );
   return pending.length > 0 ? [...incoming, ...pending] : incoming;
 }

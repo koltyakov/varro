@@ -1615,13 +1615,17 @@ describe('state helpers', () => {
 
     stateModule.requestComposerFocus();
     stateModule.requestOpenAttentionSessions();
-    stateModule.requestMessageListScrollToBottom();
+    stateModule.requestMessageListScrollToBottom('message-new-turn');
     stateModule.toggleThinking();
     stateModule.resetPastedImageIndex();
 
     expect(stateModule.composerFocusKey()).toBe(1);
     expect(stateModule.openAttentionSessionsKey()).toBe(1);
     expect(stateModule.messageListScrollRequestKey()).toBe(1);
+    expect(stateModule.messageListScrollTargetMessageId()).toBe('message-new-turn');
+    stateModule.requestMessageListScrollToBottom();
+    expect(stateModule.messageListScrollRequestKey()).toBe(2);
+    expect(stateModule.messageListScrollTargetMessageId()).toBeNull();
     expect(stateModule.showThinking()).toBe(false);
     expect(stateModule.nextPastedImageIndex()).toBe(1);
     expect(window.localStorage.getItem('varro.showThinking')).toBe(JSON.stringify(false));

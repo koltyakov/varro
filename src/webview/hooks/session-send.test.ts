@@ -537,6 +537,7 @@ describe('session-send helpers', () => {
     const appendOptimisticMessage = vi.fn((_entry: { info: Message; parts: Part[] }) => {
       messageCount += 1;
     });
+    const requestMessageListScrollToBottom = vi.fn();
 
     const promise = sendMessageWithDependencies(
       {
@@ -556,7 +557,7 @@ describe('session-send helpers', () => {
           },
           effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
         }),
-        requestMessageListScrollToBottom: vi.fn(),
+        requestMessageListScrollToBottom,
         startLoading: vi.fn(),
         setError: vi.fn(),
         applyEffectiveModel: vi.fn(),
@@ -608,6 +609,7 @@ describe('session-send helpers', () => {
       ],
       model: { providerID: 'openai', modelID: 'gpt-4o' },
     });
+    expect(requestMessageListScrollToBottom).toHaveBeenCalledWith(optimisticEntry.info.id);
 
     resolveSend?.();
     await promise;

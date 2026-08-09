@@ -15,7 +15,9 @@ const providerFileSystem = getProviderSignatureFileSystemMock();
 type ProviderRefreshAccess = {
   initializeProviderFileSignature(): Promise<void>;
   readProviderFilesSignature(): Promise<string>;
+  refreshOpenCodeWorkspaceState(): Promise<void>;
   refreshProviderState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
+  sessionState: { markSessionBusy(sessionID: string): unknown };
   setProviderWatchActive(active: boolean): void;
   startProviderFileObservation(): void;
 };
@@ -209,7 +211,7 @@ describe('SidebarProvider provider refresh', () => {
     let statusRequestCount = 0;
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) => {
-        if (path === '/question') return [];
+        if (path === '/question' || path === '/permission') return [];
         if (path === '/session/status') {
           statusRequestCount += 1;
           return statusRequestCount <= 6 ? { active: { type: 'busy' } } : {};
@@ -243,6 +245,61 @@ describe('SidebarProvider provider refresh', () => {
           message.type === 'providers/refresh'
       )
     ).toHaveLength(2);
+    await provider.dispose();
+  });
+
+  it('queues a workspace config reload until active work is idle', async () => {
+    vi.useFakeTimers();
+    let idle = false;
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return true;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+
+    await access.refreshOpenCodeWorkspaceState();
+
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    await provider.dispose();
+  });
+
+  it('reloads immediately when only stale local busy state remains', async () => {
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return {};
+        if (path === '/question' || path === '/permission') return [];
+        return true;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.sessionState.markSessionBusy('stale-session');
+
+    await access.refreshOpenCodeWorkspaceState();
+
+    expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(posted).not.toContainEqual({
+      type: 'providers/status',
+      payload: { pending: true },
+    });
     await provider.dispose();
   });
 
@@ -299,7 +356,8 @@ describe('SidebarProvider provider refresh', () => {
 
     await firstAccess.refreshProviderState();
     expect(values.get('varro.providerRefresh.pending')).toEqual({
-      version: 1,
+      version: 2,
+      scope: 'global',
       revalidateAuth: false,
     });
     await first.provider.dispose();
@@ -308,7 +366,7 @@ describe('SidebarProvider provider refresh', () => {
     const restoredServer = createServer({
       status: { state: 'stopped' },
       request: vi.fn(async (_method: string, path: string) => {
-        if (path === '/question') return [];
+        if (path === '/question' || path === '/permission') return [];
         if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
         return undefined;
       }),
@@ -349,7 +407,7 @@ describe('SidebarProvider provider refresh', () => {
       readServerInfo: vi.fn(async () => ({ managedProcess: false })),
       request: vi.fn(async (_method: string, path: string) => {
         if (path === '/session/status') return {};
-        if (path === '/question') return [];
+        if (path === '/question' || path === '/permission') return [];
         return true;
       }),
     });
@@ -375,7 +433,7 @@ describe('SidebarProvider provider refresh', () => {
       readServerInfo: vi.fn(async () => ({ managedProcess: false })),
       request: vi.fn(async (_method: string, path: string) => {
         if (path === '/session/status') return {};
-        if (path === '/question') return [];
+        if (path === '/question' || path === '/permission') return [];
         return true;
       }),
     });
@@ -410,8 +468,9 @@ describe('SidebarProvider provider refresh', () => {
     providerFileSystem.readFile.mockResolvedValue(Buffer.from('config'));
     const server = createServer({
       request: vi.fn(async (_method: string, path: string) => {
-        if (path === '/question') return [];
-        return idle ? {} : { active: { type: 'busy' } };
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return undefined;
       }),
       readServerInfo: vi.fn(async () => ({ managedProcess: true })),
     });
@@ -437,8 +496,10 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
-  it('does not restart again when provider watching toggles during an in-flight restart', async () => {
+  it('clears a queued notice without restarting again when watching toggles during restart', async () => {
+    vi.useFakeTimers();
     let resolveRestart!: (url: string) => void;
+    let idle = false;
     const server = createServer({
       restart: vi.fn(
         () =>
@@ -446,24 +507,32 @@ describe('SidebarProvider provider refresh', () => {
             resolveRestart = resolve;
           })
       ),
-      request: vi.fn(async (_method: string, path: string) =>
-        path === '/session/status' ? {} : []
-      ),
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return [];
+      }),
       readServerInfo: vi.fn(async () => ({ managedProcess: true })),
     });
     const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
     const access = provider as unknown as ProviderRefreshAccess;
     access.setProviderWatchActive(true);
 
-    const refresh = access.refreshProviderState();
-    await vi.waitFor(() => expect(server.restart).toHaveBeenCalledOnce());
+    await access.refreshProviderState();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(server.restart).toHaveBeenCalledOnce();
 
     access.setProviderWatchActive(false);
     resolveRestart('http://127.0.0.1:4096');
-    await refresh;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
 
     access.setProviderWatchActive(true);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
 
     expect(server.restart).toHaveBeenCalledOnce();
     await provider.dispose();

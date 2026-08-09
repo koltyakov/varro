@@ -36,10 +36,14 @@ The Extension Host matrix covers:
 | `invalid-cli-path` | `varro.server.command` points to a missing file | Reports the configured path instead of generic install guidance |
 | `auto-start-disabled` | No server and automatic startup disabled | Reports the manual `opencode serve` recovery path |
 | `version-command-failure` | `opencode --version` exits with an error | Continues startup and reports the diagnostic in About |
+| `malformed-cli-version` | `opencode --version` returns no parseable version | Uses the healthy server while reporting that the CLI version is unavailable |
 | `startup-process-exit` | CLI version succeeds but `serve` exits | Retries and reports startup diagnostics |
+| `runtime-crash-recovery` | A healthy managed server exits unexpectedly | Restarts the server and returns to a healthy event stream |
+| `event-stream-failure` | Health remains available but the global event endpoint fails | Keeps the server usable while reporting a degraded event stream |
 | `port-conflict-fallback` | Configured port is occupied by another HTTP process | Moves to a nearby port and reaches healthy state |
 | `required-update-disabled` | CLI is below the supported floor and updates are disabled | Blocks startup with the update setting guidance |
 | `required-update-failure` | Required CLI update encounters a network failure | Reports install-aware update recovery |
+| `required-update-no-change` | Updater exits successfully but leaves the old CLI in place | Rejects the false success and explains that an older CLI may be shadowing the update |
 | `healthy-first-run` | Compatible CLI and server | Starts, passes health, and connects the event stream |
 
 The assertions use the `Varro: About` diagnostics from the real extension host. Webview DOM and

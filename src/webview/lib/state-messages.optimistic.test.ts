@@ -199,6 +199,28 @@ describe('optimistic user message reconciliation', () => {
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
 
+  it('preserves an acknowledged optimistic row across a stale incremental refresh', () => {
+    const previous = {
+      info: userMessage('msg-previous'),
+      parts: [textPart('part-previous', 'msg-previous', 'previous prompt')],
+    };
+    const optimistic = {
+      info: userMessage('msg-pending'),
+      parts: [textPart('msg-pending-part-0', 'msg-pending', 'new prompt')],
+    };
+    upsertMessage(previous);
+    upsertMessage(optimistic);
+    upsertMessageInfo(userMessage('msg-pending'));
+    upsertPart(textPart('part-server', 'msg-pending', 'new prompt'));
+
+    setMessagesIncremental([previous]);
+
+    expect(state.messages.map((entry) => entry.info.id)).toEqual(['msg-previous', 'msg-pending']);
+    expect(state.messages[1]!.parts).toEqual([
+      textPart('part-server', 'msg-pending', 'new prompt'),
+    ]);
+  });
+
   it('keeps images attached to their exact IDs when acknowledgements arrive out of order', () => {
     upsertMessage({
       info: userMessage('msg-older'),

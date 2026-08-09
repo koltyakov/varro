@@ -1,3 +1,4 @@
+import { batch } from 'solid-js';
 import {
   isLoading,
   loadingStartedAt,
@@ -6,6 +7,7 @@ import {
   setLoadingLastActivityAt,
   setLoadingStartedAt,
   setMessageListScrollRequestKey,
+  setMessageListScrollTargetMessageId,
   setOpenAttentionSessionsKey,
   setSessionSearchFocusKey,
   setShowThinking,
@@ -69,6 +71,9 @@ export function requestSessionSearchFocus() {
   setSessionSearchFocusKey((value) => value + 1);
 }
 
-export function requestMessageListScrollToBottom() {
-  setMessageListScrollRequestKey((value) => value + 1);
+export function requestMessageListScrollToBottom(targetMessageId?: string) {
+  batch(() => {
+    setMessageListScrollTargetMessageId(targetMessageId ?? null);
+    setMessageListScrollRequestKey((value) => value + 1);
+  });
 }

@@ -29,11 +29,15 @@ export const nodeProviderSignatureFileSystem: ProviderSignatureFileSystem = {
 type ProviderFileRefreshDependencies = {
   server: Pick<OpenCodeServer, 'status' | 'request' | 'restart' | 'readServerInfo' | 'on' | 'off'>;
   persistence: Pick<Persistence, 'get' | 'set' | 'remove'>;
-  hasLocallyActiveWork(): boolean;
   clearProviderLimitCache(): void;
   postRefresh(options?: { revalidateAuth: true }): void;
   postPendingStatus(pending: boolean): void;
 };
+
+type PendingRefreshScope = 'workspace' | 'global';
+type PersistedPendingRefreshState =
+  | { version: 1; revalidateAuth: boolean }
+  | { version: 2; scope: PendingRefreshScope; revalidateAuth: boolean };
 
 export class ProviderFileRefreshController {
   private static readonly PENDING_STATE_KEY = 'varro.providerRefresh.pending';
@@ -47,7 +51,7 @@ export class ProviderFileRefreshController {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
-  private restartPending = false;
+  private pendingScope: PendingRefreshScope | null = null;
   private authChangePending = false;
   private authRevalidationPending = false;
   private pendingStatusPosted = false;
@@ -57,7 +61,7 @@ export class ProviderFileRefreshController {
   private readonly handleServerStatus = (status: ServerStatus) => {
     if (
       status.state !== 'running' ||
-      !this.restartPending ||
+      !this.pendingScope ||
       this.invalidationInFlight ||
       this.refreshTimer
     ) {
@@ -74,7 +78,7 @@ export class ProviderFileRefreshController {
       ProviderFileRefreshController.PENDING_STATE_KEY
     );
     if (isPersistedPendingState(pendingState)) {
-      this.restartPending = true;
+      this.pendingScope = pendingState.version === 1 ? 'global' : pendingState.scope;
       this.authRevalidationPending = pendingState.revalidateAuth;
     }
     dependencies.server.on('status', this.handleServerStatus);
@@ -126,8 +130,17 @@ export class ProviderFileRefreshController {
   }
 
   postStatus() {
-    this.pendingStatusPosted = this.restartPending;
-    this.dependencies.postPendingStatus(this.restartPending);
+    this.pendingStatusPosted = this.pendingScope !== null;
+    this.dependencies.postPendingStatus(this.pendingScope !== null);
+  }
+
+  async refreshWorkspaceState(generation = ++this.refreshGeneration) {
+    if (this.disposed || generation !== this.refreshGeneration) return;
+    this.dependencies.clearProviderLimitCache();
+    await this.markRefreshPending('workspace');
+    if (this.disposed || generation !== this.refreshGeneration) return;
+    this.dependencies.postRefresh();
+    await this.maybeRestart(generation, 0);
   }
 
   async refreshState(generation = ++this.refreshGeneration, requireSignatureChange = false) {
@@ -139,14 +152,14 @@ export class ProviderFileRefreshController {
       this.authRevalidationPending ||= this.authChangePending;
       this.authChangePending = false;
       this.dependencies.clearProviderLimitCache();
-      await this.markRestartPending();
+      await this.markRefreshPending('global');
       this.dependencies.postRefresh();
       await this.maybeRestart(generation, 0);
       return;
     }
     if (requireSignatureChange && signature === this.observedFilesSignature) {
       this.authChangePending = false;
-      if (this.restartPending) {
+      if (this.pendingScope) {
         await this.maybeRestart(generation, 0);
       }
       return;
@@ -155,7 +168,7 @@ export class ProviderFileRefreshController {
     this.observedFilesSignature = signature;
     this.authRevalidationPending ||= this.authChangePending;
     this.authChangePending = false;
-    await this.markRestartPending();
+    await this.markRefreshPending('global');
     this.dependencies.postRefresh();
     await this.maybeRestart(generation, 0);
   }
@@ -232,17 +245,17 @@ export class ProviderFileRefreshController {
     this.observedFilesSignature = signature;
     if (changed) {
       this.dependencies.clearProviderLimitCache();
-      await this.markRestartPending();
+      await this.markRefreshPending('global');
     } else if (
       !this.unmanagedServerSynchronized &&
       this.dependencies.server.status.state === 'running'
     ) {
       const managedProcess = await this.readManagedServerState();
       if (this.disposed || generation !== this.refreshGeneration) return;
-      if (managedProcess === false) await this.markRestartPending();
+      if (managedProcess === false) await this.markRefreshPending('global');
     }
     this.dependencies.postRefresh();
-    if (this.restartPending) {
+    if (this.pendingScope) {
       await this.maybeRestart(generation, 0);
     }
   }
@@ -252,7 +265,8 @@ export class ProviderFileRefreshController {
     retryCount: number,
     managedProcessConfirmed = false
   ) {
-    if (this.disposed || generation !== this.refreshGeneration || !this.restartPending) {
+    const pendingScope = this.pendingScope;
+    if (this.disposed || generation !== this.refreshGeneration || !pendingScope) {
       return;
     }
     if (this.dependencies.server.status.state === 'starting') {
@@ -261,7 +275,7 @@ export class ProviderFileRefreshController {
     }
     if (this.dependencies.server.status.state !== 'running') return;
 
-    if (!managedProcessConfirmed) {
+    if (pendingScope === 'global' && !managedProcessConfirmed) {
       const managedProcess = await this.readManagedServerState();
       if (this.disposed || generation !== this.refreshGeneration) return;
       if (managedProcess === null) {
@@ -270,12 +284,6 @@ export class ProviderFileRefreshController {
       }
       managedProcessConfirmed = managedProcess;
     }
-    if (this.dependencies.hasLocallyActiveWork()) {
-      this.postPendingStatus();
-      this.scheduleRestartRetry(generation, retryCount, false, managedProcessConfirmed);
-      return;
-    }
-
     const idle = await this.isServerIdle();
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (idle === false) {
@@ -290,29 +298,33 @@ export class ProviderFileRefreshController {
     if (
       this.disposed ||
       generation !== this.refreshGeneration ||
-      this.dependencies.server.status.state !== 'running' ||
-      this.dependencies.hasLocallyActiveWork()
+      this.dependencies.server.status.state !== 'running'
     ) {
       return;
     }
-    const stillManaged = await this.readManagedServerState();
-    if (this.disposed || generation !== this.refreshGeneration) return;
-    if (stillManaged === null) {
-      this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
-      return;
+    let stillManaged = false;
+    if (pendingScope === 'global') {
+      const managedState = await this.readManagedServerState();
+      if (this.disposed || generation !== this.refreshGeneration) return;
+      if (managedState === null) {
+        this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
+        return;
+      }
+      stillManaged = managedState;
     }
     if (
       this.disposed ||
       generation !== this.refreshGeneration ||
-      this.dependencies.server.status.state !== 'running' ||
-      this.dependencies.hasLocallyActiveWork()
+      this.dependencies.server.status.state !== 'running'
     ) {
       return;
     }
 
     this.invalidationInFlight = true;
     try {
-      if (stillManaged) {
+      if (pendingScope === 'workspace') {
+        await this.dependencies.server.request('POST', '/instance/dispose');
+      } else if (stillManaged) {
         await this.dependencies.server.restart();
       } else {
         await this.dependencies.server.request('POST', '/global/dispose');
@@ -320,19 +332,19 @@ export class ProviderFileRefreshController {
       }
       // The invalidation happened, so the pending flag must clear even when the
       // generation moved on (e.g. the webview toggled watching while the server
-      // was restarting); a signature change during the restart is still caught
+      // was refreshing); a signature change during the refresh is still caught
       // by the next activation's signature comparison.
-      this.restartPending = false;
-      if (this.disposed || generation !== this.refreshGeneration) return;
+      this.pendingScope = null;
       await this.clearPersistedPendingState();
+      if (!this.disposed && this.pendingStatusPosted) {
+        this.pendingStatusPosted = false;
+        this.dependencies.postPendingStatus(false);
+      }
+      if (this.disposed || generation !== this.refreshGeneration) return;
       const revalidateAuth = this.authRevalidationPending;
       this.authRevalidationPending = false;
       this.dependencies.clearProviderLimitCache();
       this.dependencies.postRefresh(revalidateAuth ? { revalidateAuth: true } : undefined);
-      if (this.pendingStatusPosted) {
-        this.pendingStatusPosted = false;
-        this.dependencies.postPendingStatus(false);
-      }
     } catch (err) {
       if (this.disposed || generation !== this.refreshGeneration) return;
       logger.warn(
@@ -355,18 +367,20 @@ export class ProviderFileRefreshController {
 
   private async isServerIdle(): Promise<boolean | null> {
     try {
-      const [statuses, questions] = await Promise.all([
+      const [statuses, questions, permissions] = await Promise.all([
         this.dependencies.server.request('GET', '/session/status'),
         this.dependencies.server.request('GET', '/question'),
+        this.dependencies.server.request('GET', '/permission'),
       ]);
       if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
       if (!Array.isArray(questions)) return null;
+      if (!Array.isArray(permissions)) return null;
       for (const value of Object.values(statuses)) {
         if (!value || typeof value !== 'object') continue;
         const type = (value as Record<string, unknown>).type;
         if (type === 'busy' || type === 'retry') return false;
       }
-      return questions.length === 0 && !this.dependencies.hasLocallyActiveWork();
+      return questions.length === 0 && permissions.length === 0;
     } catch {
       return null;
     }
@@ -381,7 +395,7 @@ export class ProviderFileRefreshController {
     if (
       this.disposed ||
       generation !== this.refreshGeneration ||
-      !this.restartPending ||
+      !this.pendingScope ||
       (this.configWatchers.length === 0 && !this.authWatcher)
     ) {
       return;
@@ -403,11 +417,14 @@ export class ProviderFileRefreshController {
     this.dependencies.postPendingStatus(true);
   }
 
-  private async markRestartPending() {
-    this.restartPending = true;
+  private async markRefreshPending(scope: PendingRefreshScope) {
+    if (!this.pendingScope || scope === 'global') {
+      this.pendingScope = scope;
+    }
     try {
       await this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, {
-        version: 1,
+        version: 2,
+        scope: this.pendingScope,
         revalidateAuth: this.authRevalidationPending,
       });
     } catch (err) {
@@ -443,11 +460,13 @@ export class ProviderFileRefreshController {
   }
 }
 
-function isPersistedPendingState(value: unknown): value is {
-  version: 1;
-  revalidateAuth: boolean;
-} {
+function isPersistedPendingState(value: unknown): value is PersistedPendingRefreshState {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  return record.version === 1 && typeof record.revalidateAuth === 'boolean';
+  if (record.version === 1) return typeof record.revalidateAuth === 'boolean';
+  return (
+    record.version === 2 &&
+    (record.scope === 'workspace' || record.scope === 'global') &&
+    typeof record.revalidateAuth === 'boolean'
+  );
 }

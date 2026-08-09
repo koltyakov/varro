@@ -226,6 +226,10 @@ Direct input acquires ownership only when it can affect the transcript:
 - Pure bottom-followed appends below the virtualization threshold may claim a one-time row entrance,
   except image rows. Once measurement is active, append rows publish final heights immediately and any
   reveal transition moves only the viewport. Remounting history must not replay entrance animation.
+- A normal send below the virtualization threshold aligns its new user card to the message-jump inset
+  and creates only enough trailing reserve to make that destination reachable. Assistant growth
+  consumes that reserve while direct transcript input cancels destination settling. Measured appends
+  retain their viewport-only transition so provisional row reconciliation cannot create a large jump.
 - The append reserve is general bottom-pinned flow geometry, not only activity-exit state. It may
   replace space lost from trays, todo collapse, external panels, or local container changes. Real
   appended growth consumes it while its original bottom target remains fixed.

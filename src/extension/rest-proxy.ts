@@ -62,6 +62,7 @@ type OpenCodeConfigRequest =
       providerID: string;
       modelID: string;
       agentName?: string;
+      unset: boolean;
     };
 
 type SessionSummaryCacheEntry = {
@@ -1202,17 +1203,18 @@ export class RestProxy {
     const target = typeof payload?.target === 'string' ? payload.target : null;
     const providerID = typeof payload?.providerID === 'string' ? payload.providerID.trim() : '';
     const modelID = typeof payload?.modelID === 'string' ? payload.modelID.trim() : '';
+    const unset = payload?.unset === true;
 
     if (!target || !providerID || !modelID) {
       throw new Error('Invalid model routing update');
     }
 
     if (target === 'small_model') {
-      return { kind: 'update', target, providerID, modelID };
+      return { kind: 'update', target, providerID, modelID, unset };
     }
 
     if (target === 'commit_message' || target === 'auto_approve') {
-      return { kind: 'update', target, providerID, modelID };
+      return { kind: 'update', target, providerID, modelID, unset };
     }
 
     if (target === 'agent') {
@@ -1220,7 +1222,7 @@ export class RestProxy {
       if (!agentName) {
         throw new Error('Agent name is required');
       }
-      return { kind: 'update', target, agentName, providerID, modelID };
+      return { kind: 'update', target, agentName, providerID, modelID, unset };
     }
 
     throw new Error('Unsupported model routing target');
@@ -1353,7 +1355,11 @@ export class RestProxy {
         request.target === 'commit_message' ? 'commitMessage.model' : 'chat.autoApproveModel';
       await vscode.workspace
         .getConfiguration('varro')
-        .update(key, `${request.providerID}/${request.modelID}`, vscode.ConfigurationTarget.Global);
+        .update(
+          key,
+          request.unset ? undefined : `${request.providerID}/${request.modelID}`,
+          vscode.ConfigurationTarget.Global
+        );
       return this.readOpenCodeModelRouting();
     }
     return this.updateOpenCodeModelRouting(request);
@@ -1365,7 +1371,19 @@ export class RestProxy {
     if (request.target !== 'small_model' && request.target !== 'agent') {
       throw new Error('Unsupported OpenCode model routing target');
     }
-    const { files, target } = await this.readOpenCodeConfigObject();
+    const { files, config, target: defaultTarget } = await this.readOpenCodeConfigObject();
+    const target = request.unset
+      ? files.toReversed().find((file) => {
+          const route =
+            request.target === 'small_model'
+              ? parseModelRoute(file.config.small_model)
+              : parseModelRoute(
+                  asRecord(asRecord(file.config.agent)?.[request.agentName || ''])?.model
+                );
+          return route?.providerID === request.providerID && route.modelID === request.modelID;
+        })
+      : defaultTarget;
+    if (!target) return this.normalizeOpenCodeModelRouting(config);
     const { uri } = target;
     const dirtyDocument = vscode.workspace.textDocuments.find(
       (document) =>
@@ -1380,19 +1398,38 @@ export class RestProxy {
     }
     const initialStat = await this.readConfigStat(uri);
     let nextRaw = target.raw.trim() ? target.raw : '{}\n';
-    if (typeof target.config.$schema !== 'string' || !target.config.$schema.trim()) {
+    if (
+      !request.unset &&
+      (typeof target.config.$schema !== 'string' || !target.config.$schema.trim())
+    ) {
       nextRaw = applyJsoncChange(nextRaw, ['$schema'], 'https://opencode.ai/config.json');
     }
 
     const modelRef = `${request.providerID}/${request.modelID}`;
     if (request.target === 'small_model') {
-      nextRaw = applyJsoncChange(nextRaw, ['small_model'], modelRef);
+      nextRaw = applyJsoncChange(nextRaw, ['small_model'], request.unset ? undefined : modelRef);
     } else {
       const agentName = request.agentName;
       if (!agentName) {
         throw new Error('Agent name is required');
       }
-      nextRaw = applyJsoncChange(nextRaw, ['agent', agentName, 'model'], modelRef);
+      nextRaw = applyJsoncChange(
+        nextRaw,
+        ['agent', agentName, 'model'],
+        request.unset ? undefined : modelRef
+      );
+      if (request.unset) {
+        let nextConfig = parseOpenCodeConfig(nextRaw, target.path);
+        const agentConfig = asRecord(asRecord(nextConfig.agent)?.[agentName]);
+        if (agentConfig && Object.keys(agentConfig).length === 0) {
+          nextRaw = applyJsoncChange(nextRaw, ['agent', agentName], undefined);
+          nextConfig = parseOpenCodeConfig(nextRaw, target.path);
+          const agents = asRecord(nextConfig.agent);
+          if (agents && Object.keys(agents).length === 0) {
+            nextRaw = applyJsoncChange(nextRaw, ['agent'], undefined);
+          }
+        }
+      }
     }
 
     const nextTargetConfig = parseOpenCodeConfig(nextRaw, target.path);

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import type { Session } from '../types';
 import { setState } from '../lib/state';
 import { ModelsPanel } from './ModelsPanel';
 
@@ -46,6 +47,18 @@ vi.mock('../hooks/useOpenCode', () => ({
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+
+function session(id: string, parentID?: string): Session {
+  return {
+    id,
+    projectID: 'project-1',
+    directory: '/repo',
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+    ...(parentID ? { parentID } : {}),
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -105,6 +118,7 @@ beforeEach(() => {
   setState('providerDefaults', { openai: 'gpt-5' });
   setState('providersLoaded', true);
   setState('providerRefreshPending', false);
+  setState('sessions', []);
   setState('sessionStatus', {});
   setState('agents', [
     {
@@ -149,6 +163,7 @@ afterEach(() => {
   setState('providerDefaults', {});
   setState('providersLoaded', false);
   setState('providerRefreshPending', false);
+  setState('sessions', []);
   setState('sessionStatus', {});
   setState('agents', []);
   setState('allAgents', []);
@@ -243,31 +258,32 @@ describe('ModelsPanel', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it('explains when provider changes are waiting for active work', () => {
+  it('does not show a queued notice without running sessions', () => {
     setState('providerRefreshPending', true);
     cleanup = render(() => ModelsPanel(), container!);
 
-    const notice = container?.querySelector<HTMLElement>('.settings-provider-refresh-notice');
-    expect(notice?.getAttribute('role')).toBe('status');
-    expect(notice?.textContent).toContain('Provider update queued.');
-    expect(notice?.textContent).toContain(
-      'Changes will appear automatically when active work finishes.'
-    );
-
-    setState('providerRefreshPending', false);
     expect(container?.querySelector('.settings-provider-refresh-notice')).toBeNull();
   });
 
-  it('updates the number of running agents in the queued provider notice', () => {
+  it('counts only running parent sessions in the queued provider notice', () => {
     setState('providerRefreshPending', true);
+    setState('sessions', [
+      session('session-1'),
+      session('session-2'),
+      session('session-3'),
+      session('child-1', 'session-1'),
+    ]);
     setState('sessionStatus', {
       'session-1': { type: 'busy' },
       'session-2': { type: 'retry', attempt: 1, message: 'Retrying', next: Date.now() },
       'session-3': { type: 'idle' },
+      'child-1': { type: 'busy' },
     });
     cleanup = render(() => ModelsPanel(), container!);
 
     const notice = container?.querySelector<HTMLElement>('.settings-provider-refresh-notice');
+    expect(notice?.getAttribute('role')).toBe('status');
+    expect(notice?.textContent).toContain('Configuration update queued.');
     expect(notice?.textContent).toContain('when 2 running agents finish.');
 
     setState('sessionStatus', 'session-2', { type: 'idle' });
@@ -353,9 +369,9 @@ describe('ModelsPanel', () => {
     );
     expect(menuItems.some((item) => item.textContent?.includes('Use for build agent'))).toBe(false);
     expect(menuItems.some((item) => item.textContent?.includes('Use for review agent'))).toBe(true);
-    expect(menuItems.some((item) => item.textContent?.includes('Use for commit messages'))).toBe(
-      true
-    );
+    expect(
+      menuItems.some((item) => item.textContent?.includes("Don't use for commit messages"))
+    ).toBe(true);
     expect(menuItems.some((item) => item.textContent?.includes('Use for auto-approve'))).toBe(true);
 
     const button = menuItems.find((item) =>
@@ -372,6 +388,45 @@ describe('ModelsPanel', () => {
       modelID: 'gpt-5',
     });
     expect(refreshRoutingStateMock).toHaveBeenCalled();
+  });
+
+  it('reverses assigned model actions and unsets the routing assignment', async () => {
+    clientMocks.openCodeConfig.mockResolvedValue({
+      smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      agentModels: { review: { providerID: 'openai', modelID: 'gpt-5-mini' } },
+      commitMessageModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      autoApproveModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    ) as HTMLElement;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+
+    const menuItems = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    );
+    expect(menuItems.map((item) => item.textContent)).toEqual(
+      expect.arrayContaining([
+        "Don't use as small model",
+        "Don't use for commit messages",
+        "Don't use for auto-approve",
+        "Don't use for review agent",
+      ])
+    );
+
+    menuItems.find((item) => item.textContent === "Don't use as small model")?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(clientMocks.saveModelRouting).toHaveBeenCalledWith({
+      target: 'small_model',
+      providerID: 'openai',
+      modelID: 'gpt-5-mini',
+      unset: true,
+    });
   });
 
   it('shows workspace status', async () => {
