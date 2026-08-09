@@ -835,8 +835,27 @@ export function MessageList() {
 
   function publishPendingWidthMeasurements(options?: { preserveVisibleAnchor?: boolean }) {
     if (!pendingWidthMeasurementPublish) return false;
+    const anchor = options?.preserveVisibleAnchor === false ? null : widthResizeAnchor;
     pendingWidthMeasurementPublish = false;
-    publishMeasurementVersion(options);
+    if (!anchor) {
+      publishMeasurementVersion(options);
+      return true;
+    }
+
+    publishMeasurementVersion({ preserveVisibleAnchor: false });
+    queueMicrotask(() => {
+      if (
+        disposed ||
+        autoScroll() ||
+        diffFocusPauseActive ||
+        pendingStructuralScrollAnchor ||
+        stickyNavigationOwnsScroll() ||
+        editingMessage()
+      ) {
+        return;
+      }
+      restoreVisibleScrollAnchor(anchor, { useMessageOffsetFallback: true });
+    });
     return true;
   }
 
@@ -5134,7 +5153,6 @@ export function MessageList() {
       const ownerIsTransitioning = (group: AssistantActivityGroupInfo) => {
         const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
         return (
-          visibleActiveActivityPartKeys().has(ownerKey) ||
           retainedActivityPartKeys().has(ownerKey) ||
           exitingActivityPartKeys().has(ownerKey)
         );

@@ -51,6 +51,8 @@ type ToolbarSharedProps = {
   permissionButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   permissionPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   permissionMode: PermissionMode;
+  autoPermissionCounts?: { inFlight: number; approved: number; rejected: number };
+  autoPermissionCountsSince?: number;
   showPermissionPicker: boolean;
   onTogglePermissionPicker: () => void;
   onSelectPermissionMode: (mode: PermissionMode) => void;
@@ -260,6 +262,8 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               boundaryRef={props.inputFrameRef}
               alignTo="left"
               mode={props.permissionMode}
+              counts={props.autoPermissionCounts}
+              countsSince={props.autoPermissionCountsSince}
               showPicker={props.showPermissionPicker}
               showLabel={true}
               onToggle={props.onTogglePermissionPicker}

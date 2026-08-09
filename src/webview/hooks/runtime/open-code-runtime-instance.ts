@@ -208,6 +208,7 @@ export type SessionStatusSnapshot = {
 type PermissionJudgeAttempt = {
   permission: Permission;
   status: 'judging' | 'visible' | 'responded';
+  countedInFlight: boolean;
   promise: Promise<void>;
 };
 
@@ -216,12 +217,61 @@ type PermissionJudgeOutcome =
   | { type: 'error'; error: unknown }
   | { type: 'timeout' };
 
-function showPermissionAfterJudge(attempt: PermissionJudgeAttempt) {
+function showPermissionAfterJudge(attempt: PermissionJudgeAttempt, reason?: string) {
+  attempt.permission = {
+    ...attempt.permission,
+    autoApproveReason: reason,
+  };
+  if (attempt.status === 'visible') {
+    permissionsStore.setPermissionAutoApproveReason(attempt.permission.id, reason);
+    return;
+  }
+
   attempt.status = 'visible';
   permissionsStore.addPermission(attempt.permission);
+  permissionsStore.setPermissionAutoApproveReason(attempt.permission.id, reason);
   postMessage({
     type: 'permission/reveal',
     payload: { permissionId: attempt.permission.id },
+  });
+}
+
+function getPermissionJudgeErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (
+    error &&
+    typeof error === 'object' &&
+    typeof (error as { message?: unknown }).message === 'string' &&
+    (error as { message: string }).message.trim()
+  ) {
+    return (error as { message: string }).message;
+  }
+  return 'Unknown error';
+}
+
+function updateSessionAutoPermissionCounts(
+  sessionId: string,
+  changes: Partial<{ inFlight: number; approved: number; rejected: number }>
+) {
+  const current = appStore.state.sessionAutoPermissionCounts[sessionId] ?? {
+    inFlight: 0,
+    approved: 0,
+    rejected: 0,
+  };
+  appStore.setState('sessionAutoPermissionCounts', sessionId, {
+    inFlight: Math.max(0, changes.inFlight ?? current.inFlight),
+    approved: changes.approved ?? current.approved,
+    rejected: changes.rejected ?? current.rejected,
+  });
+}
+
+function finishPermissionJudgeAttempt(attempt: PermissionJudgeAttempt) {
+  if (!attempt.countedInFlight) return;
+  attempt.countedInFlight = false;
+  const current = appStore.state.sessionAutoPermissionCounts[attempt.permission.sessionID];
+  updateSessionAutoPermissionCounts(attempt.permission.sessionID, {
+    inFlight: (current?.inFlight ?? 0) - 1,
   });
 }
 
@@ -711,6 +761,8 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('providerLimits', reconcile({}));
     appStore.setState('mcpStatus', reconcile({}));
     appStore.setState('providerDefaults', reconcile({}));
+    appStore.setState('sessionAutoPermissionCounts', reconcile({}));
+    appStore.setState('autoPermissionCountsSince', Date.now());
     appStore.setState('providerAuthMethods', reconcile({}));
     appStore.setState('workspaceStatuses', []);
     appStore.setState('workspaceStatusSummary', reconcile({ entries: [] }));
@@ -760,6 +812,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let permissionSyncGeneration = 0;
   let latestPermissionSyncGeneration = 0;
   let permissionSnapshotGeneration = 0;
+
   const fullHistoryLoads = new Map<
     string,
     {
@@ -1165,6 +1218,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           !pendingPermissionIds.has(permissionId) &&
           !reconciliation.changedPermissionIds.has(permissionId)
         ) {
+          const attempt = permissionJudgeAttempts.get(permissionId);
+          if (attempt) finishPermissionJudgeAttempt(attempt);
           permissionJudgeAttempts.delete(permissionId);
         }
       }
@@ -1197,7 +1252,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         }
         if (mode === 'auto') {
           const attempt = permissionJudgeAttempts.get(permission.id);
-          if (attempt?.status === 'visible') visiblePermissions.push(permission);
+          if (attempt?.status === 'visible') visiblePermissions.push(attempt.permission);
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
@@ -1321,19 +1376,25 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         attempt.status = mode === 'default' ? 'visible' : 'responded';
         if (mode === 'default') showPermissionAfterJudge(attempt);
       }
+      finishPermissionJudgeAttempt(attempt);
       return;
     }
     if (outcome.type === 'timeout') {
-      if (!wasVisible) showPermissionAfterJudge(attempt);
+      if (!wasVisible) showPermissionAfterJudge(attempt, 'Timed out before making a decision.');
       return;
     }
     if (outcome.type === 'error') {
       logError('autoApproveJudge', outcome.error);
-      if (!wasVisible) showPermissionAfterJudge(attempt);
+      showPermissionAfterJudge(
+        attempt,
+        `Failed to evaluate this request: ${getPermissionJudgeErrorMessage(outcome.error)}`
+      );
+      finishPermissionJudgeAttempt(attempt);
       return;
     }
     if (outcome.response.decision === 'ask') {
-      if (!wasVisible) showPermissionAfterJudge(attempt);
+      showPermissionAfterJudge(attempt, outcome.response.reason);
+      finishPermissionJudgeAttempt(attempt);
       return;
     }
 
@@ -1345,11 +1406,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         outcome.response.decision === 'allow' ? 'once' : 'reject',
         { rethrow: true }
       );
+      const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
+      const key = outcome.response.decision === 'allow' ? 'approved' : 'rejected';
+      updateSessionAutoPermissionCounts(permission.sessionID, {
+        [key]: (counts?.[key] ?? 0) + 1,
+      });
     } catch (err) {
       logError('autoApproveJudge', err);
       if (permissionJudgeAttempts.get(permission.id) === attempt) {
-        showPermissionAfterJudge(attempt);
+        showPermissionAfterJudge(
+          attempt,
+          `Failed to apply the automatic decision: ${getPermissionJudgeErrorMessage(err)}`
+        );
       }
+    } finally {
+      finishPermissionJudgeAttempt(attempt);
     }
   }
 
@@ -1361,9 +1432,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const attempt: PermissionJudgeAttempt = {
       permission,
       status: 'judging',
+      countedInFlight: true,
       promise: Promise.resolve(),
     };
     permissionJudgeAttempts.set(permission.id, attempt);
+    const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
+    updateSessionAutoPermissionCounts(permission.sessionID, {
+      inFlight: (counts?.inFlight ?? 0) + 1,
+    });
 
     const judgeRequest = Promise.resolve()
       .then(async (): Promise<PermissionJudgeOutcome> => {
@@ -1399,6 +1475,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const attempt = permissionJudgeAttempts.get(permissionId);
     if (!attempt) return;
     attempt.status = 'responded';
+    finishPermissionJudgeAttempt(attempt);
   }
 
   function initConnection() {
@@ -1493,6 +1570,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     promptHistoryLoads.clear();
     promptHistoryPageLoads.clear();
     permissionDecisionReferencesBySession.clear();
+    for (const attempt of permissionJudgeAttempts.values()) {
+      finishPermissionJudgeAttempt(attempt);
+    }
     permissionJudgeAttempts.clear();
     permissionSessionSyncs.clear();
   }
@@ -2146,6 +2226,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         const attempt = permissionJudgeAttempts.get(member.id);
         if (!attempt) continue;
         attempt.status = 'responded';
+        finishPermissionJudgeAttempt(attempt);
       }
       await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
         ...options,

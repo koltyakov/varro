@@ -164,7 +164,7 @@ describe('TodoList', () => {
     );
   });
 
-  it('hides resolved todos on the next prompt and reappears for new work', async () => {
+  it('keeps resolved todos visible on the next prompt and expands for new work', async () => {
     setState('messages', [
       {
         info: userMessage('user-current'),
@@ -207,7 +207,11 @@ describe('TodoList', () => {
     ]);
     await Promise.resolve();
 
-    expect(container?.querySelector('.todo-block')).toBeNull();
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+    expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+    expect(container?.textContent).toContain('2/2');
 
     setState('todos', (todos) => [
       ...todos,
@@ -336,7 +340,7 @@ describe('TodoList', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('hides completed todos for a new prompt and expands when a new todo arrives', async () => {
+  it('collapses completed todos for a new prompt and expands when a new todo arrives', async () => {
     setState('todos', [
       { id: 'todo-1', content: 'Done task', status: 'completed', priority: 'medium' },
     ]);
@@ -350,7 +354,10 @@ describe('TodoList', () => {
     setState('messages', [{ info: userMessage('user-1'), parts: [] }]);
     await Promise.resolve();
 
-    expect(container?.querySelector('.todo-block')).toBeNull();
+    expect(container?.querySelector('.todo-block')).not.toBeNull();
+    expect(container?.querySelector('.todo-block-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
 
     setState('todos', (todos) => [
       ...todos,

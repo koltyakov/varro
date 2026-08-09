@@ -120,6 +120,11 @@ export interface AppState {
   mcpStatus: Record<string, McpStatus>;
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
+  sessionAutoPermissionCounts: Record<
+    string,
+    { inFlight: number; approved: number; rejected: number }
+  >;
+  autoPermissionCountsSince: number;
   selectedAgent: string | null;
   sessionSelectedAgents: SessionSelectedAgents;
   selectedModel: SelectedModel | null;
@@ -301,6 +306,8 @@ export function createAppState(): AppStateInstance {
     mcpStatus: {},
     providerDefaults: {},
     sessionPermissionModes: readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
+    sessionAutoPermissionCounts: {},
+    autoPermissionCountsSince: Date.now(),
     selectedAgent: readStoredString(STORAGE_KEYS.selectedAgent),
     sessionSelectedAgents: readStoredStringRecord(STORAGE_KEYS.sessionSelectedAgents),
     selectedModel: readStoredSelectedModel(STORAGE_KEYS.selectedModel),

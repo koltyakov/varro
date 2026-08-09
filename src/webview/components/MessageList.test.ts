@@ -1551,7 +1551,7 @@ describe('MessageList compact activity', () => {
     expect(container?.textContent).toContain('Working on it.');
   });
 
-  it('keeps Explored mounted when earlier parallel activity becomes visible', async () => {
+  it('renders Explored before earlier parallel activity becomes visible', async () => {
     const running = toolPart('command-running', 'assistant-1', 'call-command-running');
     running.state = {
       status: 'running',
@@ -1591,17 +1591,21 @@ describe('MessageList compact activity', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
-    const initialSummary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
-    expect(initialSummary?.textContent).toContain('Explored: 2 commands');
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 2 commands'
+    );
     await vi.advanceTimersByTimeAsync(500);
 
     const summary = container?.querySelector<HTMLElement>('.assistant-activity-summary');
     const activeItem = container?.querySelector<HTMLElement>(
       '[data-activity-part-id="command-running"]'
     );
-    expect(summary).toBe(initialSummary);
+    expect(container?.querySelectorAll('.assistant-activity-summary')).toHaveLength(1);
     expect(summary?.textContent).toContain('Explored: 2 commands');
-    expect(activeItem?.compareDocumentPosition(summary!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(summary?.closest('.assistant-active-activity-tray')).toBe(
+      activeItem?.closest('.assistant-active-activity-tray')
+    );
+    expect(summary?.compareDocumentPosition(activeItem!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('keeps one Explored group while a command between completed tools is retained', async () => {
@@ -2061,6 +2065,50 @@ describe('MessageList compact activity', () => {
       'edit'
     );
     expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('apply_patch');
+  });
+
+  it('removes a pending tool from Explored when it is identified as apply_patch', async () => {
+    const patch = toolPart('patch-pending', 'assistant-1', 'call-patch-pending');
+    patch.tool = '';
+    patch.state = { status: 'pending', input: {}, raw: '' };
+    const read = toolPart('read-1', 'assistant-1', 'call-read-1');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Inspect and edit')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [read, patch],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await vi.advanceTimersByTimeAsync(500);
+    container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
+
+    upsertPart({ ...patch, tool: 'functions.apply_patch' });
+    await Promise.resolve();
+
+    const patchTitle = [...(container?.querySelectorAll('.tool-invocation-title') || [])].find(
+      (element) => element.textContent?.endsWith('apply_patch')
+    );
+    expect(patchTitle).not.toBeUndefined();
+    expect(patchTitle?.closest('.assistant-activity-details')).toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).not.toContain(
+      'tool call'
+    );
   });
 
   it('keeps an expanded activity group open when history extends it backward', async () => {

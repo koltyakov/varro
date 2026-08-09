@@ -94,6 +94,22 @@ describe('PermissionPrompt', () => {
     expect(container?.querySelector('.permission-prompt-group-note')).toBeNull();
   });
 
+  it('shows why the auto-approve judge deferred the request', () => {
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({
+            autoApproveReason: 'The command needs manual confirmation.',
+          }),
+        }),
+      container!
+    );
+
+    const reason = container?.querySelector('.permission-prompt-auto-reason');
+    expect(reason?.textContent).toContain('Auto-approve judge');
+    expect(reason?.textContent).toContain('The command needs manual confirmation.');
+  });
+
   it('renders single-line title and metadata values with full-text copy controls', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });

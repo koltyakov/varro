@@ -86,6 +86,30 @@ export function addPermission(permission: Permission) {
   );
 }
 
+export function setPermissionAutoApproveReason(permissionId: string, reason: string | undefined) {
+  const matchedPermission = state.permissions.find(
+    (item) =>
+      item.id === permissionId ||
+      item.duplicateIDs?.includes(permissionId) ||
+      item.groupMembers?.some((member) => member.id === permissionId)
+  );
+  if (!matchedPermission) return;
+
+  markPermissionMutations(getPermissionGroupMembers(matchedPermission).map((member) => member.id));
+  setState(
+    'permissions',
+    produce((permissions) => {
+      const permission = permissions.find(
+        (item) =>
+          item.id === permissionId ||
+          item.duplicateIDs?.includes(permissionId) ||
+          item.groupMembers?.some((member) => member.id === permissionId)
+      );
+      if (permission) permission.autoApproveReason = reason;
+    })
+  );
+}
+
 export function removePermission(permissionId: string, options?: { removeGroup?: boolean }) {
   const matchedPermission = state.permissions.find(
     (item) =>

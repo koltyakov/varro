@@ -270,6 +270,36 @@ describe('calculateVirtualRange', () => {
     expect(getFirstVisibleMessageIndexFromVirtualMetrics({ metrics, scrollTop: 0 })).toBe(2);
     expect(getFirstVisibleMessageIndexFromVirtualMetrics({ metrics, scrollTop: 40 })).toBe(3);
   });
+
+  it('keeps physical row coverage when a stale scroll position ends in zero-height rows', () => {
+    const itemIds = ['visible-a', 'visible-b', 'empty-a', 'empty-b'];
+    const measuredHeights = new Map([
+      ['visible-a', 40],
+      ['visible-b', 40],
+      ['empty-a', 0],
+      ['empty-b', 0],
+    ]);
+
+    expect(
+      calculateVirtualRange({
+        itemIds,
+        measuredHeights,
+        scrollTop: 999,
+        viewportHeight: 20,
+        overscan: 0,
+      })
+    ).toEqual({
+      start: 1,
+      end: 4,
+      coreStart: 1,
+      coreEnd: 4,
+      topPad: 40,
+      bottomPad: 0,
+    });
+
+    const metrics = buildVirtualMetrics({ itemIds, measuredHeights });
+    expect(getFirstVisibleMessageIndexFromVirtualMetrics({ metrics, scrollTop: 999 })).toBe(1);
+  });
 });
 
 describe('getFirstVisibleMessageIndexFromVirtualMetrics', () => {

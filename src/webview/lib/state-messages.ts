@@ -231,7 +231,7 @@ function getAssistantDialogPartSignature(part: Part | undefined): string | null 
 
   const normalizedTool = part.tool.trim().toLowerCase().split('.').at(-1) || '';
   if (normalizedTool !== 'task') {
-    return `tool:${part.state.status === 'running'}`;
+    return `tool:${normalizedTool}:${part.state.status === 'running'}`;
   }
 
   const metadata = 'metadata' in part.state ? part.state.metadata : undefined;

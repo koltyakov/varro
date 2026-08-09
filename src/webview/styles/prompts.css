@@ -723,6 +723,29 @@ body.vscode-high-contrast-light
   background: var(--permission-meta-surface);
 }
 
+.permission-prompt-auto-reason {
+  display: flex;
+  gap: 6px;
+  margin: 4px 12px 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
+  border-radius: var(--radius-inset);
+  background: color-mix(in srgb, var(--color-vscode-warning) 8%, transparent);
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.permission-prompt-auto-reason-label {
+  flex-shrink: 0;
+  color: var(--color-vscode-warning);
+  font-weight: 600;
+}
+
+.permission-prompt-auto-reason-label::after {
+  content: ':';
+}
+
 .permission-prompt-text-shell:hover .tool-copy-button,
 .permission-meta-entry:hover .tool-copy-button,
 .permission-prompt .tool-copy-button.is-copied,

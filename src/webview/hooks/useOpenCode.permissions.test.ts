@@ -154,9 +154,77 @@ describe('useOpenCode permission and config flows', () => {
       serverEventHandlers.get('server.connected')?.({});
 
       await vi.waitFor(() =>
-        expect(stateModule.state.permissions).toEqual([expect.objectContaining({ id: 'perm-1' })])
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-1', autoApproveReason: 'review' }),
+        ])
       );
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('counts acknowledged automatic rejections', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.varroJudgePermission.mockResolvedValue({
+      decision: 'reject',
+      reason: 'Matches a prior rejection.',
+    });
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-rejected'),
+      });
+
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'session-1',
+          'perm-rejected',
+          'reject'
+        )
+      );
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 0, approved: 0, rejected: 1 },
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('shows the judge failure reason on the permission fallback', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.varroJudgePermission.mockRejectedValue(new Error('Judge model unavailable'));
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-judge-failed'),
+      });
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-judge-failed',
+            autoApproveReason: 'Failed to evaluate this request: Judge model unavailable',
+          }),
+        ])
+      );
     } finally {
       dispose();
     }
@@ -414,6 +482,9 @@ describe('useOpenCode permission and config flows', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 1, approved: 0, rejected: 0 },
+      });
       expect(stateModule.state.permissions).toEqual([]);
       expect(bridgeMocks.postMessage).not.toHaveBeenCalledWith({
         type: 'permission/reveal',
@@ -427,6 +498,9 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.permissions).toEqual([
         expect.objectContaining({ id: 'perm-timeout' }),
       ]);
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 1, approved: 0, rejected: 0 },
+      });
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-timeout' },
@@ -440,6 +514,9 @@ describe('useOpenCode permission and config flows', () => {
           'once'
         )
       );
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 0, approved: 1, rejected: 0 },
+      });
       expect(stateModule.state.permissions).toEqual([]);
     } finally {
       dispose();
@@ -471,7 +548,10 @@ describe('useOpenCode permission and config flows', () => {
 
       await vi.advanceTimersByTimeAsync(AUTO_APPROVE_JUDGE_TIMEOUT_MS);
       expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({ id: 'perm-timeout-sync' }),
+        expect.objectContaining({
+          id: 'perm-timeout-sync',
+          autoApproveReason: 'Timed out before making a decision.',
+        }),
       ]);
 
       serverEventHandlers.get('server.connected')?.({});
@@ -481,15 +561,21 @@ describe('useOpenCode permission and config flows', () => {
 
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce();
       expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({ id: 'perm-timeout-sync' }),
+        expect.objectContaining({
+          id: 'perm-timeout-sync',
+          autoApproveReason: 'Timed out before making a decision.',
+        }),
       ]);
 
       judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({ id: 'perm-timeout-sync' }),
-      ]);
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-timeout-sync',
+            autoApproveReason: 'Needs confirmation.',
+          }),
+        ])
+      );
     } finally {
       dispose();
       vi.useRealTimers();
@@ -574,6 +660,9 @@ describe('useOpenCode permission and config flows', () => {
 
       const response = hookModule.respondPermission('session-1', 'perm-user-first', 'once');
       await Promise.resolve();
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 0, approved: 0, rejected: 0 },
+      });
       judge.resolve({ decision: 'allow', reason: 'Too late.' });
       await Promise.resolve();
       await Promise.resolve();
@@ -764,10 +853,17 @@ describe('useOpenCode permission and config flows', () => {
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
-          expect.objectContaining({ id: 'perm-response-failed' }),
+          expect.objectContaining({
+            id: 'perm-response-failed',
+            autoApproveReason:
+              'Failed to apply the automatic decision: Permission backend unavailable',
+          }),
         ])
       );
       expect(clientMocks.sessionRespondPermission).toHaveBeenCalledTimes(1);
+      expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
+        'session-1': { inFlight: 0, approved: 0, rejected: 0 },
+      });
       expect(bridgeMocks.postMessage).toHaveBeenCalledWith({
         type: 'permission/reveal',
         payload: { permissionId: 'perm-response-failed' },

@@ -420,6 +420,7 @@ export type Permission = {
   title: string;
   metadata: { [key: string]: unknown };
   time: { created: number };
+  autoApproveReason?: string;
   duplicateIDs?: string[];
   groupMembers?: PermissionGroupMember[];
 };

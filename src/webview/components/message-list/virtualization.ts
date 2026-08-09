@@ -114,19 +114,13 @@ export function calculateVirtualRangeFromMetrics(args: {
   const overscanPx = overscan * defaultItemHeight;
   const startOffset = Math.max(0, args.scrollTop - overscanPx);
   const endOffset = Math.max(startOffset, args.scrollTop + args.viewportHeight + overscanPx);
-  const start = Math.max(
-    0,
-    Math.min(itemCount - 1, lowerBound(args.metrics.prefix, startOffset + 1) - 1)
-  );
+  const start = getPhysicalRowIndexAtOffset(args.metrics, startOffset);
   const end = Math.min(
     itemCount,
     Math.max(start + 1, lowerBound(args.metrics.prefix, endOffset + 1))
   );
 
-  const coreStart = Math.max(
-    start,
-    Math.min(itemCount - 1, lowerBound(args.metrics.prefix, args.scrollTop + 1) - 1)
-  );
+  const coreStart = Math.max(start, getPhysicalRowIndexAtOffset(args.metrics, args.scrollTop));
   const coreEnd = Math.min(
     end,
     Math.max(
@@ -167,8 +161,7 @@ export function getFirstVisibleMessageIndexFromVirtualMetrics(args: {
   scrollTop: number;
 }) {
   if (args.metrics.itemCount === 0) return null;
-  const start = lowerBound(args.metrics.prefix, Math.max(0, args.scrollTop) + 1) - 1;
-  return Math.max(0, Math.min(args.metrics.itemCount - 1, start));
+  return getPhysicalRowIndexAtOffset(args.metrics, args.scrollTop);
 }
 
 export function pruneMeasuredHeights(
@@ -194,4 +187,10 @@ function lowerBound(values: number[], target: number) {
     else high = mid;
   }
   return low;
+}
+
+function getPhysicalRowIndexAtOffset(metrics: VirtualMetrics, offset: number) {
+  const target = Math.min(Math.max(0, offset) + 1, Math.max(1, metrics.totalHeight));
+  const index = lowerBound(metrics.prefix, target) - 1;
+  return Math.max(0, Math.min(metrics.itemCount - 1, index));
 }

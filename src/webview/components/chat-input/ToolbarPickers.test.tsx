@@ -111,6 +111,80 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-approve permissions');
   });
 
+  it('shows the active-session auto-approved permission count', () => {
+    const onToggle = vi.fn();
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="auto"
+          counts={{ inFlight: 2, approved: 4, rejected: 1 }}
+          countsSince={Date.UTC(2026, 7, 9, 10, 30)}
+          showPicker={false}
+          showLabel={true}
+          onToggle={onToggle}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
+    const count = container?.querySelector<HTMLElement>('.permission-mode-count');
+    expect(count?.textContent).toBe('2/4/1');
+    expect(toggleButton?.contains(count ?? null)).toBe(false);
+    expect(count?.previousElementSibling).toBe(toggleButton);
+    expect(count?.querySelector('.permission-mode-count-inflight')?.textContent).toBe('2');
+    expect(count?.querySelector('.permission-mode-count-rejected')?.textContent).toBe('1');
+    expect(toggleButton?.title).toBe('Auto-approve permissions');
+    expect(count?.title).toContain('2 in flight, 4 approved, 1 rejected');
+    expect(count?.title).toContain('Counts since');
+    expect(count?.title).toContain('this view only, not cumulative');
+
+    count?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it('shows only approved permissions when no requests are in flight', () => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="auto"
+          counts={{ inFlight: 0, approved: 4, rejected: 1 }}
+          showPicker={false}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const count = container?.querySelector('.permission-mode-count');
+    expect(count?.textContent).toBe('4');
+    expect(count?.querySelector('.permission-mode-count-inflight')).toBeNull();
+    expect(count?.querySelector('.permission-mode-count-rejected')).toBeNull();
+  });
+
+  it('omits the rejected segment when no requests were rejected', () => {
+    cleanup = render(
+      () => (
+        <PermissionModePicker
+          mode="auto"
+          counts={{ inFlight: 2, approved: 4, rejected: 0 }}
+          showPicker={false}
+          showLabel={true}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const count = container?.querySelector('.permission-mode-count');
+    expect(count?.textContent).toBe('2/4');
+    expect(count?.querySelector('.permission-mode-count-rejected')).toBeNull();
+  });
+
   it('uses the full-access title when the permission picker is closed', () => {
     cleanup = render(
       () => (

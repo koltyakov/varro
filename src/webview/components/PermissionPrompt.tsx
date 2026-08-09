@@ -90,6 +90,15 @@ export function PermissionPrompt(props: {
         </div>
       </Show>
 
+      <Show when={props.permission.autoApproveReason}>
+        {(reason) => (
+          <div class="permission-prompt-auto-reason">
+            <span class="permission-prompt-auto-reason-label">Auto-approve judge</span>
+            <span>{reason()}</span>
+          </div>
+        )}
+      </Show>
+
       <Show when={duplicateCount() > 1}>
         <div class="permission-prompt-group-note">
           Requested {duplicateCount()} times in parallel - one response applies to all.

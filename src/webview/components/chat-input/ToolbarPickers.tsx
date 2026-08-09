@@ -83,6 +83,8 @@ export function PermissionModePicker(props: {
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
   mode: PermissionMode;
+  counts?: { inFlight: number; approved: number; rejected: number };
+  countsSince?: number;
   showPicker: boolean;
   showLabel?: boolean;
   onToggle: () => void;
@@ -97,6 +99,19 @@ export function PermissionModePicker(props: {
     if (props.mode === 'full') return 'Full access permissions';
     if (props.mode === 'auto') return 'Auto-approve permissions';
     return 'Default permissions';
+  };
+  const countTitle = () => {
+    if (!props.counts) return '';
+    const details = [`${props.counts.approved} approved`];
+    if (props.counts.inFlight > 0) details.unshift(`${props.counts.inFlight} in flight`);
+    if (props.counts.rejected > 0) details.push(`${props.counts.rejected} rejected`);
+    const since = props.countsSince
+      ? new Date(props.countsSince).toLocaleString(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : 'this view opened';
+    return `Auto approve: ${details.join(', ')}. Counts since ${since} (this view only, not cumulative).`;
   };
   const buttonLabel = () => {
     if (props.mode === 'full') return 'Full access';
@@ -127,7 +142,7 @@ export function PermissionModePicker(props: {
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div class="permission-mode-picker">
       <button
         ref={props.buttonRef}
         class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
@@ -141,6 +156,21 @@ export function PermissionModePicker(props: {
           <PickerChevron />
         </Show>
       </button>
+      <Show when={props.showLabel && props.mode === 'auto' && props.counts} keyed>
+        {(counts) => (
+          <span class="permission-mode-count" title={countTitle()} aria-label={countTitle()}>
+            <Show when={counts.inFlight > 0}>
+              <span class="permission-mode-count-inflight">{counts.inFlight}</span>
+              <span class="permission-mode-count-separator">/</span>
+            </Show>
+            <span>{counts.approved}</span>
+            <Show when={counts.inFlight > 0 && counts.rejected > 0}>
+              <span class="permission-mode-count-separator">/</span>
+              <span class="permission-mode-count-rejected">{counts.rejected}</span>
+            </Show>
+          </span>
+        )}
+      </Show>
       <Show when={props.showPicker}>
         <div ref={setPopoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
           <div class="toolbar-popover-header">Permissions</div>

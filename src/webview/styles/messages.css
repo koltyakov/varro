@@ -1790,7 +1790,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
   height: 22px;
-  padding: 0 6px;
+  padding: 0 4px 0 6px;
   gap: 0;
   border: none;
   background: transparent;

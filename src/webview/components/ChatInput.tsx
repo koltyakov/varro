@@ -2624,6 +2624,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }));
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(composerSessionId()));
+  const autoPermissionCounts = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) return undefined;
+    return getSessionTreeIdsForSession(sessionId).reduce(
+      (total, id) => {
+        const counts = state.sessionAutoPermissionCounts[id];
+        return {
+          inFlight: total.inFlight + (counts?.inFlight ?? 0),
+          approved: total.approved + (counts?.approved ?? 0),
+          rejected: total.rejected + (counts?.rejected ?? 0),
+        };
+      },
+      { inFlight: 0, approved: 0, rejected: 0 }
+    );
+  });
 
   function syncActiveRalphModel(nextModel: RalphSelectedModel) {
     const managerSessionId = activeRalphManagerSessionId();
@@ -3101,6 +3116,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               permissionPopoverRef = el;
             }}
             permissionMode={activePermissionMode()}
+            autoPermissionCounts={autoPermissionCounts()}
+            autoPermissionCountsSince={state.autoPermissionCountsSince}
             showPermissionPicker={showPermissionModePicker()}
             onTogglePermissionPicker={() => {
               const next = !showPermissionModePicker();
@@ -3262,6 +3279,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             permissionPopoverRef = el;
           }}
           permissionMode={activePermissionMode()}
+          autoPermissionCounts={autoPermissionCounts()}
+          autoPermissionCountsSince={state.autoPermissionCountsSince}
           showPermissionPicker={showPermissionModePicker()}
           onTogglePermissionPicker={() => {
             const next = !showPermissionModePicker();

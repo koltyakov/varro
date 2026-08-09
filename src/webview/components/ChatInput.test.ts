@@ -1341,6 +1341,26 @@ describe('ChatInput', () => {
     expect(metaRow?.querySelector('.provider-limit-anchor')).not.toBeNull();
   });
 
+  it('shows auto-approved permissions across the active session tree', () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setState('sessionPermissionModes', { 'session-1': 'auto' });
+    setState('sessionAutoPermissionCounts', {
+      'session-1': { inFlight: 1, approved: 2, rejected: 0 },
+      'child-1': { inFlight: 1, approved: 3, rejected: 1 },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-meta .permission-mode-count')?.textContent).toBe(
+      '2/5/1'
+    );
+  });
+
   it('uses the full composer controls and starts a new session only when sending', async () => {
     setupModelState();
     setState('activeSessionId', 'existing-session');
