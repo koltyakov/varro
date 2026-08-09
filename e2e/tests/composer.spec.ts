@@ -34,17 +34,25 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const value = (window as Window & {
-          __varroE2E?: { requests: Array<{ path: string }> };
-        }).__varroE2E;
-        return value?.requests.filter((request) => request.path.endsWith('/prompt_async')).length || 0;
+        const value = (
+          window as Window & {
+            __varroE2E?: { requests: Array<{ path: string }> };
+          }
+        ).__varroE2E;
+        return (
+          value?.requests.filter((request) => request.path.endsWith('/prompt_async')).length || 0
+        );
       })
     )
     .toBe(1);
 
   await expect(page.getByText('Add a smoke test for the sidebar', { exact: true })).toBeVisible();
-  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Mock assistant response for:');
-  await expect(page.locator('.chat-turn-assistant').last()).toContainText('Add a smoke test for the sidebar');
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+    'Mock assistant response for:'
+  );
+  await expect(page.locator('.chat-turn-assistant').last()).toContainText(
+    'Add a smoke test for the sidebar'
+  );
 });
 
 test('shows todos and queues follow-up messages while a session is busy', async ({ page }) => {
@@ -454,7 +462,9 @@ test('attaches files from @ search using the tmp workspace fixture', async ({ pa
   await expect(page.getByText('src/components/StickyHeader.tsx')).toBeVisible();
   await page.keyboard.press('Enter');
 
-  await expect(page.getByTitle('src/components/StickyHeader.tsx')).toContainText('StickyHeader.tsx');
+  await expect(page.getByTitle('src/components/StickyHeader.tsx')).toContainText(
+    'StickyHeader.tsx'
+  );
 
   await composer.fill('@queue');
   await expect(page.getByText('tests/e2e/queue.spec.ts')).toBeVisible();
@@ -463,7 +473,9 @@ test('attaches files from @ search using the tmp workspace fixture', async ({ pa
   await expect(page.getByTitle('tests/e2e/queue.spec.ts')).toContainText('queue.spec.ts');
 });
 
-test('sending from mid transcript snaps back to bottom and keeps following new turns', async ({ page }) => {
+test('sending from mid transcript snaps back to bottom and keeps following new turns', async ({
+  page,
+}) => {
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');
 
   const list = page.locator('.interactive-list');
@@ -504,7 +516,9 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
   await composer.fill('Second follow mode regression check');
   await sendButton.click();
 
-  await expect(page.getByText('Second follow mode regression check', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Second follow mode regression check', { exact: true })
+  ).toBeVisible();
   await expect(page.locator('.chat-turn-assistant').last()).toContainText(
     'Mock assistant response for: Second follow mode regression check'
   );
@@ -552,9 +566,7 @@ test('places a new turn at the transcript inset while its response space is empt
     .toBeLessThanOrEqual(2);
 });
 
-test('keeps first-turn Thinking at the bottom while its response space is empty', async ({
-  page,
-}) => {
+test('keeps first-turn Thinking directly after the prompt', async ({ page }) => {
   await page.setViewportSize({ width: 504, height: 1272 });
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
@@ -583,15 +595,13 @@ test('keeps first-turn Thinking at the bottom while its response space is empty'
     return {
       promptTop: promptRect.top - containerRect.top - inset,
       responseSpace: loadingRect.top - promptRect.bottom,
-      loadingBottomGap: containerRect.bottom - loadingRect.bottom,
     };
   });
 
   expect(geometry.promptTop).toBeGreaterThanOrEqual(0);
   expect(geometry.promptTop).toBeLessThanOrEqual(16);
-  expect(geometry.responseSpace).toBeGreaterThan(400);
-  expect(geometry.loadingBottomGap).toBeGreaterThanOrEqual(0);
-  expect(geometry.loadingBottomGap).toBeLessThanOrEqual(40);
+  expect(geometry.responseSpace).toBeGreaterThanOrEqual(0);
+  expect(geometry.responseSpace).toBeLessThanOrEqual(40);
 });
 
 test('yields new-turn placement to direct upward transcript input', async ({ page }) => {

@@ -8134,6 +8134,21 @@ describe('MessageList loading row', () => {
     expect(row?.classList.contains('is-reserved')).toBe(false);
   });
 
+  it('keeps the loading row directly after the last message', async () => {
+    setState('activeSessionId', 'session-1');
+    replaceMessages([{ info: userMessage('user-1'), parts: [textPart('user-text-1', 'Prompt')] }]);
+    startLoading(1);
+    requestMessageListScrollToBottom('user-1');
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const messageRow = container?.querySelector('[data-msg-id="user-1"]');
+    const loadingRow = container?.querySelector('.interactive-loading-row');
+    expect(loadingRow).toBeInstanceOf(HTMLDivElement);
+    expect(messageRow?.nextElementSibling).toBe(loadingRow);
+  });
+
   it('keeps stale busy status hidden after the final assistant text completed', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

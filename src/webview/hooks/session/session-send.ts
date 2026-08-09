@@ -101,6 +101,13 @@ type CapturedComposerAttachments = {
   attachedDiagnosticsIdentity: AttachedDiagnostics | null;
 };
 
+type ClearedComposerAttachments = {
+  droppedFiles: DroppedFile[];
+  clipboardImages: ClipboardImage[];
+  terminalSelection: { text: string; terminalName: string } | null;
+  attachedDiagnostics: AttachedDiagnostics | null;
+};
+
 type StateBoundSendDependencies = {
   getWorkspaceGeneration?(): number;
   createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
@@ -405,8 +412,15 @@ function captureComposerAttachments(
   };
 }
 
-function clearCapturedComposerAttachments(captured: CapturedComposerAttachments) {
-  const removedFilePaths: string[] = [];
+function clearCapturedComposerAttachments(
+  captured: CapturedComposerAttachments
+): ClearedComposerAttachments {
+  const cleared: ClearedComposerAttachments = {
+    droppedFiles: [],
+    clipboardImages: [],
+    terminalSelection: null,
+    attachedDiagnostics: null,
+  };
   for (const sent of captured.snapshot.droppedFiles) {
     const current = appStore.state.droppedFiles.find((file) => file.path === sent.path);
     if (
@@ -416,7 +430,7 @@ function clearCapturedComposerAttachments(captured: CapturedComposerAttachments)
     ) {
       continue;
     }
-    removedFilePaths.push(current.path);
+    cleared.droppedFiles.push(sent);
     composerStore.removeContextFile(current.path);
   }
 
@@ -429,6 +443,7 @@ function clearCapturedComposerAttachments(captured: CapturedComposerAttachments)
     ) {
       continue;
     }
+    cleared.clipboardImages.push(sent);
     composerStore.removeSentClipboardImage(current.id);
   }
 
@@ -437,15 +452,27 @@ function clearCapturedComposerAttachments(captured: CapturedComposerAttachments)
     !!captured.snapshot.terminalSelection &&
     currentTerminalSelection === captured.terminalSelectionIdentity &&
     areTerminalSelectionsEqual(currentTerminalSelection, captured.snapshot.terminalSelection);
-  if (terminalSelectionCleared) composerStore.clearTerminalSelection();
+  if (terminalSelectionCleared) {
+    cleared.terminalSelection = captured.snapshot.terminalSelection;
+    composerStore.clearTerminalSelection();
+  }
   const currentAttachedDiagnostics = appStore.state.attachedDiagnostics;
   if (
     captured.snapshot.attachedDiagnostics &&
     currentAttachedDiagnostics === captured.attachedDiagnosticsIdentity &&
     areAttachedDiagnosticsEqual(currentAttachedDiagnostics, captured.snapshot.attachedDiagnostics)
   ) {
+    cleared.attachedDiagnostics = captured.snapshot.attachedDiagnostics;
     composerStore.clearAttachedDiagnostics();
   }
+
+  return cleared;
+}
+
+function commitClearedComposerAttachments(cleared: ClearedComposerAttachments) {
+  const removedFilePaths = cleared.droppedFiles
+    .map((file) => file.path)
+    .filter((path) => !appStore.state.droppedFiles.some((file) => file.path === path));
 
   if (removedFilePaths.length > 0) {
     if (appStore.state.droppedFiles.length === 0) {
@@ -456,7 +483,34 @@ function clearCapturedComposerAttachments(captured: CapturedComposerAttachments)
       }
     }
   }
-  if (terminalSelectionCleared) postMessage({ type: 'terminal-selection/clear' });
+  if (cleared.terminalSelection && !appStore.state.terminalSelection) {
+    postMessage({ type: 'terminal-selection/clear' });
+  }
+}
+
+function restoreClearedComposerAttachments(cleared: ClearedComposerAttachments) {
+  for (const file of cleared.droppedFiles) {
+    if (!appStore.state.droppedFiles.some((current) => current.path === file.path)) {
+      composerStore.addContextFile({
+        ...file,
+        lineRanges: file.lineRanges?.map((range) => ({ ...range })),
+      });
+    }
+  }
+  for (const image of cleared.clipboardImages) {
+    if (!appStore.state.clipboardImages.some((current) => current.id === image.id)) {
+      composerStore.addClipboardImage({ ...image });
+    }
+  }
+  if (cleared.terminalSelection && !appStore.state.terminalSelection) {
+    composerStore.setTerminalSelection({ ...cleared.terminalSelection });
+  }
+  if (cleared.attachedDiagnostics && !appStore.state.attachedDiagnostics) {
+    appStore.setState('attachedDiagnostics', {
+      diagnostics: cleared.attachedDiagnostics.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      total: cleared.attachedDiagnostics.total,
+    });
+  }
 }
 
 function areDroppedFilesEqual(left: DroppedFile, right: DroppedFile) {
@@ -577,6 +631,7 @@ export class SessionSendOperations {
     const ensureSessionPermission = this.deps.ensureSessionPermission;
     const draftGeneration = getNewChatDraftGeneration();
     const workspaceGeneration = this.deps.getWorkspaceGeneration?.() ?? 0;
+    let clearedAttachments: ClearedComposerAttachments | null = null;
     return (beforeOptimisticPublish?: () => void) =>
       sendMessageWithDependencies(
         {
@@ -616,7 +671,19 @@ export class SessionSendOperations {
           clearClipboardImages: composerStore.clearClipboardImages,
           postFilesClear: () => postMessage({ type: 'files/clear' }),
           postTerminalSelectionClear: () => postMessage({ type: 'terminal-selection/clear' }),
-          clearSentComposerAttachments: () => clearCapturedComposerAttachments(capturedAttachments),
+          clearSentComposerAttachments: () => {
+            clearedAttachments ??= clearCapturedComposerAttachments(capturedAttachments);
+          },
+          commitSentComposerAttachments: () => {
+            if (!clearedAttachments) return;
+            commitClearedComposerAttachments(clearedAttachments);
+            clearedAttachments = null;
+          },
+          restoreSentComposerAttachments: () => {
+            if (!clearedAttachments) return;
+            restoreClearedComposerAttachments(clearedAttachments);
+            clearedAttachments = null;
+          },
           syncSession: this.deps.syncSession,
           syncSessionMessages: this.deps.syncSessionMessages,
           recheckSessionStatus: this.deps.recheckSessionStatus,
@@ -700,6 +767,8 @@ export async function sendMessageWithDependencies(
     postFilesClear(): void;
     postTerminalSelectionClear(): void;
     clearSentComposerAttachments?(): void;
+    commitSentComposerAttachments?(): void;
+    restoreSentComposerAttachments?(): void;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
     recheckSessionStatus(sessionId: string): Promise<void>;
@@ -771,10 +840,20 @@ export async function sendMessageWithDependencies(
     }
   });
 
+  const shouldClearComposer = deps.shouldClearComposerAfterSend();
+  const canClearComposerBeforeSend =
+    shouldClearComposer &&
+    !!deps.clearSentComposerAttachments &&
+    !!deps.commitSentComposerAttachments &&
+    !!deps.restoreSentComposerAttachments;
+  if (canClearComposerBeforeSend) deps.clearSentComposerAttachments?.();
+
   try {
     await deps.sendAsync(sessionId, sendBody);
-    if (deps.shouldClearComposerAfterSend()) {
-      if (deps.clearSentComposerAttachments) {
+    if (shouldClearComposer) {
+      if (canClearComposerBeforeSend) {
+        deps.commitSentComposerAttachments?.();
+      } else if (deps.clearSentComposerAttachments) {
         deps.clearSentComposerAttachments();
       } else if (deps.getActiveSessionId() === sessionId) {
         deps.clearDroppedFiles();
@@ -810,6 +889,7 @@ export async function sendMessageWithDependencies(
     }
     return true;
   } catch (err) {
+    if (canClearComposerBeforeSend) deps.restoreSentComposerAttachments?.();
     if (optimisticMessage) deps.removeOptimisticMessage?.(optimisticMessage.info.id);
     if (expectsAssistantReply) {
       deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });

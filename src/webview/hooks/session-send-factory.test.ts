@@ -23,10 +23,12 @@ type SendAsync = ConstructorParameters<typeof SessionSendOperations>[0]['sendAsy
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function createOperations(sendAsync: SendAsync) {
@@ -146,6 +148,90 @@ describe('SessionSendOperations', () => {
     expect(resetTodoSync).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+  });
+
+  it('clears sent composer attachments while the network send is pending', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    composerStore.addContextFile({
+      path: '/repo/pending.ts',
+      relativePath: 'pending.ts',
+      type: 'file',
+    });
+    composerStore.addClipboardImage({
+      id: 'pending-image',
+      url: 'blob:pending',
+      mime: 'image/png',
+      filename: 'pending.png',
+      size: 10,
+    });
+    composerStore.setTerminalSelection({ text: 'npm test', terminalName: 'zsh' });
+    const send = deferred<void>();
+    const sendAsync = vi.fn(() => send.promise);
+    const operations = createOperations(sendAsync);
+
+    const pending = operations.sendMessage('send pending context');
+    await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+
+    expect(appStore.state.droppedFiles).toEqual([]);
+    expect(appStore.state.clipboardImages).toEqual([]);
+    expect(appStore.state.terminalSelection).toBeNull();
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+
+    send.resolve();
+    await pending;
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+  });
+
+  it('restores composer attachments when a pending send fails', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    composerStore.addContextFile({
+      path: '/repo/retry.ts',
+      relativePath: 'retry.ts',
+      type: 'file',
+    });
+    composerStore.addClipboardImage({
+      id: 'retry-image',
+      url: 'blob:retry',
+      mime: 'image/png',
+      filename: 'retry.png',
+      size: 10,
+    });
+    composerStore.setTerminalSelection({ text: 'npm test', terminalName: 'zsh' });
+    const send = deferred<void>();
+    const sendAsync = vi.fn(() => send.promise);
+    const operations = createOperations(sendAsync);
+
+    const pending = operations.sendMessage('retry context');
+    await vi.waitFor(() => expect(sendAsync).toHaveBeenCalledOnce());
+    expect(appStore.state.droppedFiles).toEqual([]);
+
+    send.reject(new Error('send failed'));
+    await expect(pending).resolves.toBe(false);
+
+    expect(appStore.state.droppedFiles).toMatchObject([
+      { path: '/repo/retry.ts', relativePath: 'retry.ts', type: 'file' },
+    ]);
+    expect(appStore.state.clipboardImages).toMatchObject([
+      { id: 'retry-image', filename: 'retry.png' },
+    ]);
+    expect(appStore.state.terminalSelection).toEqual({ text: 'npm test', terminalName: 'zsh' });
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'files/clear' });
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
   });
 
   it('shares one lazy session creation across rapid sends', async () => {
