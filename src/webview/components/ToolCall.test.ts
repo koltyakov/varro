@@ -1090,6 +1090,51 @@ describe('ToolCall', () => {
     expect(runningStatus?.textContent).toContain('Results will appear here when ready.');
   });
 
+  it('shows a wait icon when the subagent is blocked on permission', () => {
+    setState('sessions', [
+      session('session-1'),
+      session('subagent-session-1', { parentID: 'session-1' }),
+    ]);
+    setState('permissions', [
+      {
+        id: 'permission-1',
+        type: 'bash',
+        sessionID: 'subagent-session-1',
+        messageID: 'subagent-message-1',
+        callID: 'subagent-call-1',
+        title: 'Run tests',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { prompt: 'Review the implementation' },
+        title: 'Review implementation',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 0 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const icon = container?.querySelector('.tool-call-icon-task');
+    expect(icon).toBeInstanceOf(SVGElement);
+    expect(icon?.classList).toContain('tool-call-wait-icon');
+    expect(icon?.classList).not.toContain('tool-call-spinner');
+    expect(icon?.getAttribute('aria-label')).toBe('Waiting for permission');
+    expect(icon?.getAttribute('width')).toBe('16');
+    expect(icon?.getAttribute('height')).toBe('16');
+    expect(icon?.querySelectorAll('path')).toHaveLength(3);
+  });
+
   it('opens the running subagent session from its status card', () => {
     setState('activeSessionId', 'session-1');
     const part: ToolPart = {
@@ -1490,7 +1535,7 @@ describe('ToolCall', () => {
     });
   });
 
-  it('hides the command card when a linked permission prompt is pending', () => {
+  it('shows a pending command card before its linked permission prompt', () => {
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -1516,12 +1561,27 @@ describe('ToolCall', () => {
 
     cleanup = render(() => ToolCall({ part }), container!);
 
-    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
-    expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+    const toolHeader = container?.querySelector('.tool-invocation-header');
+    const permissionPrompt = container?.querySelector('.permission-prompt');
+    const icon = toolHeader?.querySelector('.tool-call-icon');
+
+    expect(toolHeader).not.toBeNull();
+    expect(permissionPrompt).not.toBeNull();
+    expect(
+      (toolHeader?.compareDocumentPosition(permissionPrompt!) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(icon?.classList).toContain('tool-status-pending');
+    expect(icon?.classList).toContain('tool-call-wait-icon');
+    expect(icon?.classList).not.toContain('tool-call-spinner');
+    expect(icon?.getAttribute('aria-label')).toBe('Waiting for permission');
+    expect(container?.querySelector('.tool-invocation-title')?.classList).not.toContain(
+      'shimmer-progress'
+    );
     expect(container?.textContent).toContain('Permission Required');
   });
 
-  it('keeps later linked tool cards visible until their permission reaches the front', () => {
+  it('shows later permission-linked tool cards as waiting without another prompt', () => {
     const part: ToolPart = {
       id: 'tool-2',
       sessionID: 'session-1',
@@ -1559,6 +1619,13 @@ describe('ToolCall', () => {
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
     expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+    const icon = container?.querySelector('.tool-call-icon');
+    expect(icon?.classList).toContain('tool-status-pending');
+    expect(icon?.classList).toContain('tool-call-wait-icon');
+    expect(icon?.classList).not.toContain('tool-call-spinner');
+    expect(container?.querySelector('.tool-invocation-title')?.classList).not.toContain(
+      'shimmer-progress'
+    );
   });
 
   it('shows one linked permission prompt for duplicate permission requests', () => {
@@ -1628,7 +1695,8 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(0);
-    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).not.toBeNull();
+    expect(container?.querySelector('.tool-call-wait-icon')).not.toBeNull();
   });
 
   it('keeps the command card visible when a linked question prompt is pending', () => {

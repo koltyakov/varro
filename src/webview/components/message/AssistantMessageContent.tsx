@@ -32,6 +32,7 @@ import {
 import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
+import { PermissionPrompt } from '../PermissionPrompt';
 
 type AssistantRenderItem =
   | { kind: 'part'; key: string; part: Part }
@@ -372,6 +373,47 @@ export function AssistantMessageContent(props: {
         })
       : dedupedParts()
   );
+  const orderedDisplayParts = createMemo(() => {
+    const parts = displayParts();
+    const ordered: Part[] = [];
+
+    for (let index = 0; index < parts.length;) {
+      const part = parts[index]!;
+      if (!isAssistantActivityPart(part)) {
+        ordered.push(part);
+        index += 1;
+        continue;
+      }
+
+      let end = index + 1;
+      while (end < parts.length && isAssistantActivityPart(parts[end]!)) end += 1;
+      const activityParts = parts.slice(index, end);
+      const waitingParts = activityParts.filter(
+        (candidate): candidate is ToolPart =>
+          candidate.type === 'tool' && !!props.permissionMatchForTool?.(candidate)
+      );
+      if (waitingParts.length === 0) {
+        ordered.push(...activityParts);
+      } else {
+        const waitingIds = new Set(waitingParts.map((candidate) => candidate.id));
+        ordered.push(
+          ...activityParts.filter((candidate) => !waitingIds.has(candidate.id)),
+          ...waitingParts
+        );
+      }
+      index = end;
+    }
+
+    return ordered;
+  });
+  const trailingPermissionMatch = createMemo(() => {
+    for (const part of orderedDisplayParts()) {
+      if (part.type !== 'tool' || props.questionRequestForTool?.(part)) continue;
+      const match = props.permissionMatchForTool?.(part);
+      if (match?.isActive && match.isPrimaryOwner) return match;
+    }
+    return null;
+  });
   const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
@@ -415,7 +457,7 @@ export function AssistantMessageContent(props: {
         });
         activityParts = [];
       };
-      for (const part of displayParts()) {
+      for (const part of orderedDisplayParts()) {
         if (isLocallyCompactActivityPart(part)) activityParts.push(part);
         else flush();
       }
@@ -435,7 +477,7 @@ export function AssistantMessageContent(props: {
     const groups = new Map(baseCompactActivityGroupByPartKey());
     let expandedGroup: AssistantActivityGroupInfo | null = null;
 
-    for (const part of displayParts()) {
+    for (const part of orderedDisplayParts()) {
       if (isAssistantActivityPart(part)) {
         const existingGroup = groups.get(getAssistantActivityPartKey(part));
         if (existingGroup) {
@@ -458,7 +500,9 @@ export function AssistantMessageContent(props: {
   });
   const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
     if (group.ownerMessageId !== props.info.id) return null;
-    return displayParts().some((part) => part.id === group.ownerPartId) ? group.ownerPartId : null;
+    return orderedDisplayParts().some((part) => part.id === group.ownerPartId)
+      ? group.ownerPartId
+      : null;
   };
   const finalTextPartId = createMemo(() =>
     getFinalAssistantTextPartId(displayParts(), !!props.highlightFinalAnswer, props.textForPart)
@@ -508,7 +552,7 @@ export function AssistantMessageContent(props: {
   const renderItems = createMemo<AssistantRenderItem[]>((previousItems) => {
     const previousByKey = new Map((previousItems || []).map((item) => [item.key, item]));
     const items: AssistantRenderItem[] = [];
-    const parts = displayParts();
+    const parts = orderedDisplayParts();
 
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]!;
@@ -746,6 +790,7 @@ export function AssistantMessageContent(props: {
                         permissionMatch={
                           part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
                         }
+                        renderPermissionPrompt={false}
                       />
                     </div>
                   </div>
@@ -827,6 +872,7 @@ export function AssistantMessageContent(props: {
                   lightweight={isLightweight()}
                   questionRequest={props.questionRequestForTool?.(part)}
                   permissionMatch={props.permissionMatchForTool?.(part)}
+                  renderPermissionPrompt={false}
                 />
               )}
             </For>
@@ -891,6 +937,7 @@ export function AssistantMessageContent(props: {
               ? props.permissionMatchForTool?.(item().part as ToolPart)
               : undefined
           }
+          renderPermissionPrompt={false}
         />
       </div>
     );
@@ -899,6 +946,15 @@ export function AssistantMessageContent(props: {
   return (
     <div class="assistant-message-flow">
       <For each={renderEntries()}>{renderAssistantItem}</For>
+      <Show when={trailingPermissionMatch()}>
+        {(match) => (
+          <PermissionPrompt
+            permission={match().permission}
+            queuePosition={match().queuePosition}
+            queueTotal={match().queueTotal}
+          />
+        )}
+      </Show>
       <Show when={props.errorMessage}>
         <div class="assistant-message-flow-item assistant-message-flow-item-error rendered-markdown">
           <p>{props.errorMessage!}</p>
@@ -1029,6 +1085,7 @@ function AssistantActivityGroup(props: {
                   permissionMatch={
                     part.type === 'tool' ? props.permissionMatchForTool?.(part) : undefined
                   }
+                  renderPermissionPrompt={false}
                 />
               </div>
             )}

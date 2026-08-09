@@ -98,6 +98,7 @@ export type AutoApproveJudgeResponse = {
 export type AutoApproveActivityStatus =
   | 'reviewing'
   | 'auto-approved'
+  | 'approval-required'
   | 'auto-review-failed'
   | 'manually-approved'
   | 'manually-rejected';

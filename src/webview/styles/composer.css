@@ -760,6 +760,10 @@
   background: var(--vscode-testing-iconPassed, #73c991);
 }
 
+.permission-activity-item.approval-required .permission-activity-dot {
+  background: var(--vscode-charts-yellow, #cca700);
+}
+
 .permission-activity-item.auto-review-failed .permission-activity-dot {
   background: var(--vscode-testing-iconFailed, #f14c4c);
 }

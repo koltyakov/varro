@@ -20,6 +20,7 @@ export function MessagePart(props: {
   streamedText?: string | null;
   questionRequest?: (typeof state.questions)[number] | null;
   permissionMatch?: ToolCallPermissionMatch | null;
+  renderPermissionPrompt?: boolean;
   lightweight?: boolean;
 }) {
   const p = () => props.part;
@@ -41,6 +42,7 @@ export function MessagePart(props: {
             part={part}
             questionRequest={props.questionRequest}
             permissionMatch={props.permissionMatch}
+            renderPermissionPrompt={props.renderPermissionPrompt}
             lightweight={props.lightweight}
           />
         );

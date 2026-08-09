@@ -17,10 +17,12 @@ import {
 import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
+const selectSessionMock = vi.hoisted(() => vi.fn());
 const openProviderSetupMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
+  selectSession: selectSessionMock,
 }));
 
 vi.mock('../lib/provider-setup', () => ({
@@ -59,7 +61,9 @@ afterEach(() => {
   else Reflect.deleteProperty(globalThis, 'ResizeObserver');
   document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
+  selectSessionMock.mockReset();
   openProviderSetupMock.mockReset();
+  setAppState('sessions', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -541,6 +545,36 @@ describe('Message user prompt rendering', () => {
     expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(2);
     expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(2);
     expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('links workspace session IDs in user messages and leaves unknown IDs unchanged', () => {
+    setAppState('sessions', [
+      {
+        id: 'ses_found123',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Permission request states',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-session-reference'),
+          parts: [textPart('text-1', 'Session ses_found123 and ses_missing456')],
+        }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
+    expect(link?.textContent).toBe('Permission request states');
+    expect(link?.getAttribute('href')).toBe('#session/ses_found123');
+    expect(link?.dataset.copyMarker).toBe('ses_found123');
+    expect(container?.textContent).toContain('ses_missing456');
+
+    link?.click();
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
   });
 
   it('renders inline image placeholders as chips inside the user bubble text', () => {

@@ -12,6 +12,8 @@ import {
 import { state } from '../lib/state';
 import { formatDisplayPath, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
+import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
+import { selectSession } from '../hooks/useOpenCode';
 
 interface MarkdownProps {
   content: string;
@@ -256,6 +258,7 @@ function hashContent(value: string) {
 function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOptions) {
   return [
     hashContent(state.editorContext.workspacePath || ''),
+    hashContent(getSessionReferenceContextKey(content)),
     options.disablePathLinkify ? 'no-paths' : 'paths',
     options.disableCodeHighlighting ? 'plain-code' : `highlight-code:${codeHighlighterVersion()}`,
     hashContent(content),
@@ -522,9 +525,43 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.removeAttribute('data-external');
 }
 
-function sanitizeHtml(html: string, disableCache: boolean): string {
+function linkifySessionReferences(fragment: DocumentFragment) {
+  const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const parent = node.parentElement;
+    if (!parent || parent.closest('a, button, code, pre')) continue;
+    textNodes.push(node);
+  }
+
+  for (const node of textNodes) {
+    const segments = splitSessionReferenceText(node.data);
+    if (!segments.some((segment) => segment.type === 'session')) continue;
+
+    const replacement = document.createDocumentFragment();
+    for (const segment of segments) {
+      if (segment.type === 'text') {
+        replacement.append(document.createTextNode(segment.content));
+        continue;
+      }
+
+      const anchor = document.createElement('a');
+      anchor.className = 'session-reference-link';
+      anchor.href = segment.reference.href;
+      anchor.dataset.sessionId = segment.reference.id;
+      anchor.title = `Open session ${segment.reference.id}`;
+      anchor.textContent = segment.reference.title;
+      replacement.append(anchor);
+    }
+    node.replaceWith(replacement);
+  }
+}
+
+function sanitizeHtml(html: string, disableCache: boolean, sessionContextKey: string): string {
+  const cacheKey = `${sessionContextKey}\u0000${html}`;
   if (!disableCache) {
-    const cached = getCachedValue(sanitizeHtmlCache, html);
+    const cached = getCachedValue(sanitizeHtmlCache, cacheKey);
     if (cached !== undefined) return cached;
   }
 
@@ -542,12 +579,13 @@ function sanitizeHtml(html: string, disableCache: boolean): string {
   for (const anchor of Array.from(fragment.querySelectorAll<HTMLAnchorElement>('a'))) {
     sanitizeAnchorHref(anchor);
   }
+  linkifySessionReferences(fragment);
 
   const container = document.createElement('div');
   container.append(fragment);
   const result = container.innerHTML;
 
-  if (!disableCache) setCachedValue(sanitizeHtmlCache, html, result);
+  if (!disableCache) setCachedValue(sanitizeHtmlCache, cacheKey, result);
   return result;
 }
 
@@ -566,9 +604,11 @@ function renderMarkdownHtml(
   };
   try {
     const parsed = marked.parse(content) as string;
+    const sessionContextKey = getSessionReferenceContextKey(content);
     return sanitizeHtml(
       options?.disablePathLinkify ? parsed : linkifyPaths(parsed),
-      options?.disableCache === true
+      options?.disableCache === true,
+      sessionContextKey
     );
   } catch {
     return `<p>${escapeHtml(content)}</p>`;
@@ -929,6 +969,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
   let lastAppliedScanState = initialSegments.scanState;
   let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
+  let lastAppliedSessionContextKey = getSessionReferenceContextKey(props.content || '');
   let lastAppliedCodeHighlighterVersion = codeHighlighterVersion();
   let lastAppliedStableContent = initialSegments.stableContent;
   let lastAppliedTailContent = initialSegments.tailContent;
@@ -953,13 +994,18 @@ export function MarkdownRenderer(props: MarkdownProps) {
   const [stableHtml, setStableHtml] = createSignal(lastAppliedStableHtml);
   const [tailHtml, setTailHtml] = createSignal(lastAppliedTailHtml);
 
-  function scheduleDeferredTailHighlight(content: string, workspacePath: string) {
+  function scheduleDeferredTailHighlight(
+    content: string,
+    workspacePath: string,
+    sessionContextKey: string
+  ) {
     if (lw()) return;
     cancelIdleWork(idleHighlightId);
     idleHighlightId = requestIdleWork(() => {
       idleHighlightId = null;
       if (pendingContent !== null) return;
       if (workspacePath !== lastAppliedWorkspacePath) return;
+      if (sessionContextKey !== lastAppliedSessionContextKey) return;
       if (content !== lastAppliedTailContent) return;
 
       const highlightedTailHtml = parseMarkdown(content, {
@@ -991,19 +1037,23 @@ export function MarkdownRenderer(props: MarkdownProps) {
         lastAppliedScanState
       );
       const workspacePath = state.editorContext.workspacePath || '';
+      const sessionContextKey = getSessionReferenceContextKey(content);
       const currentCodeHighlighterVersion = codeHighlighterVersion();
       const codeHighlighterChanged =
         currentCodeHighlighterVersion !== lastAppliedCodeHighlighterVersion;
       const stableContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
+        sessionContextKey !== lastAppliedSessionContextKey ||
         segments.stableContent !== lastAppliedStableContent ||
         codeHighlighterChanged;
       const tailContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
+        sessionContextKey !== lastAppliedSessionContextKey ||
         segments.tailContent !== lastAppliedTailContent ||
         codeHighlighterChanged;
       const appendOnlyStableDelta =
-        workspacePath === lastAppliedWorkspacePath
+        workspacePath === lastAppliedWorkspacePath &&
+        sessionContextKey === lastAppliedSessionContextKey
           ? getAppendOnlyStableDelta(
               lastAppliedStableContent,
               segments.stableContent,
@@ -1067,12 +1117,13 @@ export function MarkdownRenderer(props: MarkdownProps) {
         lastAppliedTailContent = segments.tailContent;
       }
       lastAppliedWorkspacePath = workspacePath;
+      lastAppliedSessionContextKey = sessionContextKey;
       lastAppliedCodeHighlighterVersion = currentCodeHighlighterVersion;
       lastAppliedScanState = segments.scanState;
       hasProcessedStreamingUpdate = true;
 
       if (shouldDeferTailHighlight) {
-        scheduleDeferredTailHighlight(segments.tailContent, workspacePath);
+        scheduleDeferredTailHighlight(segments.tailContent, workspacePath, sessionContextKey);
       }
 
       queueMicrotask(() => {
@@ -1089,6 +1140,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   createEffect(() => {
     const content = props.content || '';
     const workspacePath = state.editorContext.workspacePath;
+    const sessionContextKey = getSessionReferenceContextKey(content);
     const highlighterVersion = codeHighlighterVersion();
     if (rafId !== null) {
       pendingContent = content;
@@ -1097,6 +1149,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
     pendingContent = content;
     rafId = requestAnimationFrame(flushPending);
     void workspacePath;
+    void sessionContextKey;
     void highlighterVersion;
   });
 
@@ -1143,6 +1196,15 @@ export function MarkdownRenderer(props: MarkdownProps) {
           payload: { path: payload.path, line: payload.line, kind: 'file' },
         });
       } catch {}
+      return;
+    }
+
+    const sessionLink = (e.target as HTMLElement).closest<HTMLAnchorElement>(
+      'a.session-reference-link'
+    );
+    if (sessionLink?.dataset.sessionId) {
+      e.preventDefault();
+      void selectSession(sessionLink.dataset.sessionId);
       return;
     }
 

@@ -1097,6 +1097,12 @@ kbd {
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
+.chat-tool-invocation-part .tool-call-wait-icon {
+  width: 16px;
+  height: 16px;
+  animation: none;
+}
+
 .chat-tool-invocation-part .tool-call-icon.tool-status-error {
   color: color-mix(in srgb, var(--color-vscode-error) 72%, transparent);
 }

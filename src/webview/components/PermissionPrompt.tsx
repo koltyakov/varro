@@ -36,7 +36,7 @@ export function PermissionPrompt(props: {
   };
 
   return (
-    <div class="chat-tool-invocation-part permission-prompt animate-fade-in">
+    <div class="chat-tool-invocation-part permission-prompt">
       <div class="permission-prompt-header">
         <svg class="permission-prompt-icon" viewBox="0 0 24 24" fill="none">
           <path
@@ -109,6 +109,11 @@ export function PermissionPrompt(props: {
         </div>
       </Show>
 
+      <div class="permission-prompt-scope-note">
+        "Always allow" covers matching requests. In Auto approve mode, it also guides AI review
+        toward similar non-destructive actions.
+      </div>
+
       <div class="permission-prompt-actions">
         <button
           class="question-btn question-btn-primary"
@@ -126,6 +131,7 @@ export function PermissionPrompt(props: {
         <button
           class="question-btn question-btn-secondary"
           aria-label="Allow always"
+          title="Allow matching future requests and guide AI review of similar non-destructive actions"
           disabled={responding()}
           onClick={() => handleRespond('always')}
         >

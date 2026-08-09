@@ -761,11 +761,16 @@ body.vscode-high-contrast-light
   pointer-events: auto;
 }
 
-.permission-prompt-group-note {
+.permission-prompt-group-note,
+.permission-prompt-scope-note {
   margin: 2px 12px 4px;
   font-size: 11px;
   line-height: 1.4;
   color: var(--color-vscode-muted);
+}
+
+.permission-prompt-scope-note {
+  margin-top: 4px;
 }
 
 .permission-prompt-actions {

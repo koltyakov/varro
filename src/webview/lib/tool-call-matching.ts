@@ -3,6 +3,7 @@ import { getPermissionGroupMembers, getSessionTreeRootId } from './state';
 
 export type ToolCallPermissionMatch = {
   permission: Permission;
+  isActive: boolean;
   isPrimaryOwner: boolean;
   queuePosition: number;
   queueTotal: number;
@@ -45,7 +46,8 @@ export function buildPermissionRequestLookup(
   permissions: Permission[],
   sessionRootId: string | null | undefined,
   queuePosition = 1,
-  queueTotal = permissions.length
+  queueTotal = permissions.length,
+  activePermissionId = permissions[0]?.id ?? null
 ) {
   const result = new Map<string, ToolCallPermissionMatch>();
   if (!sessionRootId) return result;
@@ -60,6 +62,7 @@ export function buildPermissionRequestLookup(
       if (key && !result.has(key)) {
         result.set(key, {
           permission,
+          isActive: permission.id === activePermissionId,
           isPrimaryOwner: index === 0,
           queuePosition,
           queueTotal,

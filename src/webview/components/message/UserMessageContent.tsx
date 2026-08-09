@@ -7,8 +7,10 @@ import {
 } from '../../lib/path-display';
 import { postMessage } from '../../lib/bridge';
 import type { MessageEditContext } from '../../lib/message-edit-state';
+import { splitSessionReferenceText, type SessionReference } from '../../lib/session-reference';
 import { state } from '../../lib/state';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
+import { selectSession } from '../../hooks/useOpenCode';
 import type { FilePart, Part, TextPart } from '../../types';
 import {
   formatContextLineRanges,
@@ -55,7 +57,8 @@ type InlineRenderableAttachment =
 
 type InlineTextSegment =
   | { type: 'text'; content: string }
-  | { type: 'attachment'; attachment: InlineRenderableAttachment };
+  | { type: 'attachment'; attachment: InlineRenderableAttachment }
+  | { type: 'session'; reference: SessionReference };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
@@ -597,7 +600,10 @@ function InlineAttachmentText(props: {
   return (
     <For each={segments()}>
       {(segment) => {
-        if (segment.type !== 'attachment') return segment.content;
+        if (segment.type === 'text') return segment.content;
+        if (segment.type === 'session') {
+          return <SessionReferenceLink reference={segment.reference} />;
+        }
         if (segment.attachment.type === 'image-file') {
           const imageAttachment = segment.attachment;
           return (
@@ -788,24 +794,49 @@ function buildInlineTextSegments(
   const markers = Array.from(attachmentByMarker.keys())
     .filter((marker) => content.includes(marker))
     .toSorted((a, b) => b.length - a.length);
+  const attachmentSegments: InlineTextSegment[] = [];
   if (markers.length === 0) {
-    return [{ type: 'text' as const, content }];
-  }
-
-  const pattern = new RegExp(`(${markers.map((marker) => escapeRegex(marker)).join('|')})`, 'g');
-  const segments: InlineTextSegment[] = [];
-
-  for (const part of content.split(pattern)) {
-    if (!part) continue;
-    const attachment = attachmentByMarker.get(part);
-    if (attachment) {
-      segments.push({ type: 'attachment', attachment });
-      continue;
+    attachmentSegments.push({ type: 'text', content });
+  } else {
+    const pattern = new RegExp(`(${markers.map((marker) => escapeRegex(marker)).join('|')})`, 'g');
+    for (const part of content.split(pattern)) {
+      if (!part) continue;
+      const attachment = attachmentByMarker.get(part);
+      attachmentSegments.push(
+        attachment ? { type: 'attachment', attachment } : { type: 'text', content: part }
+      );
     }
-    segments.push({ type: 'text', content: part });
   }
 
+  const segments: InlineTextSegment[] = [];
+  for (const segment of attachmentSegments) {
+    if (segment.type === 'text') {
+      segments.push(...splitSessionReferenceText(segment.content));
+    } else {
+      segments.push(segment);
+    }
+  }
   return segments;
+}
+
+function SessionReferenceLink(props: { reference: SessionReference }) {
+  const openSession = (event: MouseEvent) => {
+    event.preventDefault();
+    void selectSession(props.reference.id);
+  };
+
+  return (
+    <a
+      class="session-reference-link"
+      href={props.reference.href}
+      data-copy-marker={props.reference.id}
+      data-session-id={props.reference.id}
+      title={`Open session ${props.reference.id}`}
+      onClick={openSession}
+    >
+      {props.reference.title}
+    </a>
+  );
 }
 
 function escapeRegex(value: string) {

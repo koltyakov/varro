@@ -1683,6 +1683,7 @@ export function MessageList() {
     });
   });
   const standalonePermissions = createMemo(() => {
+    if (state.messagesLoading) return [];
     const activePermission = pendingPermissionSequence().activePermission;
     if (!activePermission) return [];
     return getStandalonePermissionPrompts(
@@ -1760,10 +1761,11 @@ export function MessageList() {
   const permissionRequestsByToolCall = createMemo(() => {
     const sequence = pendingPermissionSequence();
     return buildPermissionRequestLookup(
-      sequence.activePermission ? [sequence.activePermission] : [],
+      state.permissions,
       activeSessionRootId(),
       sequence.position,
-      sequence.total
+      sequence.total,
+      sequence.activePermission?.id
     );
   });
 
@@ -1773,6 +1775,7 @@ export function MessageList() {
   }
 
   function getPermissionMatchForTool(part: Extract<Part, { type: 'tool' }>) {
+    if (state.messagesLoading) return null;
     const key = getToolCallLookupKey(activeSessionRootId(), part.messageID, part.callID);
     return key ? (permissionRequestsByToolCall().get(key) ?? null) : null;
   }
@@ -4564,13 +4567,15 @@ export function MessageList() {
     previousStickyPreviewBounds = null;
     clearUpwardStickyHandoff();
     setAutoScroll(!editingAtSessionStart);
-    if (!editingAtSessionStart) queueMicrotask(() => performScroll());
+    if (!editingAtSessionStart && !untrack(() => state.messagesLoading)) {
+      queueMicrotask(() => performScroll());
+    }
   });
 
   createEffect(() => {
     const sessionId = state.activeSessionId;
     const msgs = messages();
-    if (msgs.length === 0) return;
+    if (state.messagesLoading || msgs.length === 0) return;
     queueMicrotask(() => {
       if (state.activeSessionId !== sessionId) return;
       scheduleVisibleMeasurement();

@@ -114,6 +114,20 @@ test('restores a linked permission to full flow after its tool starts compacting
 
   await expect(page.getByText('Allow access to the temporary sandbox?')).toBeVisible();
   await expect(page.locator('.assistant-active-activity-item')).toBeVisible();
+  const blockedTool = page
+    .locator('.tool-invocation-header')
+    .filter({ hasText: 'Remove temporary sandbox' });
+  await expect(blockedTool).toBeVisible();
+  await expect(blockedTool.locator('.tool-call-wait-icon.tool-status-pending')).toBeVisible();
+  await expect(blockedTool.locator('.tool-call-spinner')).toHaveCount(0);
+  expect(
+    await blockedTool.evaluate((tool) => {
+      const prompt = document.querySelector('.permission-prompt');
+      return (
+        !!prompt && !!(tool.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+    })
+  ).toBe(true);
   await page.waitForTimeout(2_100);
   await page.getByRole('button', { name: 'Allow once' }).click();
   await expect(page.getByText('Allow removing the temporary sandbox?')).toBeVisible();
@@ -184,7 +198,8 @@ test('recovers a permission prompt when the live permission event is missed', as
 
   await expect(page.getByText('Permission Required')).toBeVisible();
   await expect(page.getByText('Allow running npm test?')).toBeVisible();
-  await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
+  await expect(page.locator('.tool-invocation-title')).toHaveText('Run command');
+  await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toBeVisible();
 });
 
 test('default permissions end up with a bash permission request for opencode version', async ({

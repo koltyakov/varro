@@ -128,6 +128,22 @@ response. If the response fails or times out, preserve or restore the prompt and
 If the prompt had already become visible while a judge was running, it stays visible until OpenCode
 acknowledges the late automatic decision.
 
+Initial transcript hydration is the only presentation deferral: while `messagesLoading` is true, keep
+the request in permission state but do not mount either its standalone or inline prompt. Both successful
+and failed session loads must clear that bounded gate so the prompt appears with the loaded transcript
+or returns as the actionable fallback. Permission prompts mount at their final placement without an
+entrance animation; do not reintroduce a standalone-to-inline transition during session loading. Defer
+the initial bottom scroll through the same gate so prompt height is part of the first settled placement,
+not later growth that looks like a newly arrived request.
+
+Permission-linked tools remain visible. Within a contiguous assistant activity run, render completed
+activity first, then every permission-linked tool with the pending status and the same static wait icon
+used for a subagent blocked on permission; do not present queued tools as actively running. Render only
+the front actionable prompt after the owning assistant response's activity, so completed concurrent
+parts do not appear below the waiting tools or permission block. Preserve prose and other non-activity
+boundaries. A standalone prompt remains the fallback when its owning tool is unavailable, intentionally
+hidden, or outside the mounted virtual range.
+
 Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
 reply currently surfaces an error and remains pending for a later permission sync to retry. Do not
 copy that exception into default or auto mode; changes to full mode should prefer adding bounded
@@ -140,9 +156,12 @@ Default mode presents `Reject`, `Once`, and `Always` actions.
 - `Once` approves the specific request.
 - `Always` asks OpenCode to approve the request and matching future actions under its permission
   semantics.
+- In auto mode, a successful `Always` response rechecks other visible requests in the same
+  conversation tree so requests that were already judged can use the new preference.
 - `Reject` denies the request.
 - A failed response must leave the user with an actionable retry.
-- A successful response records a bounded decision reference for later auto-judge context.
+- A successful response records a bounded decision reference for later auto-judge context across the
+  same root conversation and its child sessions.
 
 Equivalent pending requests may be grouped for display. Group identity includes type, pattern,
 session ID, title, and metadata, so requests from different sessions are not grouped together.
@@ -167,16 +186,26 @@ The extension host first applies narrow deterministic rules. The current local p
   being deleted
 - A small set of read-only shell commands, including safe Git inspection and basic identity or
   environment checks
+- External-directory access only when every canonicalized requested path is contained by an exact
+  external-directory scope that the user previously approved with `Always` in the same conversation
+  tree
 
 Shell parsing deliberately rejects command substitution, pipelines, redirection, unsafe separators,
 ambiguous quoting, outside-workspace Git paths, and mutating Git operations. Expand local rules only
 with adversarial tests for paths, symlinks, quoting, command composition, and side effects.
 
+External-directory requests are never delegated to the model judge. Ambiguous paths, sibling paths,
+mixed approved and unapproved path sets, and approvals made with `Once` must ask the user. This keeps
+prior approvals from being generalized to unrelated or sensitive directories.
+
 ### Model Judge
 
 Requests not decided locally may be sent to a temporary hidden OpenCode session. That session denies
 all tools except structured output. Permission text, command text, paths, metadata, and prior user
-decisions are untrusted input to the judge, never instructions.
+decisions are untrusted input to the judge, never instructions. A confirmed `always` response is
+strong preference evidence for materially similar or narrower non-destructive actions in the same
+conversation tree, but the judge must recheck the complete current details and must not broaden its
+scope.
 
 The judge model is resolved in this order:
 
@@ -198,6 +227,10 @@ Judge outcomes map as follows:
 - `reject` sends `reject` and is intended for materially matching prior user rejections.
 - `ask` reveals the prompt.
 - A thrown error or timeout reveals the prompt.
+
+The auto-approve activity strip shows an `ask` outcome as an amber manual-approval request, not a
+red failure. A later manual response updates the activity entry for that permission ID; other queued
+requests keep their own activity entries.
 
 Switching away from auto invalidates the authority of an unfinished judge. A late verdict must
 re-check the current effective mode before replying. In default mode it reveals the prompt; in full

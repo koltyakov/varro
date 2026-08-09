@@ -238,7 +238,12 @@ function startAutoApproveActivity(permission: Permission) {
 
 function finishAutoApproveActivity(
   permission: Pick<Permission, 'id' | 'sessionID'> & Partial<Pick<Permission, 'title' | 'type'>>,
-  status: 'auto-approved' | 'auto-review-failed' | 'manually-approved' | 'manually-rejected',
+  status:
+    | 'auto-approved'
+    | 'approval-required'
+    | 'auto-review-failed'
+    | 'manually-approved'
+    | 'manually-rejected',
   detail?: string
 ) {
   const current = appStore.state.sessionAutoPermissionActivity[permission.sessionID] ?? [];
@@ -258,6 +263,24 @@ function finishAutoApproveActivity(
       ? current.map((activity, i) => (i === index ? next : activity))
       : [...current, next]
     ).slice(-MAX_AUTO_APPROVE_ACTIVITY)
+  );
+}
+
+function clearReviewingAutoApproveActivity(permission: Pick<Permission, 'id' | 'sessionID'>) {
+  const current = appStore.state.sessionAutoPermissionActivity[permission.sessionID] ?? [];
+  if (
+    !current.some(
+      (activity) => activity.permissionId === permission.id && activity.status === 'reviewing'
+    )
+  ) {
+    return;
+  }
+  appStore.setState(
+    'sessionAutoPermissionActivity',
+    permission.sessionID,
+    current.filter(
+      (activity) => activity.permissionId !== permission.id || activity.status !== 'reviewing'
+    )
   );
 }
 
@@ -308,6 +331,10 @@ function updateSessionAutoPermissionCounts(
     approved: changes.approved ?? current.approved,
     rejected: changes.rejected ?? current.rejected,
   });
+}
+
+function getPermissionDecisionScopeId(sessionId: string) {
+  return getSessionTreeRootId(sessionId) || sessionId;
 }
 
 function finishPermissionJudgeAttempt(attempt: PermissionJudgeAttempt) {
@@ -850,7 +877,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let connectionGeneration = 0;
   let sessionSelectionGeneration = 0;
   let restoredPermissionsClassified = false;
-  const permissionDecisionReferencesBySession = new Map<string, AutoApproveJudgeReference[]>();
+  const permissionDecisionReferencesByTree = new Map<string, AutoApproveJudgeReference[]>();
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
   const permissionSessionSyncs = new Map<string, Promise<void>>();
   const hiddenRestoredPermissions = new Map<string, Permission>();
@@ -1264,7 +1291,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           !reconciliation.changedPermissionIds.has(permissionId)
         ) {
           const attempt = permissionJudgeAttempts.get(permissionId);
-          if (attempt) finishPermissionJudgeAttempt(attempt);
+          if (attempt) {
+            finishPermissionJudgeAttempt(attempt);
+            clearReviewingAutoApproveActivity(attempt.permission);
+          }
           permissionJudgeAttempts.delete(permissionId);
         }
       }
@@ -1448,7 +1478,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       finishPermissionJudgeAttempt(attempt);
       finishAutoApproveActivity(
         permission,
-        'auto-review-failed',
+        'approval-required',
         outcome.response.reason || 'Automatic review requested manual approval.'
       );
       return;
@@ -1516,7 +1546,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         const model = resolvePermissionJudgeModel(permission.sessionID);
         const response = await client.varro.judgePermission({
           permission,
-          approvedReferences: permissionDecisionReferencesBySession.get(permission.sessionID) || [],
+          approvedReferences:
+            permissionDecisionReferencesByTree.get(
+              getPermissionDecisionScopeId(permission.sessionID)
+            ) || [],
           ...(model ? { model } : {}),
         });
         return { type: 'decision', response };
@@ -1541,11 +1574,28 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     return attempt.promise;
   }
 
+  function recheckVisiblePermissionsAfterAlways(permission: Permission) {
+    const scopeId = getPermissionDecisionScopeId(permission.sessionID);
+    const visibleAttempts = [...permissionJudgeAttempts.values()].filter(
+      (attempt) =>
+        attempt.status === 'visible' &&
+        getPermissionDecisionScopeId(attempt.permission.sessionID) === scopeId &&
+        permissionsStore.getPermissionModeForSession(attempt.permission.sessionID) === 'auto'
+    );
+
+    for (const attempt of visibleAttempts) {
+      finishPermissionJudgeAttempt(attempt);
+      permissionJudgeAttempts.delete(attempt.permission.id);
+      void judgeAndRespondPermission(attempt.permission);
+    }
+  }
+
   function markPermissionJudgeResponded(permissionId: string) {
     const attempt = permissionJudgeAttempts.get(permissionId);
     if (!attempt) return;
     attempt.status = 'responded';
     finishPermissionJudgeAttempt(attempt);
+    clearReviewingAutoApproveActivity(attempt.permission);
   }
 
   function initConnection() {
@@ -1639,9 +1689,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     historyPageLoads.clear();
     promptHistoryLoads.clear();
     promptHistoryPageLoads.clear();
-    permissionDecisionReferencesBySession.clear();
+    permissionDecisionReferencesByTree.clear();
     for (const attempt of permissionJudgeAttempts.values()) {
       finishPermissionJudgeAttempt(attempt);
+      clearReviewingAutoApproveActivity(attempt.permission);
     }
     permissionJudgeAttempts.clear();
     permissionSessionSyncs.clear();
@@ -2325,6 +2376,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
               : 'Approved manually once.'
         );
       }
+      if (response === 'always') recheckVisiblePermissionsAfterAlways(permission);
     }
   }
 
@@ -2332,8 +2384,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     sessionId: string,
     reference: AutoApproveJudgeReference
   ) {
-    const references = permissionDecisionReferencesBySession.get(sessionId) || [];
-    permissionDecisionReferencesBySession.set(sessionId, [...references, reference].slice(-20));
+    const scopeId = getPermissionDecisionScopeId(sessionId);
+    const references = permissionDecisionReferencesByTree.get(scopeId) || [];
+    permissionDecisionReferencesByTree.set(scopeId, [...references, reference].slice(-20));
   }
 
   async function respondQuestion(

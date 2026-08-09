@@ -38,6 +38,7 @@ function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
   const label = {
     reviewing: 'Automatic review in progress',
     'auto-approved': 'Auto-approved',
+    'approval-required': 'Manual approval requested',
     'auto-review-failed': 'Automatic review did not pass',
     'manually-approved': 'Manually approved',
     'manually-rejected': 'Manually rejected',

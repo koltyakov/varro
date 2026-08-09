@@ -633,7 +633,7 @@ describe('MessageList loading states', () => {
     expect(container?.querySelectorAll('.question-prompt-card')).toHaveLength(1);
   });
 
-  it('keeps a linked permission actionable while its message loads', async () => {
+  it('waits to render a linked permission until its message finishes loading', async () => {
     const permission: Permission = {
       id: 'permission-1',
       type: 'bash',
@@ -654,21 +654,135 @@ describe('MessageList loading states', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
-    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
 
-    batch(() => {
-      replaceMessages([
-        {
-          info: assistantMessage('message-1'),
-          parts: [toolPart('tool-1')],
-        },
-      ]);
-      setState('messagesLoading', false);
-    });
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [
+          toolPart('tool-1'),
+          {
+            ...toolPart('tool-2', 'message-1', 'call-2'),
+            state: {
+              status: 'completed',
+              input: { command: 'git status' },
+              output: '',
+              title: 'git status',
+              metadata: {},
+              time: { start: 1, end: 2 },
+            },
+          },
+        ],
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-msg-id="message-1"]')).not.toBeNull();
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
+
+    setState('messagesLoading', false);
     await Promise.resolve();
 
     const messageRow = container?.querySelector('[data-msg-id="message-1"]');
+    const activitySummary = messageRow?.querySelector('.assistant-activity-summary');
+    const waitingTool = messageRow
+      ?.querySelector('.tool-call-wait-icon')
+      ?.closest('.tool-invocation-header');
+    const permissionPrompt = messageRow?.querySelector('.permission-prompt');
+    expect(permissionPrompt).not.toBeNull();
+    expect(activitySummary).not.toBeNull();
+    expect(waitingTool).not.toBeNull();
+    expect(
+      (activitySummary?.compareDocumentPosition(waitingTool!) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      (activitySummary?.compareDocumentPosition(permissionPrompt!) ?? 0) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(messageRow?.querySelectorAll('.permission-prompt')).toHaveLength(1);
+    expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
+  });
+
+  it('waits for restored permissions before performing the initial bottom scroll', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const permission: Permission = {
+      id: 'permission-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'Allow command',
+      metadata: { command: 'pwd' },
+      time: { created: 1 },
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('permissions', [permission]);
+    setState('messagesLoading', true);
+    replaceMessages([
+      {
+        info: assistantMessage('message-1'),
+        parts: [toolPart('tool-1')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    let scrollTopValue = 0;
+    let scrollWrites = 0;
+    Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list!, 'scrollHeight', { configurable: true, get: () => 1200 });
+    Object.defineProperty(list!, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+        scrollWrites += 1;
+      },
+    });
+
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
+    expect(scrollWrites).toBe(0);
+
+    setState('messagesLoading', false);
+    await Promise.resolve();
+    animationFrames.flush();
+
+    expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+    expect(scrollTopValue).toBe(800);
+    expect(scrollWrites).toBeGreaterThan(0);
+    animationFrames.restore();
+  });
+
+  it('reveals a retained permission when message loading ends without content', async () => {
+    const permission: Permission = {
+      id: 'permission-1',
+      type: 'bash',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      callID: 'call-1',
+      title: 'Allow command',
+      metadata: { command: 'pwd' },
+      time: { created: 1 },
+    };
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('permissions', [permission]);
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.permission-prompt')).toBeNull();
+
+    setState('messagesLoading', false);
+    await Promise.resolve();
+
     expect(container?.querySelectorAll('.permission-prompt')).toHaveLength(1);
   });
 
@@ -5236,6 +5350,50 @@ describe('shouldShowPlanImplementationAction', () => {
 });
 
 describe('standalone action prompts', () => {
+  it('matches every pending tool while activating only the front permission', () => {
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-1',
+        title: 'Allow first command',
+        metadata: {},
+        time: { created: 1 },
+      },
+      {
+        id: 'perm-2',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'message-1',
+        callID: 'call-2',
+        title: 'Allow second command',
+        metadata: {},
+        time: { created: 2 },
+      },
+    ];
+
+    const lookup = toolCallMatching.buildPermissionRequestLookup(
+      permissions,
+      'session-1',
+      1,
+      2,
+      'perm-1'
+    );
+
+    expect(lookup.get('session-1\u0000message-1\u0000call-1')).toMatchObject({
+      permission: { id: 'perm-1' },
+      isActive: true,
+      isPrimaryOwner: true,
+    });
+    expect(lookup.get('session-1\u0000message-1\u0000call-2')).toMatchObject({
+      permission: { id: 'perm-2' },
+      isActive: false,
+      isPrimaryOwner: true,
+    });
+  });
+
   it('sequences distinct permissions and skips requests resolved before their turn', () => {
     const permissions: Permission[] = [
       {

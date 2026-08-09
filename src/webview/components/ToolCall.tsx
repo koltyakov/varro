@@ -23,6 +23,7 @@ import { postMessage } from '../lib/bridge';
 import {
   state as appState,
   getPermissionGroupMembers,
+  getSessionTreeIds,
   getSessionTreeRootId,
   showInlineFileChanges,
 } from '../lib/state';
@@ -102,6 +103,7 @@ function ToolCallIcon(props: {
   kind?: ToolCallIconKind;
   statusClass?: string;
   statusLabel?: string;
+  waiting?: boolean;
   class?: string;
 }) {
   const kind = () => props.kind || getToolCallIconKind(props.toolName || '');
@@ -109,20 +111,22 @@ function ToolCallIcon(props: {
     ['tool-call-icon', `tool-call-icon-${kind()}`, props.statusClass, props.class]
       .filter(Boolean)
       .join(' ');
-  const isRunningTask = () => kind() === 'task' && props.statusClass === 'tool-status-running';
+  const isWaiting = () => !!props.waiting;
+  const isRunningTask = () =>
+    kind() === 'task' && props.statusClass === 'tool-status-running' && !isWaiting();
 
   return (
     <Show
       when={isRunningTask()}
       fallback={
         <svg
-          class={classes()}
+          class={`${classes()}${isWaiting() ? ' tool-call-wait-icon' : ''}`}
           viewBox="0 0 24 24"
-          width="12"
-          height="12"
+          width={isWaiting() ? '16' : '12'}
+          height={isWaiting() ? '16' : '12'}
           fill="none"
           stroke="currentColor"
-          stroke-width="2"
+          stroke-width={isWaiting() ? '1.6' : '2'}
           stroke-linecap="round"
           stroke-linejoin="round"
           role={props.statusLabel ? 'status' : undefined}
@@ -133,6 +137,11 @@ function ToolCallIcon(props: {
         >
           <Show when={props.statusLabel}>{(label) => <title>{label()}</title>}</Show>
           <Switch>
+            <Match when={isWaiting()}>
+              <path d="M12 12C15.866 12 19 8.86599 19 5H5C5 8.86599 8.13401 12 12 12ZM12 12C15.866 12 19 15.134 19 19H5C5 15.134 8.13401 12 12 12Z" />
+              <path d="M5 2H12H19" />
+              <path d="M5 22H12H19" />
+            </Match>
             <Match when={kind() === 'terminal'}>
               <path d="M13 17H20" />
               <path d="M5 7L10 12L5 17" />
@@ -424,6 +433,7 @@ export function ToolCall(props: {
   part: ToolPart;
   questionRequest?: QuestionRequest | null;
   permissionMatch?: ToolCallPermissionMatch | null;
+  renderPermissionPrompt?: boolean;
   lightweight?: boolean;
 }) {
   const tool = () => props.part;
@@ -452,21 +462,25 @@ export function ToolCall(props: {
           (getSessionTreeRootId(permission.sessionID) || permission.sessionID) === sessionRootId
       )
       .toSorted((left, right) => left.time.created - right.time.created);
-    const permission = permissions[0];
-    if (!permission) return null;
+    const activePermission = permissions[0];
+    if (!activePermission) return null;
 
-    const members = getPermissionGroupMembers(permission);
-    for (const [index, member] of members.entries()) {
-      if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId) continue;
-      if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
-        continue;
+    for (const permission of permissions) {
+      const members = getPermissionGroupMembers(permission);
+      for (const [index, member] of members.entries()) {
+        if ((getSessionTreeRootId(member.sessionID) || member.sessionID) !== sessionRootId)
+          continue;
+        if (member.messageID !== currentTool.messageID || member.callID !== currentTool.callID) {
+          continue;
+        }
+        return {
+          permission,
+          isActive: permission.id === activePermission.id,
+          isPrimaryOwner: index === 0,
+          queuePosition: 1,
+          queueTotal: permissions.length,
+        };
       }
-      return {
-        permission,
-        isPrimaryOwner: index === 0,
-        queuePosition: 1,
-        queueTotal: permissions.length,
-      };
     }
 
     return null;
@@ -480,7 +494,9 @@ export function ToolCall(props: {
     props.permissionMatch !== undefined ? props.permissionMatch : fallbackPermissionMatch()
   );
   const permissionRequest = createMemo(() => permissionMatch()?.permission ?? null);
+  const isActivePermission = createMemo(() => permissionMatch()?.isActive ?? false);
   const isPrimaryPermissionOwner = createMemo(() => permissionMatch()?.isPrimaryOwner ?? false);
+  const isWaitingForPermission = createMemo(() => !!permissionRequest());
 
   const filePath = () => {
     return getToolReadPath(tool().tool, state());
@@ -490,6 +506,7 @@ export function ToolCall(props: {
   const isReadTool = () => isToolFileRead(tool().tool);
 
   const statusClass = () => {
+    if (isWaitingForPermission()) return 'tool-status-pending';
     switch (state().status) {
       case 'pending':
         return normalizeToolName(tool().tool) === 'apply_patch'
@@ -541,12 +558,19 @@ export function ToolCall(props: {
   };
 
   const shouldHideToolCard = () => {
-    if (permissionRequest()) return true;
     return Boolean(questionRequest()) && isQuestionToolName(tool().tool);
   };
   const showPermission = () => {
     const permission = permissionRequest();
-    if (questionRequest() || !permission || !isPrimaryPermissionOwner()) return null;
+    if (
+      questionRequest() ||
+      !permission ||
+      props.renderPermissionPrompt === false ||
+      !isActivePermission() ||
+      !isPrimaryPermissionOwner()
+    ) {
+      return null;
+    }
     return permission;
   };
 
@@ -561,6 +585,7 @@ export function ToolCall(props: {
           toolState={state()}
           changes={fileChanges()}
           animatePending={normalizeToolName(tool().tool) === 'apply_patch'}
+          waitingForPermission={isWaitingForPermission()}
           previewStateKey={expansionKey()}
           expanded={expanded()}
           toggleExpand={toggleExpand}
@@ -570,7 +595,12 @@ export function ToolCall(props: {
 
     if (isReadTool()) {
       return (
-        <ReadToolCard toolState={state()} filePath={filePath()} sessionID={tool().sessionID} />
+        <ReadToolCard
+          toolState={state()}
+          filePath={filePath()}
+          sessionID={tool().sessionID}
+          waitingForPermission={isWaitingForPermission()}
+        />
       );
     }
 
@@ -585,6 +615,7 @@ export function ToolCall(props: {
         inputEntries={inputEntries()}
         fullOutput={fullOutput()}
         runningOutput={runningOutput()}
+        waitingForPermission={isWaitingForPermission()}
         lightweight={props.lightweight}
       />
     );
@@ -640,12 +671,14 @@ function ReadToolCard(props: {
   toolState: ToolPart['state'];
   filePath: string | null;
   sessionID: string;
+  waitingForPermission: boolean;
 }) {
   const s = () => props.toolState;
   const isCompleted = () => s().status === 'completed';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
   const statusClass = () => {
+    if (props.waitingForPermission) return 'tool-status-pending';
     switch (s().status) {
       case 'pending':
         return 'tool-status-pending';
@@ -718,9 +751,14 @@ function ReadToolCard(props: {
   return (
     <div class="chat-tool-invocation-part file-read-card">
       <div class="file-read-card-header">
-        <ToolCallIcon kind="read" statusClass={statusClass()} />
+        <ToolCallIcon
+          kind="read"
+          statusClass={statusClass()}
+          statusLabel={props.waitingForPermission ? 'Waiting for permission' : undefined}
+          waiting={props.waitingForPermission}
+        />
         <span
-          class={`file-read-action-label${s().status === 'running' ? ' shimmer-progress' : ''}`}
+          class={`file-read-action-label${s().status === 'running' && !props.waitingForPermission ? ' shimmer-progress' : ''}`}
         >
           {displayName() ? 'Read:' : 'Read'}
         </span>
@@ -763,6 +801,7 @@ function FileChangeCard(props: {
   toolState: ToolPart['state'];
   changes: FileChange[];
   animatePending: boolean;
+  waitingForPermission: boolean;
   previewStateKey: string;
   expanded: boolean;
   toggleExpand: () => void;
@@ -860,6 +899,7 @@ function FileChangeCard(props: {
   };
 
   const statusClass = () => {
+    if (props.waitingForPermission) return 'tool-status-pending';
     if (isPending()) return props.animatePending ? 'tool-status-running' : 'tool-status-pending';
     if (isRunning()) return 'tool-status-running';
     if (isError()) return isAborted() ? 'tool-status-aborted' : 'tool-status-error';
@@ -867,6 +907,7 @@ function FileChangeCard(props: {
   };
 
   const statusLabel = () => {
+    if (props.waitingForPermission) return 'Pending';
     if (isPending()) return props.animatePending ? 'Running' : 'Pending';
     if (isRunning()) return 'Running';
     if (isError()) return isAborted() ? 'Aborted' : 'Failed';
@@ -931,10 +972,11 @@ function FileChangeCard(props: {
               kind="edit"
               statusClass={statusClass()}
               statusLabel={statusLabel()}
+              waiting={props.waitingForPermission}
               class="file-edit-icon"
             />
             <span
-              class={`file-edit-action-label${isRunning() || (isPending() && props.animatePending) ? ' shimmer-progress' : ''}`}
+              class={`file-edit-action-label${!props.waitingForPermission && (isRunning() || (isPending() && props.animatePending)) ? ' shimmer-progress' : ''}`}
             >
               {action()}:
             </span>
@@ -1140,6 +1182,7 @@ function GenericToolCall(props: {
   inputEntries: Array<[string, unknown]>;
   fullOutput: string;
   runningOutput: string;
+  waitingForPermission: boolean;
   lightweight?: boolean;
 }) {
   const toolName = () => normalizeToolName(props.tool.tool);
@@ -1250,6 +1293,15 @@ function GenericToolCall(props: {
     const status = appState.sessionStatus[sessionId];
     return status?.type === 'retry' ? status : null;
   };
+  const taskPermissionPending = createMemo(() => {
+    if (props.state.status !== 'running') return false;
+    const sessionId = taskSessionId();
+    if (!sessionId) return false;
+    const sessionIds = new Set(getSessionTreeIds(sessionId));
+    sessionIds.add(sessionId);
+    return appState.permissions.some((permission) => sessionIds.has(permission.sessionID));
+  });
+  const waitingForPermission = () => props.waitingForPermission || taskPermissionPending();
   const openTaskSession = () => {
     const sessionId = taskSessionId();
     if (!sessionId) return;
@@ -1348,7 +1400,12 @@ function GenericToolCall(props: {
           aria-expanded={hasExpandableContent() ? isExpanded() : undefined}
           aria-controls={hasExpandableContent() ? bodyId : undefined}
         >
-          <ToolCallIcon toolName={props.tool.tool} statusClass={props.statusClass} />
+          <ToolCallIcon
+            toolName={props.tool.tool}
+            statusClass={props.statusClass}
+            statusLabel={waitingForPermission() ? 'Waiting for permission' : undefined}
+            waiting={waitingForPermission()}
+          />
           <span
             class={`tool-invocation-title${props.statusClass === 'tool-status-running' && !isTask() ? ' shimmer-progress' : ''}`}
           >

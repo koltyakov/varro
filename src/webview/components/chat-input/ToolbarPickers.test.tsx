@@ -133,22 +133,29 @@ describe('ToolbarPickers', () => {
             },
             {
               permissionId: 'three',
-              status: 'auto-review-failed',
-              title: 'npm publish',
-              detail: 'Manual approval required.',
+              status: 'approval-required',
+              title: 'external_directory /tmp/*',
+              detail: 'Outside the workspace.',
               createdAt: 3,
             },
             {
               permissionId: 'four',
-              status: 'manually-approved',
-              title: 'npm install',
+              status: 'auto-review-failed',
+              title: 'npm publish',
+              detail: 'Matches a prior rejection.',
               createdAt: 4,
             },
             {
               permissionId: 'five',
+              status: 'manually-approved',
+              title: 'npm install',
+              createdAt: 5,
+            },
+            {
+              permissionId: 'six',
               status: 'manually-rejected',
               title: 'rm -rf build',
-              createdAt: 5,
+              createdAt: 6,
             },
           ]}
           judgeModel={{ providerName: 'OpenAI', modelName: 'GPT-5.6' }}
@@ -164,15 +171,19 @@ describe('ToolbarPickers', () => {
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
     const activity = container?.querySelector<HTMLElement>('.permission-activity');
     const dots = activity?.querySelectorAll<HTMLElement>('.permission-activity-item') ?? [];
-    expect(dots).toHaveLength(5);
+    expect(dots).toHaveLength(6);
     expect(toggleButton?.contains(activity ?? null)).toBe(false);
     expect(activity?.previousElementSibling).toBe(toggleButton);
     expect(dots[0]?.className).toContain('reviewing');
     expect(dots[1]?.className).toContain('auto-approved');
-    expect(dots[2]?.className).toContain('auto-review-failed');
-    expect(dots[3]?.className).toContain('manually-approved');
-    expect(dots[4]?.className).toContain('manually-rejected');
+    expect(dots[2]?.className).toContain('approval-required');
+    expect(dots[3]?.className).toContain('auto-review-failed');
+    expect(dots[4]?.className).toContain('manually-approved');
+    expect(dots[5]?.className).toContain('manually-rejected');
     expect(dots[1]?.title).toBe('Auto-approved: edit src/app.ts. Workspace file edit.');
+    expect(dots[2]?.title).toBe(
+      'Manual approval requested: external_directory /tmp/*. Outside the workspace.'
+    );
     expect(toggleButton?.title).toBe('Auto-approve permissions - OpenAI / GPT-5.6');
     expect(toggleButton?.getAttribute('aria-label')).toBe(
       'Auto-approve permissions - OpenAI / GPT-5.6'

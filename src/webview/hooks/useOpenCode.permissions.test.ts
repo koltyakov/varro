@@ -162,7 +162,7 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
         expect.objectContaining({
           permissionId: 'perm-1',
-          status: 'auto-review-failed',
+          status: 'approval-required',
           detail: 'review',
         }),
       ]);
@@ -696,6 +696,85 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('clears reviewing activity when a reply event resolves the permission first', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-replied-first'),
+      });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
+        expect.objectContaining({ permissionId: 'perm-replied-first', status: 'reviewing' }),
+      ]);
+
+      serverEventHandlers.get('permission.replied')?.({
+        properties: { id: 'perm-replied-first' },
+      });
+
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
+      expect(stateModule.state.sessionAutoPermissionCounts['session-1']?.inFlight).toBe(0);
+
+      judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('clears reviewing activity when a pending snapshot proves the permission resolved', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([]);
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: permissionListItem('perm-snapshot-resolved'),
+      });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
+        expect.objectContaining({ permissionId: 'perm-snapshot-resolved', status: 'reviewing' }),
+      ]);
+
+      serverEventHandlers.get('server.connected')?.({});
+
+      await vi.waitFor(() =>
+        expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([])
+      );
+      expect(stateModule.state.sessionAutoPermissionCounts['session-1']?.inFlight).toBe(0);
+
+      judge.resolve({ decision: 'allow', reason: 'Too late.' });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(clientMocks.sessionRespondPermission).not.toHaveBeenCalled();
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('keeps a child-session permission hidden while resolving inherited auto mode', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
@@ -950,7 +1029,7 @@ describe('useOpenCode permission and config flows', () => {
     { userResponse: 'always' as const, judgeDecision: 'allow' as const, autoResponse: 'once' },
     { userResponse: 'reject' as const, judgeDecision: 'reject' as const, autoResponse: 'reject' },
   ])(
-    'passes a confirmed $userResponse decision to the judge and applies its $judgeDecision verdict',
+    'passes a confirmed $userResponse decision through the conversation tree and applies its $judgeDecision verdict',
     async ({ userResponse, judgeDecision, autoResponse }) => {
       const serverEventHandlers = captureServerEventHandlers();
       configureReconciliationMocks();
@@ -962,6 +1041,10 @@ describe('useOpenCode permission and config flows', () => {
         .mockResolvedValueOnce({ decision: judgeDecision, reason: 'matches user decision' });
 
       const { stateModule, hookModule } = await loadModules();
+      stateModule.setState('sessions', [
+        session('session-1'),
+        { ...session('child-1'), parentID: 'session-1' },
+      ]);
       stateModule.setPermissionModeForSession('session-1', 'auto');
       const dispose = createRoot((cleanup) => {
         hookModule.useOpenCode();
@@ -989,7 +1072,7 @@ describe('useOpenCode permission and config flows', () => {
           }),
         ]);
         serverEventHandlers.get('permission.asked')?.({
-          properties: permissionListItem('perm-similar'),
+          properties: { ...permissionListItem('perm-similar'), sessionID: 'child-1' },
         });
 
         await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2));
@@ -1006,7 +1089,7 @@ describe('useOpenCode permission and config flows', () => {
         );
         await vi.waitFor(() =>
           expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
-            'session-1',
+            'child-1',
             'perm-similar',
             autoResponse
           )
@@ -1014,7 +1097,7 @@ describe('useOpenCode permission and config flows', () => {
         expect(stateModule.state.permissions).not.toContainEqual(
           expect.objectContaining({ id: 'perm-similar' })
         );
-        expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual(
+        expect(stateModule.state.sessionAutoPermissionActivity['child-1']).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               permissionId: 'perm-similar',
@@ -1036,6 +1119,87 @@ describe('useOpenCode permission and config flows', () => {
       }
     }
   );
+
+  it('rechecks an already-visible request after always approval records a preference', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.permissionList.mockResolvedValue([]);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+    clientMocks.varroJudgePermission
+      .mockResolvedValue({ decision: 'ask', reason: 'review' })
+      .mockResolvedValueOnce({ decision: 'ask', reason: 'first request needs review' })
+      .mockResolvedValueOnce({ decision: 'ask', reason: 'second request needs review' })
+      .mockResolvedValueOnce({ decision: 'allow', reason: 'matches the always preference' });
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('server.connected')?.({});
+      await vi.waitFor(() => expect(serverEventHandlers.has('permission.asked')).toBe(true));
+
+      serverEventHandlers.get('permission.asked')?.({
+        properties: {
+          ...permissionListItem('perm-first'),
+          permission: 'external_directory',
+          patterns: '/external/path/one/*',
+          title: 'external_directory /external/path/one/*',
+          metadata: { filepath: '/external/path/one', parentDir: '/external/path' },
+        },
+      });
+      serverEventHandlers.get('permission.asked')?.({
+        properties: {
+          ...permissionListItem('perm-second'),
+          permission: 'external_directory',
+          patterns: '/external/path/two/*',
+          title: 'external_directory /external/path/two/*',
+          metadata: { filepath: '/external/path/two', parentDir: '/external/path' },
+        },
+      });
+      await vi.waitFor(() => {
+        expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(2);
+        expect(stateModule.state.permissions).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'perm-first' }),
+            expect.objectContaining({ id: 'perm-second' }),
+          ])
+        );
+      });
+
+      await hookModule.respondPermission('session-1', 'perm-first', 'always');
+
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(3));
+      expect(clientMocks.varroJudgePermission.mock.calls[2]?.[0]).toEqual(
+        expect.objectContaining({
+          permission: expect.objectContaining({ id: 'perm-second' }),
+          approvedReferences: [
+            expect.objectContaining({
+              type: 'external_directory',
+              response: 'always',
+              title: 'external_directory /external/path/one/*',
+              metadata: { filepath: '/external/path/one', parentDir: '/external/path' },
+            }),
+          ],
+        })
+      );
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'session-1',
+          'perm-second',
+          'once'
+        )
+      );
+      expect(stateModule.state.permissions).not.toContainEqual(
+        expect.objectContaining({ id: 'perm-second' })
+      );
+    } finally {
+      dispose();
+    }
+  });
 
   it('does not approve an auto-judged prompt after switching to default mode', async () => {
     const serverEventHandlers = captureServerEventHandlers();

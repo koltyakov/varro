@@ -21,6 +21,11 @@ declare global {
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
+const selectSessionMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../hooks/useOpenCode', () => ({
+  selectSession: selectSessionMock,
+}));
 
 beforeAll(() => loadCodeHighlighter());
 
@@ -46,6 +51,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   delete window.__sendToExtension;
+  selectSessionMock.mockReset();
+  setState('sessions', []);
   setState('editorContext', {
     workspacePath: null,
     activeFile: null,
@@ -219,6 +226,62 @@ describe('MarkdownRenderer', () => {
       type: 'vscode/open',
       payload: { path: '/repo/src/webview/App.tsx', kind: 'file', line: undefined },
     });
+  });
+
+  it('links workspace session IDs using their session titles', () => {
+    setState('sessions', [
+      {
+        id: 'ses_found123',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Permission request states',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: 'Session ses_found123 and ses_missing456. `ses_found123`',
+          cacheByContent: true,
+        }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
+    expect(link?.textContent).toBe('Permission request states');
+    expect(link?.getAttribute('href')).toBe('#session/ses_found123');
+    expect(link?.dataset.sessionId).toBe('ses_found123');
+    expect(container?.textContent).toContain('ses_missing456');
+    expect(container?.querySelector('code a')).toBeNull();
+
+    link?.click();
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+  });
+
+  it('updates session references when a matching workspace session is discovered', async () => {
+    const content = 'Open ses_discovered123';
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+
+    expect(container?.querySelector('a.session-reference-link')).toBeNull();
+    expect(container?.textContent).toContain('ses_discovered123');
+
+    setState('sessions', [
+      {
+        id: 'ses_discovered123',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Discovered session',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.querySelector('a.session-reference-link')?.textContent).toBe(
+      'Discovered session'
+    );
   });
 
   it('does not treat protocol-relative links as local files', () => {

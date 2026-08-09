@@ -80,6 +80,172 @@ describe('AutoApproveJudge', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it('allows external directory access contained by prior always-approved scopes', async () => {
+    const { root } = createTemporaryWorkspace();
+    const approvedOne = join(root, 'external-one');
+    const approvedTwo = join(root, 'external-two');
+    const nested = join(approvedTwo, 'nested');
+    mkdirSync(approvedOne);
+    mkdirSync(nested, { recursive: true });
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-external-approved',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          title: `external_directory ${nested}/*`,
+          pattern: `${nested}/*`,
+        },
+        approvedReferences: [
+          {
+            type: 'external_directory',
+            title: `external_directory ${approvedOne}/*`,
+            response: 'always',
+            pattern: `${approvedOne}/*`,
+          },
+          {
+            type: 'external_directory',
+            title: `external_directory ${approvedTwo}/*`,
+            response: 'always',
+            pattern: `${approvedTwo}/*`,
+          },
+        ],
+      })
+    ).resolves.toEqual({
+      decision: 'allow',
+      reason: 'Covered by an existing external directory approval.',
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not generalize multiple external directory approvals to unrelated sensitive paths', async () => {
+    const { root } = createTemporaryWorkspace();
+    const approvedOne = join(root, 'external-one');
+    const approvedTwo = join(root, 'external-two');
+    const secrets = join(root, '.secrets');
+    const sibling = `${approvedOne}-secrets`;
+    const linkedSecrets = join(approvedOne, 'linked-secrets');
+    mkdirSync(approvedOne);
+    mkdirSync(approvedTwo);
+    mkdirSync(secrets);
+    mkdirSync(sibling);
+    symlinkSync(secrets, linkedSecrets, process.platform === 'win32' ? 'junction' : 'dir');
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const approvedReferences = [
+      {
+        type: 'external_directory',
+        title: `external_directory ${approvedOne}/*`,
+        response: 'always' as const,
+        pattern: `${approvedOne}/*`,
+      },
+      {
+        type: 'external_directory',
+        title: `external_directory ${approvedTwo}/*`,
+        response: 'always' as const,
+        pattern: `${approvedTwo}/*`,
+      },
+    ];
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-external-secrets',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          title: `external_directory ${secrets}/*`,
+          pattern: `${secrets}/*`,
+        },
+        approvedReferences,
+      })
+    ).resolves.toEqual({
+      decision: 'ask',
+      reason: 'External directory access exceeds prior approvals.',
+    });
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-external-mixed',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          title: 'external_directory mixed paths',
+          pattern: [`${approvedOne}/*`, `${secrets}/*`],
+        },
+        approvedReferences,
+      })
+    ).resolves.toEqual({
+      decision: 'ask',
+      reason: 'External directory access exceeds prior approvals.',
+    });
+    for (const path of [sibling, linkedSecrets]) {
+      await expect(
+        judge.judge({
+          permission: {
+            id: `perm-external-${path}`,
+            type: 'external_directory',
+            sessionID: 'session-1',
+            title: `external_directory ${path}/*`,
+            pattern: `${path}/*`,
+          },
+          approvedReferences,
+        })
+      ).resolves.toEqual({
+        decision: 'ask',
+        reason: 'External directory access exceeds prior approvals.',
+      });
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('requires an always approval with unambiguous external directory paths', async () => {
+    const { root } = createTemporaryWorkspace();
+    const external = join(root, 'external');
+    mkdirSync(external);
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-external-once',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          title: `external_directory ${external}/*`,
+          pattern: `${external}/*`,
+        },
+        approvedReferences: [
+          {
+            type: 'external_directory',
+            title: `external_directory ${external}/*`,
+            response: 'once',
+            pattern: `${external}/*`,
+          },
+        ],
+      })
+    ).resolves.toEqual({
+      decision: 'ask',
+      reason: 'External directory access requires approval.',
+    });
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-external-ambiguous',
+          type: 'external_directory',
+          sessionID: 'session-1',
+          title: 'external_directory *',
+          pattern: '*',
+        },
+      })
+    ).resolves.toEqual({
+      decision: 'ask',
+      reason: 'External directory path is missing or ambiguous.',
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('allows workspace file edits without creating a judge session', async () => {
     const { workspace } = createTemporaryWorkspace();
     const filePath = join(workspace, 'src', 'app.ts');
@@ -644,7 +810,9 @@ describe('AutoApproveJudge', () => {
       '/session/judge-session-1/message',
       expect.objectContaining({
         model: { providerID: 'openai', modelID: 'gpt-5-mini' },
-        system: expect.stringContaining('An always decision is strong evidence'),
+        system: expect.stringContaining(
+          'An always decision records the user preference to allow materially similar or narrower non-destructive actions'
+        ),
         format: expect.objectContaining({ type: 'json_schema' }),
         parts: [
           expect.objectContaining({
