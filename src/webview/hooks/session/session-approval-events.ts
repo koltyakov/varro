@@ -7,6 +7,8 @@ import { getPermissionReplyId, getQuestionReplyId } from './session-event-utils'
 type ApprovalEventDependencies = {
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
+  isPermissionSessionKnown?(sessionId: string): boolean;
+  syncPermissionSession?(sessionId: string): Promise<void>;
   judgePermission?(permission: Permission): Promise<void>;
   permissionReplied?(permissionId: string): void;
   respondPermission(
@@ -20,11 +22,11 @@ type ApprovalEventDependencies = {
 
 export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): Array<() => void> {
   const autoJudgingPermissionIds = new Set<string>();
+  const pendingSessionPermissions = new Map<string, Permission>();
   const cleanups: Array<() => void> = [];
+  let disposed = false;
 
-  function handlePermissionEvent(props: Record<string, unknown>) {
-    const permission = normalizePermissionEvent(props);
-    if (!permission) return;
+  function handleKnownPermission(permission: Permission) {
     if (deps.shouldAutoApprovePermissions(permission.sessionID)) {
       void deps
         .respondPermission(permission.sessionID, permission.id, 'always', { rethrow: true })
@@ -50,6 +52,36 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       return;
     }
     permissionsStore.addPermission(permission);
+  }
+
+  function handlePermissionEvent(props: Record<string, unknown>) {
+    const permission = normalizePermissionEvent(props);
+    if (!permission) return;
+    if (!deps.isPermissionSessionKnown?.(permission.sessionID) && deps.syncPermissionSession) {
+      const alreadyPending = pendingSessionPermissions.has(permission.id);
+      pendingSessionPermissions.set(permission.id, permission);
+      if (alreadyPending) return;
+
+      void Promise.resolve()
+        .then(() => deps.syncPermissionSession!(permission.sessionID))
+        .then(
+          () => {
+            const pending = pendingSessionPermissions.get(permission.id);
+            if (disposed || !pending) return;
+            pendingSessionPermissions.delete(permission.id);
+            handleKnownPermission(pending);
+          },
+          (err: unknown) => {
+            const pending = pendingSessionPermissions.get(permission.id);
+            if (disposed || !pending) return;
+            pendingSessionPermissions.delete(permission.id);
+            deps.logError('permission.session', err);
+            permissionsStore.addPermission(pending);
+          }
+        );
+      return;
+    }
+    handleKnownPermission(permission);
   }
 
   cleanups.push(
@@ -79,6 +111,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       if (!props) return;
       const pid = getPermissionReplyId(props);
       if (pid) {
+        pendingSessionPermissions.delete(pid);
         deps.permissionReplied?.(pid);
         permissionsStore.removePermission(pid);
       }
@@ -91,6 +124,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       if (!props) return;
       const pid = getPermissionReplyId(props);
       if (pid) {
+        pendingSessionPermissions.delete(pid);
         deps.permissionReplied?.(pid);
         permissionsStore.removePermission(pid);
       }
@@ -138,6 +172,11 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
       if (requestID) permissionsStore.removeQuestion(requestID);
     })
   );
+
+  cleanups.push(() => {
+    disposed = true;
+    pendingSessionPermissions.clear();
+  });
 
   return cleanups;
 }

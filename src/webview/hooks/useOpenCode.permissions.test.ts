@@ -201,6 +201,50 @@ describe('useOpenCode permission and config flows', () => {
     }
   });
 
+  it('hides a restored child permission before its inherited auto mode is known', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    clientMocks.sessionList.mockResolvedValue([session('session-1')]);
+    clientMocks.permissionList.mockResolvedValue([
+      { ...permissionListItem('perm-restored-child'), sessionID: 'child-1' },
+    ]);
+    clientMocks.sessionGet.mockResolvedValue({
+      ...session('child-1'),
+      parentID: 'session-1',
+    });
+    const judge = deferred<{ decision: 'ask'; reason: string }>();
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    stateModule.addPermission({
+      ...permission('perm-restored-child'),
+      sessionID: 'child-1',
+    });
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      expect(stateModule.state.permissions).toEqual([]);
+      serverEventHandlers.get('server.connected')?.({});
+
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+
+      judge.resolve({ decision: 'ask', reason: 'Needs confirmation.' });
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({ id: 'perm-restored-child', sessionID: 'child-1' }),
+        ])
+      );
+    } finally {
+      dispose();
+    }
+  });
+
   it('ignores a late judge result after the permission is no longer pending', async () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
@@ -386,6 +430,50 @@ describe('useOpenCode permission and config flows', () => {
     } finally {
       dispose();
       vi.useRealTimers();
+    }
+  });
+
+  it('keeps a child-session permission hidden while resolving inherited auto mode', async () => {
+    const serverEventHandlers = captureServerEventHandlers();
+    configureReconciliationMocks();
+    const childSession = deferred<ReturnType<typeof session>>();
+    const judge = deferred<{ decision: 'allow'; reason: string }>();
+    clientMocks.sessionGet.mockReturnValue(childSession.promise);
+    clientMocks.varroJudgePermission.mockReturnValue(judge.promise);
+    clientMocks.sessionRespondPermission.mockResolvedValue(undefined);
+
+    const { stateModule, hookModule } = await loadModules();
+    stateModule.setState('sessions', [session('session-1')]);
+    stateModule.setPermissionModeForSession('session-1', 'auto');
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      serverEventHandlers.get('permission.asked')?.({
+        properties: { ...permissionListItem('perm-child'), sessionID: 'child-1' },
+      });
+
+      await vi.waitFor(() => expect(clientMocks.sessionGet).toHaveBeenCalledWith('child-1'));
+      expect(clientMocks.varroJudgePermission).not.toHaveBeenCalled();
+      expect(stateModule.state.permissions).toEqual([]);
+
+      childSession.resolve({ ...session('child-1'), parentID: 'session-1' });
+      await vi.waitFor(() => expect(clientMocks.varroJudgePermission).toHaveBeenCalledOnce());
+      expect(stateModule.state.permissions).toEqual([]);
+
+      judge.resolve({ decision: 'allow', reason: 'Safe child action.' });
+      await vi.waitFor(() =>
+        expect(clientMocks.sessionRespondPermission).toHaveBeenCalledWith(
+          'child-1',
+          'perm-child',
+          'once'
+        )
+      );
+      expect(stateModule.state.permissions).toEqual([]);
+    } finally {
+      dispose();
     }
   });
 
@@ -812,15 +900,17 @@ describe('useOpenCode permission and config flows', () => {
         },
       });
 
-      expect(stateModule.state.permissions).toEqual([
-        expect.objectContaining({
-          id: 'perm-live-1',
-          sessionID: 'session-1',
-          type: 'apply_patch',
-          messageID: 'message-1',
-          callID: 'call-1',
-        }),
-      ]);
+      await vi.waitFor(() =>
+        expect(stateModule.state.permissions).toEqual([
+          expect.objectContaining({
+            id: 'perm-live-1',
+            sessionID: 'session-1',
+            type: 'apply_patch',
+            messageID: 'message-1',
+            callID: 'call-1',
+          }),
+        ])
+      );
     } finally {
       dispose();
     }

@@ -119,6 +119,8 @@ type EventHandlerDependencies = {
   syncTodosForSession?(sessionId: string, messages?: MessageEntry[]): Promise<void>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
+  isPermissionSessionKnown?(sessionId: string): boolean;
+  syncPermissionSession?(sessionId: string): Promise<void>;
   judgePermission?(permission: Permission): Promise<void>;
   permissionReplied?(permissionId: string): void;
   syncPendingPermissions?(): Promise<void>;
@@ -160,7 +162,11 @@ type EventHandlerOperationDependencies = {
   repairSessionTitle?: EventHandlerDependencies['repairSessionTitle'];
   sessionApprovalOperations: Pick<
     EventHandlerDependencies,
-    'respondPermission' | 'judgePermission' | 'permissionReplied'
+    | 'respondPermission'
+    | 'judgePermission'
+    | 'permissionReplied'
+    | 'isPermissionSessionKnown'
+    | 'syncPermissionSession'
   >;
   syncPendingPermissions?: EventHandlerDependencies['syncPendingPermissions'];
   reconcileServerState?: EventHandlerDependencies['reconcileServerState'];
@@ -214,6 +220,8 @@ export class SessionEventHandlerOperations {
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
       shouldAutoJudgePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
+      isPermissionSessionKnown: this.deps.sessionApprovalOperations.isPermissionSessionKnown,
+      syncPermissionSession: this.deps.sessionApprovalOperations.syncPermissionSession,
       judgePermission: this.deps.sessionApprovalOperations.judgePermission,
       permissionReplied: this.deps.sessionApprovalOperations.permissionReplied,
       syncPendingPermissions: this.deps.syncPendingPermissions,

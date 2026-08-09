@@ -219,6 +219,13 @@ function showPermissionAfterJudge(attempt: PermissionJudgeAttempt) {
   permissionsStore.addPermission(attempt.permission);
 }
 
+function isPermissionSessionKnown(sessionId: string): boolean {
+  return (
+    Object.hasOwn(appStore.state.sessionPermissionModes, sessionId) ||
+    appStore.state.sessions.some((session) => session.id === sessionId)
+  );
+}
+
 export function createSessionStatusSnapshotCoordinator(
   loadSessionStatuses: () => Promise<Record<string, SessionStatus>>,
   freshnessMs = POLLED_STATUS_SNAPSHOT_FRESHNESS_MS
@@ -733,6 +740,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   let restoredPermissionsClassified = false;
   const permissionDecisionReferencesBySession = new Map<string, AutoApproveJudgeReference[]>();
   const permissionJudgeAttempts = new Map<string, PermissionJudgeAttempt>();
+  const permissionSessionSyncs = new Map<string, Promise<void>>();
   const hiddenRestoredPermissions = new Map<string, Permission>();
   let permissionSyncGeneration = 0;
   let latestPermissionSyncGeneration = 0;
@@ -882,6 +890,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         respondPermission: sessionApprovalOperations.respondPermission,
         judgePermission: judgeAndRespondPermission,
         permissionReplied: markPermissionJudgeResponded,
+        isPermissionSessionKnown,
+        syncPermissionSession: ensurePermissionSessionKnown,
       },
       syncPendingPermissions,
       reconcileServerState,
@@ -1121,6 +1131,14 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       const normalizedPendingPermissions = pendingPermissions
         .map((item) => normalizePermissionEvent(item))
         .filter((permission): permission is Permission => permission !== null);
+      await Promise.all(
+        normalizedPendingPermissions.map((permission) =>
+          ensurePermissionSessionKnown(permission.sessionID).catch((err) =>
+            logError('permission.session', err)
+          )
+        )
+      );
+      if (syncGeneration !== permissionSyncGeneration) return;
       const pendingPermissionIds = new Set(
         normalizedPendingPermissions.map((permission) => permission.id)
       );
@@ -1188,14 +1206,43 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     if (restoredPermissionsClassified) return;
     restoredPermissionsClassified = true;
 
+    const hasStoredAutomaticMode = Object.values(appStore.state.sessionPermissionModes).some(
+      (mode) => mode !== 'default'
+    );
     const restoredPermissions = appStore.state.permissions.filter(
       (permission) =>
+        (!isPermissionSessionKnown(permission.sessionID) && hasStoredAutomaticMode) ||
         permissionsStore.getPermissionModeForSession(permission.sessionID) !== 'default'
     );
     for (const permission of restoredPermissions) {
       hiddenRestoredPermissions.set(permission.id, permission);
       permissionsStore.removePermission(permission.id, { removeGroup: true });
     }
+  }
+
+  function ensurePermissionSessionKnown(sessionId: string): Promise<void> {
+    if (isPermissionSessionKnown(sessionId)) return Promise.resolve();
+    const existing = permissionSessionSyncs.get(sessionId);
+    if (existing) return existing;
+
+    const generation = workspaceGeneration;
+    const sessionSync = sessionSyncOperations.syncSession(sessionId, {
+      shouldApply: () => generation === workspaceGeneration,
+    });
+    permissionSessionSyncs.set(sessionId, sessionSync);
+    void sessionSync.then(
+      () => {
+        if (permissionSessionSyncs.get(sessionId) === sessionSync) {
+          permissionSessionSyncs.delete(sessionId);
+        }
+      },
+      () => {
+        if (permissionSessionSyncs.get(sessionId) === sessionSync) {
+          permissionSessionSyncs.delete(sessionId);
+        }
+      }
+    );
+    return sessionSync;
   }
 
   function judgeAndRespondPermission(permission: Permission): Promise<void> {
@@ -1360,6 +1407,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     promptHistoryPageLoads.clear();
     permissionDecisionReferencesBySession.clear();
     permissionJudgeAttempts.clear();
+    permissionSessionSyncs.clear();
   }
 
   function invalidateConnection() {
