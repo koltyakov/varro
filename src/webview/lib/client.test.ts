@@ -943,7 +943,7 @@ describe('client', () => {
     ]);
   });
 
-  it('forwards readWorkspaceFile, saveModelRouting, openCodeConfig, and judge calls', async () => {
+  it('forwards workspace, model routing, and judge calls', async () => {
     const { client } = await loadClient();
     bridgeMocks.apiCall.mockResolvedValue({});
 
@@ -957,6 +957,11 @@ describe('client', () => {
     await client.varro.judgePermission({
       permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
       model: { providerID: 'openai', modelID: 'gpt-4.1' },
+    });
+    await client.varro.resolveJudgeModel({
+      providerID: 'openai',
+      modelID: 'gpt-4.1',
+      variant: 'low',
     });
 
     expect(bridgeMocks.apiCall.mock.calls).toEqual([
@@ -979,6 +984,7 @@ describe('client', () => {
           model: { providerID: 'openai', modelID: 'gpt-4.1' },
         },
       ],
+      ['GET', '/varro/permission/judge/model?providerID=openai&modelID=gpt-4.1&variant=low'],
     ]);
   });
 

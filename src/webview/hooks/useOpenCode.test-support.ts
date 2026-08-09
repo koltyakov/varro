@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
     permissionList: vi.fn(),
     varroOpenPlan: vi.fn(),
     varroJudgePermission: vi.fn(),
+    varroResolveJudgeModel: vi.fn(),
     varroSessionRenameIfUntitled: vi.fn(),
     recycleBinList: vi.fn(),
     recycleBinRestore: vi.fn(),
@@ -94,6 +95,7 @@ vi.mock('../lib/client', () => ({
     varro: {
       openPlan: clientMocks.varroOpenPlan,
       judgePermission: clientMocks.varroJudgePermission,
+      resolveJudgeModel: clientMocks.varroResolveJudgeModel,
       session: {
         renameIfUntitled: clientMocks.varroSessionRenameIfUntitled,
       },
@@ -237,6 +239,7 @@ beforeEach(() => {
   clientMocks.permissionList.mockReset();
   clientMocks.varroOpenPlan.mockReset();
   clientMocks.varroJudgePermission.mockReset();
+  clientMocks.varroResolveJudgeModel.mockReset();
   clientMocks.varroSessionRenameIfUntitled.mockReset();
   clientMocks.recycleBinList.mockReset();
   clientMocks.recycleBinRestore.mockReset();
@@ -269,6 +272,7 @@ beforeEach(() => {
   clientMocks.mcpDisconnect.mockResolvedValue(true);
   clientMocks.varroOpenPlan.mockResolvedValue({ path: '/tmp/plan.md' });
   clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'test' });
+  clientMocks.varroResolveJudgeModel.mockResolvedValue(null);
   clientMocks.varroSessionRenameIfUntitled.mockResolvedValue(null);
   clientMocks.recycleBinList.mockResolvedValue([]);
   clientMocks.recycleBinRestore.mockResolvedValue(true);

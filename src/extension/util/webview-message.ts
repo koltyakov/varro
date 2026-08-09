@@ -1086,6 +1086,10 @@ const API_ROUTES: ApiRoute[] = [
   route(VARRO_API_ENDPOINTS.openCodeConfigModelRouting, methodsNoQuery('POST')),
   route(VARRO_API_ENDPOINTS.permissionJudge, methodsNoQuery('POST')),
   route(
+    VARRO_API_ENDPOINTS.permissionJudgeModel,
+    ({ method, url }) => method === 'GET' && onlyQuery(url, 'providerID', 'modelID', 'variant')
+  ),
+  route(
     `${VARRO_API_ENDPOINTS.session}/:id/diff-summary`,
     ({ method, url }) => method === 'GET' && onlyQuery(url, 'revision')
   ),

@@ -113,7 +113,7 @@ export interface RestProxyCallbacks {
     | 'filterVisibleSessions'
     | 'isHidden'
   >;
-  autoApproveJudge: Pick<AutoApproveJudge, 'judge'>;
+  autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
   simulateNoProviders: boolean;
   getRequestGeneration(): number;
@@ -270,6 +270,13 @@ export class RestProxy {
       );
       if (judgePermissionRequest) {
         const data = await this.callbacks.autoApproveJudge.judge(judgePermissionRequest);
+        this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
+        return;
+      }
+
+      const judgeModelRequest = this.parseJudgeModelRequest(method, payload.path);
+      if (judgeModelRequest) {
+        const data = await this.callbacks.autoApproveJudge.resolveModel(judgeModelRequest.model);
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -1254,6 +1261,22 @@ export class RestProxy {
           }
         : {}),
       approvedReferences: parseApprovedPermissionReferences(payload?.approvedReferences),
+    };
+  }
+
+  private parseJudgeModelRequest(method: string, path: string) {
+    if (method !== 'GET') return null;
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== VARRO_API_ENDPOINTS.permissionJudgeModel) return null;
+
+    const providerID = url.searchParams.get('providerID')?.trim() || '';
+    const modelID = url.searchParams.get('modelID')?.trim() || '';
+    const variant = url.searchParams.get('variant')?.trim() || '';
+    return {
+      model:
+        providerID && modelID
+          ? { providerID, modelID, ...(variant ? { variant } : {}) }
+          : undefined,
     };
   }
 

@@ -106,7 +106,7 @@ describe('PermissionPrompt', () => {
     );
 
     const reason = container?.querySelector('.permission-prompt-auto-reason');
-    expect(reason?.textContent).toContain('Auto-approve judge');
+    expect(reason?.textContent).toContain('AI check');
     expect(reason?.textContent).toContain('The command needs manual confirmation.');
   });
 

@@ -126,6 +126,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     },
     autoApproveJudge: {
       judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const, reason: 'test' })),
+      resolveModel: vi.fn(() => Promise.resolve(null)),
     },
     sessionTitleFallback: {
       renameIfUntitled: vi.fn(() => Promise.resolve(null)),
@@ -829,6 +830,7 @@ describe('RestProxy handleRequest', () => {
       getStatus: vi.fn(() => ({ state: 'stopped' as const })),
       autoApproveJudge: {
         judge: vi.fn(() => Promise.resolve(judgeResult)),
+        resolveModel: vi.fn(() => Promise.resolve(null)),
       },
     });
 
@@ -847,6 +849,31 @@ describe('RestProxy handleRequest', () => {
       approvedReferences: [{ type: 'bash', title: 'bash npm publish', response: 'reject' }],
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
+  it('resolves the auto-approve judge model', async () => {
+    const model = { providerID: 'openai', modelID: 'gpt-5.6', variant: 'low' };
+    const { proxy, callbacks } = createProxy({
+      autoApproveJudge: {
+        judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const })),
+        resolveModel: vi.fn(() => Promise.resolve(model)),
+      },
+    });
+
+    await proxy.handleRequest(
+      makePayload(
+        82,
+        'GET',
+        '/varro/permission/judge/model?providerID=openai&modelID=gpt-4.1&variant=low'
+      )
+    );
+
+    expect(callbacks.autoApproveJudge.resolveModel).toHaveBeenCalledWith({
+      providerID: 'openai',
+      modelID: 'gpt-4.1',
+      variant: 'low',
+    });
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 82, data: model });
   });
 
   it('routes session title fallback requests after server startup', async () => {

@@ -114,6 +114,12 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/varro/opencode-config')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/opencode-config/model-routing')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/permission/judge')).toBe(true);
+    expect(
+      isAllowedApiRequest(
+        'GET',
+        '/varro/permission/judge/model?providerID=openai&modelID=gpt-5.6&variant=low'
+      )
+    ).toBe(true);
     expect(isAllowedApiRequest('GET', '/varro/session/session-1/diff-summary')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/pin')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/session/session-1/rename-if-untitled')).toBe(true);

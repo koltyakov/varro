@@ -73,30 +73,34 @@ export function PermissionPrompt(props: {
         <CopyIconButton text={props.permission.title} label="permission request" />
       </div>
 
-      <Show when={metadataEntries().length > 0}>
-        <div class="permission-prompt-meta">
-          {metadataEntries().map(([key, value]) => {
-            const text = formatMetadataValue(value);
-            return (
-              <div class="permission-meta-entry">
-                <span class="permission-meta-key">{key}</span>
-                <div class="permission-meta-value-shell">
-                  <span class="permission-meta-value">{text}</span>
-                  <CopyIconButton text={text} label={key} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Show>
+      <Show when={metadataEntries().length > 0 || Boolean(props.permission.autoApproveReason)}>
+        <div class="permission-prompt-details">
+          <Show when={metadataEntries().length > 0}>
+            <div class="permission-prompt-meta">
+              {metadataEntries().map(([key, value]) => {
+                const text = formatMetadataValue(value);
+                return (
+                  <div class="permission-meta-entry">
+                    <span class="permission-meta-key">{key}</span>
+                    <div class="permission-meta-value-shell">
+                      <span class="permission-meta-value">{text}</span>
+                      <CopyIconButton text={text} label={key} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Show>
 
-      <Show when={props.permission.autoApproveReason}>
-        {(reason) => (
-          <div class="permission-prompt-auto-reason">
-            <span class="permission-prompt-auto-reason-label">Auto-approve judge</span>
-            <span>{reason()}</span>
-          </div>
-        )}
+          <Show when={props.permission.autoApproveReason}>
+            {(reason) => (
+              <div class="permission-prompt-auto-reason">
+                <span class="permission-prompt-auto-reason-label">AI check</span>
+                <span>{reason()}</span>
+              </div>
+            )}
+          </Show>
+        </div>
       </Show>
 
       <Show when={duplicateCount() > 1}>

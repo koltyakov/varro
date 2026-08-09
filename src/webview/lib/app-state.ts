@@ -25,6 +25,7 @@ import type {
   SessionSelectedModels,
 } from './app-state-types';
 import type {
+  AutoApproveActivity,
   DesktopSessionPaneSide,
   EditorContext,
   DroppedFile,
@@ -124,6 +125,7 @@ export interface AppState {
     string,
     { inFlight: number; approved: number; rejected: number }
   >;
+  sessionAutoPermissionActivity: Record<string, AutoApproveActivity[]>;
   autoPermissionCountsSince: number;
   selectedAgent: string | null;
   sessionSelectedAgents: SessionSelectedAgents;
@@ -307,6 +309,7 @@ export function createAppState(): AppStateInstance {
     providerDefaults: {},
     sessionPermissionModes: readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
     sessionAutoPermissionCounts: {},
+    sessionAutoPermissionActivity: {},
     autoPermissionCountsSince: Date.now(),
     selectedAgent: readStoredString(STORAGE_KEYS.selectedAgent),
     sessionSelectedAgents: readStoredStringRecord(STORAGE_KEYS.sessionSelectedAgents),

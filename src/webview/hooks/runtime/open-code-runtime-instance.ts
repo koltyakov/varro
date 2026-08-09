@@ -217,6 +217,50 @@ type PermissionJudgeOutcome =
   | { type: 'error'; error: unknown }
   | { type: 'timeout' };
 
+const MAX_AUTO_APPROVE_ACTIVITY = 40;
+
+function startAutoApproveActivity(permission: Permission) {
+  const current = appStore.state.sessionAutoPermissionActivity[permission.sessionID] ?? [];
+  appStore.setState(
+    'sessionAutoPermissionActivity',
+    permission.sessionID,
+    [
+      ...current.filter((activity) => activity.permissionId !== permission.id),
+      {
+        permissionId: permission.id,
+        status: 'reviewing' as const,
+        title: permission.title?.trim() || permission.type,
+        createdAt: Date.now(),
+      },
+    ].slice(-MAX_AUTO_APPROVE_ACTIVITY)
+  );
+}
+
+function finishAutoApproveActivity(
+  permission: Pick<Permission, 'id' | 'sessionID'> & Partial<Pick<Permission, 'title' | 'type'>>,
+  status: 'auto-approved' | 'auto-review-failed' | 'manually-approved' | 'manually-rejected',
+  detail?: string
+) {
+  const current = appStore.state.sessionAutoPermissionActivity[permission.sessionID] ?? [];
+  const index = current.findIndex((activity) => activity.permissionId === permission.id);
+  const next = {
+    permissionId: permission.id,
+    status,
+    title:
+      permission.title?.trim() || permission.type || current[index]?.title || 'Permission request',
+    ...(detail ? { detail } : {}),
+    createdAt: index >= 0 ? current[index]!.createdAt : Date.now(),
+  };
+  appStore.setState(
+    'sessionAutoPermissionActivity',
+    permission.sessionID,
+    (index >= 0
+      ? current.map((activity, i) => (i === index ? next : activity))
+      : [...current, next]
+    ).slice(-MAX_AUTO_APPROVE_ACTIVITY)
+  );
+}
+
 function showPermissionAfterJudge(attempt: PermissionJudgeAttempt, reason?: string) {
   attempt.permission = {
     ...attempt.permission,
@@ -762,6 +806,7 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('mcpStatus', reconcile({}));
     appStore.setState('providerDefaults', reconcile({}));
     appStore.setState('sessionAutoPermissionCounts', reconcile({}));
+    appStore.setState('sessionAutoPermissionActivity', reconcile({}));
     appStore.setState('autoPermissionCountsSince', Date.now());
     appStore.setState('providerAuthMethods', reconcile({}));
     appStore.setState('workspaceStatuses', []);
@@ -1377,6 +1422,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         if (mode === 'default') showPermissionAfterJudge(attempt);
       }
       finishPermissionJudgeAttempt(attempt);
+      finishAutoApproveActivity(permission, 'auto-review-failed', 'Automatic review was stopped.');
       return;
     }
     if (outcome.type === 'timeout') {
@@ -1390,11 +1436,21 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         `Failed to evaluate this request: ${getPermissionJudgeErrorMessage(outcome.error)}`
       );
       finishPermissionJudgeAttempt(attempt);
+      finishAutoApproveActivity(
+        permission,
+        'auto-review-failed',
+        `Review failed: ${getPermissionJudgeErrorMessage(outcome.error)}`
+      );
       return;
     }
     if (outcome.response.decision === 'ask') {
       showPermissionAfterJudge(attempt, outcome.response.reason);
       finishPermissionJudgeAttempt(attempt);
+      finishAutoApproveActivity(
+        permission,
+        'auto-review-failed',
+        outcome.response.reason || 'Automatic review requested manual approval.'
+      );
       return;
     }
 
@@ -1411,12 +1467,25 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       updateSessionAutoPermissionCounts(permission.sessionID, {
         [key]: (counts?.[key] ?? 0) + 1,
       });
+      finishAutoApproveActivity(
+        permission,
+        outcome.response.decision === 'allow' ? 'auto-approved' : 'auto-review-failed',
+        outcome.response.reason ||
+          (outcome.response.decision === 'allow'
+            ? 'Approved by automatic review.'
+            : 'Rejected by automatic review.')
+      );
     } catch (err) {
       logError('autoApproveJudge', err);
       if (permissionJudgeAttempts.get(permission.id) === attempt) {
         showPermissionAfterJudge(
           attempt,
           `Failed to apply the automatic decision: ${getPermissionJudgeErrorMessage(err)}`
+        );
+        finishAutoApproveActivity(
+          permission,
+          'auto-review-failed',
+          `Could not apply the automatic decision: ${getPermissionJudgeErrorMessage(err)}`
         );
       }
     } finally {
@@ -1436,6 +1505,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       promise: Promise.resolve(),
     };
     permissionJudgeAttempts.set(permission.id, attempt);
+    startAutoApproveActivity(permission);
     const counts = appStore.state.sessionAutoPermissionCounts[permission.sessionID];
     updateSessionAutoPermissionCounts(permission.sessionID, {
       inFlight: (counts?.inFlight ?? 0) + 1,
@@ -2216,13 +2286,12 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     options?: { rethrow?: boolean }
   ) {
     const permission = appStore.state.permissions.find((item) => item.id === permissionId);
+    const groupMembers = permission ? permissionsStore.getPermissionGroupMembers(permission) : [];
     const decisionReference = permission
       ? toApprovedPermissionReference(permission, response)
       : null;
     try {
-      for (const member of permission
-        ? permissionsStore.getPermissionGroupMembers(permission)
-        : []) {
+      for (const member of groupMembers) {
         const attempt = permissionJudgeAttempts.get(member.id);
         if (!attempt) continue;
         attempt.status = 'responded';
@@ -2231,9 +2300,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
         ...options,
         rethrow: true,
-        ...(response === 'reject' && permission
-          ? { groupMembers: permissionsStore.getPermissionGroupMembers(permission) }
-          : {}),
+        ...(response === 'reject' && permission ? { groupMembers } : {}),
       });
     } catch (err) {
       for (const member of permission
@@ -2247,6 +2314,17 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     }
     if (permission && decisionReference) {
       recordPermissionDecisionReference(permission.sessionID, decisionReference);
+      for (const member of groupMembers.length > 0 ? groupMembers : [permission]) {
+        finishAutoApproveActivity(
+          member,
+          response === 'reject' ? 'manually-rejected' : 'manually-approved',
+          response === 'reject'
+            ? 'Rejected manually.'
+            : response === 'always'
+              ? 'Approved manually for matching future requests.'
+              : 'Approved manually once.'
+        );
+      }
     }
   }
 

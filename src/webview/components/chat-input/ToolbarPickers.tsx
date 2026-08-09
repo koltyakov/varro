@@ -1,6 +1,10 @@
 import { createEffect, For, onCleanup, Show } from 'solid-js';
 import type { Agent } from '../../types';
-import type { PermissionMode, WorkspaceFolderContext } from '../../../shared/protocol';
+import type {
+  AutoApproveActivity,
+  PermissionMode,
+  WorkspaceFolderContext,
+} from '../../../shared/protocol';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { formatModelName } from '../../lib/format';
 import { FolderIcon } from '../FolderIcon';
@@ -28,6 +32,17 @@ function PickerChevron() {
       <path d="M4 6l4 4 4-4" />
     </svg>
   );
+}
+
+function getAutoApproveActivityTitle(activity: AutoApproveActivity) {
+  const label = {
+    reviewing: 'Automatic review in progress',
+    'auto-approved': 'Auto-approved',
+    'auto-review-failed': 'Automatic review did not pass',
+    'manually-approved': 'Manually approved',
+    'manually-rejected': 'Manually rejected',
+  }[activity.status];
+  return `${label}: ${activity.title}${activity.detail ? `. ${activity.detail}` : ''}`;
 }
 
 export function WorkspacePicker(props: {
@@ -83,8 +98,8 @@ export function PermissionModePicker(props: {
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
   mode: PermissionMode;
-  counts?: { inFlight: number; approved: number; rejected: number };
-  countsSince?: number;
+  activity?: AutoApproveActivity[];
+  judgeModel?: { providerName: string; modelName: string } | null;
   showPicker: boolean;
   showLabel?: boolean;
   onToggle: () => void;
@@ -97,21 +112,13 @@ export function PermissionModePicker(props: {
   ];
   const title = () => {
     if (props.mode === 'full') return 'Full access permissions';
-    if (props.mode === 'auto') return 'Auto-approve permissions';
+    if (props.mode === 'auto') {
+      const model = props.judgeModel;
+      return model
+        ? `Auto-approve permissions - ${model.providerName} / ${model.modelName}`
+        : 'Auto-approve permissions';
+    }
     return 'Default permissions';
-  };
-  const countTitle = () => {
-    if (!props.counts) return '';
-    const details = [`${props.counts.approved} approved`];
-    if (props.counts.inFlight > 0) details.unshift(`${props.counts.inFlight} in flight`);
-    if (props.counts.rejected > 0) details.push(`${props.counts.rejected} rejected`);
-    const since = props.countsSince
-      ? new Date(props.countsSince).toLocaleString(undefined, {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        })
-      : 'this view opened';
-    return `Auto approve: ${details.join(', ')}. Counts since ${since} (this view only, not cumulative).`;
   };
   const buttonLabel = () => {
     if (props.mode === 'full') return 'Full access';
@@ -156,20 +163,22 @@ export function PermissionModePicker(props: {
           <PickerChevron />
         </Show>
       </button>
-      <Show when={props.showLabel && props.mode === 'auto' && props.counts} keyed>
-        {(counts) => (
-          <span class="permission-mode-count" title={countTitle()} aria-label={countTitle()}>
-            <Show when={counts.inFlight > 0}>
-              <span class="permission-mode-count-inflight">{counts.inFlight}</span>
-              <span class="permission-mode-count-separator">/</span>
-            </Show>
-            <span>{counts.approved}</span>
-            <Show when={counts.inFlight > 0 && counts.rejected > 0}>
-              <span class="permission-mode-count-separator">/</span>
-              <span class="permission-mode-count-rejected">{counts.rejected}</span>
-            </Show>
+      <Show when={props.showLabel && props.mode === 'auto' && props.activity?.length}>
+        <span class="permission-activity" aria-label="Auto-approve activity">
+          <span class="permission-activity-strip">
+            <For each={props.activity?.slice(-13)}>
+              {(activity) => (
+                <span
+                  class={`permission-activity-item ${activity.status}`}
+                  title={getAutoApproveActivityTitle(activity)}
+                  aria-label={getAutoApproveActivityTitle(activity)}
+                >
+                  <span class="permission-activity-dot" aria-hidden="true" />
+                </span>
+              )}
+            </For>
           </span>
-        )}
+        </span>
       </Show>
       <Show when={props.showPicker}>
         <div ref={setPopoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>

@@ -95,6 +95,21 @@ export type AutoApproveJudgeResponse = {
   reason?: string;
 };
 
+export type AutoApproveActivityStatus =
+  | 'reviewing'
+  | 'auto-approved'
+  | 'auto-review-failed'
+  | 'manually-approved'
+  | 'manually-rejected';
+
+export type AutoApproveActivity = {
+  permissionId: string;
+  status: AutoApproveActivityStatus;
+  title: string;
+  detail?: string;
+  createdAt: number;
+};
+
 export type SessionTitleFallbackResponse = {
   id: string;
   title: string;
@@ -266,6 +281,7 @@ export const VARRO_API_ENDPOINTS = {
   workspaceFilePick: `${VARRO_API_NAMESPACE}/workspace-file/pick`,
   workspacePathResolve: `${VARRO_API_NAMESPACE}/workspace-path/resolve`,
   permissionJudge: `${VARRO_API_NAMESPACE}/permission/judge`,
+  permissionJudgeModel: `${VARRO_API_NAMESPACE}/permission/judge/model`,
 } as const;
 
 export type VarroSessionEndpointAction = 'delete' | 'diff-summary' | 'pin' | 'rename-if-untitled';

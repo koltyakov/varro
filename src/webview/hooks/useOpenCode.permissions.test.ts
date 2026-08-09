@@ -159,6 +159,13 @@ describe('useOpenCode permission and config flows', () => {
         ])
       );
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1);
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
+        expect.objectContaining({
+          permissionId: 'perm-1',
+          status: 'auto-review-failed',
+          detail: 'review',
+        }),
+      ]);
     } finally {
       dispose();
     }
@@ -195,6 +202,13 @@ describe('useOpenCode permission and config flows', () => {
       expect(stateModule.state.sessionAutoPermissionCounts).toEqual({
         'session-1': { inFlight: 0, approved: 0, rejected: 1 },
       });
+      expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
+        expect.objectContaining({
+          permissionId: 'perm-rejected',
+          status: 'auto-review-failed',
+          detail: 'Matches a prior rejection.',
+        }),
+      ]);
     } finally {
       dispose();
     }
@@ -968,6 +982,12 @@ describe('useOpenCode permission and config flows', () => {
         );
 
         await hookModule.respondPermission('session-1', 'perm-manual', userResponse);
+        expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual([
+          expect.objectContaining({
+            permissionId: 'perm-manual',
+            status: userResponse === 'reject' ? 'manually-rejected' : 'manually-approved',
+          }),
+        ]);
         serverEventHandlers.get('permission.asked')?.({
           properties: permissionListItem('perm-similar'),
         });
@@ -993,6 +1013,14 @@ describe('useOpenCode permission and config flows', () => {
         );
         expect(stateModule.state.permissions).not.toContainEqual(
           expect.objectContaining({ id: 'perm-similar' })
+        );
+        expect(stateModule.state.sessionAutoPermissionActivity['session-1']).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              permissionId: 'perm-similar',
+              status: judgeDecision === 'allow' ? 'auto-approved' : 'auto-review-failed',
+            }),
+          ])
         );
 
         stateModule.setPermissionModeForSession('session-2', 'auto');

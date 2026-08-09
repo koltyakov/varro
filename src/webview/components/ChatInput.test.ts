@@ -99,6 +99,7 @@ vi.mock('../lib/client', () => ({
           activeStartedAt: null,
         })),
       },
+      resolveJudgeModel: vi.fn(async () => null),
       resolveWorkspacePath: vi.fn(async (path: string) => {
         if (path === 'README.md') {
           return { path: '/repo/README.md', relativePath: 'README.md', type: 'file' as const };
@@ -1341,7 +1342,7 @@ describe('ChatInput', () => {
     expect(metaRow?.querySelector('.provider-limit-anchor')).not.toBeNull();
   });
 
-  it('shows auto-approved permissions across the active session tree', () => {
+  it('shows auto-approve activity across the active session tree', () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('sessions', [
@@ -1349,16 +1350,17 @@ describe('ChatInput', () => {
       session('child-1', 2_100, { parentID: 'session-1' }),
     ]);
     setState('sessionPermissionModes', { 'session-1': 'auto' });
-    setState('sessionAutoPermissionCounts', {
-      'session-1': { inFlight: 1, approved: 2, rejected: 0 },
-      'child-1': { inFlight: 1, approved: 3, rejected: 1 },
+    setState('sessionAutoPermissionActivity', {
+      'session-1': [{ permissionId: 'one', status: 'reviewing', title: 'one', createdAt: 2 }],
+      'child-1': [{ permissionId: 'two', status: 'auto-approved', title: 'two', createdAt: 1 }],
     });
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('.toolbar-meta .permission-mode-count')?.textContent).toBe(
-      '2/5/1'
-    );
+    const dots = container?.querySelectorAll('.toolbar-meta .permission-activity-item') ?? [];
+    expect(dots).toHaveLength(2);
+    expect(dots[0]?.className).toContain('auto-approved');
+    expect(dots[1]?.className).toContain('reviewing');
   });
 
   it('uses the full composer controls and starts a new session only when sending', async () => {

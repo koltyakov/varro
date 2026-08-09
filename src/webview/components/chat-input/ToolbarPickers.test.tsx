@@ -111,14 +111,47 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-approve permissions');
   });
 
-  it('shows the active-session auto-approved permission count', () => {
+  it('shows the tail of auto-approve activity with per-dot details', () => {
     const onToggle = vi.fn();
     cleanup = render(
       () => (
         <PermissionModePicker
           mode="auto"
-          counts={{ inFlight: 2, approved: 4, rejected: 1 }}
-          countsSince={Date.UTC(2026, 7, 9, 10, 30)}
+          activity={[
+            {
+              permissionId: 'one',
+              status: 'reviewing',
+              title: 'npm test',
+              createdAt: 1,
+            },
+            {
+              permissionId: 'two',
+              status: 'auto-approved',
+              title: 'edit src/app.ts',
+              detail: 'Workspace file edit.',
+              createdAt: 2,
+            },
+            {
+              permissionId: 'three',
+              status: 'auto-review-failed',
+              title: 'npm publish',
+              detail: 'Manual approval required.',
+              createdAt: 3,
+            },
+            {
+              permissionId: 'four',
+              status: 'manually-approved',
+              title: 'npm install',
+              createdAt: 4,
+            },
+            {
+              permissionId: 'five',
+              status: 'manually-rejected',
+              title: 'rm -rf build',
+              createdAt: 5,
+            },
+          ]}
+          judgeModel={{ providerName: 'OpenAI', modelName: 'GPT-5.6' }}
           showPicker={false}
           showLabel={true}
           onToggle={onToggle}
@@ -129,27 +162,32 @@ describe('ToolbarPickers', () => {
     );
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
-    const count = container?.querySelector<HTMLElement>('.permission-mode-count');
-    expect(count?.textContent).toBe('2/4/1');
-    expect(toggleButton?.contains(count ?? null)).toBe(false);
-    expect(count?.previousElementSibling).toBe(toggleButton);
-    expect(count?.querySelector('.permission-mode-count-inflight')?.textContent).toBe('2');
-    expect(count?.querySelector('.permission-mode-count-rejected')?.textContent).toBe('1');
-    expect(toggleButton?.title).toBe('Auto-approve permissions');
-    expect(count?.title).toContain('2 in flight, 4 approved, 1 rejected');
-    expect(count?.title).toContain('Counts since');
-    expect(count?.title).toContain('this view only, not cumulative');
+    const activity = container?.querySelector<HTMLElement>('.permission-activity');
+    const dots = activity?.querySelectorAll<HTMLElement>('.permission-activity-item') ?? [];
+    expect(dots).toHaveLength(5);
+    expect(toggleButton?.contains(activity ?? null)).toBe(false);
+    expect(activity?.previousElementSibling).toBe(toggleButton);
+    expect(dots[0]?.className).toContain('reviewing');
+    expect(dots[1]?.className).toContain('auto-approved');
+    expect(dots[2]?.className).toContain('auto-review-failed');
+    expect(dots[3]?.className).toContain('manually-approved');
+    expect(dots[4]?.className).toContain('manually-rejected');
+    expect(dots[1]?.title).toBe('Auto-approved: edit src/app.ts. Workspace file edit.');
+    expect(toggleButton?.title).toBe('Auto-approve permissions - OpenAI / GPT-5.6');
+    expect(toggleButton?.getAttribute('aria-label')).toBe(
+      'Auto-approve permissions - OpenAI / GPT-5.6'
+    );
 
-    count?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    activity?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onToggle).not.toHaveBeenCalled();
   });
 
-  it('shows only approved permissions when no requests are in flight', () => {
+  it('omits the activity strip when no permission activity exists', () => {
     cleanup = render(
       () => (
         <PermissionModePicker
           mode="auto"
-          counts={{ inFlight: 0, approved: 4, rejected: 1 }}
+          activity={[]}
           showPicker={false}
           showLabel={true}
           onToggle={vi.fn()}
@@ -159,30 +197,7 @@ describe('ToolbarPickers', () => {
       container!
     );
 
-    const count = container?.querySelector('.permission-mode-count');
-    expect(count?.textContent).toBe('4');
-    expect(count?.querySelector('.permission-mode-count-inflight')).toBeNull();
-    expect(count?.querySelector('.permission-mode-count-rejected')).toBeNull();
-  });
-
-  it('omits the rejected segment when no requests were rejected', () => {
-    cleanup = render(
-      () => (
-        <PermissionModePicker
-          mode="auto"
-          counts={{ inFlight: 2, approved: 4, rejected: 0 }}
-          showPicker={false}
-          showLabel={true}
-          onToggle={vi.fn()}
-          onSelect={vi.fn()}
-        />
-      ),
-      container!
-    );
-
-    const count = container?.querySelector('.permission-mode-count');
-    expect(count?.textContent).toBe('2/4');
-    expect(count?.querySelector('.permission-mode-count-rejected')).toBeNull();
+    expect(container?.querySelector('.permission-activity')).toBeNull();
   });
 
   it('uses the full-access title when the permission picker is closed', () => {

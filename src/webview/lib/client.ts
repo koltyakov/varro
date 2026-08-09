@@ -17,6 +17,7 @@ import type {
 import type {
   AutoApproveJudgeRequest,
   AutoApproveJudgeResponse,
+  ChatModelSelection,
   McpStatus,
   ProviderLimitStatus,
   RecycleBinEntry,
@@ -298,6 +299,16 @@ export const client = {
     },
     async judgePermission(body: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
       return apiCall('POST', VARRO_API_ENDPOINTS.permissionJudge, body);
+    },
+    async resolveJudgeModel(model?: ChatModelSelection): Promise<ChatModelSelection | null> {
+      const params = new URLSearchParams();
+      if (model) {
+        params.set('providerID', model.providerID);
+        params.set('modelID', model.modelID);
+        if (model.variant) params.set('variant', model.variant);
+      }
+      const query = params.size > 0 ? `?${params.toString()}` : '';
+      return apiCall('GET', `${VARRO_API_ENDPOINTS.permissionJudgeModel}${query}`);
     },
     recycleBin: {
       async list(): Promise<RecycleBinEntry[]> {

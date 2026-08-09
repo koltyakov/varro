@@ -651,6 +651,13 @@ body.vscode-high-contrast-light
   color: var(--color-vscode-fg);
 }
 
+.permission-prompt-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 8px;
+  margin: 4px 12px 6px;
+}
+
 .permission-prompt-meta {
   --permission-meta-surface: color-mix(
     in srgb,
@@ -659,8 +666,8 @@ body.vscode-high-contrast-light
   );
 
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  margin: 4px 12px 6px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   padding: 6px 8px;
   border-radius: var(--radius-inset);
   background: var(--permission-meta-surface);
@@ -724,9 +731,9 @@ body.vscode-high-contrast-light
 }
 
 .permission-prompt-auto-reason {
-  display: flex;
-  gap: 6px;
-  margin: 4px 12px 6px;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--color-vscode-warning) 22%, transparent);
   border-radius: var(--radius-inset);

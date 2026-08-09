@@ -2624,21 +2624,49 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   }));
 
   const activePermissionMode = createMemo(() => getPermissionModeForSession(composerSessionId()));
-  const autoPermissionCounts = createMemo(() => {
+  const [resolvedAutoApproveJudgeModel, setResolvedAutoApproveJudgeModel] =
+    createSignal<Awaited<ReturnType<typeof client.varro.resolveJudgeModel>>>(null);
+  const autoPermissionActivity = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId) return undefined;
-    return getSessionTreeIdsForSession(sessionId).reduce(
-      (total, id) => {
-        const counts = state.sessionAutoPermissionCounts[id];
-        return {
-          inFlight: total.inFlight + (counts?.inFlight ?? 0),
-          approved: total.approved + (counts?.approved ?? 0),
-          rejected: total.rejected + (counts?.rejected ?? 0),
-        };
-      },
-      { inFlight: 0, approved: 0, rejected: 0 }
-    );
+    return getSessionTreeIdsForSession(sessionId)
+      .flatMap((id) => state.sessionAutoPermissionActivity[id] ?? [])
+      .toSorted((a, b) => a.createdAt - b.createdAt);
   });
+  const autoApproveJudgeModel = createMemo(() => {
+    const route = resolvedAutoApproveJudgeModel();
+    if (!route) return null;
+    const provider = state.providers.find((item) => item.id === route.providerID);
+    const model = provider
+      ? Object.values(provider.models).find((item) => item.id === route.modelID)
+      : null;
+    return {
+      providerName: provider?.name || route.providerID,
+      modelName: model?.name || route.modelID,
+    };
+  });
+  let judgeModelRequestId = 0;
+  createEffect(() => {
+    if (activePermissionMode() !== 'auto') return;
+    const current = currentModel();
+    const fallback =
+      current.providerID && current.modelID
+        ? {
+            providerID: current.providerID,
+            modelID: current.modelID,
+            ...(effectiveVariant() ? { variant: effectiveVariant()! } : {}),
+          }
+        : undefined;
+    void state.providerRefreshPending;
+    const requestId = ++judgeModelRequestId;
+    void client.varro
+      .resolveJudgeModel(fallback)
+      .then((model) => {
+        if (requestId === judgeModelRequestId) setResolvedAutoApproveJudgeModel(model);
+      })
+      .catch(() => {});
+  });
+  onCleanup(() => judgeModelRequestId++);
 
   function syncActiveRalphModel(nextModel: RalphSelectedModel) {
     const managerSessionId = activeRalphManagerSessionId();
@@ -3116,8 +3144,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               permissionPopoverRef = el;
             }}
             permissionMode={activePermissionMode()}
-            autoPermissionCounts={autoPermissionCounts()}
-            autoPermissionCountsSince={state.autoPermissionCountsSince}
+            autoPermissionActivity={autoPermissionActivity()}
+            autoApproveJudgeModel={autoApproveJudgeModel()}
             showPermissionPicker={showPermissionModePicker()}
             onTogglePermissionPicker={() => {
               const next = !showPermissionModePicker();
@@ -3279,8 +3307,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             permissionPopoverRef = el;
           }}
           permissionMode={activePermissionMode()}
-          autoPermissionCounts={autoPermissionCounts()}
-          autoPermissionCountsSince={state.autoPermissionCountsSince}
+          autoPermissionActivity={autoPermissionActivity()}
+          autoApproveJudgeModel={autoApproveJudgeModel()}
           showPermissionPicker={showPermissionModePicker()}
           onTogglePermissionPicker={() => {
             const next = !showPermissionModePicker();

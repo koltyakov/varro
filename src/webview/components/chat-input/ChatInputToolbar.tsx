@@ -1,6 +1,7 @@
 import { Show } from 'solid-js';
 import type { Agent } from '../../types';
 import type {
+  AutoApproveActivity,
   PermissionMode,
   ProviderLimitStatus,
   WorkspaceFolderContext,
@@ -51,8 +52,8 @@ type ToolbarSharedProps = {
   permissionButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   permissionPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   permissionMode: PermissionMode;
-  autoPermissionCounts?: { inFlight: number; approved: number; rejected: number };
-  autoPermissionCountsSince?: number;
+  autoPermissionActivity?: AutoApproveActivity[];
+  autoApproveJudgeModel?: { providerName: string; modelName: string } | null;
   showPermissionPicker: boolean;
   onTogglePermissionPicker: () => void;
   onSelectPermissionMode: (mode: PermissionMode) => void;
@@ -262,8 +263,8 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               boundaryRef={props.inputFrameRef}
               alignTo="left"
               mode={props.permissionMode}
-              counts={props.autoPermissionCounts}
-              countsSince={props.autoPermissionCountsSince}
+              activity={props.autoPermissionActivity}
+              judgeModel={props.autoApproveJudgeModel}
               showPicker={props.showPermissionPicker}
               showLabel={true}
               onToggle={props.onTogglePermissionPicker}

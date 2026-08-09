@@ -89,7 +89,7 @@ export class AutoApproveJudge {
     let verdictCacheKey: string | null = null;
     const decision = await this.withTimeout(
       (async () => {
-        const model = await this.resolveJudgeModel(request.model);
+        const model = await this.resolveModel(request.model);
         verdictCacheKey = buildVerdictCacheKey(
           permission,
           approvedReferences,
@@ -220,9 +220,7 @@ export class AutoApproveJudge {
     }
   }
 
-  private async resolveJudgeModel(
-    fallbackModel: AutoApproveJudgeRequest['model']
-  ): Promise<JudgeModel | null> {
+  async resolveModel(fallbackModel: AutoApproveJudgeRequest['model']): Promise<JudgeModel | null> {
     return resolveHelperModel({
       configuredModel: this.getConfiguredModel(),
       loadSmallModel: async () => {
