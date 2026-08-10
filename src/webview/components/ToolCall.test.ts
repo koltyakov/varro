@@ -1336,6 +1336,89 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('7s');
   });
 
+  it('shows the running subagent session activity age only while Alt is held', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    setState('sessions', [
+      session('subagent-session-1', {
+        time: { created: 1_000, updated: 7_000 },
+      }),
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { description: 'Inspect the repository' },
+        title: 'Inspect the repository',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 1_000 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+
+    const activityAge = container?.querySelector('.tool-invocation-activity-age');
+    expect(activityAge?.textContent).toBe('last active 3s ago');
+    expect(activityAge?.querySelector('.tool-invocation-activity-time')?.textContent).toBe('3s');
+    expect(activityAge?.getAttribute('title')).toBe('Last session activity');
+    expect(container?.querySelector('.tool-invocation-token-stats')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-duration')).toBeNull();
+
+    vi.advanceTimersByTime(2_000);
+    expect(activityAge?.textContent).toBe('last active 5s ago');
+
+    setState('sessions', 0, 'time', 'updated', 11_000);
+    expect(activityAge?.textContent).toBe('last active 1s ago');
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+    expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-token-stats')?.textContent).toBe('↑ 0 ↓ 0');
+    expect(container?.querySelector('.tool-invocation-duration')?.textContent).toBe('11s');
+  });
+
+  it('clears the running subagent activity age when the window loses focus', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    setState('sessions', [
+      session('subagent-session-1', {
+        time: { created: 1_000, updated: 7_000 },
+      }),
+    ]);
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'task',
+      state: {
+        status: 'running',
+        input: { description: 'Inspect the repository' },
+        title: 'Inspect the repository',
+        metadata: { sessionId: 'subagent-session-1' },
+        time: { start: 1_000 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+    expect(container?.querySelector('.tool-invocation-activity-age')?.textContent).toBe(
+      'last active 3s ago'
+    );
+
+    window.dispatchEvent(new Event('blur'));
+    expect(container?.querySelector('.tool-invocation-activity-age')).toBeNull();
+  });
+
   it('uses subagent session token snapshots when message tokens are unavailable', () => {
     setState('sessions', [
       session('subagent-session-1', {

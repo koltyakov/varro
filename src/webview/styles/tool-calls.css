@@ -1130,21 +1130,39 @@ kbd {
   color: var(--color-vscode-fg);
 }
 
-.chat-tool-invocation-part :is(.tool-invocation-duration, .tool-invocation-token-stats) {
+.chat-tool-invocation-part
+  :is(.tool-invocation-duration, .tool-invocation-activity-age, .tool-invocation-token-stats) {
   display: inline-flex;
   align-self: stretch;
   align-items: center;
 }
 
-.chat-tool-invocation-part .tool-invocation-duration {
-  transform: translateY(1px);
-  font-family: var(--font-mono);
+.chat-tool-invocation-part :is(.tool-invocation-duration, .tool-invocation-activity-age) {
   font-size: 11px;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  color: var(--color-vscode-fg-muted);
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.chat-tool-invocation-part .tool-invocation-duration,
+.chat-tool-invocation-part .tool-invocation-activity-time {
+  font-family: var(--font-mono);
+  color: var(--color-vscode-fg-muted);
+}
+
+.chat-tool-invocation-part .tool-invocation-duration {
+  transform: translateY(1px);
+}
+
+.chat-tool-invocation-part .tool-invocation-activity-age {
+  display: inline;
+  align-self: auto;
+  color: color-mix(in srgb, var(--color-vscode-fg-muted) 58%, transparent);
+}
+
+.chat-tool-invocation-part .tool-invocation-activity-time {
+  margin-inline: 3px;
 }
 
 .chat-tool-invocation-part .tool-invocation-token-stats {

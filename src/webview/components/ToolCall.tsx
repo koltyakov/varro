@@ -64,6 +64,44 @@ const EDIT_TOOL_NAMES = new Set([
 ]);
 const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
+const [taskActivityAltPressed, setTaskActivityAltPressed] = createSignal(false);
+let taskActivityAltListenerCount = 0;
+
+function handleTaskActivityAltKeydown(event: KeyboardEvent) {
+  if (event.key === 'Alt') setTaskActivityAltPressed(true);
+}
+
+function handleTaskActivityAltKeyup(event: KeyboardEvent) {
+  if (event.key === 'Alt') setTaskActivityAltPressed(false);
+}
+
+function handleTaskActivityAltMousemove(event: MouseEvent) {
+  setTaskActivityAltPressed(event.altKey);
+}
+
+function handleTaskActivityAltBlur() {
+  setTaskActivityAltPressed(false);
+}
+
+function retainTaskActivityAltListener() {
+  if (taskActivityAltListenerCount === 0) {
+    window.addEventListener('keydown', handleTaskActivityAltKeydown);
+    window.addEventListener('keyup', handleTaskActivityAltKeyup);
+    window.addEventListener('mousemove', handleTaskActivityAltMousemove);
+    window.addEventListener('blur', handleTaskActivityAltBlur);
+  }
+  taskActivityAltListenerCount += 1;
+
+  return () => {
+    taskActivityAltListenerCount -= 1;
+    if (taskActivityAltListenerCount > 0) return;
+    window.removeEventListener('keydown', handleTaskActivityAltKeydown);
+    window.removeEventListener('keyup', handleTaskActivityAltKeyup);
+    window.removeEventListener('mousemove', handleTaskActivityAltMousemove);
+    window.removeEventListener('blur', handleTaskActivityAltBlur);
+    setTaskActivityAltPressed(false);
+  };
+}
 
 export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
@@ -1359,6 +1397,9 @@ function GenericToolCall(props: {
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
   const [now, setNow] = createSignal(Date.now());
+  onMount(() => {
+    if (isTask()) onCleanup(retainTaskActivityAltListener());
+  });
   createEffect(() => {
     if (!isTask() || props.state.status !== 'running') return;
     setNow(Date.now());
@@ -1369,6 +1410,17 @@ function GenericToolCall(props: {
     if (!isTask() || props.state.status !== 'running') return null;
     return formatDuration(Math.max(0, now() - props.state.time.start)) || '0ms';
   };
+  const taskActivityAgeDuration = () => {
+    if (!taskActivityAltPressed() || !isTask() || props.state.status !== 'running') return null;
+    const sessionId = taskSessionId();
+    if (!sessionId) return null;
+    const updated = appState.sessions.find((session) => session.id === sessionId)?.time.updated;
+    if (updated === undefined) return null;
+    return formatDuration(Math.max(0, now() - updated)) || '0ms';
+  };
+  const visibleTaskTokenUsage = () => (taskActivityAgeDuration() ? null : taskTokenUsage());
+  const visibleRunningDurationLabel = () =>
+    taskActivityAgeDuration() ? null : runningDurationLabel();
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
@@ -1415,7 +1467,7 @@ function GenericToolCall(props: {
           >
             {props.title}
           </span>
-          <Show when={taskTokenUsage()}>
+          <Show when={visibleTaskTokenUsage()}>
             {(tokens) => (
               <span class="tool-invocation-token-stats" title="Subagent tokens">
                 ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
@@ -1425,10 +1477,17 @@ function GenericToolCall(props: {
           <Show when={completedDurationLabel()}>
             <span class="tool-invocation-duration">{completedDurationLabel()}</span>
           </Show>
-          <Show when={runningDurationLabel()}>
+          <Show when={visibleRunningDurationLabel()}>
             <span class="tool-invocation-duration" title="Elapsed time">
-              {runningDurationLabel()}
+              {visibleRunningDurationLabel()}
             </span>
+          </Show>
+          <Show when={taskActivityAgeDuration()}>
+            {(duration) => (
+              <span class="tool-invocation-activity-age" title="Last session activity">
+                last active <span class="tool-invocation-activity-time">{duration()}</span> ago
+              </span>
+            )}
           </Show>
           <Show when={taskRetryStatus()}>
             {(retry) => (
