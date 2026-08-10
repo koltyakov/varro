@@ -21,6 +21,12 @@
   margin-inline: auto;
 }
 
+.chat-header-title-text,
+.chat-header-session-duration {
+  font-size-adjust: 0.52;
+  text-box: trim-both text;
+}
+
 .chat-header-title-text {
   font-size: 12px;
   font-weight: 600;
