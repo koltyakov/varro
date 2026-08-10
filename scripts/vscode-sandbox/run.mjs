@@ -310,7 +310,7 @@ async function runScenario(scenario, vscodeExecutable) {
     await stopFakeCli(pidFile);
     if (conflictServer) await new Promise((resolve) => conflictServer.close(resolve));
     if (keepSandboxes) process.stdout.write(`Kept VS Code sandbox: ${root}\n`);
-    else await rm(root, { recursive: true, force: true });
+    else await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

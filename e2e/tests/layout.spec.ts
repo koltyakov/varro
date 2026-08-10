@@ -2017,6 +2017,9 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
   const list = page.locator('.interactive-list');
   const compactionSelector = '[data-msg-id="message-sticky-large-compaction-user"]';
   await expect(page.locator(compactionSelector)).toBeAttached();
+  await page.locator('[data-msg-id="message-sticky-large-assistant-1"]').evaluate((row) => {
+    (row as HTMLElement).style.paddingBottom = '80px';
+  });
   await list.evaluate((element, selector) => {
     const compaction = element.querySelector(selector);
     if (!compaction) throw new Error('Compaction boundary is not mounted');
@@ -2055,6 +2058,7 @@ test('sticky preview yields before a synthetic compaction boundary', async ({ pa
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
   }, compactionSelector);
+  await expect(page.locator('.latest-user-message-sticky-overlay')).toBeVisible();
   const setupGeometry = await list.evaluate((element, selector) => {
     const compaction = document.querySelector<HTMLElement>(selector);
     const source = document.querySelector<HTMLElement>(

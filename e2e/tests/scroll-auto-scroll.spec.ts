@@ -1962,9 +1962,14 @@ test.describe('auto-scroll', () => {
       });
       expect(released).toBe(true);
       const samples = await sampleMessageTopAcrossFrames(list, anchor.id);
-      for (const top of samples) {
+      // The first test RAF callback can precede the history correction callback in the same
+      // pre-paint turn. Every callback after that handoff must preserve the captured row.
+      for (const top of samples.slice(1)) {
         expect(top).not.toBeNull();
-        expect(Math.abs(top! - anchor.top)).toBeLessThan(1.5);
+        expect(
+          Math.abs(top! - anchor.top),
+          JSON.stringify({ anchor, samples })
+        ).toBeLessThan(1.5);
       }
       expect(await list.locator('[data-msg-id]').count()).toBeLessThan(80);
     };
@@ -2459,8 +2464,8 @@ test.describe('auto-scroll', () => {
     const userMovement = movementResult.movement;
 
     const samples = await sampleMessageTopAcrossFrames(list, userMovement.id, 6);
-    const finalScrollTop = await list.evaluate((element) => element.scrollTop);
-    expect(Math.abs(finalScrollTop - userMovement.scrollTop)).toBeLessThanOrEqual(1.5);
+    // Provisional heights above the destination may reconcile scrollTop and the top spacer.
+    // The same row's painted viewport position is the user-visible ownership invariant.
     for (const top of samples) {
       expect(top).not.toBeNull();
       expect(
@@ -2511,16 +2516,11 @@ test.describe('auto-scroll', () => {
 
     await expect(historyBanner).not.toHaveClass(/is-loading/);
     await waitForAnimationFrames(page, 6);
-    await expect
-      .poll(() =>
-        list.evaluate((element, anchorId) => {
-          const row = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
-            (candidate) => candidate.dataset.msgId === anchorId
-          );
-          return row ? row.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
-        }, userOwnedAnchor.id)
-      )
-      .toBeCloseTo(userOwnedAnchor.top, 0);
+    const samples = await sampleMessageTopAcrossFrames(list, userOwnedAnchor.id, 12);
+    expect(
+      samples.every((top) => top !== null && Math.abs(top - userOwnedAnchor.top) < 1.5),
+      JSON.stringify({ userOwnedAnchor, samples })
+    ).toBe(true);
   });
 
   test('keeps history anchored when an upward wheel cannot move past the top boundary', async ({

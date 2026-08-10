@@ -124,7 +124,8 @@ server.on('error', (error) => {
 server.listen(port, '127.0.0.1', () => {
   process.stdout.write(`Fake OpenCode listening on http://127.0.0.1:${port}\n`);
   if (mode === 'crash-once' && launchCount === 1) {
-    setTimeout(() => process.exit(17), 1500).unref();
+    const crashDelayMs = process.platform === 'win32' ? 8_000 : 1_500;
+    setTimeout(() => process.exit(17), crashDelayMs).unref();
   }
 });
 

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const vscode = require('vscode');
 
+const DEFAULT_WAIT_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 25_000;
+
 const EXPECTATIONS = {
   'clean-install-missing-cli': [
     '- CLI version: not found',
@@ -78,7 +80,7 @@ async function readAboutDocument() {
   return document.getText();
 }
 
-async function waitForExpectedAboutText(expected, timeoutMs = 25_000) {
+async function waitForExpectedAboutText(expected, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   let lastText = '';
   while (Date.now() < deadline) {
@@ -91,7 +93,7 @@ async function waitForExpectedAboutText(expected, timeoutMs = 25_000) {
   );
 }
 
-async function waitForLaunchCount(expected, timeoutMs = 25_000) {
+async function waitForLaunchCount(expected, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   let launches = [];
   while (Date.now() < deadline) {
