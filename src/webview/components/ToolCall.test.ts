@@ -2016,6 +2016,44 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-header')).toBeNull();
   });
 
+  it('shows skipped questions as a compact summary instead of raw JSON', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: {
+        status: 'error',
+        input: {
+          questions: [
+            {
+              question: 'Which machine identifier should be used?',
+              header: 'Machine identity',
+              options: [{ label: 'Anonymous ID', description: 'Use a generated identifier' }],
+            },
+          ],
+        },
+        error: 'QuestionRejectedError: The user dismissed this question',
+        time: { start: 0, end: 1 },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const summary = container?.querySelector('.question-summary-card.is-skipped');
+    expect(summary?.querySelector('.question-summary-title')?.textContent).toBe('Question skipped');
+    expect(summary?.querySelector('.question-summary-question')?.textContent).toBe(
+      'Which machine identifier should be used?'
+    );
+    expect(summary?.querySelector('.question-summary-answer')?.textContent).toBe('Skipped');
+    expect(summary?.querySelector('button, input')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-header')).toBeNull();
+    expect(container?.textContent).not.toContain('Anonymous ID');
+    expect(container?.textContent).not.toContain('QuestionRejectedError');
+  });
+
   it('lets users select a survey option', () => {
     const part: ToolPart = {
       id: 'tool-1',

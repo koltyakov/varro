@@ -158,6 +158,11 @@ continuation to discard: keep the tool card outside compact activity, label it `
 the terminal turn summary with `Permission rejected`. Generic command-level `permission denied`
 errors must not be classified as user rejection.
 
+Skipping a question similarly completes its tool with `QuestionRejectedError` and
+`The user dismissed this question`. Treat that exact error as a stopped turn, label the question tool
+with a compact `Question skipped` summary instead of generic input/error JSON, and render the terminal
+turn summary with `Question skipped`; other question failures remain generic failures.
+
 Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
 reply currently surfaces an error and remains pending for a later permission sync to retry. Do not
 copy that exception into default or auto mode; changes to full mode should prefer adding bounded

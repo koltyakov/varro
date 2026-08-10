@@ -16,6 +16,15 @@
   background: color-mix(in srgb, var(--color-vscode-fg) 2%, transparent);
 }
 
+.question-summary-card.is-skipped {
+  border-color: color-mix(in srgb, var(--color-vscode-warning) 28%, var(--color-vscode-border));
+  background: color-mix(in srgb, var(--color-vscode-warning) 3%, transparent);
+}
+
+.question-summary-card.is-skipped .question-summary-icon {
+  color: var(--color-vscode-warning);
+}
+
 .question-summary-header {
   display: flex;
   align-items: center;
@@ -78,6 +87,12 @@
   color: var(--color-vscode-fg-muted);
   font-style: italic;
   font-weight: 400;
+}
+
+.question-summary-answer.is-skipped {
+  color: var(--color-vscode-warning);
+  font-style: italic;
+  font-weight: 500;
 }
 
 .question-prompt-header {

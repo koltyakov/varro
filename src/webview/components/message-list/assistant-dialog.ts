@@ -1,4 +1,7 @@
-import { isPermissionRejectedToolError } from '../../../shared/error-classification';
+import {
+  isPermissionRejectedToolError,
+  isQuestionSkippedToolError,
+} from '../../../shared/error-classification';
 import { getChildRunsByParentId } from '../../lib/state';
 import {
   isAssistantMessage,
@@ -15,6 +18,7 @@ export type AssistantDialogSummaryInfo = {
   outputTokens: number;
   agentCount: number;
   permissionRejected?: boolean;
+  questionSkipped?: boolean;
   collectingStats?: boolean;
 };
 
@@ -65,7 +69,15 @@ export function getAssistantDialogSummaryMap(
       lastEntry?.parts.some(
         (part) => part.type === 'tool' && isPermissionRejectedToolError(part.state)
       ) ?? false;
-    if (isContinuationAssistantFinish(lastMessage.finish) && !permissionRejected) {
+    const questionSkipped =
+      lastEntry?.parts.some(
+        (part) => part.type === 'tool' && isQuestionSkippedToolError(part.state)
+      ) ?? false;
+    if (
+      isContinuationAssistantFinish(lastMessage.finish) &&
+      !permissionRejected &&
+      !questionSkipped
+    ) {
       resetCurrentDialog();
       return;
     }
@@ -121,6 +133,7 @@ export function getAssistantDialogSummaryMap(
       outputTokens: tokens.output,
       agentCount,
       ...(permissionRejected ? { permissionRejected: true } : {}),
+      ...(questionSkipped ? { questionSkipped: true } : {}),
       collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,
     });
 

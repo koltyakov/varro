@@ -9047,6 +9047,41 @@ describe('MessageList loading row', () => {
     );
   });
 
+  it('shows a skipped question as a stopped turn instead of a failure', async () => {
+    const skippedQuestion = toolPart('tool-1', 'assistant-1');
+    skippedQuestion.tool = 'question';
+    skippedQuestion.state = {
+      status: 'error',
+      input: { questions: [{ question: 'Which identifier should be used?' }] },
+      error: 'QuestionRejectedError: The user dismissed this question',
+      time: { start: 3_000, end: 10_000 },
+    };
+    const interrupted = assistantMessage('assistant-1', {
+      time: { created: 2_000, completed: 11_000 },
+      tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    interrupted.finish = 'tool-calls';
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Help identify this machine')],
+      },
+      { info: interrupted, parts: [skippedQuestion] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.question-summary-title')?.textContent).toBe(
+      'Question skipped'
+    );
+    expect(container?.querySelector('.question-summary-answer')?.textContent).toBe('Skipped');
+    expect(container?.querySelector('.tool-invocation-error-label')).toBeNull();
+    expect(container?.textContent).toContain('Worked for 10s - Question skipped - Tokens ↑ 42 ↓ 7');
+  });
+
   it('does not render the loading row in a draft session when stale messages leak in', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

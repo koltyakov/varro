@@ -90,4 +90,39 @@ describe('getAssistantDialogSummaryMap', () => {
 
     expect([...summaries.keys()]).toEqual(['assistant-parent']);
   });
+
+  it('treats a skipped question as a terminal stopped turn', () => {
+    const skipped = assistantMessage(
+      'assistant-question',
+      'session-parent',
+      'user-1',
+      2_000,
+      3_000
+    );
+    skipped.info.finish = 'tool-calls';
+    skipped.parts = [
+      {
+        id: 'tool-1',
+        sessionID: 'session-parent',
+        messageID: 'assistant-question',
+        type: 'tool',
+        callID: 'call-1',
+        tool: 'question',
+        state: {
+          status: 'error',
+          input: { questions: [] },
+          error: 'QuestionRejectedError: The user dismissed this question',
+          time: { start: 2_100, end: 2_900 },
+        },
+      },
+    ];
+
+    expect(
+      getAssistantDialogSummaryMap(
+        [userMessage('user-1', 'session-parent', 1_000), skipped],
+        undefined,
+        { primarySessionId: 'session-parent' }
+      ).get('assistant-question')
+    ).toMatchObject({ durationMs: 2_000, questionSkipped: true });
+  });
 });

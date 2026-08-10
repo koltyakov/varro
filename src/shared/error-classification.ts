@@ -57,3 +57,8 @@ export function isPermissionRejectedToolError(state: { status: string; error?: s
     'user rejected permission to use this specific tool call'
   );
 }
+
+export function isQuestionSkippedToolError(state: { status: string; error?: string }) {
+  if (state.status !== 'error') return false;
+  return normalizeAbortText(state.error).includes('user dismissed this question');
+}

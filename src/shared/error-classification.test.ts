@@ -5,6 +5,7 @@ import {
   isAbortedToolError,
   isPermissionRejectedToolError,
   isProviderAuthFailure,
+  isQuestionSkippedToolError,
 } from './error-classification';
 
 describe('friendlyErrorName', () => {
@@ -129,6 +130,29 @@ describe('isPermissionRejectedToolError', () => {
       isPermissionRejectedToolError({
         status: 'completed',
         error: 'The user rejected permission to use this specific tool call.',
+      })
+    ).toBe(false);
+  });
+});
+
+describe('isQuestionSkippedToolError', () => {
+  it('detects the OpenCode question rejection error', () => {
+    expect(
+      isQuestionSkippedToolError({
+        status: 'error',
+        error: 'QuestionRejectedError: The user dismissed this question',
+      })
+    ).toBe(true);
+  });
+
+  it('does not confuse other question failures with a skipped question', () => {
+    expect(isQuestionSkippedToolError({ status: 'error', error: 'Question request failed' })).toBe(
+      false
+    );
+    expect(
+      isQuestionSkippedToolError({
+        status: 'completed',
+        error: 'The user dismissed this question',
       })
     ).toBe(false);
   });

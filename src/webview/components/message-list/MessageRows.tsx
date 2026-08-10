@@ -240,7 +240,12 @@ function AssistantDialogSummary(props: {
       : '';
   const agentSuffix = () =>
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
-  const statusSuffix = () => (props.summary.permissionRejected ? ' - Permission rejected' : '');
+  const statusSuffix = () =>
+    props.summary.permissionRejected
+      ? ' - Permission rejected'
+      : props.summary.questionSkipped
+        ? ' - Question skipped'
+        : '';
 
   return (
     <div class="model-change-indicator assistant-dialog-summary">

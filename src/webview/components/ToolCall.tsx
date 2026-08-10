@@ -13,6 +13,7 @@ import {
 import {
   isAbortedToolError,
   isPermissionRejectedToolError,
+  isQuestionSkippedToolError,
 } from '../../shared/error-classification';
 import { asRecord } from '../../shared/type-utils';
 import type {
@@ -233,10 +234,13 @@ type QuestionSummaryItem = {
 };
 
 function getQuestionSummaryItems(state: ToolPart['state']): QuestionSummaryItem[] {
-  if (state.status !== 'completed') return [];
+  if (state.status !== 'completed' && !isQuestionSkippedToolError(state)) return [];
 
   const questions = Array.isArray(state.input.questions) ? state.input.questions : [];
-  const answers = Array.isArray(state.metadata.answers) ? state.metadata.answers : [];
+  const answers =
+    state.status === 'completed' && Array.isArray(state.metadata.answers)
+      ? state.metadata.answers
+      : [];
 
   return questions.flatMap((value, index) => {
     if (!value || typeof value !== 'object') return [];
@@ -566,6 +570,9 @@ export function ToolCall(props: {
   const questionSummaryItems = createMemo(() =>
     isQuestionToolName(tool().tool) ? getQuestionSummaryItems(state()) : []
   );
+  const questionSkipped = createMemo(
+    () => isQuestionToolName(tool().tool) && isQuestionSkippedToolError(state())
+  );
 
   // The full text. Detail views clamp what they render and open the rest in an
   // editor tab, which replaced the old head/tail excerpt - that excerpt could
@@ -604,6 +611,12 @@ export function ToolCall(props: {
   };
 
   const toolContent = () => {
+    if (questionSkipped()) {
+      return (
+        <QuestionToolSummary title="Question skipped" items={questionSummaryItems()} skipped />
+      );
+    }
+
     if (questionSummaryItems().length > 0) {
       return <QuestionToolSummary title={title()} items={questionSummaryItems()} />;
     }
@@ -667,13 +680,19 @@ export function ToolCall(props: {
   );
 }
 
-function QuestionToolSummary(props: { title: string; items: QuestionSummaryItem[] }) {
+function QuestionToolSummary(props: {
+  title: string;
+  items: QuestionSummaryItem[];
+  skipped?: boolean;
+}) {
   return (
-    <div class="chat-tool-invocation-part question-summary-card">
+    <div
+      class={`chat-tool-invocation-part question-summary-card${props.skipped ? ' is-skipped' : ''}`}
+    >
       <div class="question-summary-header">
         <ToolCallIcon
           kind="question"
-          statusClass="tool-status-completed"
+          statusClass={props.skipped ? 'tool-status-aborted' : 'tool-status-completed'}
           class="question-summary-icon"
         />
         <span class="question-summary-title">{props.title}</span>
@@ -684,9 +703,13 @@ function QuestionToolSummary(props: { title: string; items: QuestionSummaryItem[
             <div class="question-summary-item">
               <span class="question-summary-question">{item.question}</span>
               <span
-                class={`question-summary-answer ${item.answers.length === 0 ? 'is-unanswered' : ''}`}
+                class={`question-summary-answer ${props.skipped ? 'is-skipped' : item.answers.length === 0 ? 'is-unanswered' : ''}`}
               >
-                {item.answers.length > 0 ? item.answers.join(', ') : 'Unanswered'}
+                {props.skipped
+                  ? 'Skipped'
+                  : item.answers.length > 0
+                    ? item.answers.join(', ')
+                    : 'Unanswered'}
               </span>
             </div>
           )}
@@ -1217,6 +1240,7 @@ function GenericToolCall(props: {
   const toolName = () => normalizeToolName(props.tool.tool);
   const isAborted = () => isAbortedToolError(props.state);
   const isPermissionRejected = () => isPermissionRejectedToolError(props.state);
+  const isQuestionSkipped = () => isQuestionSkippedToolError(props.state);
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructured = () => isStructuredTool(props.tool.tool);
@@ -1503,9 +1527,15 @@ function GenericToolCall(props: {
           </Show>
           <Show when={props.state.status === 'error' && !isExpanded()}>
             <span
-              class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}${isPermissionRejected() ? ' is-rejected' : ''}`}
+              class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}${isPermissionRejected() || isQuestionSkipped() ? ' is-rejected' : ''}`}
             >
-              {isPermissionRejected() ? 'rejected' : isAborted() ? 'aborted' : 'failed'}
+              {isPermissionRejected()
+                ? 'rejected'
+                : isQuestionSkipped()
+                  ? 'skipped'
+                  : isAborted()
+                    ? 'aborted'
+                    : 'failed'}
             </span>
           </Show>
           <Show when={hasExpandableContent()}>
