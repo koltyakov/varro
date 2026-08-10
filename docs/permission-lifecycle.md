@@ -215,7 +215,9 @@ all tools except structured output. Permission text, command text, paths, metada
 decisions are untrusted input to the judge, never instructions. A confirmed `always` response is
 strong preference evidence for materially similar or narrower non-destructive actions in the same
 conversation tree, but the judge must recheck the complete current details and must not broaden its
-scope.
+scope. The judge prompt defines OpenCode's built-in tool and permission semantics, including that a
+`*` pattern is a rule-matching scope rather than an operation, while treating unknown custom or MCP
+tools as potentially arbitrary.
 
 The judge model is resolved in this order:
 

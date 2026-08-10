@@ -1238,10 +1238,12 @@ describe('AutoApproveJudge', () => {
 
   it('uses the VS Code model setting and keeps the deleted session hidden', async () => {
     const hiddenSessions = new HiddenSessionManager();
+    let judgeMessageBody: { system?: string } | undefined;
     const request = vi.fn(async (method: string, path: string, body?: unknown) => {
       if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
       if (method === 'GET' && path === '/config') return { small_model: 'openai/gpt-5-mini' };
       if (method === 'POST' && path === '/session/judge-session-1/message') {
+        judgeMessageBody = body as { system?: string };
         return {
           info: { structured_output: { decision: 'allow', reason: 'Read-only git remote.' } },
           parts: [],
@@ -1283,6 +1285,8 @@ describe('AutoApproveJudge', () => {
     expect(hiddenSessions.isHidden('judge-session-1')).toBe(false);
     expect(request).toHaveBeenCalledWith('POST', '/session', {
       title: 'Varro permission judge: perm-1',
+      parentID: 'session-1',
+      metadata: { varroInternal: 'permission-judge' },
       permission: expect.any(Array),
     });
     expect(request).toHaveBeenCalledWith(
@@ -1303,6 +1307,18 @@ describe('AutoApproveJudge', () => {
     );
     expect(request).toHaveBeenCalledWith('DELETE', '/session/judge-session-1');
     expect(request).not.toHaveBeenCalledWith('GET', '/config');
+    expect(judgeMessageBody?.system).toContain(
+      'OpenCode, not the model provider, defines and executes its built-in tools'
+    );
+    expect(judgeMessageBody?.system).toContain(
+      '`todowrite` only manages the coding session task list'
+    );
+    expect(judgeMessageBody?.system).toContain(
+      '`*` is a catch-all for that permission, not a shell glob'
+    );
+    expect(judgeMessageBody?.system).toContain(
+      'Unknown custom or MCP tools can have arbitrary side effects'
+    );
   });
 
   it('prefers GPT Luna from a connected provider when small_model is absent', async () => {
@@ -1494,7 +1510,15 @@ describe('AutoApproveJudge', () => {
       if (method === 'POST' && path === '/session') return { id: 'judge-session-1' };
       if (method === 'GET' && path === '/config') return {};
       if (method === 'POST' && path === '/session/judge-session-1/message') {
-        return { info: { structured: { decision: 'allow', reason: 'Current field.' } } };
+        return {
+          info: {
+            structured: {
+              decision: 'allow',
+              reason: 'Current field.',
+              actionSummary: 'Run local build.',
+            },
+          },
+        };
       }
       if (method === 'DELETE' && path === '/session/judge-session-1') return true;
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -1506,6 +1530,7 @@ describe('AutoApproveJudge', () => {
     ).resolves.toEqual({
       decision: 'allow',
       reason: 'Current field.',
+      actionSummary: 'Run local build',
     });
   });
 
@@ -1518,7 +1543,15 @@ describe('AutoApproveJudge', () => {
       }
       if (method === 'GET' && path === '/config') return {};
       if (method === 'POST' && path.endsWith('/message')) {
-        return { info: { structured_output: { decision: 'allow', reason: 'Local build.' } } };
+        return {
+          info: {
+            structured_output: {
+              decision: 'allow',
+              reason: 'Local build.',
+              actionSummary: 'Build the project',
+            },
+          },
+        };
       }
       if (method === 'DELETE') return true;
       throw new Error(`Unexpected request: ${method} ${path}`);
@@ -1528,10 +1561,12 @@ describe('AutoApproveJudge', () => {
     await expect(judge.judge({ permission: cargoBuildPermission('perm-1') })).resolves.toEqual({
       decision: 'allow',
       reason: 'Local build.',
+      actionSummary: 'Build the project',
     });
     await expect(judge.judge({ permission: cargoBuildPermission('perm-2') })).resolves.toEqual({
       decision: 'allow',
       reason: 'Local build.',
+      actionSummary: 'Build the project',
     });
     expect(sessionCount).toBe(1);
   });
@@ -1581,7 +1616,9 @@ describe('AutoApproveJudge', () => {
           schema: expect.objectContaining({
             properties: expect.objectContaining({
               decision: expect.objectContaining({ enum: ['allow', 'reject', 'ask'] }),
+              actionSummary: expect.objectContaining({ maxLength: 80 }),
             }),
+            required: ['decision', 'reason', 'actionSummary'],
           }),
         }),
         parts: [expect.objectContaining({ text: expect.stringContaining('"response": "reject"') })],

@@ -86,7 +86,11 @@ export function addPermission(permission: Permission) {
   );
 }
 
-export function setPermissionAutoApproveReason(permissionId: string, reason: string | undefined) {
+export function setPermissionAutoApprovePresentation(
+  permissionId: string,
+  reason: string | undefined,
+  actionSummary?: string
+) {
   const matchedPermission = state.permissions.find(
     (item) =>
       item.id === permissionId ||
@@ -105,7 +109,10 @@ export function setPermissionAutoApproveReason(permissionId: string, reason: str
           item.duplicateIDs?.includes(permissionId) ||
           item.groupMembers?.some((member) => member.id === permissionId)
       );
-      if (permission) permission.autoApproveReason = reason;
+      if (permission) {
+        permission.autoApproveReason = reason;
+        if (actionSummary) permission.actionSummary = actionSummary;
+      }
     })
   );
 }

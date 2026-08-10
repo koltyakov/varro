@@ -421,6 +421,7 @@ export type Permission = {
   metadata: { [key: string]: unknown };
   time: { created: number };
   autoApproveReason?: string;
+  actionSummary?: string;
   duplicateIDs?: string[];
   groupMembers?: PermissionGroupMember[];
 };

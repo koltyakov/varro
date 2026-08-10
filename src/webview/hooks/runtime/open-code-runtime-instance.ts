@@ -284,19 +284,32 @@ function clearReviewingAutoApproveActivity(permission: Pick<Permission, 'id' | '
   );
 }
 
-function showPermissionAfterJudge(attempt: PermissionJudgeAttempt, reason?: string) {
+function showPermissionAfterJudge(
+  attempt: PermissionJudgeAttempt,
+  reason?: string,
+  actionSummary?: string
+) {
   attempt.permission = {
     ...attempt.permission,
     autoApproveReason: reason,
+    ...(actionSummary ? { actionSummary } : {}),
   };
   if (attempt.status === 'visible') {
-    permissionsStore.setPermissionAutoApproveReason(attempt.permission.id, reason);
+    permissionsStore.setPermissionAutoApprovePresentation(
+      attempt.permission.id,
+      reason,
+      actionSummary
+    );
     return;
   }
 
   attempt.status = 'visible';
   permissionsStore.addPermission(attempt.permission);
-  permissionsStore.setPermissionAutoApproveReason(attempt.permission.id, reason);
+  permissionsStore.setPermissionAutoApprovePresentation(
+    attempt.permission.id,
+    reason,
+    actionSummary
+  );
   postMessage({
     type: 'permission/reveal',
     payload: { permissionId: attempt.permission.id },
@@ -1474,7 +1487,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       return;
     }
     if (outcome.response.decision === 'ask') {
-      showPermissionAfterJudge(attempt, outcome.response.reason);
+      showPermissionAfterJudge(attempt, outcome.response.reason, outcome.response.actionSummary);
       finishPermissionJudgeAttempt(attempt);
       finishAutoApproveActivity(
         permission,
@@ -1510,7 +1523,8 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       if (permissionJudgeAttempts.get(permission.id) === attempt) {
         showPermissionAfterJudge(
           attempt,
-          `Failed to apply the automatic decision: ${getPermissionJudgeErrorMessage(err)}`
+          `Failed to apply the automatic decision: ${getPermissionJudgeErrorMessage(err)}`,
+          outcome.response.actionSummary
         );
         finishAutoApproveActivity(
           permission,

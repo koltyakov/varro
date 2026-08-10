@@ -93,6 +93,7 @@ export type AutoApproveJudgeRequest = {
 export type AutoApproveJudgeResponse = {
   decision: AutoApproveJudgeDecision;
   reason?: string;
+  actionSummary?: string;
 };
 
 export type AutoApproveActivityStatus =

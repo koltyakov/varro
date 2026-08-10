@@ -35,6 +35,7 @@ import {
   scopeOpenCodeRequest,
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
+import { HiddenSessionManager } from './hidden-session-manager';
 import { SessionStateManager } from './session-state-manager';
 
 type SanitizedMessageResponse = {
@@ -123,6 +124,8 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
       filterVisibleSessions: vi.fn(<T>(arr: T[]) => arr) as never,
       filterVisibleSessionStatuses: vi.fn(<T>(obj: Record<string, T>) => obj) as never,
       isHidden: vi.fn(() => false),
+      observeSessionList: vi.fn(() => []),
+      retainUntilDeleted: vi.fn(),
     },
     autoApproveJudge: {
       judge: vi.fn(() => Promise.resolve({ decision: 'ask' as const, reason: 'test' })),
@@ -1640,6 +1643,44 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(16, 'GET', '/session'));
     expect(filterVisible).toHaveBeenCalledWith(sessions);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 16, data: filtered });
+  });
+
+  it('hides and deletes orphaned permission judges discovered in session lists', async () => {
+    const sessions = [
+      { id: 'visible', directory: '/repo', title: 'Visible session' },
+      {
+        id: 'legacy-judge',
+        directory: '/repo',
+        title: 'Varro permission judge: per_legacy',
+        time: { updated: Date.now() - 180_000 },
+      },
+      {
+        id: 'marked-judge',
+        directory: '/repo',
+        title: 'Internal helper',
+        metadata: { varroInternal: 'permission-judge' },
+        time: { updated: Date.now() - 180_000 },
+      },
+    ];
+    const serverRequest = vi.fn((method: string) =>
+      Promise.resolve(method === 'GET' ? sessions : true)
+    );
+    const hiddenSessions = new HiddenSessionManager();
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      hiddenSessions,
+    });
+
+    await proxy.handleRequest(makePayload(161, 'GET', '/session?limit=3'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 161,
+      data: { items: [sessions[0]], hasMore: false },
+    });
+    await vi.waitFor(() => {
+      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/legacy-judge');
+      expect(serverRequest).toHaveBeenCalledWith('DELETE', '/session/marked-judge');
+    });
   });
 
   it('filters session list to the exact current workspace directory', async () => {

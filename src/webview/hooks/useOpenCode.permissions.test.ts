@@ -141,7 +141,11 @@ describe('useOpenCode permission and config flows', () => {
     const serverEventHandlers = captureServerEventHandlers();
     configureReconciliationMocks();
     clientMocks.permissionList.mockResolvedValue([permissionListItem()]);
-    clientMocks.varroJudgePermission.mockResolvedValue({ decision: 'ask', reason: 'review' });
+    clientMocks.varroJudgePermission.mockResolvedValue({
+      decision: 'ask',
+      reason: 'review',
+      actionSummary: 'Check installed tool versions',
+    });
 
     const { stateModule, hookModule } = await loadModules();
     stateModule.setPermissionModeForSession('session-1', 'auto');
@@ -155,7 +159,11 @@ describe('useOpenCode permission and config flows', () => {
 
       await vi.waitFor(() =>
         expect(stateModule.state.permissions).toEqual([
-          expect.objectContaining({ id: 'perm-1', autoApproveReason: 'review' }),
+          expect.objectContaining({
+            id: 'perm-1',
+            autoApproveReason: 'review',
+            actionSummary: 'Check installed tool versions',
+          }),
         ])
       );
       expect(clientMocks.varroJudgePermission).toHaveBeenCalledTimes(1);

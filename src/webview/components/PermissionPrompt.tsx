@@ -1,6 +1,7 @@
 import { Show, createSignal } from 'solid-js';
 import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
+import { getPermissionModeForSession } from '../lib/state-permission-modes';
 import { CopyIconButton } from './CopyIconButton';
 
 const respondingPermissionIds = new Set<string>();
@@ -18,6 +19,7 @@ export function PermissionPrompt(props: {
   queueTotal?: number;
 }) {
   const sessionId = () => props.permission.sessionID;
+  const isAutoApproveMode = () => getPermissionModeForSession(sessionId()) === 'auto';
   const responding = () => {
     respondingPermissionVersion();
     return respondingPermissionIds.has(props.permission.id);
@@ -42,6 +44,19 @@ export function PermissionPrompt(props: {
     const meta = props.permission.metadata;
     if (!meta || typeof meta !== 'object') return [];
     return Object.entries(meta).filter(([, v]) => v !== undefined && v !== null);
+  };
+  const displayTitle = () => {
+    const summary = props.permission.actionSummary?.trim();
+    if (summary) return summary;
+    const command = props.permission.metadata?.command;
+    if (
+      (props.permission.type === 'bash' || props.permission.type === 'shell') &&
+      typeof command === 'string' &&
+      command.trim()
+    ) {
+      return 'Run command';
+    }
+    return props.permission.title;
   };
 
   return (
@@ -77,40 +92,41 @@ export function PermissionPrompt(props: {
         </Show>
       </div>
 
-      <div class="permission-prompt-text-shell">
-        <span class="permission-prompt-text">{props.permission.title}</span>
-        <CopyIconButton text={props.permission.title} label="permission request" />
-      </div>
-
-      <Show when={metadataEntries().length > 0 || Boolean(props.permission.autoApproveReason)}>
-        <div class="permission-prompt-details">
-          <Show when={metadataEntries().length > 0}>
-            <div class="permission-prompt-meta">
-              {metadataEntries().map(([key, value]) => {
-                const text = formatMetadataValue(value);
-                return (
-                  <div class="permission-meta-entry">
-                    <span class="permission-meta-key">{key}</span>
-                    <div class="permission-meta-value-shell">
-                      <span class="permission-meta-value">{text}</span>
-                      <CopyIconButton text={text} label={key} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Show>
-
-          <Show when={props.permission.autoApproveReason}>
-            {(reason) => (
-              <div class="permission-prompt-auto-reason">
-                <span class="permission-prompt-auto-reason-label">AI check</span>
-                <span>{reason()}</span>
-              </div>
-            )}
-          </Show>
+      <div class="permission-prompt-content">
+        <div class="permission-prompt-text-shell">
+          <span class="permission-prompt-text">{displayTitle()}</span>
         </div>
-      </Show>
+
+        <Show when={metadataEntries().length > 0 || Boolean(props.permission.autoApproveReason)}>
+          <div class="permission-prompt-details">
+            <Show when={metadataEntries().length > 0}>
+              <div class="permission-prompt-meta">
+                {metadataEntries().map(([key, value]) => {
+                  const text = formatMetadataValue(value);
+                  return (
+                    <div class="permission-meta-entry">
+                      <span class="permission-meta-key">{key}</span>
+                      <div class="permission-meta-value-shell">
+                        <span class="permission-meta-value">{text}</span>
+                        <CopyIconButton text={text} label={key} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Show>
+
+            <Show when={props.permission.autoApproveReason}>
+              {(reason) => (
+                <div class="permission-prompt-auto-reason">
+                  <span class="permission-prompt-auto-reason-label">AI check</span>
+                  <span>{reason()}</span>
+                </div>
+              )}
+            </Show>
+          </div>
+        </Show>
+      </div>
 
       <Show when={duplicateCount() > 1}>
         <div class="permission-prompt-group-note">
@@ -120,8 +136,11 @@ export function PermissionPrompt(props: {
       </Show>
 
       <div class="permission-prompt-scope-note">
-        "Always allow" covers matching requests. In Auto approve mode, it also guides AI review
-        toward similar non-destructive actions.
+        "Always allow" covers matching requests.
+        <Show when={isAutoApproveMode()}>
+          {' '}
+          In Auto approve mode, it also guides AI review toward similar non-destructive actions.
+        </Show>
       </div>
 
       <div class="permission-prompt-actions">
@@ -141,7 +160,11 @@ export function PermissionPrompt(props: {
         <button
           class="question-btn question-btn-secondary"
           aria-label="Allow always"
-          title="Allow matching future requests and guide AI review of similar non-destructive actions"
+          title={
+            isAutoApproveMode()
+              ? 'Allow matching future requests and guide AI review of similar non-destructive actions'
+              : 'Allow matching future requests'
+          }
           disabled={responding()}
           onClick={() => handleRespond('always')}
         >

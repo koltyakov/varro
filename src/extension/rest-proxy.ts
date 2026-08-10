@@ -112,6 +112,8 @@ export interface RestProxyCallbacks {
     | 'filterVisibleSessionStatuses'
     | 'filterVisibleSessions'
     | 'isHidden'
+    | 'observeSessionList'
+    | 'retainUntilDeleted'
   >;
   autoApproveJudge: Pick<AutoApproveJudge, 'judge' | 'resolveModel'>;
   sessionTitleFallback: Pick<SessionTitleFallback, 'renameIfUntitled'>;
@@ -128,6 +130,7 @@ export class RestProxy {
   private sessionDirectories = new Map<string, string>();
   private hasSessionDirectorySnapshot = false;
   private sessionDirectoryBootstrapPromise: Promise<ReadonlyMap<string, string>> | null = null;
+  private readonly permissionJudgeCleanupRequests = new Set<string>();
   private sessionSummaryListRequest: { expiresAt: number; request: Promise<unknown> } | null = null;
   private sessionSummaryRequests = new Map<string, SessionSummaryCacheEntry>();
   private activeSessionSummaryDescendantRequests = 0;
@@ -655,7 +658,17 @@ export class RestProxy {
     if (cached && cached.expiresAt > now) {
       return cached.request;
     }
-    const request = this.callbacks.server.request('GET', FULL_SESSION_LIST_PATH);
+    const request = this.callbacks.server
+      .request('GET', FULL_SESSION_LIST_PATH)
+      .then((sessions) => {
+        if (!Array.isArray(sessions)) return sessions;
+        this.observePermissionJudgeSessions(sessions);
+        return this.callbacks.hiddenSessions.filterVisibleSessions(
+          sessions.filter(
+            (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
+          )
+        );
+      });
     const entry = {
       expiresAt: now + SESSION_SUMMARY_CACHE_TTL_MS,
       request,
@@ -761,6 +774,7 @@ export class RestProxy {
     complete: boolean,
     preserveCompleteSnapshot = false
   ) {
+    this.observePermissionJudgeSessions(sessions);
     this.recordSessionDirectories(sessions, complete, preserveCompleteSnapshot);
     for (const session of sessions) {
       const info = asRecord(session);
@@ -769,6 +783,44 @@ export class RestProxy {
         type: 'session.updated',
         properties: { info },
       });
+    }
+  }
+
+  private observePermissionJudgeSessions(sessions: unknown[]) {
+    this.cleanupStalePermissionJudgeSessions(
+      this.callbacks.hiddenSessions.observeSessionList(
+        sessions.filter(
+          (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
+        )
+      )
+    );
+  }
+
+  private cleanupStalePermissionJudgeSessions(sessionIDs: string[]) {
+    for (const sessionID of sessionIDs) {
+      if (this.permissionJudgeCleanupRequests.has(sessionID)) continue;
+      this.permissionJudgeCleanupRequests.add(sessionID);
+      void this.callbacks.server
+        .request('DELETE', `/session/${encodeURIComponent(sessionID)}`)
+        .then(
+          (deleted) => {
+            if (deleted === true) {
+              this.callbacks.hiddenSessions.retainUntilDeleted(sessionID);
+            } else {
+              logger.warn(
+                `Failed to delete stale permission judge session ${sessionID}: OpenCode did not confirm deletion`
+              );
+            }
+          },
+          (err) => {
+            logger.warn(
+              `Failed to delete stale permission judge session ${sessionID}: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        )
+        .finally(() => this.permissionJudgeCleanupRequests.delete(sessionID));
     }
   }
 

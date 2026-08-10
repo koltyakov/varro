@@ -4,10 +4,15 @@ import type { Permission } from '../types';
 
 const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
+  permissionMode: 'default' as 'default' | 'auto' | 'full',
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({
   respondPermission: mocks.respondPermission,
+}));
+
+vi.mock('../lib/state-permission-modes', () => ({
+  getPermissionModeForSession: () => mocks.permissionMode,
 }));
 
 import { PermissionPrompt } from './PermissionPrompt';
@@ -33,6 +38,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   mocks.respondPermission.mockReset();
   mocks.respondPermission.mockResolvedValue(undefined);
+  mocks.permissionMode = 'default';
 });
 
 afterEach(() => {
@@ -63,7 +69,19 @@ describe('PermissionPrompt', () => {
     expect(container?.querySelector('.permission-prompt')?.classList).not.toContain(
       'animate-fade-in'
     );
-    expect(buttons[1]?.getAttribute('title')).toContain('matching future requests');
+    expect(buttons[1]?.getAttribute('title')).toBe('Allow matching future requests');
+    const scopeNote = container?.querySelector('.permission-prompt-scope-note')?.textContent;
+    expect(scopeNote).toContain('"Always allow" covers matching requests.');
+    expect(scopeNote).not.toContain('guides AI review');
+  });
+
+  it('explains how always approval guides review in auto approve mode', () => {
+    mocks.permissionMode = 'auto';
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('[aria-label="Allow always"]')?.title
+    ).toContain('guide AI review');
     expect(container?.querySelector('.permission-prompt-scope-note')?.textContent).toContain(
       'guides AI review toward similar non-destructive actions'
     );
@@ -119,38 +137,51 @@ describe('PermissionPrompt', () => {
     expect(reason?.textContent).toContain('The command needs manual confirmation.');
   });
 
-  it('renders single-line title and metadata values with full-text copy controls', async () => {
+  it('renders a human-friendly action summary and the full command only once', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    const parameters = { command: 'x'.repeat(1_300) };
-    const text = JSON.stringify(parameters);
-    const title = `external_directory ${'/tmp/'.repeat(100)}*`;
+    const command = 'x'.repeat(1_300);
+    const title = `bash ${command}`;
 
     cleanup = render(
       () =>
         PermissionPrompt({
-          permission: createPermission({ title, metadata: { parameters } }),
+          permission: createPermission({
+            title,
+            actionSummary: 'Check installed tool versions',
+            metadata: { command },
+          }),
         }),
       container!
     );
 
-    const value = container?.querySelector('.permission-meta-value');
-    expect(value?.textContent).toBe(text);
-    expect(value?.tagName).toBe('SPAN');
-
-    const titleCopy = container?.querySelector<HTMLButtonElement>(
-      '.permission-prompt-text-shell button'
+    expect(container?.querySelector('.permission-prompt-text')?.textContent).toBe(
+      'Check installed tool versions'
     );
-    titleCopy?.click();
-    await Promise.resolve();
-
-    expect(writeText).toHaveBeenCalledWith(title);
+    const value = container?.querySelector('.permission-meta-value');
+    expect(value?.textContent).toBe(command);
+    expect(value?.tagName).toBe('SPAN');
+    expect(container?.textContent?.split(command)).toHaveLength(2);
+    expect(container?.querySelector('.permission-prompt-text-shell button')).toBeNull();
 
     const copy = container?.querySelector<HTMLButtonElement>('.permission-meta-entry button');
     copy?.click();
     await Promise.resolve();
 
-    expect(writeText).toHaveBeenCalledWith(text);
+    expect(writeText).toHaveBeenCalledWith(command);
+  });
+
+  it('uses a generic shell action name when no model summary is available', () => {
+    cleanup = render(
+      () =>
+        PermissionPrompt({
+          permission: createPermission({ metadata: { command: 'npm run test' } }),
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.permission-prompt-text')?.textContent).toBe('Run command');
+    expect(container?.querySelector('.permission-meta-value')?.textContent).toBe('npm run test');
   });
 
   it.each([

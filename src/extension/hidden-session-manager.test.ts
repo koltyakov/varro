@@ -39,6 +39,78 @@ describe('HiddenSessionManager', () => {
     expect(manager.isHidden('other-session')).toBe(false);
   });
 
+  it('recognizes permission judges after the extension host restarts', () => {
+    const manager = new HiddenSessionManager();
+    const now = 1_000_000;
+
+    manager.observeEvent({
+      type: 'session.updated',
+      properties: {
+        info: {
+          id: 'marked-judge',
+          title: 'Internal helper',
+          metadata: { varroInternal: 'permission-judge' },
+        },
+      },
+    });
+    const stale = manager.observeSessionList(
+      [
+        { id: 'visible', title: 'Visible session' },
+        {
+          id: 'legacy-judge',
+          title: 'Varro permission judge: per_legacy',
+          time: { updated: now - 180_000 },
+        },
+        {
+          id: 'marked-judge',
+          title: 'Internal helper',
+          metadata: { varroInternal: 'permission-judge' },
+          time: { created: now - 180_000 },
+        },
+      ],
+      now
+    );
+
+    expect(stale).toEqual(['legacy-judge', 'marked-judge']);
+    expect(
+      manager
+        .filterVisibleSessions([
+          { id: 'visible', title: 'Visible session' },
+          { id: 'legacy-judge', title: 'Varro permission judge: per_legacy' },
+          { id: 'marked-judge', title: 'Internal helper' },
+        ])
+        .map(({ id }) => id)
+    ).toEqual(['visible']);
+  });
+
+  it('does not classify an active permission judge as stale', () => {
+    const manager = new HiddenSessionManager();
+    const title = 'Varro permission judge: per_active';
+    manager.registerPendingTitle(title);
+
+    expect(manager.observeSessionList([{ id: 'active-judge', title }])).toEqual([]);
+    expect(manager.isHidden('active-judge')).toBe(true);
+  });
+
+  it('hides but does not delete a recent judge owned by another window', () => {
+    const manager = new HiddenSessionManager();
+    const now = 1_000_000;
+
+    expect(
+      manager.observeSessionList(
+        [
+          {
+            id: 'recent-judge',
+            title: 'Varro permission judge: per_recent',
+            time: { updated: now - 30_000 },
+          },
+        ],
+        now
+      )
+    ).toEqual([]);
+    expect(manager.isHidden('recent-judge')).toBe(true);
+  });
+
   it('supports hide and unhide without exposing its internal set', () => {
     const manager = new HiddenSessionManager();
     manager.hide('hidden-session');
