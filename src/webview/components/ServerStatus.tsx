@@ -431,7 +431,7 @@ function UpdateState(props: { message: string; detail: ServerErrorDetail }) {
         : 'OpenCode update required';
 
   return (
-    <div class="flex w-full max-w-75 flex-col items-center gap-4 text-center">
+    <div class="flex w-full max-w-90 flex-col items-center gap-4 text-center">
       <Show when={isWaiting()} fallback={<UpdateIcon />}>
         <WaitingIcon />
       </Show>
