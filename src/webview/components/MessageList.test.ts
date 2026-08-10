@@ -44,7 +44,7 @@ import {
   getStandaloneQuestionPrompts,
   reconcilePendingPermissionSequence,
 } from './message-list/pending-prompts';
-import { getVisibleThreadMessages } from './message-list/thread-visibility';
+import { getRenderedMessages, getVisibleThreadMessages } from './message-list/thread-visibility';
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
@@ -5592,6 +5592,45 @@ describe('standalone action prompts', () => {
         'session-1'
       )
     ).toEqual(permissions);
+  });
+
+  it('keeps linked permissions visible when their tool row is inside a pinned virtual gap', () => {
+    const messages = Array.from({ length: 60 }, (_, index) => {
+      const messageId = `assistant-${index}`;
+      return {
+        info: assistantMessage(messageId),
+        parts:
+          index === 20
+            ? [toolPart('tool-1', messageId, 'call-1')]
+            : [textPart(`text-${index}`, `Response ${index}`)],
+      };
+    });
+    const permissions: Permission[] = [
+      {
+        id: 'perm-1',
+        type: 'bash',
+        sessionID: 'session-1',
+        messageID: 'assistant-20',
+        callID: 'call-1',
+        title: 'Allow bash',
+        metadata: {},
+        time: { created: 1 },
+      },
+    ];
+    const renderedMessages = getRenderedMessages(
+      messages,
+      {
+        start: 0,
+        end: 50,
+        pinnedGapStart: 10,
+        pinnedGapEnd: 40,
+      },
+      true
+    );
+
+    expect(getStandalonePermissionPrompts(renderedMessages, permissions, 'session-1')).toEqual(
+      permissions
+    );
   });
 
   it('keeps unmatched questions visible as standalone prompts', () => {

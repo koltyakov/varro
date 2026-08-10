@@ -342,7 +342,9 @@ function isWorkspaceEditPermission(
   if (!workspace) return false;
 
   const paths = collectPermissionPaths(permission);
-  return paths.length > 0 && paths.every((item) => isWorkspacePath(item, workspace));
+  return (
+    paths !== null && paths.length > 0 && paths.every((item) => isWorkspacePath(item, workspace))
+  );
 }
 
 function isEditPermissionType(permission: NormalizedJudgePermission) {
@@ -442,10 +444,18 @@ function hasDeletedFileChange(metadata: Record<string, unknown>) {
 
 function collectPermissionPaths(permission: NormalizedJudgePermission) {
   const paths: string[] = [];
+  let ambiguous = false;
   const addPath = (value: unknown) => {
-    if (typeof value !== 'string') return;
+    if (value === undefined || value === null) return;
+    if (typeof value !== 'string') {
+      ambiguous = true;
+      return;
+    }
     const trimmed = value.trim();
-    if (!trimmed || /[*?[\]{}]/.test(trimmed)) return;
+    if (!trimmed || /[*?[\]{}]/.test(trimmed)) {
+      ambiguous = true;
+      return;
+    }
     paths.push(trimmed);
   };
   const addRecordPaths = (record: Record<string, unknown> | null) => {
@@ -457,7 +467,11 @@ function collectPermissionPaths(permission: NormalizedJudgePermission) {
 
   addRecordPaths(permission.metadata);
   if (Array.isArray(permission.metadata.files)) {
-    for (const item of permission.metadata.files) addRecordPaths(asRecord(item));
+    for (const item of permission.metadata.files) {
+      const record = asRecord(item);
+      if (!record) ambiguous = true;
+      else addRecordPaths(record);
+    }
   }
   if (Array.isArray(permission.pattern)) {
     for (const item of permission.pattern) addPath(item);
@@ -467,7 +481,7 @@ function collectPermissionPaths(permission: NormalizedJudgePermission) {
   const titlePath = permission.title.match(/^(?:edit|apply_patch|patch|write)\s+(.+)$/i)?.[1];
   addPath(titlePath);
 
-  return [...new Set(paths)];
+  return ambiguous ? null : [...new Set(paths)];
 }
 
 type CanonicalWorkspace = {
@@ -781,7 +795,7 @@ function describePermissionSubject(permission: NormalizedJudgePermission) {
   }
   if (isEditPermissionType(permission)) {
     const paths = collectPermissionPaths(permission);
-    if (paths.length > 0) return paths.join(', ');
+    if (paths && paths.length > 0) return paths.join(', ');
   }
   return permission.title;
 }

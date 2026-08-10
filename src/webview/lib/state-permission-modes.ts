@@ -17,11 +17,14 @@ import { readStoredPermissionModes } from './state-stored-values';
 export function getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode {
   if (!sessionId) return draftPermissionMode();
 
-  const sessionMode = state.sessionPermissionModes[sessionId];
-  if (sessionMode) return sessionMode;
-
-  const parentId = state.sessions.find((session) => session.id === sessionId)?.parentID;
-  if (parentId) return getPermissionModeForSession(parentId);
+  const visited = new Set<string>();
+  let currentSessionId: string | undefined = sessionId;
+  while (currentSessionId && !visited.has(currentSessionId)) {
+    visited.add(currentSessionId);
+    const sessionMode = state.sessionPermissionModes[currentSessionId];
+    if (sessionMode) return sessionMode;
+    currentSessionId = state.sessions.find((session) => session.id === currentSessionId)?.parentID;
+  }
 
   return 'default';
 }

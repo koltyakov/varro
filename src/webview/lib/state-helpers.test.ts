@@ -666,6 +666,34 @@ describe('state helpers', () => {
     expect(stateModule.getPermissionModeForSession('child-1')).toBe('default');
   });
 
+  it('falls back to default when session ancestry is cyclic', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSessions([
+      {
+        id: 'session-a',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-b',
+        title: 'Session A',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+      {
+        id: 'session-b',
+        projectID: 'project-1',
+        directory: '/repo',
+        parentID: 'session-a',
+        title: 'Session B',
+        version: '1',
+        time: { created: 1, updated: 1 },
+      },
+    ]);
+
+    expect(stateModule.getPermissionModeForSession('session-a')).toBe('default');
+    expect(stateModule.getPermissionModeForSession('session-b')).toBe('default');
+  });
+
   it('persists current document auto-context by project', async () => {
     (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
       editorContext: {

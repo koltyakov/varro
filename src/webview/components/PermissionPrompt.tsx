@@ -3,6 +3,9 @@ import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
 import { CopyIconButton } from './CopyIconButton';
 
+const respondingPermissionIds = new Set<string>();
+const [respondingPermissionVersion, setRespondingPermissionVersion] = createSignal(0);
+
 function formatMetadataValue(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -15,17 +18,23 @@ export function PermissionPrompt(props: {
   queueTotal?: number;
 }) {
   const sessionId = () => props.permission.sessionID;
-  const [responding, setResponding] = createSignal(false);
+  const responding = () => {
+    respondingPermissionVersion();
+    return respondingPermissionIds.has(props.permission.id);
+  };
   const duplicateCount = () =>
     props.permission.groupMembers?.length || props.permission.duplicateIDs?.length || 0;
 
   const handleRespond = async (response: 'once' | 'always' | 'reject') => {
-    if (responding()) return;
-    setResponding(true);
+    const permissionId = props.permission.id;
+    if (respondingPermissionIds.has(permissionId)) return;
+    respondingPermissionIds.add(permissionId);
+    setRespondingPermissionVersion((version) => version + 1);
     try {
-      await respondPermission(sessionId(), props.permission.id, response);
+      await respondPermission(sessionId(), permissionId, response);
     } finally {
-      setResponding(false);
+      respondingPermissionIds.delete(permissionId);
+      setRespondingPermissionVersion((version) => version + 1);
     }
   };
 
@@ -105,7 +114,8 @@ export function PermissionPrompt(props: {
 
       <Show when={duplicateCount() > 1}>
         <div class="permission-prompt-group-note">
-          Requested {duplicateCount()} times in parallel - one response applies to all.
+          Requested {duplicateCount()} times in parallel. Allow once handles one request; Reject
+          handles all {duplicateCount()}.
         </div>
       </Show>
 

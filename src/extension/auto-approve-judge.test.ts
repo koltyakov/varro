@@ -306,6 +306,41 @@ describe('AutoApproveJudge', () => {
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
+  it('does not locally allow an edit when any requested path is ambiguous', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge(
+      { request, getWorkspaceCwd: () => workspace } as never,
+      new HiddenSessionManager()
+    );
+    const filePath = join(workspace, 'src', 'app.ts');
+    const wildcardPath = join(workspace, 'src', '*.ts');
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-ambiguous-pattern',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit src/app.ts',
+          pattern: [filePath, wildcardPath],
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-ambiguous-files',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit src/app.ts',
+          metadata: { files: [{ filePath }, { filePath: wildcardPath }] },
+        },
+      })
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
   it('does not locally allow relative edit paths that escape the workspace', async () => {
     const { workspace } = createTemporaryWorkspace();
     const request = createAskJudgeRequest();

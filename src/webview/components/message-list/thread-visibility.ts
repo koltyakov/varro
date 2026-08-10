@@ -5,10 +5,31 @@ import type { MessageEntry, Part, Session } from '../../types';
 
 export function getRenderedMessages(
   messages: MessageEntry[],
-  range: { start: number; end: number },
-  shouldVirtualize: boolean
+  range: {
+    start: number;
+    end: number;
+    pinnedGapStart?: number;
+    pinnedGapEnd?: number;
+  },
+  shouldVirtualize: boolean,
+  forceVirtualContent?: (messageId: string) => boolean
 ) {
-  return shouldVirtualize ? messages.slice(range.start, range.end) : messages;
+  if (!shouldVirtualize) return messages;
+  if (
+    range.pinnedGapStart === undefined ||
+    range.pinnedGapEnd === undefined ||
+    range.pinnedGapStart >= range.pinnedGapEnd
+  ) {
+    return messages.slice(range.start, range.end);
+  }
+
+  return [
+    ...messages.slice(range.start, range.pinnedGapStart),
+    ...messages
+      .slice(range.pinnedGapStart, range.pinnedGapEnd)
+      .filter((message) => forceVirtualContent?.(message.info.id)),
+    ...messages.slice(range.pinnedGapEnd, range.end),
+  ];
 }
 
 function shouldHideThreadMessage(

@@ -1648,16 +1648,25 @@ export function MessageList() {
       range.end < ids.length && lastRow.getBoundingClientRect().bottom < containerRect.bottom - 1
     );
   }
-  const renderedMessages = createMemo(() =>
-    getRenderedMessages(messages(), visibleRange(), shouldVirtualize())
+  const pendingPermissionSequence = createMemo<PendingPermissionSequence>((previous) =>
+    reconcilePendingPermissionSequence(previous, state.permissions, state.activeSessionId)
   );
+  const renderedMessages = createMemo(() => {
+    measurementVersion();
+    const activePermissionMessageId = pendingPermissionSequence().activePermission?.messageID;
+    return getRenderedMessages(messages(), visibleRange(), shouldVirtualize(), (messageId) => {
+      return (
+        forcedVirtualContentMessageIds.has(messageId) ||
+        viewportForcedVirtualContentMessageIds.has(messageId) ||
+        displayedStickyUserMessagePreview()?.id === messageId ||
+        activePermissionMessageId === messageId
+      );
+    });
+  });
   const linkedToolCalls = createMemo(() => {
     messageStructureVersion();
     return getLinkedToolCallKeys(renderedMessages());
   });
-  const pendingPermissionSequence = createMemo<PendingPermissionSequence>((previous) =>
-    reconcilePendingPermissionSequence(previous, state.permissions, state.activeSessionId)
-  );
   let previousActivePermissionId: string | null | undefined;
   createEffect(() => {
     const permissionId = pendingPermissionSequence().activePermission?.id ?? null;
@@ -5986,7 +5995,8 @@ export function MessageList() {
                 return (
                   forcedVirtualContentMessageIds.has(messageId) ||
                   viewportForcedVirtualContentMessageIds.has(messageId) ||
-                  displayedStickyUserMessagePreview()?.id === messageId
+                  displayedStickyUserMessagePreview()?.id === messageId ||
+                  pendingPermissionSequence().activePermission?.messageID === messageId
                 );
               }}
               canReleaseVirtualPlaceholders={() =>

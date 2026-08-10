@@ -31,7 +31,8 @@ function createPermission(overrides: Partial<Permission> = {}): Permission {
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
-  mocks.respondPermission.mockClear();
+  mocks.respondPermission.mockReset();
+  mocks.respondPermission.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -68,7 +69,7 @@ describe('PermissionPrompt', () => {
     );
   });
 
-  it('explains grouped requests and that one response applies to all', () => {
+  it('explains the response scope for grouped requests', () => {
     cleanup = render(
       () =>
         PermissionPrompt({
@@ -91,7 +92,8 @@ describe('PermissionPrompt', () => {
 
     const note = container?.querySelector('.permission-prompt-group-note');
     expect(note?.textContent).toContain('Requested 2 times in parallel');
-    expect(note?.textContent).toContain('one response applies to all');
+    expect(note?.textContent).toContain('Allow once handles one request');
+    expect(note?.textContent).toContain('Reject handles all 2');
   });
 
   it('hides the group note for a single request', () => {
@@ -163,5 +165,43 @@ describe('PermissionPrompt', () => {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(mocks.respondPermission).toHaveBeenCalledWith('session-1', 'permission-1', response);
+  });
+
+  it('keeps a permission response locked across prompt remounts', async () => {
+    let resolveResponse!: () => void;
+    mocks.respondPermission.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Allow once"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(
+      [
+        ...(container?.querySelectorAll<HTMLButtonElement>('.permission-prompt-actions button') ||
+          []),
+      ].every((button) => button.disabled)
+    ).toBe(true);
+
+    cleanup();
+    cleanup = render(() => PermissionPrompt({ permission: createPermission() }), container!);
+    const remountedButtons = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('.permission-prompt-actions button') ||
+        []),
+    ];
+    expect(remountedButtons.every((button) => button.disabled)).toBe(true);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Reject"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(mocks.respondPermission).toHaveBeenCalledTimes(1);
+
+    resolveResponse();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(remountedButtons.every((button) => !button.disabled)).toBe(true);
   });
 });
