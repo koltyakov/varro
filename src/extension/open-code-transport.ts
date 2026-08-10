@@ -1,5 +1,5 @@
-import type { ServerStatus } from '../shared/protocol';
 import { parseHealthResponse } from '../shared/health';
+import { parseServerEvent, type ServerStatus } from '../shared/protocol';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
 import { getOpenCodeDirectoryHeaders, scopeOpenCodeRequest } from './util/opencode-request';
@@ -431,11 +431,10 @@ export class OpenCodeTransport {
   }
 
   private observeServerEvent(event: unknown) {
-    const evt = asRecord(event);
-    const envelope = asRecord(evt?.payload) || evt;
-    const type = getString(envelope?.type);
-    const props = asRecord(envelope?.properties) || asRecord(envelope?.data);
-    if (!type) return;
+    const parsed = parseServerEvent(event);
+    if (!parsed) return;
+    const type = parsed.type;
+    const props = asRecord(parsed.properties);
     const requestProps = asRecord(props?.info) || props;
 
     switch (type) {

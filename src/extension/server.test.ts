@@ -2133,6 +2133,38 @@ describe('OpenCodeServer restart blockers', () => {
     expect(request).toHaveBeenCalledWith('GET', '/permission', undefined, { unscoped: true });
   });
 
+  it('includes a synchronized attention ask when restart snapshots are empty', async () => {
+    const server = new OpenCodeServer(4096, true);
+    const request = vi.fn(async (_method: string, path: string) => {
+      if (path === '/session/status') return {};
+      if (path === '/question' || path === '/permission' || path === '/session') return [];
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const transport = (
+      server as unknown as {
+        transport: {
+          observeServerEvent(event: unknown): void;
+          request: typeof request;
+        };
+      }
+    ).transport;
+    transport.request = request;
+    transport.observeServerEvent({
+      payload: {
+        type: 'sync',
+        syncEvent: {
+          type: 'permission.asked.1',
+          data: { id: 'permission-1', sessionID: 'session-1' },
+        },
+      },
+    });
+
+    await expect(server.readRestartBlockers()).resolves.toEqual({
+      totalSessionCount: 1,
+      directories: [{ directory: null, sessionCount: 1 }],
+    });
+  });
+
   it.each([
     ['/session/status', { 'session-1': { state: 'busy' } }, 'session status'],
     ['/question', [{}], 'pending question'],

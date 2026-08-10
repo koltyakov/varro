@@ -348,6 +348,65 @@ describe('OpenCodeTransport event stream path', () => {
     expect(transport.hasPendingAttentionRequests()).toBe(false);
   });
 
+  it('tracks attention across synchronized event envelope lifecycles', () => {
+    const transport = createTransport() as unknown as {
+      observeServerEvent(event: unknown): void;
+      getPendingAttentionSessionIDs(): string[];
+    };
+    const lifecycles = [
+      {
+        sessionID: 'session-legacy',
+        ask: {
+          directory: '/repo',
+          payload: {
+            type: 'sync',
+            name: 'permission.asked.1',
+            data: { id: 'permission-legacy', sessionID: 'session-legacy' },
+          },
+        },
+        reply: {
+          directory: '/repo',
+          payload: {
+            type: 'sync',
+            name: 'permission.replied.1',
+            data: { requestID: 'permission-legacy', sessionID: 'session-legacy' },
+          },
+        },
+      },
+      {
+        sessionID: 'session-nested',
+        ask: {
+          directory: '/repo',
+          payload: {
+            type: 'sync',
+            syncEvent: {
+              type: 'question.asked.1',
+              data: { id: 'question-nested', sessionID: 'session-nested' },
+            },
+          },
+        },
+        reply: {
+          directory: '/repo',
+          payload: {
+            type: 'sync',
+            syncEvent: {
+              type: 'question.rejected.1',
+              data: { requestID: 'question-nested', sessionID: 'session-nested' },
+            },
+          },
+        },
+      },
+    ];
+
+    for (const lifecycle of lifecycles) {
+      transport.observeServerEvent(lifecycle.ask);
+      expect(transport.getPendingAttentionSessionIDs()).toEqual([lifecycle.sessionID]);
+
+      transport.observeServerEvent(lifecycle.reply);
+      expect(transport.getPendingAttentionSessionIDs()).toEqual([]);
+    }
+  });
+
   it('clears direct v2 attention requests when a session is deleted', () => {
     const transport = createTransport() as unknown as {
       observeServerEvent(event: unknown): void;
