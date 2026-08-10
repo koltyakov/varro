@@ -5075,7 +5075,7 @@ async function handleApiRequest(
 
     const session = getSession(state, sessionId);
     if (
-      session.permission?.some(
+      (session.permission ?? DEFAULT_PERMISSION_RULES).some(
         (rule) => rule.permission === 'bash' && rule.pattern === '*' && rule.action === 'ask'
       ) &&
       /\b(opencode(?:\s+|.*\s)--version|get opencode version|bash)\b/i.test(promptText)

@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.24.12",
+  "version": "0.24.14",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -55,7 +55,7 @@
     "vscode:install": "node scripts/vscode-install.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.15",
+    "@opencode-ai/sdk": "^1.18.16",
     "dompurify": "^3.4.13",
     "highlight.js": "11.11.1",
     "jsonc-parser": "^3.3.1",
@@ -286,7 +286,7 @@
             "full"
           ],
           "default": "auto",
-          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` asks before state-changing actions, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
+          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
         },
         "varro.chat.autoApproveModel": {
           "type": "string",

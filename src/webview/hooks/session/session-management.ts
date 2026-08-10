@@ -230,9 +230,10 @@ export async function createSessionWithDependencies(
     const defaultModel = deps.getDefaultSelectedModel();
     const defaultAgent = deps.resolveDefaultAgent();
     const initialMcpNames = [...deps.getInitialMcpNames()];
+    const permission = deps.buildCreatePermission(initialPermissionMode);
     const session = await deps.createRemoteSession({
       ...(title ? { title } : {}),
-      permission: deps.buildCreatePermission(initialPermissionMode),
+      ...(permission.length > 0 ? { permission } : {}),
     });
 
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;

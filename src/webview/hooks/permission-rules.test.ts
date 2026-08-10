@@ -24,8 +24,12 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(rules.at(-1)).toEqual({ permission: '*', pattern: '*', action: 'allow' });
   });
 
-  it('returns read-only defaults for default mode', () => {
-    const rules = getSessionPermissionRulesForMode('default', 'create');
+  it('leaves default mode to OpenCode configuration', () => {
+    expect(getSessionPermissionRulesForMode('default', 'create')).toEqual([]);
+  });
+
+  it('returns conservative ask rules for auto mode', () => {
+    const rules = getSessionPermissionRulesForMode('auto', 'create');
     const byPermission = new Map(rules.map((rule) => [rule.permission, rule]));
 
     expect(byPermission.get('read')).toMatchObject({ pattern: '*', action: 'allow' });
@@ -38,16 +42,16 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('bash')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('shell')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('edit')).toMatchObject({ pattern: '*', action: 'ask' });
-    expect(byPermission.get('task')).toMatchObject({ pattern: '*', action: 'ask' });
+    expect(byPermission.get('task')).toMatchObject({ pattern: '*', action: 'allow' });
     expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('webfetch')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('websearch')).toMatchObject({ pattern: '*', action: 'ask' });
   });
 
-  it('overrides agent allow-all for unknown permissions while preserving read-only allowances', () => {
+  it('makes auto mode override agent allow-all while preserving read-only allowances', () => {
     const rules = [
       { permission: '*', pattern: '*', action: 'allow' as const },
-      ...getSessionPermissionRulesForMode('default', 'create'),
+      ...getSessionPermissionRulesForMode('auto', 'create'),
     ];
 
     expect(rules[1]).toEqual({ permission: '*', pattern: '*', action: 'ask' });
@@ -62,12 +66,6 @@ describe('getSessionPermissionRulesForMode', () => {
     ];
 
     expect(resolvePermissionAction(rules, 'mcp_dynamic_tool')).toBe('allow');
-  });
-
-  it('uses default approval rules for auto mode', () => {
-    expect(getSessionPermissionRulesForMode('auto', 'create')).toEqual(
-      getSessionPermissionRulesForMode('default', 'create')
-    );
   });
 
   it('returns the same rules for create and update targets', () => {

@@ -1028,6 +1028,7 @@ export async function ensureSessionPermissionWithDependencies(
 }
 
 function hasPermissionRules(current: PermissionRule[] | undefined, required: PermissionRule[]) {
+  if (required.length === 0) return !current || current.length === 0;
   if (!Array.isArray(current) || current.length === 0) return false;
   return required.every((requiredRule) =>
     current.some(

@@ -879,7 +879,7 @@ describe('session-send helpers', () => {
     expect(sendAsync).not.toHaveBeenCalled();
   });
 
-  it('applies default permission rules to sessions that have none', async () => {
+  it('applies auto-approve permission rules to sessions that have none', async () => {
     const updateSessionPermission = vi.fn(
       async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
         id: 'session-1',
@@ -897,7 +897,7 @@ describe('session-send helpers', () => {
       {
         getSession: () => ({ permission: undefined }),
         buildPermissionRules: () => [{ permission: 'bash', pattern: '*', action: 'ask' }],
-        getPermissionMode: () => 'default',
+        getPermissionMode: () => 'auto',
         updateSessionPermission,
         upsertSession,
         setError: vi.fn(),
@@ -910,6 +910,56 @@ describe('session-send helpers', () => {
       permission: [{ permission: 'bash', pattern: '*', action: 'ask' }],
     });
     expect(upsertSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
+  });
+
+  it('clears session permission overrides in default mode', async () => {
+    const updateSessionPermission = vi.fn(
+      async (_sessionId: string, input: { permission: PermissionRule[] }) => ({
+        id: 'session-1',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Session',
+        version: '1',
+        time: { created: 1, updated: 1 },
+        permission: input.permission,
+      })
+    );
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({
+          permission: [{ permission: '*', pattern: '*', action: 'ask' }],
+        }),
+        buildPermissionRules: () => [],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', { permission: [] });
+  });
+
+  it('keeps default sessions without permission overrides', async () => {
+    const updateSessionPermission = vi.fn();
+
+    const ok = await ensureSessionPermissionWithDependencies(
+      {
+        getSession: () => ({ permission: undefined }),
+        buildPermissionRules: () => [],
+        getPermissionMode: () => 'default',
+        updateSessionPermission,
+        upsertSession: vi.fn(),
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    expect(ok).toBe(true);
+    expect(updateSessionPermission).not.toHaveBeenCalled();
   });
 
   it('updates sessions missing current permission rules before sending', async () => {

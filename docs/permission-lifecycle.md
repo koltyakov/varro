@@ -19,9 +19,13 @@ and `Full access`.
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
-| `default` | Allow known read-only permissions; ask for everything else | Show an actionable prompt |
-| `auto` | The same rules as `default` | Hide briefly while Varro judges; reply or fall back to a prompt |
+| `default` | No Varro session override; use OpenCode configuration and agent rules | Show requests OpenCode asks about as actionable prompts |
+| `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
 | `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
+
+`Default` is the OpenCode-managed mode. New sessions omit a session-level permission override, and
+switching an existing session to default clears Varro's prior auto/full override. OpenCode's global,
+project, and agent configuration then determines whether an action is allowed, denied, or asked.
 
 `Auto approve` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
 specific request ID and complete action context to judge. Giving `auto` allow-all rules would bypass
@@ -35,13 +39,16 @@ workflow choice.
 
 OpenCode uses the last matching permission rule.
 
-- Default and auto rules start with `* -> ask`, then place known read-only allowances after it.
-- Current read-only permissions are `read`, `glob`, `grep`, `list`, `codesearch`, and `lsp`.
-- Mutating, executable, delegating, external, and interactive permissions remain `ask` in default and
-  auto mode.
+- Default contributes no Varro rules; OpenCode configuration and selected-agent rules remain in
+  control.
+- Auto rules start with `* -> ask`, then place known read-only allowances after it.
+- Current direct allowances are read-only permissions (`read`, `glob`, `grep`, `list`, `codesearch`,
+  and `lsp`) plus `task`, which only launches a child whose actions remain permission-checked.
+- Mutating, executable, external, and interactive permissions remain `ask` in auto mode. Default mode
+  continues to use OpenCode configuration and agent rules.
 - Full rules end with `* -> allow`, so they override earlier agent restrictions and cover permission
   names introduced by OpenCode or an MCP tool.
-- Unknown permission names therefore ask in default/auto and allow in full.
+- Unknown permission names follow OpenCode configuration in default, ask in auto, and allow in full.
 
 Keep these ordering properties when adding permission names. Do not replace the final wildcard with
 an enumeration that can become incomplete after an OpenCode upgrade.
@@ -144,6 +151,13 @@ parts do not appear below the waiting tools or permission block. Preserve prose 
 boundaries. A standalone prompt remains the fallback when its owning tool is unavailable, intentionally
 hidden, or outside the mounted virtual range.
 
+After a user rejects a permission, OpenCode may complete the assistant message with `finish:
+tool-calls` and place `The user rejected permission to use this specific tool call.` on an error-state
+tool part. Treat that specific error as a stopped turn, not as a generic command failure or a
+continuation to discard: keep the tool card outside compact activity, label it `rejected`, and render
+the terminal turn summary with `Permission rejected`. Generic command-level `permission denied`
+errors must not be classified as user rejection.
+
 Full mode intentionally does not restore a prompt while the mode remains `full`. A failed full-mode
 reply currently surfaces an error and remains pending for a later permission sync to retry. Do not
 copy that exception into default or auto mode; changes to full mode should prefer adding bounded
@@ -183,6 +197,8 @@ The extension host first applies narrow deterministic rules. The current local p
 
 - Known read-only permissions as a defensive fallback if OpenCode emits an ask despite the session
   rules
+- OpenCode `task` subagent launches as the same defensive fallback; delegated actions remain subject
+  to the child session's inherited permission mode
 - `webfetch` and `websearch`
 - Workspace-contained edits when the permission-owning session directory is inside a Git work tree,
   all canonicalized paths remain inside that workspace, and no file is being deleted
@@ -244,6 +260,13 @@ The auto-approve activity strip shows an `ask` outcome as an amber manual-approv
 red failure. A later manual response updates the activity entry for that permission ID; other queued
 requests keep their own activity entries.
 
+The model judge also requests an `actionSummary`: a neutral two-to-eight-word description limited to
+80 characters, with no approval advice, risk judgment, Markdown, or trailing punctuation. It is
+presentation-only and must not affect the verdict or resolution state. When an `ask` verdict or
+failed automatic reply reveals a prompt, preserve the summary as its display title while retaining
+the original metadata below it. A shell request with command metadata falls back to `Run command`
+when no summary is available.
+
 Switching away from auto invalidates the authority of an unfinished judge. A late verdict must
 re-check the current effective mode before replying. In default mode it reveals the prompt; in full
 mode the full-access flow owns the pending request.
@@ -255,6 +278,14 @@ without a separate security review.
 
 Hidden judge sessions must remain filtered from normal session, status, permission, and question
 views. Their cleanup is best effort and can finish after the caller's timeout.
+
+Model-judge sessions are children of the permission-owning session and carry
+`metadata.varroInternal = 'permission-judge'`; the `Varro permission judge: ` title prefix remains a
+legacy fallback. Identification must survive extension-host restart and must not depend only on
+in-memory hidden IDs or pending titles. Identified judges remain hidden from session, status,
+permission, and question results. A session-list observation may delete a judge only when it is not
+locally active and its latest known timestamp is at least two minutes old; recent judges are hidden
+but retained because another window may own them. Deletion remains best effort.
 
 ## Timeouts And Late Results
 
@@ -306,10 +337,10 @@ Mode updates patch OpenCode session rules and update Varro's workspace/session p
 for one session are serialized, and stale successes or failures must not overwrite the latest user
 selection.
 
-- Switching to auto installs default ask rules, invalidates the authority of older mode work, and
-  syncs pending requests into the judge flow.
-- Switching to default installs default ask rules. Any unfinished auto verdict must not approve after
-  the switch.
+- Switching to auto installs Varro's ask-based auto rules, invalidates the authority of older mode
+  work, and syncs pending requests into the judge flow.
+- Switching to default clears Varro's session override so OpenCode configuration applies. Any
+  unfinished auto verdict must not approve after the switch.
 - Switching to full first installs allow-all rules, then responds to locally known pending requests,
   then fetches the authoritative pending list to catch hidden or missed requests.
 - A failed mode update rolls back only state still owned by that update. It must not undo a newer
@@ -399,8 +430,10 @@ Also run `npm run lint:check` and `npm run typecheck` when implementation or typ
 | Local and model judge policy | `src/extension/auto-approve-judge.ts` |
 | Judge model fallback order | `src/extension/helper-model-selection.ts` |
 | Host attention, persistence, and recovery | `src/extension/session-state-manager.ts` |
-| Workspace and hidden-session snapshot filtering | `src/extension/rest-proxy.ts` |
+| Workspace filtering plus internal helper-session identification, hiding, and stale cleanup | `src/extension/rest-proxy.ts`, `src/extension/hidden-session-manager.ts` |
 | Inline and session-tree prompt placement | `src/webview/components/message-list/pending-prompts.ts` |
+| Judge-summary propagation and permission prompt presentation | `src/webview/hooks/runtime/open-code-runtime-instance.ts`, `src/webview/lib/state-permissions.ts`, `src/webview/components/PermissionPrompt.tsx` |
+| Rejected-permission classification, tool preservation, and stopped-turn summaries | `src/shared/error-classification.ts`, `src/webview/lib/assistant-activity.ts`, `src/webview/components/ToolCall.tsx`, `src/webview/components/message-list/assistant-dialog.ts`, `src/webview/components/MessageList.tsx` |
 
 OpenCode version bumps can change event names, payload wrappers, request IDs, routes, and permission
 rule behavior. Follow `docs/opencode-version-bumps.md` and revalidate this contract against the new

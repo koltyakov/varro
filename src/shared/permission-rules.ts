@@ -37,13 +37,18 @@ export function isKnownReadOnlyPermission(permission: string): boolean {
   return READ_ONLY_PERMISSIONS.has(permission.toLowerCase());
 }
 
-const DEFAULT_PERMISSION_RULES: PermissionRule[] = [
-  // Specific read-only allowances must follow this catch-all under last-match semantics.
+function isAutoApprovedPermission(permission: string): boolean {
+  const normalized = permission.toLowerCase();
+  return normalized === 'task' || isKnownReadOnlyPermission(normalized);
+}
+
+const AUTO_APPROVE_PERMISSION_RULES: PermissionRule[] = [
+  // Specific safe allowances must follow this catch-all under last-match semantics.
   { permission: '*', pattern: '*', action: 'ask' },
   ...FULL_ACCESS_PERMISSION_NAMES.map<PermissionRule>((permission) => ({
     permission,
     pattern: '*',
-    action: isKnownReadOnlyPermission(permission) ? 'allow' : 'ask',
+    action: isAutoApprovedPermission(permission) ? 'allow' : 'ask',
   })),
 ];
 
@@ -52,5 +57,6 @@ export function getSessionPermissionRulesForMode(
   _target: 'create' | 'update'
 ): PermissionRule[] {
   if (mode === 'full') return FULL_ACCESS_PERMISSION_RULES;
-  return DEFAULT_PERMISSION_RULES;
+  if (mode === 'auto') return AUTO_APPROVE_PERMISSION_RULES;
+  return [];
 }

@@ -7,7 +7,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Streamlined assistant activity with compact summaries, clearer loading progress, expandable details, and collapsed thinking blocks.
 - Added session cost details and helper-model assignments for commit messages and automatic permission decisions.
 - Deferred provider and authentication refreshes until active work finishes, with visible pending status.
-- Improved permissions with sequential progress, responsive actions, reliable tool matching, and safer contextual decisions.
+- Improved permissions with sequential progress, responsive actions, reliable tool matching and
+  child-session inheritance, OpenCode-managed defaults, clearer request summaries, safer Git-backed
+  local decisions, and preserved rejected commands in stopped turns.
 - Made message edits immediate and recoverable, and strengthened scrolling, history loading, sticky navigation, and viewport preservation.
 - Improved session switching and deletion, first-run navigation, model discovery, markdown readability, and image-paste feedback.
 

@@ -94,6 +94,8 @@ Supporting host components define the main boundaries:
 - `src/extension/sidebar-provider-bridge.ts` and `webview-html.ts`: resource URIs, CSP, HTML, and extension/webview posting
 - `src/extension/message-router.ts` and `sidebar-provider-actions.ts`: validated webview command dispatch
 - `src/extension/rest-proxy.ts`: OpenCode REST forwarding and local `/varro/*` endpoints
+- `src/extension/hidden-session-manager.ts`: internal helper-session identification, user-visible
+  filtering, and stale permission-judge cleanup
 - `src/extension/server-event-bridge.ts`: server status and workspace-scoped event forwarding
 - `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
 - `src/extension/commit-message-service.ts` and `usage-report-service.ts`: repository-aware commit generation and retained-history usage reports
@@ -241,6 +243,9 @@ Key components:
 - `src/webview/components/message-list/MessageRows.tsx` and `VirtualizedContent.tsx`: row rendering and virtualization
 - `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message and tool-part rendering
 - `src/webview/components/PermissionPrompt.tsx`: inline approval UI
+- `src/webview/components/ToolCall.tsx`, `src/webview/lib/assistant-activity.ts`, and
+  `src/webview/components/message-list/assistant-dialog.ts`: tool-state presentation, activity
+  compaction, and turn summaries, including explicit permission-rejection evidence
 - `src/webview/components/QuestionPrompt.tsx`: inline question UI
 - `src/webview/components/TodoList.tsx`: task progress surface
 - `src/webview/components/DiffView.tsx`: file change summaries

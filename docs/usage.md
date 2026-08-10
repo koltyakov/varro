@@ -294,9 +294,28 @@ OpenCode approval flows stay inside the chat UI.
 - Each session can run in `Default`, `Auto approve`, or `Full access` permission mode.
 - Use the permission control in the composer toolbar to switch the active session between those modes.
 
-`Default` allows read-style tools and asks before actions that can modify state.
+Permissions from child and deeper sub-agent sessions inherit the nearest explicitly selected mode in
+their parent session tree. When manual approval is needed, Varro surfaces the child request in the
+parent conversation while keeping the request owned by the child session.
 
-`Auto approve` is the first-run mode. It applies conservative local rules to web reads, Git-backed workspace edits, and strictly parsed inspection commands. Edit paths must remain inside the permission-owning session's workspace, and command rules reject unsafe composition or options that can mutate state. Requests that cannot be decided locally may be sent, with their command, path, metadata, and recent approval examples, to the configured model in a temporary hidden judge session. Allowed verdicts are cached briefly for identical permission context. Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
+`Default` leaves permission decisions to OpenCode. Rules from your OpenCode configuration and selected
+agent determine which actions are allowed, denied, or sent to Varro for manual approval. Varro does
+not add session-level permission rules in this mode.
+
+`Auto approve` is the first-run mode. Its deterministic rules allow known read-only permissions,
+subagent launches, web fetches and searches, non-deleting edits whose canonical paths stay inside the
+permission-owning session's Git-backed workspace, and strictly parsed inspection commands. Actions
+inside a subagent remain subject to the inherited permission mode. Ambiguous or out-of-workspace paths
+and command composition or options that may mutate state fall through to model or manual review.
+
+Requests not decided by local rules may be sent, with their command, path, metadata, and recent user
+permission decisions, to the configured model in a temporary hidden judge session. The judge may
+allow the exact request once, reject it when materially equivalent to a prior rejection, or show the
+normal manual prompt. Allow and reject verdicts are cached briefly for identical permission context.
+Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
+
+When automatic review falls back to manual approval, the prompt shows a concise action summary when
+available, the full request metadata with copy actions, and the judge's reason under `AI check`.
 
 The judge uses `varro.chat.autoApproveModel` first, then OpenCode's `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, and the selected Varro session model. Right-click a model in the Models view to set the VS Code user setting.
 
@@ -333,6 +352,8 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Expanded shell tool cards stream command output while running, show failed or aborted output inline, and provide a command copy action
 - Long tool input or output can open in a read-only editor tab
 - Inline permission and question prompts
+- Permission-rejected tool calls remain visible with a `rejected` label; when rejection stops the
+  turn, its summary says `Permission rejected`
 - Todo tracking from `todowrite` or related todo events
 - Diff summaries for changed files
 - Complete inline file-edit previews when `varro.chat.showInlineFileChanges` is enabled; filenames in the previews open the corresponding file
@@ -397,7 +418,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.15` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
+- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.16` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: run `/connect` or `opencode auth login`, then reopen Varro.

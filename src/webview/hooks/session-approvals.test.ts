@@ -575,6 +575,7 @@ describe('session-approvals helpers', () => {
   it('skips auto-approval when the mode is not full', async () => {
     const autoApprovePermissionsForSession = vi.fn(async () => {});
     const getPermissionsForSession = vi.fn(() => [permission('perm-1')]);
+    const updateSessionPermission = vi.fn(async () => session('session-1'));
 
     await updatePermissionModeForSessionWithDependencies(
       {
@@ -583,17 +584,18 @@ describe('session-approvals helpers', () => {
         setPermissionModeForSession: vi.fn(),
         setDraftPermissionMode: vi.fn(),
         saveProjectPermissionMode: vi.fn(),
-        updateSessionPermission: vi.fn(async () => session('session-1')),
+        updateSessionPermission,
         upsertSession: vi.fn(),
         setError: vi.fn(),
         getPermissionsForSession,
         autoApprovePermissionsForSession,
       },
       'default',
-      [{ permission: 'bash', pattern: '*', action: 'ask' }],
+      [],
       'session-1'
     );
 
+    expect(updateSessionPermission).toHaveBeenCalledWith('session-1', { permission: [] });
     expect(getPermissionsForSession).not.toHaveBeenCalled();
     expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
   });

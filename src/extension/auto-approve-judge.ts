@@ -275,6 +275,9 @@ export class AutoApproveJudge {
     if (isKnownReadOnlyPermission(type)) {
       return { decision: 'allow', reason: 'Known read-only permission.' };
     }
+    if (type === 'task') {
+      return { decision: 'allow', reason: 'OpenCode subagent launch.' };
+    }
     if (type === 'webfetch') {
       return { decision: 'allow', reason: 'Web fetch.' };
     }

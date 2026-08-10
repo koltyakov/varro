@@ -212,7 +212,7 @@ test('recovers a permission prompt when the live permission event is missed', as
   await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toBeVisible();
 });
 
-test('default permissions end up with a bash permission request for opencode version', async ({
+test('default permissions defer to OpenCode and surface its bash request', async ({
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
@@ -267,16 +267,7 @@ test('default permissions end up with a bash permission request for opencode ver
       | undefined;
   });
 
-  expect(permissionCreateBody?.permission).toContainEqual({
-    permission: 'bash',
-    pattern: '*',
-    action: 'ask',
-  });
-  expect(permissionCreateBody?.permission).toContainEqual({
-    permission: 'shell',
-    pattern: '*',
-    action: 'ask',
-  });
+  expect(permissionCreateBody?.permission).toBeUndefined();
 
   const promptBody = await getE2EState(page, () => {
     const value = (

@@ -126,6 +126,46 @@ describe('session management helpers', () => {
     expect(setPermissionModeForSession).toHaveBeenCalledWith('session-auto', 'auto');
   });
 
+  it('omits session permission overrides in default mode', async () => {
+    const createRemoteSession = vi.fn(async () => session('session-default'));
+
+    const result = await createSessionWithDependencies(
+      {
+        getActiveSessionId: () => null,
+        getNewChatDraftGeneration: () => 0,
+        createRemoteSession,
+        buildCreatePermission: () => [],
+        upsertSession: vi.fn(),
+        resetToolCallExpansionState: vi.fn(),
+        setActiveSessionId: vi.fn(),
+        clearDraftCurrentDocumentState: vi.fn(),
+        adoptDraftCurrentDocumentState: vi.fn(),
+        setSessionStatusEntry: vi.fn(),
+        setSessionUsageLimit: vi.fn(),
+        persistActiveSessionId: vi.fn(),
+        markSessionSeen: vi.fn(),
+        getDefaultSelectedModel: () => null,
+        setSelectedModel: vi.fn(),
+        resolveDefaultAgent: () => null,
+        setSelectedAgent: vi.fn(),
+        getInitialMcpNames: () => [],
+        setSelectedMcpsForSession: vi.fn(),
+        resetDraftSelectedMcps: vi.fn(),
+        setPermissionModeForSession: vi.fn(),
+        resetDraftPermissionMode: vi.fn(),
+        resetTodoSync: vi.fn(),
+        clearMessages: vi.fn(),
+        stopLoading: vi.fn(),
+        setError: vi.fn(),
+      },
+      undefined,
+      'default'
+    );
+
+    expect(result).toBe('session-default');
+    expect(createRemoteSession).toHaveBeenCalledWith({});
+  });
+
   it('does not replace a session selected while remote creation is pending', async () => {
     let activeSessionId: string | null = null;
     let initialMcpNames = ['draft-mcp'];

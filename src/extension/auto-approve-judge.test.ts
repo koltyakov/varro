@@ -120,6 +120,28 @@ describe('AutoApproveJudge', () => {
     }
   );
 
+  it('allows OpenCode subagent launches without creating a judge session', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-task',
+          type: 'task',
+          sessionID: 'session-1',
+          title: 'task general',
+          pattern: 'general',
+          metadata: {
+            description: 'Audit upstream release diff',
+            subagent_type: 'general',
+          },
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'OpenCode subagent launch.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('allows external directory access contained by prior always-approved scopes', async () => {
     const { root } = createTemporaryWorkspace();
     const approvedOne = join(root, 'external-one');
