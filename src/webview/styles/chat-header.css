@@ -41,7 +41,6 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  transform: translateY(1px);
 }
 
 .chat-header-shared-marker {
