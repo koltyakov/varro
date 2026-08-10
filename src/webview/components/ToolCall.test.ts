@@ -675,6 +675,53 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-call-icon-search')).toBeInstanceOf(SVGElement);
   });
 
+  it('extracts the completed search result count into a header pill', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'grep',
+      state: completedState(
+        { pattern: 'ToolCall' },
+        'Search: ToolCall',
+        'Found 2 matches\n\n/repo/src/a.ts:\n  Line 1: ToolCall\n/repo/src/b.ts:\n  Line 2: ToolCall'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const count = container?.querySelector('.tool-invocation-search-count');
+    expect(count?.textContent).toBe('2');
+    expect(count?.getAttribute('aria-label')).toBe('2 search results');
+  });
+
+  it('uses search metadata and marks truncated counts as lower bounds', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'functions.grep',
+      state: {
+        ...completedState(
+          { pattern: 'ToolCall' },
+          'Search: ToolCall',
+          'Found 100 matches (more matches available)'
+        ),
+        metadata: { matches: 100, truncated: true },
+      },
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const count = container?.querySelector('.tool-invocation-search-count');
+    expect(count?.textContent).toBe('100+');
+    expect(count?.getAttribute('aria-label')).toBe('100 or more search results');
+  });
+
   it('uses the canonical icon kind for namespaced file aliases', () => {
     const part: ToolPart = {
       id: 'tool-1',
@@ -770,6 +817,7 @@ describe('ToolCall', () => {
       inputRows.every((row) => row.querySelector('.structured-tool-value-line') !== null)
     ).toBe(true);
     expect(inputRows[0]?.querySelector('.structured-tool-value-single')?.textContent).toBe(pattern);
+    expect(container?.querySelector('.tool-invocation-search-count')?.textContent).toBe('0');
   });
 
   it('renders web fetch details and errors in the structured table', () => {

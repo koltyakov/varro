@@ -114,9 +114,7 @@ describe('MessageListChrome', () => {
       container!
     );
 
-    const timestamp = container?.querySelector<HTMLTimeElement>(
-      '.latest-user-message-sticky-time'
-    );
+    const timestamp = container?.querySelector<HTMLTimeElement>('.latest-user-message-sticky-time');
     expect(timestamp?.classList.contains('is-visible')).toBe(false);
     expect(timestamp?.textContent).toBe(
       new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(sentAt)

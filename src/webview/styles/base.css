@@ -204,11 +204,11 @@
      sibling surfaces can't drift a pixel apart; `pill` and `50%` circles are
      the only shapes that opt out. Also exposed as Tailwind `rounded-*`. */
   --radius-xs: 2px;
-  --radius-inset: 4px;
-  --radius-chip: 6px;
-  --radius-control: 8px;
-  --radius-card: 10px;
-  --radius-bubble: 16px;
+  --radius-inset: 3px;
+  --radius-chip: 4px;
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-bubble: 10px;
   --radius-pill: 999px;
   /* Padding scale for card-like surfaces (prompts, banners, tool cards). */
   --space-1: 2px;

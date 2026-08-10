@@ -5923,9 +5923,7 @@ export function MessageList() {
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
-                sentAt={
-                  messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created
-                }
+                sentAt={messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created}
                 showSentTimestamp={showPromptNumbers()}
                 promptNumber={
                   promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined

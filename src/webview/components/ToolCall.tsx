@@ -352,6 +352,38 @@ function parseIntLike(value: unknown): number | null {
   return null;
 }
 
+type SearchResultCount = {
+  count: number;
+  truncated: boolean;
+};
+
+function getSearchResultCount(
+  toolName: string,
+  state: ToolPart['state']
+): SearchResultCount | null {
+  if (getToolKind(toolName) !== 'search' || state.status !== 'completed') return null;
+
+  const output = state.output || '';
+  const truncated =
+    state.metadata.truncated === true ||
+    /\bmore matches available\b|\bresults (?:are )?truncated\b/i.test(output);
+  const metadataCount = parseIntLike(state.metadata.matches) ?? parseIntLike(state.metadata.count);
+  if (metadataCount !== null && metadataCount >= 0) return { count: metadataCount, truncated };
+
+  const found = output.match(/^\s*Found\s+(\d+)\s+(?:matches|files|results)\b/im);
+  if (found?.[1]) return { count: Number.parseInt(found[1], 10), truncated };
+  if (/^\s*No (?:files|matches|search results?) found\b/im.test(output)) {
+    return { count: 0, truncated: false };
+  }
+
+  if (normalizeToolName(toolName) !== 'glob') return null;
+  const files = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('(Results are truncated'));
+  return files.length > 0 ? { count: files.length, truncated } : null;
+}
+
 function extractTaggedOutput(output: string, tagName: string): string | null {
   const match = output.match(new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>`, 'i'));
   if (!match) return null;
@@ -1352,6 +1384,7 @@ function GenericToolCall(props: {
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
+  const searchResultCount = () => getSearchResultCount(props.tool.tool, props.state);
   const [now, setNow] = createSignal(Date.now());
   onMount(() => {
     if (isTask()) onCleanup(retainTaskActivityAltListener());
@@ -1435,6 +1468,18 @@ function GenericToolCall(props: {
                 ↑ {formatNumber(tokens().input)} ↓ {formatNumber(tokens().output)}
               </span>
             )}
+          </Show>
+          <Show when={searchResultCount()}>
+            {(result) => {
+              const label = () =>
+                `${result().count}${result().truncated ? ' or more' : ''} search ${result().count === 1 && !result().truncated ? 'result' : 'results'}`;
+              return (
+                <span class="tool-invocation-search-count" title={label()} aria-label={label()}>
+                  {result().count}
+                  {result().truncated ? '+' : ''}
+                </span>
+              );
+            }}
           </Show>
           <Show when={completedDurationLabel()}>
             <span class="tool-invocation-duration">{completedDurationLabel()}</span>

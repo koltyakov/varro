@@ -927,13 +927,7 @@ describe('parseUserMessageContent', () => {
 describe('Message user rendering', () => {
   it('reveals a system-formatted time without mounting new layout content', () => {
     const now = new Date();
-    const created = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      13,
-      45
-    );
+    const created = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45);
     const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
     cleanup = render(
       () =>
@@ -962,13 +956,7 @@ describe('Message user rendering', () => {
 
   it('includes the system-formatted date for messages sent before today', () => {
     const now = new Date();
-    const created = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() - 2,
-      13,
-      45
-    );
+    const created = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 13, 45);
     cleanup = render(
       () =>
         Message({

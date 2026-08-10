@@ -519,6 +519,7 @@ input:focus-visible {
 }
 
 .chat-turn-user {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -548,8 +549,9 @@ input:focus-visible {
 }
 
 .chat-turn-user > .message-sent-time {
-  margin-top: 3px;
-  margin-right: var(--chat-radius-card);
+  position: absolute;
+  top: 100%;
+  right: var(--chat-radius-card);
 }
 
 .latest-user-message-sticky-time {

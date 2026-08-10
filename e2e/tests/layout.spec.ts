@@ -1006,6 +1006,33 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
   });
   expect(gaps.userToSummary).toBeCloseTo(12, 0);
   expect(gaps.summaryToUser).toBeCloseTo(12, 0);
+
+  await page.keyboard.down('Alt');
+  const precedingTimestamp = page.locator(
+    '[data-msg-id="message-tool-cards-user"] .message-sent-time'
+  );
+  await expect(precedingTimestamp).toBeVisible();
+  const revealedGeometry = await precedingTimestamp.evaluate((element) => {
+    const precedingUser = document.querySelector<HTMLElement>(
+      '[data-msg-id="message-tool-cards-user"] .user-message-card'
+    );
+    const activitySummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+    if (!precedingUser || !activitySummary) {
+      throw new Error('Revealed timestamp boundary fixtures are missing');
+    }
+    const userBox = precedingUser.getBoundingClientRect();
+    const timestampBox = element.getBoundingClientRect();
+    const summaryBox = activitySummary.getBoundingClientRect();
+    return {
+      userToSummary: summaryBox.top - userBox.bottom,
+      timestampAfterUser: timestampBox.top >= userBox.bottom,
+      timestampBeforeSummary: timestampBox.bottom <= summaryBox.top,
+    };
+  });
+  await page.keyboard.up('Alt');
+  expect(revealedGeometry.userToSummary).toBeCloseTo(12, 0);
+  expect(revealedGeometry.timestampAfterUser).toBe(true);
+  expect(revealedGeometry.timestampBeforeSummary).toBe(true);
 });
 
 test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {

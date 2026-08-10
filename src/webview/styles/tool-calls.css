@@ -1065,9 +1065,7 @@ kbd {
   transform: translateY(-50%);
 }
 
-.chat-tool-invocation-part
-  .tool-invocation-header-shell.has-command-only-copy
-  > .tool-copy-button {
+.chat-tool-invocation-part .tool-invocation-header-shell.has-command-only-copy > .tool-copy-button {
   right: var(--space-5);
 }
 
@@ -1178,6 +1176,22 @@ kbd {
   flex-shrink: 0;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.chat-tool-invocation-part .tool-invocation-search-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-vscode-fg-muted) 7%, transparent);
+  color: var(--color-vscode-fg-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  flex-shrink: 0;
 }
 
 .chat-tool-invocation-part .tool-invocation-error-label {
