@@ -5,6 +5,7 @@ import {
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { isFileEditPart, isFileReadPart } from './part-utils';
 import { getToolFileChanges } from './tool-file-change';
+import { getToolKind, isApplyPatchTool } from './tool-normalization';
 
 export type AssistantActivityPart = Extract<Part, { type: 'reasoning' | 'tool' }>;
 
@@ -38,35 +39,29 @@ const ACTIVITY_KIND_ORDER: readonly AssistantActivityKind[] = [
   'skills',
   'tools',
 ];
-const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'search', 'websearch']);
-const EDIT_TOOL_NAMES = new Set([
-  'apply_patch',
-  'create',
-  'delete',
-  'edit',
-  'patch',
-  'rename',
-  'write',
-]);
-const COMMAND_TOOL_NAMES = new Set(['bash', 'command', 'exec', 'shell', 'terminal']);
-
-function normalizeToolName(toolName: string) {
-  const normalized = toolName.trim().toLowerCase();
-  return normalized.split('.').at(-1) || normalized;
-}
-
 function getActivityKind(part: AssistantActivityPart): AssistantActivityKind {
   if (part.type === 'reasoning') return 'reasoning';
 
-  const toolName = normalizeToolName(part.tool);
-  if (toolName === 'read' || isFileReadPart(part)) return 'files';
-  if (SEARCH_TOOL_NAMES.has(toolName)) return 'searches';
-  if (EDIT_TOOL_NAMES.has(toolName) || isFileEditPart(part)) return 'edits';
-  if (COMMAND_TOOL_NAMES.has(toolName)) return 'commands';
-  if (toolName === 'webfetch' || toolName.includes('browser')) return 'web';
-  if (toolName === 'question') return 'questions';
-  if (toolName === 'skill') return 'skills';
-  return 'tools';
+  switch (getToolKind(part.tool)) {
+    case 'read':
+      return 'files';
+    case 'search':
+      return 'searches';
+    case 'edit':
+      return 'edits';
+    case 'terminal':
+      return 'commands';
+    case 'web':
+      return 'web';
+    case 'question':
+      return 'questions';
+    case 'skill':
+      return 'skills';
+    default:
+      if (isFileReadPart(part)) return 'files';
+      if (isFileEditPart(part)) return 'edits';
+      return 'tools';
+  }
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
@@ -99,7 +94,7 @@ function formatActivityCount(kind: AssistantActivityKind, count: number) {
 export function isAssistantActivityPart(part: Part): part is AssistantActivityPart {
   if (part.type === 'reasoning') return true;
   if (part.type !== 'tool') return false;
-  return !['question', 'task'].includes(normalizeToolName(part.tool));
+  return !['question', 'task'].includes(getToolKind(part.tool));
 }
 
 export function getAssistantActivityPartKey(
@@ -122,11 +117,7 @@ export function shouldCompactAssistantActivityPart(
   options: { showInlineFileChanges: boolean; keepEditInline: boolean }
 ) {
   if (part.type === 'tool' && isPermissionRejectedToolError(part.state)) return false;
-  if (
-    part.type === 'tool' &&
-    normalizeToolName(part.tool) === 'apply_patch' &&
-    isAssistantActivityPartRunning(part)
-  ) {
+  if (part.type === 'tool' && isApplyPatchTool(part.tool) && isAssistantActivityPartRunning(part)) {
     return false;
   }
   return (

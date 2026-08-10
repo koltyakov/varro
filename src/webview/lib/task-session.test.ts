@@ -3,6 +3,46 @@ import type { Message, ToolPart } from '../types';
 import { resolveTaskSessionId } from './task-session';
 
 describe('task session resolution', () => {
+  it('matches namespaced task aliases', () => {
+    const tool = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'functions.task',
+      state: {
+        status: 'completed',
+        input: { description: 'Research the issue' },
+        output: '',
+        title: 'Research the issue',
+        metadata: {},
+        time: { start: 1_100, end: 1_500 },
+      },
+    } satisfies ToolPart;
+    const parent = {
+      id: 'assistant-1',
+      sessionID: 'session-1',
+      role: 'assistant',
+      time: { created: 1_000, completed: 1_500 },
+    } as Message;
+
+    expect(
+      resolveTaskSessionId(
+        tool,
+        [{ info: parent, parts: [tool] }],
+        [
+          {
+            id: 'child-1',
+            parentID: 'session-1',
+            title: 'Research the issue',
+            time: { created: 1_200 },
+          },
+        ]
+      )
+    ).toBe('child-1');
+  });
+
   it('does not attribute a child created after the next user turn', () => {
     const tool = {
       id: 'tool-1',

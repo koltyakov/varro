@@ -675,6 +675,22 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-call-icon-search')).toBeInstanceOf(SVGElement);
   });
 
+  it('uses the canonical icon kind for namespaced file aliases', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'functions.file_write',
+      state: completedState({ filePath: 'src/app.ts' }, 'Wrote src/app.ts'),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(container?.querySelector('.tool-call-icon-edit')).toBeInstanceOf(SVGElement);
+  });
+
   it('renders failed search errors as a structured table row', () => {
     setState('editorContext', {
       workspacePath: '/repo',
@@ -719,6 +735,41 @@ describe('ToolCall', () => {
         child.classList.contains('tool-invocation-error')
       )
     ).toBe(false);
+  });
+
+  it('styles a long single-line search pattern like the include value', () => {
+    const pattern =
+      'normalizeToolName|SEARCH_TOOL_NAMES|FILE_CHANGE_TOOL_NAMES|FILE_READ_TOOLS|COMMAND_TOOL_NAMES';
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'grep',
+      state: completedState(
+        {
+          pattern,
+          include: '{components/ToolCall.tsx,lib/assistant-activity.ts,lib/task-activity.ts}',
+        },
+        `Search: ${pattern}`,
+        'No files found'
+      ),
+    };
+
+    cleanup = render(() => ToolCall({ part }), container!);
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+
+    const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
+    const inputRows = rows.slice(0, 2);
+
+    expect(
+      inputRows.map((row) => row.querySelector('.structured-tool-label')?.textContent)
+    ).toEqual(['pattern', 'include']);
+    expect(
+      inputRows.every((row) => row.querySelector('.structured-tool-value-line') !== null)
+    ).toBe(true);
+    expect(inputRows[0]?.querySelector('.structured-tool-value-single')?.textContent).toBe(pattern);
   });
 
   it('renders web fetch details and errors in the structured table', () => {

@@ -1,4 +1,5 @@
 import type { MessageEntry, ToolPart } from '../types';
+import { getToolKind } from './tool-normalization';
 
 export type TaskSessionInfo = {
   id: string;
@@ -7,12 +8,6 @@ export type TaskSessionInfo = {
   time: { created: number };
   tokens?: { input: number; output: number };
 };
-
-function normalizeToolName(toolName: string) {
-  const normalized = toolName.trim().toLowerCase();
-  const parts = normalized.split('.');
-  return parts[parts.length - 1] || normalized;
-}
 
 function getTaskSessionIdFromMetadata(metadata: Record<string, unknown> | undefined) {
   if (typeof metadata?.sessionId === 'string') return metadata.sessionId;
@@ -36,7 +31,7 @@ export function resolveTaskSessionId(
   sessions: readonly TaskSessionInfo[],
   createdBefore?: number
 ) {
-  if (normalizeToolName(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
+  if (getToolKind(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
 
   const metadata = tool.state.metadata as Record<string, unknown> | undefined;
   const metadataSessionId = getTaskSessionIdFromMetadata(metadata);
@@ -74,7 +69,7 @@ export function resolveTaskSessionId(
 
   const taskParts =
     parent?.parts.filter(
-      (part): part is ToolPart => part.type === 'tool' && normalizeToolName(part.tool) === 'task'
+      (part): part is ToolPart => part.type === 'tool' && getToolKind(part.tool) === 'task'
     ) || [];
   const taskIndex = taskParts.findIndex((part) => part.callID === tool.callID);
   return taskIndex >= 0 ? (candidates[taskIndex]?.id ?? null) : null;

@@ -71,6 +71,14 @@ describe('assistant activity summaries', () => {
     expect(formatAssistantActivitySummary([patch])).toBe('Explored: 3 edits');
   });
 
+  it('uses canonical alias classification for activity summaries', () => {
+    expect(
+      formatAssistantActivitySummary([
+        completedTool('write-1', 'functions.file_write', { filePath: 'src/app.ts' }),
+      ])
+    ).toBe('Explored: 1 edit');
+  });
+
   it('detects streaming reasoning and pending or running tools', () => {
     const pending: ToolPart = {
       ...completedTool('pending-1', 'glob'),

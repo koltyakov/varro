@@ -1,5 +1,6 @@
 import type { FileDiff, Part, ToolPart, ToolState } from '../types';
 import { getWorkspaceRelativePath, isAbsolutePath, normalizePath } from './path-display';
+import { getToolKind, isApplyPatchTool, normalizeToolName } from './tool-normalization';
 
 export type FileChangeKind = 'added' | 'edited' | 'removed' | 'moved';
 
@@ -43,31 +44,6 @@ type BoundedTextMeasurement = {
   exceeded: 'bytes' | 'lines' | null;
 };
 
-const FILE_CHANGE_TOOL_NAMES = new Set([
-  'edit',
-  'write',
-  'create',
-  'file_edit',
-  'file_write',
-  'file_create',
-  'update_file',
-  'replace',
-  'insert',
-  'apply_edit',
-  'apply_diff',
-  'delete',
-  'remove',
-  'unlink',
-  'rm',
-  'file_delete',
-  'file_remove',
-  'move',
-  'mv',
-  'rename',
-  'file_move',
-  'file_rename',
-]);
-
 const PRIMARY_PATH_KEYS = [
   'file_path',
   'filePath',
@@ -102,7 +78,6 @@ const TARGET_PATH_KEYS = [
   'dest',
 ];
 const OPERATION_KEYS = ['operation', 'action', 'changeType', 'change_type', 'status', 'type'];
-const FILE_READ_TOOLS = new Set(['read', 'file_read']);
 const MAX_LAYOUT_CONTENT_SCAN_CHARS = 256 * 1024;
 const MAX_PATCH_FILE_CHANGES = 64;
 const MAX_MODEL_PATCH_BYTES = 1024 * 1024;
@@ -219,7 +194,7 @@ function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {
 }
 
 export function isToolFileRead(toolName: string): boolean {
-  return FILE_READ_TOOLS.has(toolName.trim().toLowerCase());
+  return getToolKind(toolName) === 'read';
 }
 
 export function getToolReadPath(toolName: string, toolState: ToolState): string | null {
@@ -343,12 +318,12 @@ function getLayoutContentSignature(content: string) {
 
 function computeToolFileChanges(toolName: string, toolState: ToolState): FileChange[] {
   const metadata = getToolMetadata(toolState) || {};
-  const normalizedToolName = toolName.trim().toLowerCase().split('.').pop();
+  const normalizedToolName = normalizeToolName(toolName);
   const metadataChanges = fileChangesFromMetadataFiles(
     metadata,
-    normalizedToolName === 'apply_patch' ? 'edited' : null
+    isApplyPatchTool(normalizedToolName) ? 'edited' : null
   );
-  if (normalizedToolName === 'apply_patch') {
+  if (isApplyPatchTool(normalizedToolName)) {
     const inputChanges = fileChangesFromPatchInput(
       (toolState.input || {}) as Record<string, unknown>
     );
@@ -884,14 +859,14 @@ function computeToolFileChange(toolName: string, toolState: ToolState): FileChan
   const before = stringValue(source, ['oldString', 'old_string', 'before', 'oldContent']);
   const after = stringValue(source, ['newString', 'new_string', 'after', 'newContent', 'content']);
   const patch = firstString(source, ['patch', 'diff']);
-  const normalizedToolName = toolName.trim().toLowerCase();
+  const normalizedToolName = normalizeToolName(toolName);
   const titleChange = parseTitleFileChange(title);
   const inferredKind =
     (fromPath && toPath && normalizePath(fromPath) !== normalizePath(toPath) ? 'moved' : null) ||
     kindFromText(firstString(source, OPERATION_KEYS)) ||
     titleChange?.kind ||
     kindFromText(normalizedToolName) ||
-    (FILE_CHANGE_TOOL_NAMES.has(normalizedToolName) ? 'edited' : null);
+    (getToolKind(normalizedToolName) === 'edit' ? 'edited' : null);
 
   if (!inferredKind) return null;
 

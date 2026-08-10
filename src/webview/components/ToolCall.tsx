@@ -38,6 +38,13 @@ import type { FileChange } from '../lib/tool-file-change';
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { resolveTaskSessionId } from '../lib/task-session';
+import {
+  getToolKind,
+  isApplyPatchTool,
+  isStructuredTool,
+  normalizeToolName,
+} from '../lib/tool-normalization';
+import type { ToolKind } from '../lib/tool-normalization';
 import { rememberDirectSessionReturn } from '../lib/session-navigation';
 import { selectSession } from '../hooks/useOpenCode';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -50,19 +57,6 @@ import { CopyIconButton } from './CopyIconButton';
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
 const isPathKey = (key: string) => key === 'file_path' || key === 'path';
-const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'codesearch', 'websearch', 'search']);
-const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch', 'webfetch']);
-const TERMINAL_TOOL_NAMES = new Set(['bash', 'shell', 'terminal', 'exec', 'command']);
-const EDIT_TOOL_NAMES = new Set([
-  'apply_patch',
-  'edit',
-  'write',
-  'create',
-  'delete',
-  'rename',
-  'patch',
-]);
-const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
 const MIN_VISIBLE_TOOL_DURATION_MS = 1000;
 const [taskActivityAltPressed, setTaskActivityAltPressed] = createSignal(false);
 let taskActivityAltListenerCount = 0;
@@ -107,47 +101,15 @@ export function getToolCallExpansionKey(part: ToolPart) {
   return `${part.sessionID}\u0000${part.messageID}\u0000${part.callID}`;
 }
 
-function normalizeToolName(toolName: string) {
-  const normalized = toolName.trim().toLowerCase();
-  const parts = normalized.split('.');
-  return parts[parts.length - 1] || normalized;
-}
-
-type ToolCallIconKind =
-  | 'terminal'
-  | 'search'
-  | 'read'
-  | 'edit'
-  | 'task'
-  | 'todo'
-  | 'web'
-  | 'question'
-  | 'skill'
-  | 'tools';
-
-function getToolCallIconKind(toolName: string): ToolCallIconKind {
-  const normalized = normalizeToolName(toolName);
-  if (TERMINAL_TOOL_NAMES.has(normalized)) return 'terminal';
-  if (SEARCH_TOOL_NAMES.has(normalized)) return 'search';
-  if (normalized === 'read') return 'read';
-  if (EDIT_TOOL_NAMES.has(normalized)) return 'edit';
-  if (normalized === 'task') return 'task';
-  if (TODO_TOOL_NAMES.has(normalized)) return 'todo';
-  if (normalized === 'question') return 'question';
-  if (normalized === 'skill') return 'skill';
-  if (normalized === 'webfetch' || normalized.includes('browser')) return 'web';
-  return 'tools';
-}
-
 function ToolCallIcon(props: {
   toolName?: string;
-  kind?: ToolCallIconKind;
+  kind?: ToolKind;
   statusClass?: string;
   statusLabel?: string;
   waiting?: boolean;
   class?: string;
 }) {
-  const kind = () => props.kind || getToolCallIconKind(props.toolName || '');
+  const kind = () => props.kind || getToolKind(props.toolName || '');
   const classes = () =>
     ['tool-call-icon', `tool-call-icon-${kind()}`, props.statusClass, props.class]
       .filter(Boolean)
@@ -262,7 +224,7 @@ function ToolCallIcon(props: {
 }
 
 function isQuestionToolName(toolName: string) {
-  return normalizeToolName(toolName) === 'question';
+  return getToolKind(toolName) === 'question';
 }
 
 type QuestionSummaryItem = {
@@ -291,10 +253,6 @@ function getQuestionSummaryItems(state: ToolPart['state']): QuestionSummaryItem[
       },
     ];
   });
-}
-
-function isStructuredToolName(toolName: string) {
-  return STRUCTURED_TOOL_NAMES.has(normalizeToolName(toolName));
 }
 
 function getSearchPattern(input: Record<string, unknown>) {
@@ -362,7 +320,7 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
-  if (SEARCH_TOOL_NAMES.has(normalizedToolName)) {
+  if (getToolKind(normalizedToolName) === 'search') {
     const pattern = getSearchPattern(input);
     if (pattern) return `Search: ${pattern}`;
     return title || 'Search';
@@ -550,9 +508,7 @@ export function ToolCall(props: {
     if (isWaitingForPermission()) return 'tool-status-pending';
     switch (state().status) {
       case 'pending':
-        return normalizeToolName(tool().tool) === 'apply_patch'
-          ? 'tool-status-running'
-          : 'tool-status-pending';
+        return isApplyPatchTool(tool().tool) ? 'tool-status-running' : 'tool-status-pending';
       case 'running':
         return 'tool-status-running';
       case 'completed':
@@ -625,7 +581,7 @@ export function ToolCall(props: {
         <FileChangeCard
           toolState={state()}
           changes={fileChanges()}
-          animatePending={normalizeToolName(tool().tool) === 'apply_patch'}
+          animatePending={isApplyPatchTool(tool().tool)}
           waitingForPermission={isWaitingForPermission()}
           previewStateKey={expansionKey()}
           expanded={expanded()}
@@ -1231,11 +1187,11 @@ function GenericToolCall(props: {
   const isPermissionRejected = () => isPermissionRejectedToolError(props.state);
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
-  const isStructuredTool = () => isStructuredToolName(props.tool.tool);
-  const isSearchTool = () => SEARCH_TOOL_NAMES.has(toolName());
+  const isStructured = () => isStructuredTool(props.tool.tool);
+  const isSearchTool = () => getToolKind(toolName()) === 'search';
   // Search results are inputs-plus-output like task/apply_patch, so they share the
   // framed labeled-row card instead of the unframed key/value + bare <pre> body.
-  const usesStructuredCard = () => isStructuredTool() || isSearchTool();
+  const usesStructuredCard = () => isStructured() || isSearchTool();
   const taskAgentLabel = () => {
     const type = props.state.input?.subagent_type;
     if (typeof type !== 'string' || !type.trim()) return 'Subagent';
@@ -1427,8 +1383,7 @@ function GenericToolCall(props: {
     props.state.status === 'completed' ||
     props.state.status === 'error' ||
     (props.state.status === 'running' && !isBlank(props.runningOutput));
-  const hasOnlyHeaderCommand = () =>
-    isBash() && commandMatchesTitle() && !hasBashResultRow();
+  const hasOnlyHeaderCommand = () => isBash() && commandMatchesTitle() && !hasBashResultRow();
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
@@ -1827,7 +1782,10 @@ function StructuredToolCard(props: {
 
 function shouldShowStructuredToolValueAsBlock(key: string, value: unknown): boolean {
   if (isPathKey(key)) return false;
-  if (typeof value === 'string') return value.includes('\n') || value.length > 100;
+  if (typeof value === 'string') {
+    if (key === 'pattern' && !value.includes('\n')) return false;
+    return value.includes('\n') || value.length > 100;
+  }
   return typeof value === 'object' && value !== null;
 }
 

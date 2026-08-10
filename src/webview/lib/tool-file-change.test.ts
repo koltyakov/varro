@@ -41,6 +41,7 @@ function completedState(
 describe('tool file change helpers', () => {
   it('detects file read tools and extracts read paths', () => {
     expect(isToolFileRead(' read ')).toBe(true);
+    expect(isToolFileRead('functions.file_read')).toBe(true);
     expect(isToolFileRead('bash')).toBe(false);
     expect(
       getToolReadPath('file_read', {
@@ -49,6 +50,13 @@ describe('tool file change helpers', () => {
         raw: '',
       })
     ).toBe('src/app.ts');
+    expect(
+      getToolReadPath('functions.file_read', {
+        status: 'pending',
+        input: { filePath: 'src/namespaced.ts' },
+        raw: '',
+      })
+    ).toBe('src/namespaced.ts');
     expect(
       getToolReadPath('bash', { status: 'pending', input: { filePath: 'src/app.ts' }, raw: '' })
     ).toBeNull();
@@ -59,6 +67,14 @@ describe('tool file change helpers', () => {
       kind: 'added',
       path: 'src/new.ts',
       dedupeKey: 'added:src/new.ts',
+    });
+
+    expect(
+      getToolFileChange('functions.file_write', completedState({ filePath: 'src/namespaced.ts' }))
+    ).toEqual({
+      kind: 'edited',
+      path: 'src/namespaced.ts',
+      dedupeKey: 'edited:src/namespaced.ts',
     });
 
     expect(
