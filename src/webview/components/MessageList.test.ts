@@ -1073,6 +1073,7 @@ afterEach(async () => {
   resetToolCallExpansionState();
   setState('sessionSelectedAgents', reconcile({}));
   setState('sessionStatus', reconcile({}));
+  setState('sessionAutoPermissionCounts', reconcile({}));
   setState('skippedPlanSessions', reconcile({}));
   setShowInlineFileChanges(false);
   setShowThinkingPreference(true);
@@ -8361,6 +8362,24 @@ describe('MessageList loading row', () => {
     const row = container?.querySelector('.interactive-loading-row');
     expect(row).toBeInstanceOf(HTMLDivElement);
     expect(row?.classList.contains('is-reserved')).toBe(false);
+  });
+
+  it('shows the loading row while automatic permission review is in progress', async () => {
+    setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionAutoPermissionCounts', 'child-1', {
+      inFlight: 1,
+      approved: 0,
+      rejected: 0,
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('.interactive-loading-row');
+    expect(row).toBeInstanceOf(HTMLDivElement);
+    expect(row?.classList.contains('is-reserved')).toBe(false);
+    expect(row?.textContent).toContain('Thinking');
   });
 
   it('keeps the loading row while the visible assistant reply is incomplete', async () => {

@@ -25,6 +25,7 @@ import {
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
   isSessionTreeStatusWorking,
+  getSessionTreeIds,
   getSessionTreeRootId,
   messageStructureVersion,
   messageInfoVersion,
@@ -578,6 +579,15 @@ export function MessageList() {
     return notice && shouldDisplayUsageLimitNotice(notice) ? notice : null;
   });
   const activeSessionWorking = createMemo(() => isActiveSessionWorking());
+  const activePermissionReviewInFlight = createMemo(() => {
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return false;
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    return getSessionTreeIds(rootId).some(
+      (candidateSessionId) =>
+        (state.sessionAutoPermissionCounts[candidateSessionId]?.inFlight ?? 0) > 0
+    );
+  });
   const shouldShowStarterLogo = createMemo(() => {
     const sessionId = state.activeSessionId;
     if (getVisibleThreadMessages(state.messages, sessionId, state.sessions).length > 0)
@@ -1466,7 +1476,9 @@ export function MessageList() {
   const loadingRowEligible = createMemo(
     () =>
       !!state.activeSessionId &&
-      (activeSessionWorking() || hasIncompleteLatestVisibleAssistantReply()) &&
+      (activeSessionWorking() ||
+        activePermissionReviewInFlight() ||
+        hasIncompleteLatestVisibleAssistantReply()) &&
       !hasActiveQuestion() &&
       !hasActivePermission() &&
       !activeUsageLimit()
