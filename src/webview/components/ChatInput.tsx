@@ -2629,8 +2629,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const autoPermissionActivity = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId) return undefined;
-    return getSessionTreeIdsForSession(sessionId)
+    const sessionIds = getSessionTreeIdsForSession(sessionId);
+    const rootSessionId = getSessionTreeRootId(sessionId) || sessionId;
+    const latestPromptCreatedAt = state.messages.reduce(
+      (latest, entry) =>
+        entry.info.role === 'user' && entry.info.sessionID === rootSessionId
+          ? Math.max(latest, entry.info.time.created)
+          : latest,
+      Number.NEGATIVE_INFINITY
+    );
+    return sessionIds
       .flatMap((id) => state.sessionAutoPermissionActivity[id] ?? [])
+      .filter((activity) => activity.createdAt >= latestPromptCreatedAt)
       .toSorted((a, b) => a.createdAt - b.createdAt);
   });
   const autoApproveJudgeModel = createMemo(() => {

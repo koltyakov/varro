@@ -165,6 +165,8 @@ afterEach(() => {
   setState('mcpStatus', {});
   setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', {});
+  setState('sessionPermissionModes', {});
+  setState('sessionAutoPermissionActivity', {});
   setState('clipboardImages', []);
   resetPastedImageIndex();
   setState('droppedFiles', []);
@@ -1361,6 +1363,39 @@ describe('ChatInput', () => {
     expect(dots).toHaveLength(2);
     expect(dots[0]?.className).toContain('auto-approved');
     expect(dots[1]?.className).toContain('reviewing');
+  });
+
+  it('shows auto-approve activity only for the latest prompt', () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [
+      session('session-1', 2_000),
+      session('child-1', 2_100, { parentID: 'session-1' }),
+    ]);
+    setState('sessionPermissionModes', { 'session-1': 'auto' });
+    setState('sessionAutoPermissionActivity', {
+      'session-1': [
+        { permissionId: 'old-root', status: 'auto-approved', title: 'old', createdAt: 2 },
+      ],
+      'child-1': [
+        { permissionId: 'old-child', status: 'auto-approved', title: 'old', createdAt: 2 },
+      ],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+    expect(container?.querySelectorAll('.toolbar-meta .permission-activity-item')).toHaveLength(2);
+
+    const latestPrompt = historyEntry('user-2', 'Next prompt');
+    latestPrompt.info.time.created = 3;
+    setState('messages', [latestPrompt]);
+    expect(container?.querySelectorAll('.toolbar-meta .permission-activity-item')).toHaveLength(0);
+
+    setState('sessionAutoPermissionActivity', 'child-1', [
+      { permissionId: 'new-child', status: 'reviewing', title: 'new', createdAt: 4 },
+    ]);
+    const dots = container?.querySelectorAll('.toolbar-meta .permission-activity-item') ?? [];
+    expect(dots).toHaveLength(1);
+    expect(dots[0]?.className).toContain('reviewing');
   });
 
   it('uses the full composer controls and starts a new session only when sending', async () => {
