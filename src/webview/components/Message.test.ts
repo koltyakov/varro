@@ -925,6 +925,65 @@ describe('parseUserMessageContent', () => {
 });
 
 describe('Message user rendering', () => {
+  it('reveals a system-formatted time without mounting new layout content', () => {
+    const now = new Date();
+    const created = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      13,
+      45
+    );
+    const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...userMessage('message-timestamp-today'), time: { created: created.getTime() } },
+          parts: [textPart('text-timestamp-today', 'Timestamped prompt')],
+          get showSentTimestamp() {
+            return showSentTimestamp();
+          },
+        }),
+      container!
+    );
+
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+    expect(timestamp?.textContent).toBe(
+      new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(created)
+    );
+    expect(timestamp?.dateTime).toBe(created.toISOString());
+
+    setShowSentTimestamp(true);
+
+    expect(container?.querySelector('.message-sent-time')).toBe(timestamp);
+    expect(timestamp?.classList.contains('is-visible')).toBe(true);
+  });
+
+  it('includes the system-formatted date for messages sent before today', () => {
+    const now = new Date();
+    const created = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 2,
+      13,
+      45
+    );
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...userMessage('message-timestamp-older'), time: { created: created.getTime() } },
+          parts: [textPart('text-timestamp-older', 'Older prompt')],
+          showSentTimestamp: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.message-sent-time')?.textContent).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(created)
+    );
+  });
+
   it('does not render empty user message shells with no meaningful content', () => {
     cleanup = render(
       () =>

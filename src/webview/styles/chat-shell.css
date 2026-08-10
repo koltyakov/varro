@@ -520,7 +520,8 @@ input:focus-visible {
 
 .chat-turn-user {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .chat-turn-content {
@@ -532,6 +533,34 @@ input:focus-visible {
 
 .chat-turn-user .chat-turn-content {
   width: auto;
+}
+
+.message-sent-time {
+  height: 12px;
+  font-size: 10px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-vscode-muted);
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.chat-turn-user > .message-sent-time {
+  margin-top: 3px;
+  margin-right: var(--chat-radius-card);
+}
+
+.latest-user-message-sticky-time {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: var(--chat-radius-card);
+  z-index: 1;
+}
+
+.message-sent-time.is-visible {
+  opacity: 1;
 }
 
 .chat-turn-card {

@@ -25,6 +25,7 @@ export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   promptNumberMap: ReadonlyMap<string, number>;
   showPromptNumbers: boolean;
+  showSentTimestamps: boolean;
   lastAssistantID: string | null;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -165,6 +166,7 @@ export function MessageRow(
             promptNumber={
               props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
             }
+            showSentTimestamp={props.showSentTimestamps}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
             nearViewport={props.nearViewport}
             outerListVirtualized={props.outerListVirtualized}

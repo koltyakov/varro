@@ -15,6 +15,7 @@ import { client } from '../lib/client';
 import { editingMessageId, startEditingMessage } from '../lib/message-edit-state';
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
+import { formatMessageSentTime } from '../lib/message-time';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
 import { openProviderSetup } from '../lib/provider-setup';
 import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
@@ -86,6 +87,7 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   promptNumber?: number;
+  showSentTimestamp?: boolean;
   isLastAssistant?: boolean;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -152,6 +154,7 @@ export function Message(props: {
   });
 
   const isUser = () => props.info.role === 'user';
+  const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   // While the composer's usage-limit banner is up for this session, the latest
   // assistant 429 error card would repeat the same message and actions; hide it
@@ -408,6 +411,15 @@ export function Message(props: {
               />
             </Show>
           </div>
+          <Show when={isUser()}>
+            <time
+              class={`message-sent-time${props.showSentTimestamp ? ' is-visible' : ''}`}
+              dateTime={new Date(props.info.time.created).toISOString()}
+              aria-hidden={!props.showSentTimestamp}
+            >
+              {sentTimestamp()}
+            </time>
+          </Show>
           <Show when={assistant() && visibleDiffs().length > 0}>
             <DiffSummary
               diffs={visibleDiffs()}

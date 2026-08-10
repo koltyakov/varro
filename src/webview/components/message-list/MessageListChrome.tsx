@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
+import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
 import type { Permission, QuestionRequest } from '../../types';
@@ -70,12 +71,17 @@ function bindStickyTextOverflowFade(
 export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
   promptNumber?: number;
+  sentAt?: number;
+  showSentTimestamp?: boolean;
   onClick?: (preview: StickyUserMessagePreview) => void;
   title?: string;
   loading?: boolean;
   onGeometryChange?: () => void;
 }) {
   const isClickable = () => !!props.onClick;
+  const sentTimestamp = createMemo(() =>
+    props.sentAt === undefined ? null : formatMessageSentTime(props.sentAt)
+  );
 
   return (
     <div class="latest-user-message-sticky-wrap" aria-hidden="true">
@@ -152,6 +158,16 @@ export function StickyUserMessagePreviewCard(props: {
               </div>
             </Show>
           </div>
+          <Show when={sentTimestamp()}>
+            {(timestamp) => (
+              <time
+                class={`message-sent-time latest-user-message-sticky-time${props.showSentTimestamp ? ' is-visible' : ''}`}
+                dateTime={new Date(props.sentAt!).toISOString()}
+              >
+                {timestamp()}
+              </time>
+            )}
+          </Show>
         </div>
         <div class="latest-user-message-sticky-bottom-solid" />
         <div class="latest-user-message-sticky-bottom-fade" />

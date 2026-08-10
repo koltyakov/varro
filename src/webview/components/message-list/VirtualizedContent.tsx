@@ -203,6 +203,7 @@ export function VirtualizedContent(
         modelChangeMap={props.modelChangeMap}
         promptNumberMap={props.promptNumberMap}
         showPromptNumbers={props.showPromptNumbers}
+        showSentTimestamps={props.showSentTimestamps}
         lastAssistantID={props.lastAssistantID}
         previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}

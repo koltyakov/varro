@@ -101,14 +101,11 @@ describe('MessageRows perf guards', () => {
           isFinalAssistantMessage: () => false,
           promptNumberMap: new Map(),
           showPromptNumbers: false,
+          showSentTimestamps: false,
           hasBuildAgent: false,
           latestPlanImplementationMessageId: null,
-          isPlanningAssistantMessage: () => false,
           questionRequestForTool: () => null,
           permissionMatchForTool: () => null,
-          shouldShowPlanImplementationAction: () => false,
-          buildPlanImplementationPrompt: () => '',
-          buildPlanDocumentContent: () => '',
         }),
       container!
     );
