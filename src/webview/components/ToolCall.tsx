@@ -1421,9 +1421,18 @@ function GenericToolCall(props: {
   const visibleTaskTokenUsage = () => (taskActivityAgeDuration() ? null : taskTokenUsage());
   const visibleRunningDurationLabel = () =>
     taskActivityAgeDuration() ? null : runningDurationLabel();
+  const commandMatchesTitle = () =>
+    normalizedComparableText(bashCommand()) === normalizedComparableText(props.title);
+  const hasBashResultRow = () =>
+    props.state.status === 'completed' ||
+    props.state.status === 'error' ||
+    (props.state.status === 'running' && !isBlank(props.runningOutput));
+  const hasOnlyHeaderCommand = () =>
+    isBash() && commandMatchesTitle() && !hasBashResultRow();
   const hasExpandableContent = () => {
     if (props.lightweight) return false;
     if (props.state.status === 'error') return true;
+    if (hasOnlyHeaderCommand()) return false;
     if (detailInputEntries().length > 0) return true;
     // Whitespace-only output is not expandable content: offering a chevron that
     // opens onto an empty box is worse than no chevron.
@@ -1431,22 +1440,20 @@ function GenericToolCall(props: {
   };
   const isExpanded = () => hasExpandableContent() && props.expanded;
 
-  const commandMatchesTitle = () =>
-    normalizedComparableText(bashCommand()) === normalizedComparableText(props.title);
   // Never hide the command while it is the card's only content. Completed and
   // failed calls have a result row; running calls only do once output arrives.
-  const hasBashResultRow = () =>
-    props.state.status === 'completed' ||
-    props.state.status === 'error' ||
-    (props.state.status === 'running' && !isBlank(props.runningOutput));
   const showBashCommandRow = () => !hasBashResultRow() || !commandMatchesTitle();
-  const showHeaderCommandCopy = () => isBash() && isExpanded() && commandMatchesTitle();
+  const showHeaderCommandCopy = () =>
+    isBash() &&
+    !props.lightweight &&
+    commandMatchesTitle() &&
+    (isExpanded() || !hasBashResultRow());
 
   const bodyId = createUniqueId();
   return (
     <div class={`chat-tool-invocation-part${isTask() ? ' tool-invocation-task' : ''}`}>
       <div
-        class={`tool-invocation-header-shell${showHeaderCommandCopy() ? ' has-command-copy' : ''}`}
+        class={`tool-invocation-header-shell${showHeaderCommandCopy() ? ' has-command-copy' : ''}${hasOnlyHeaderCommand() ? ' has-command-only-copy' : ''}`}
       >
         <button
           type="button"

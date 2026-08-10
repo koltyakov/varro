@@ -572,7 +572,9 @@ describe('ToolCall', () => {
     expect(container?.querySelector('.tool-invocation-running')).toBeNull();
   });
 
-  it('keeps the $ row when there is no output, so the body is never empty', () => {
+  it('offers copy without expansion when a running command only repeats the header', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
     const part: ToolPart = {
       id: 'tool-1',
       sessionID: 'session-1',
@@ -590,9 +592,25 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
 
-    expect(container?.querySelector('.terminal-command-row-input')).not.toBeNull();
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header?.disabled).toBe(true);
+    expect(header?.hasAttribute('aria-expanded')).toBe(false);
+    expect(container?.querySelector('.tool-invocation-chevron')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
+    const copy = container?.querySelector<HTMLButtonElement>(
+      '.tool-invocation-header-shell > .tool-copy-button'
+    );
+    expect(copy).not.toBeNull();
+    expect(container?.querySelector('.tool-invocation-header-shell')?.classList).toContain(
+      'has-command-only-copy'
+    );
+
+    copy?.click();
+    await Promise.resolve();
+
+    expect(writeText).toHaveBeenCalledWith('git status');
+    vi.unstubAllGlobals();
   });
 
   it('keeps expanded running command output scrolled to its latest line', async () => {

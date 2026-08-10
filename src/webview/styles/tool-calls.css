@@ -1065,6 +1065,12 @@ kbd {
   transform: translateY(-50%);
 }
 
+.chat-tool-invocation-part
+  .tool-invocation-header-shell.has-command-only-copy
+  > .tool-copy-button {
+  right: var(--space-5);
+}
+
 .chat-tool-invocation-part .tool-invocation-header:hover {
   opacity: 1;
 }
