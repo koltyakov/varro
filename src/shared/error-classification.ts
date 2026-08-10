@@ -50,3 +50,10 @@ export function isAbortedToolError(state: { status: string; error?: string }) {
   const error = normalizeAbortText(state.error);
   return error === 'aborted' || error === 'aborterror' || error.includes('aborted');
 }
+
+export function isPermissionRejectedToolError(state: { status: string; error?: string }) {
+  if (state.status !== 'error') return false;
+  return normalizeAbortText(state.error).includes(
+    'user rejected permission to use this specific tool call'
+  );
+}

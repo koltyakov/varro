@@ -3,6 +3,7 @@ import {
   friendlyErrorName,
   isAbortedAssistantError,
   isAbortedToolError,
+  isPermissionRejectedToolError,
   isProviderAuthFailure,
 } from './error-classification';
 
@@ -107,5 +108,28 @@ describe('isAbortedToolError', () => {
 
   it('rejects non-abort tool errors', () => {
     expect(isAbortedToolError({ status: 'error', error: 'timeout' })).toBe(false);
+  });
+});
+
+describe('isPermissionRejectedToolError', () => {
+  it('detects the OpenCode permission rejection error', () => {
+    expect(
+      isPermissionRejectedToolError({
+        status: 'error',
+        error: 'The user rejected permission to use this specific tool call.',
+      })
+    ).toBe(true);
+  });
+
+  it('does not confuse command-level permission failures with a user rejection', () => {
+    expect(isPermissionRejectedToolError({ status: 'error', error: 'permission denied' })).toBe(
+      false
+    );
+    expect(
+      isPermissionRejectedToolError({
+        status: 'completed',
+        error: 'The user rejected permission to use this specific tool call.',
+      })
+    ).toBe(false);
   });
 });

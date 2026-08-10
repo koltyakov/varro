@@ -8978,6 +8978,40 @@ describe('MessageList loading row', () => {
     expect(container?.textContent).toContain('Worked for 12s - Tokens ↑ 50 ↓ 10');
   });
 
+  it('keeps a rejected permission command visible and summarizes the stopped turn', async () => {
+    const rejectedCommand = toolPart('tool-1', 'assistant-1');
+    rejectedCommand.tool = 'bash';
+    rejectedCommand.state = {
+      status: 'error',
+      input: { command: 'npm run release' },
+      error: 'The user rejected permission to use this specific tool call.',
+      time: { start: 3_000, end: 10_000 },
+    };
+    const interrupted = assistantMessage('assistant-1', {
+      time: { created: 2_000, completed: 11_000 },
+      tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+    });
+    interrupted.finish = 'tool-calls';
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      {
+        info: { ...userMessage('user-1'), time: { created: 1_000 } },
+        parts: [textPart('text-user-1', 'Publish the package')],
+      },
+      { info: interrupted, parts: [rejectedCommand] },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.tool-invocation-title')?.textContent).toBe('npm run release');
+    expect(container?.querySelector('.tool-invocation-error-label')?.textContent).toBe('rejected');
+    expect(container?.textContent).toContain(
+      'Worked for 10s - Permission rejected - Tokens ↑ 42 ↓ 7'
+    );
+  });
+
   it('does not render the loading row in a draft session when stale messages leak in', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([

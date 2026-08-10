@@ -1,3 +1,4 @@
+import { isPermissionRejectedToolError } from '../../../shared/error-classification';
 import { getChildRunsByParentId } from '../../lib/state';
 import {
   isAssistantMessage,
@@ -13,6 +14,7 @@ export type AssistantDialogSummaryInfo = {
   inputTokens: number;
   outputTokens: number;
   agentCount: number;
+  permissionRejected?: boolean;
   collectingStats?: boolean;
 };
 
@@ -58,7 +60,12 @@ export function getAssistantDialogSummaryMap(
       return;
     }
 
-    if (isContinuationAssistantFinish(lastMessage.finish)) {
+    const lastEntry = entriesById.get(lastMessage.id);
+    const permissionRejected =
+      lastEntry?.parts.some(
+        (part) => part.type === 'tool' && isPermissionRejectedToolError(part.state)
+      ) ?? false;
+    if (isContinuationAssistantFinish(lastMessage.finish) && !permissionRejected) {
       resetCurrentDialog();
       return;
     }
@@ -73,7 +80,6 @@ export function getAssistantDialogSummaryMap(
       return;
     }
 
-    const lastEntry = entriesById.get(lastMessage.id);
     if (lastEntry?.parts.some((part) => part.type === 'tool' && part.state.status === 'running')) {
       resetCurrentDialog();
       return;
@@ -114,6 +120,7 @@ export function getAssistantDialogSummaryMap(
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
+      ...(permissionRejected ? { permissionRejected: true } : {}),
       collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,
     });
 

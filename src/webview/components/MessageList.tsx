@@ -10,6 +10,7 @@ import {
   untrack,
 } from 'solid-js';
 import type { Setter } from 'solid-js';
+import { isPermissionRejectedToolError } from '../../shared/error-classification';
 import {
   isSessionAwaitingInput,
   state,
@@ -1436,8 +1437,30 @@ export function MessageList() {
       ? messageId
       : null;
   });
+  const structurallyTrailingPermissionRejectedMessageId = createMemo(() => {
+    messageStructureVersion();
+    messageInfoVersion();
+
+    const entries = messages();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.info.role === 'user') return null;
+      if (entry.info.mode === 'subagent') continue;
+      return entry.info.time.completed &&
+        entry.parts.some(
+          (part) => part.type === 'tool' && isPermissionRejectedToolError(part.state)
+        )
+        ? entry.info.id
+        : null;
+    }
+    return null;
+  });
   const trailingSummaryMessageId = createMemo(
-    () => explicitTerminalFinalResponseMessageId() ?? trailingSummaryOwner()?.messageId ?? null
+    () =>
+      explicitTerminalFinalResponseMessageId() ??
+      structurallyTrailingPermissionRejectedMessageId() ??
+      trailingSummaryOwner()?.messageId ??
+      null
   );
 
   const loadingRowEligible = createMemo(

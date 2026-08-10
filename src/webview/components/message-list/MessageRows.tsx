@@ -238,6 +238,7 @@ function AssistantDialogSummary(props: {
       : '';
   const agentSuffix = () =>
     props.summary.agentCount > 0 ? ` - Agents ${formatNumber(props.summary.agentCount)}` : '';
+  const statusSuffix = () => (props.summary.permissionRejected ? ' - Permission rejected' : '');
 
   return (
     <div class="model-change-indicator assistant-dialog-summary">
@@ -245,7 +246,7 @@ function AssistantDialogSummary(props: {
         <span class="model-change-label">
           {props.summary.collectingStats
             ? 'Collecting stats...'
-            : `Worked for ${formatTurnDuration(props.summary.durationMs)}${tokenSuffix()}${agentSuffix()}`}
+            : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
         </span>
       </div>
       <Show when={props.showImplementPlanAction}>

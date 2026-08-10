@@ -10,7 +10,10 @@ import {
   onCleanup,
   onMount,
 } from 'solid-js';
-import { isAbortedToolError } from '../../shared/error-classification';
+import {
+  isAbortedToolError,
+  isPermissionRejectedToolError,
+} from '../../shared/error-classification';
 import { asRecord } from '../../shared/type-utils';
 import type {
   AssistantMessage,
@@ -1187,6 +1190,7 @@ function GenericToolCall(props: {
 }) {
   const toolName = () => normalizeToolName(props.tool.tool);
   const isAborted = () => isAbortedToolError(props.state);
+  const isPermissionRejected = () => isPermissionRejectedToolError(props.state);
   const isBash = () => toolName() === 'bash';
   const isTask = () => toolName() === 'task';
   const isStructuredTool = () => isStructuredToolName(props.tool.tool);
@@ -1432,8 +1436,10 @@ function GenericToolCall(props: {
             )}
           </Show>
           <Show when={props.state.status === 'error' && !isExpanded()}>
-            <span class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}`}>
-              {isAborted() ? 'aborted' : 'failed'}
+            <span
+              class={`tool-invocation-error-label${isAborted() ? ' is-aborted' : ''}${isPermissionRejected() ? ' is-rejected' : ''}`}
+            >
+              {isPermissionRejected() ? 'rejected' : isAborted() ? 'aborted' : 'failed'}
             </span>
           </Show>
           <Show when={hasExpandableContent()}>

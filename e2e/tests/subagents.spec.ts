@@ -39,7 +39,7 @@ test('inherits auto mode for a child permission and replies once without a promp
       },
       judged: true,
     });
-  await expect(page.getByText('Allow child verification to run?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });
 
@@ -53,7 +53,10 @@ test('shows the child permission in the parent when the inherited auto judge ask
   await expect(
     page.locator('.interactive-session > .chat-header .chat-header-title-text')
   ).toHaveText('Parent permission orchestration');
-  await expect(page.getByText('Allow child verification to run?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText(
+    'npm run test:e2e -- child-verification'
+  );
   await page.getByRole('button', { name: 'Allow once' }).click();
 
   await expect

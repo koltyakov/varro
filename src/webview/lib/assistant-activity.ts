@@ -1,4 +1,7 @@
-import { isAbortedToolError } from '../../shared/error-classification';
+import {
+  isAbortedToolError,
+  isPermissionRejectedToolError,
+} from '../../shared/error-classification';
 import type { AssistantMessage, MessageEntry, Part } from '../types';
 import { isFileEditPart, isFileReadPart } from './part-utils';
 import { getToolFileChanges } from './tool-file-change';
@@ -118,6 +121,7 @@ export function shouldCompactAssistantActivityPart(
   part: AssistantActivityPart,
   options: { showInlineFileChanges: boolean; keepEditInline: boolean }
 ) {
+  if (part.type === 'tool' && isPermissionRejectedToolError(part.state)) return false;
   if (
     part.type === 'tool' &&
     normalizeToolName(part.tool) === 'apply_patch' &&

@@ -11,11 +11,14 @@ test('renders a child permission in its active parent and completes child work a
   await expect(
     page.locator('.interactive-session > .chat-header .chat-header-title-text')
   ).toHaveText('Parent permission orchestration');
-  await expect(page.getByText('Allow child verification to run?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText(
+    'npm run test:e2e -- child-verification'
+  );
   await expect(page.getByTitle('Send (Enter)')).toBeDisabled();
   await page.getByRole('button', { name: 'Allow once' }).click();
 
-  await expect(page.getByText('Allow child verification to run?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
     .poll(() =>
       getE2EState(page, () => {
@@ -66,10 +69,11 @@ test('responds to a pending permission request', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=pending-permission');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await page.getByRole('button', { name: 'Allow always' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -88,10 +92,11 @@ test('rejects a pending permission request', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=pending-permission');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await page.getByRole('button', { name: 'Reject' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -130,7 +135,10 @@ test('restores a linked permission to full flow after its tool starts compacting
   ).toBe(true);
   await page.waitForTimeout(2_100);
   await page.getByRole('button', { name: 'Allow once' }).click();
-  await expect(page.getByText('Allow removing the temporary sandbox?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText(
+    'rm -rf /tmp/varro-sandbox'
+  );
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 
   const geometry = await page.locator('.permission-prompt').evaluate((prompt) => {
@@ -163,12 +171,13 @@ test('keeps a linked permission visible when its tool row is hidden in chat', as
   await page.goto('/e2e/harness/index.html?scenario=hidden-linked-permission');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await expect(page.locator('.tool-invocation-title')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Allow once' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
     .poll(() =>
       getE2EState(page, () => {
@@ -197,7 +206,8 @@ test('recovers a permission prompt when the live permission event is missed', as
   await page.goto('/e2e/harness/index.html?scenario=missed-permission-event');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await expect(page.locator('.tool-invocation-title')).toHaveText('Run command');
   await expect(page.locator('.tool-call-wait-icon.tool-status-pending')).toBeVisible();
 });
@@ -225,7 +235,8 @@ test('default permissions end up with a bash permission request for opencode ver
   await page.getByTitle('Send (Enter)').click();
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running opencode --version?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.getByText('opencode --version', { exact: true })).toBeVisible();
 
   await expect
     .poll(() =>
@@ -288,12 +299,14 @@ test('keeps a grouped permission prompt visible after a one-time approval', asyn
   await page.goto('/e2e/harness/index.html?scenario=grouped-permissions');
 
   await expect(page.getByText('Permission Required')).toBeVisible();
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await expect(page.locator('.permission-prompt-count')).toContainText('2');
 
   await page.getByRole('button', { name: 'Allow once' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
   await expect(page.locator('.permission-prompt-count')).toHaveCount(0);
   await expect
     .poll(() =>
@@ -320,7 +333,7 @@ test('keeps grouped permission prompts bundled when rejecting them', async ({ pa
   await expect(page.locator('.permission-prompt-count')).toContainText('2');
   await page.getByRole('button', { name: 'Reject' }).click();
 
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt')).toHaveCount(0);
   await expect
     .poll(() =>
       getE2EState(page, () => {
@@ -381,15 +394,15 @@ test('shows distinct permission requests one at a time', async ({ page }) => {
 
   await expect(page.locator('.permission-prompt')).toHaveCount(1);
   await expect(page.locator('.permission-prompt-step')).toHaveText('1 / 2');
-  await expect(page.getByText('Allow running npm test?')).toBeVisible();
-  await expect(page.getByText('Allow running npm run build?')).toHaveCount(0);
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm test');
 
   await page.getByRole('button', { name: 'Allow once' }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(1);
   await expect(page.locator('.permission-prompt-step')).toHaveText('2 / 2');
-  await expect(page.getByText('Allow running npm test?')).toHaveCount(0);
-  await expect(page.getByText('Allow running npm run build?')).toBeVisible();
+  await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');
+  await expect(page.locator('.permission-meta-value')).toHaveText('npm run build');
   await page.getByRole('button', { name: 'Reject' }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(0);
