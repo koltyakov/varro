@@ -2,10 +2,10 @@
 .rich-composer {
   min-height: 30px;
   max-height: 200px;
-  width: 100%;
+  width: calc(100% + 7px);
   overflow-y: auto;
   background: transparent;
-  padding: 4px 4px;
+  padding: 4px 11px 4px 4px;
   margin-bottom: 8px;
   font-size: var(--vscode-font-size, 13px);
   line-height: 1.7;
