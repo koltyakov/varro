@@ -488,7 +488,7 @@
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex-shrink: 0;
   cursor: pointer;
   user-select: none;
@@ -581,6 +581,10 @@
 
 .toolbar-mcp-count-value {
   color: currentColor;
+}
+
+.toolbar-meta-compact-label {
+  display: none;
 }
 
 /* Provider limit popup */
@@ -720,6 +724,8 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .permission-activity {
@@ -728,9 +734,20 @@
   align-items: center;
   margin-left: 1px;
   width: 96px;
+  min-width: 0;
   max-width: 96px;
   height: 20px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  flex: 1 1 96px;
+}
+
+.permission-activity::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .permission-activity-strip {

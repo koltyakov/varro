@@ -55,6 +55,27 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   );
 });
 
+test('ellipsizes the composer placeholder at narrow widths', async ({ page }) => {
+  await page.setViewportSize({ width: 220, height: 320 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer[data-empty="true"]').first();
+  await expect(composer).toBeVisible();
+  const placeholderStyle = await composer.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    return {
+      overflow: style.overflow,
+      textOverflow: style.textOverflow,
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(placeholderStyle).toEqual({
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
+});
+
 test('shows todos and queues follow-up messages while a session is busy', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
 

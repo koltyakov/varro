@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -30,10 +31,11 @@ afterEach(() => {
   }
 });
 
-function createTemporaryWorkspace() {
+function createTemporaryWorkspace(options: { git?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'varro-auto-approve-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
+  if (options.git) execFileSync('git', ['init', '--quiet', workspace]);
   temporaryDirectories.push(root);
   return { root, workspace };
 }
@@ -79,6 +81,44 @@ describe('AutoApproveJudge', () => {
     ).resolves.toEqual({ decision: 'allow', reason: 'Web fetch.' });
     expect(request).not.toHaveBeenCalled();
   });
+
+  it('allows websearch without creating a judge session', async () => {
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge({
+        permission: {
+          id: 'perm-websearch',
+          type: 'websearch',
+          sessionID: 'session-1',
+          title: 'Search documentation',
+          metadata: { query: 'OpenCode permissions' },
+        },
+      })
+    ).resolves.toEqual({ decision: 'allow', reason: 'Web search.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(['read', 'glob', 'grep', 'list', 'codesearch', 'lsp'])(
+    'allows known read-only %s requests without creating a judge session',
+    async (type) => {
+      const request = vi.fn();
+      const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+      await expect(
+        judge.judge({
+          permission: {
+            id: `perm-${type}`,
+            type,
+            sessionID: 'session-1',
+            title: type,
+          },
+        })
+      ).resolves.toEqual({ decision: 'allow', reason: 'Known read-only permission.' });
+      expect(request).not.toHaveBeenCalled();
+    }
+  );
 
   it('allows external directory access contained by prior always-approved scopes', async () => {
     const { root } = createTemporaryWorkspace();
@@ -247,7 +287,7 @@ describe('AutoApproveJudge', () => {
   });
 
   it('allows workspace file edits without creating a judge session', async () => {
-    const { workspace } = createTemporaryWorkspace();
+    const { workspace } = createTemporaryWorkspace({ git: true });
     const filePath = join(workspace, 'src', 'app.ts');
     const request = vi.fn();
     const judge = new AutoApproveJudge(
@@ -256,21 +296,104 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-edit',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/app.ts',
-          metadata: {
-            filepath: filePath,
-            relativePath: 'src/app.ts',
-            files: [{ filePath, relativePath: 'src/app.ts', type: 'update' }],
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-edit',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/app.ts',
+            metadata: {
+              filepath: filePath,
+              relativePath: 'src/app.ts',
+              files: [{ filePath, relativePath: 'src/app.ts', type: 'update' }],
+            },
           },
         },
-      })
-    ).resolves.toEqual({ decision: 'allow', reason: 'Workspace file edit.' });
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'allow', reason: 'Git-backed workspace file edit.' });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not locally allow workspace edits outside a Git work tree', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-edit-no-git',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/app.ts',
+            metadata: { relativePath: 'src/app.ts' },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('does not locally allow edits to Git metadata', async () => {
+    const { workspace } = createTemporaryWorkspace({ git: true });
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-git-config-edit',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit .git/config',
+            metadata: { relativePath: '.git/config' },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('ignores inherited Git environment overrides when checking repository membership', async () => {
+    const { root, workspace } = createTemporaryWorkspace();
+    const repository = join(root, 'repository');
+    mkdirSync(repository);
+    execFileSync('git', ['init', '--quiet', repository]);
+    const previousGitDir = process.env.GIT_DIR;
+    const previousGitWorkTree = process.env.GIT_WORK_TREE;
+    process.env.GIT_DIR = join(repository, '.git');
+    process.env.GIT_WORK_TREE = workspace;
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    try {
+      await expect(
+        judge.judge(
+          {
+            permission: {
+              id: 'perm-git-environment',
+              type: 'edit',
+              sessionID: 'session-1',
+              title: 'edit src/app.ts',
+              metadata: { relativePath: 'src/app.ts' },
+            },
+          },
+          workspace
+        )
+      ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    } finally {
+      if (previousGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previousGitDir;
+      if (previousGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = previousGitWorkTree;
+    }
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
   it('does not locally allow edit permissions outside the workspace or file deletion', async () => {
@@ -282,26 +405,34 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-outside',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit outside.ts',
-          metadata: { filepath: join(root, 'outside.ts') },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-outside',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit outside.ts',
+            metadata: { filepath: join(root, 'outside.ts') },
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-delete',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/old.ts',
-          metadata: { files: [{ filePath: join(workspace, 'src', 'old.ts'), type: 'delete' }] },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-delete',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/old.ts',
+            metadata: {
+              files: [{ filePath: join(workspace, 'src', 'old.ts'), type: 'delete' }],
+            },
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -317,26 +448,32 @@ describe('AutoApproveJudge', () => {
     const wildcardPath = join(workspace, 'src', '*.ts');
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-ambiguous-pattern',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/app.ts',
-          pattern: [filePath, wildcardPath],
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-ambiguous-pattern',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/app.ts',
+            pattern: [filePath, wildcardPath],
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-ambiguous-files',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/app.ts',
-          metadata: { files: [{ filePath }, { filePath: wildcardPath }] },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-ambiguous-files',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/app.ts',
+            metadata: { files: [{ filePath }, { filePath: wildcardPath }] },
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -350,21 +487,24 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-traversal',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/../../etc/passwd',
-          metadata: { relativePath: 'src/../../etc/passwd' },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-traversal',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/../../etc/passwd',
+            metadata: { relativePath: 'src/../../etc/passwd' },
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
   it('still locally allows relative edit paths that stay inside the workspace', async () => {
-    const { workspace } = createTemporaryWorkspace();
+    const { workspace } = createTemporaryWorkspace({ git: true });
     const request = vi.fn();
     const judge = new AutoApproveJudge(
       { request, getWorkspaceCwd: () => workspace } as never,
@@ -372,17 +512,174 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-nested',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit src/app.ts',
-          metadata: { relativePath: 'src/features/../app.ts' },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-nested',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit src/app.ts',
+            metadata: { relativePath: 'src/features/../app.ts' },
+          },
         },
-      })
-    ).resolves.toEqual({ decision: 'allow', reason: 'Workspace file edit.' });
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'allow', reason: 'Git-backed workspace file edit.' });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('allows contained edits when the workspace is a subdirectory of a Git work tree', async () => {
+    const { root, workspace } = createTemporaryWorkspace();
+    execFileSync('git', ['init', '--quiet', root]);
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-git-subdirectory',
+            type: 'write',
+            sessionID: 'session-1',
+            title: 'write src/app.ts',
+            metadata: { relativePath: 'src/app.ts' },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'allow', reason: 'Git-backed workspace file edit.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('coalesces concurrent Git work-tree probes for the same workspace', async () => {
+    const { workspace } = createTemporaryWorkspace({ git: true });
+    const gitDirectory = join(workspace, '.git');
+    const probeResult = deferred<{ gitDirectory: string; commonDirectory: string } | null>();
+    const probe = vi.fn(() => probeResult.promise);
+    const request = vi.fn();
+    const judge = new AutoApproveJudge(
+      { request } as never,
+      new HiddenSessionManager(),
+      async () => false,
+      () => null,
+      probe
+    );
+    const permission = {
+      id: 'perm-concurrent-one',
+      type: 'edit',
+      sessionID: 'session-1',
+      title: 'edit src/app.ts',
+      metadata: { relativePath: 'src/app.ts' },
+    };
+
+    const first = judge.judge({ permission }, workspace);
+    const second = judge.judge(
+      { permission: { ...permission, id: 'perm-concurrent-two' } },
+      workspace
+    );
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce());
+    probeResult.resolve({ gitDirectory, commonDirectory: gitDirectory });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { decision: 'allow', reason: 'Git-backed workspace file edit.' },
+      { decision: 'allow', reason: 'Git-backed workspace file edit.' },
+    ]);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('uses structured patch paths and rejects patch deletions', async () => {
+    const { workspace } = createTemporaryWorkspace({ git: true });
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-patch-update',
+            type: 'apply_patch',
+            sessionID: 'session-1',
+            title: 'apply_patch',
+            metadata: {
+              patchText:
+                '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch',
+            },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'allow', reason: 'Git-backed workspace file edit.' });
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-patch-delete',
+            type: 'apply_patch',
+            sessionID: 'session-1',
+            title: 'apply_patch',
+            metadata: {
+              patchText: '*** Begin Patch\n*** Delete File: src/app.ts\n*** End Patch',
+            },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-patch-move',
+            type: 'apply_patch',
+            sessionID: 'session-1',
+            title: 'apply_patch',
+            metadata: {
+              patchText:
+                '*** Begin Patch\n*** Update File: src/app.ts\n*** Move to: src/moved.ts\n*** End Patch',
+            },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('does not locally allow title-only or malformed edit paths', async () => {
+    const { workspace } = createTemporaryWorkspace({ git: true });
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    for (const permission of [
+      {
+        id: 'perm-title-only',
+        type: 'edit',
+        sessionID: 'session-1',
+        title: 'edit src/app.ts',
+      },
+      {
+        id: 'perm-malformed-pattern',
+        type: 'edit',
+        sessionID: 'session-1',
+        title: 'edit src/app.ts',
+        pattern: ['src/app.ts', 42],
+      },
+      {
+        id: 'perm-malformed-files',
+        type: 'edit',
+        sessionID: 'session-1',
+        title: 'edit src/app.ts',
+        metadata: { relativePath: 'src/app.ts', files: { path: 'src/app.ts' } },
+      },
+    ]) {
+      await expect(judge.judge({ permission }, workspace)).resolves.toEqual({
+        decision: 'ask',
+        reason: 'Needs user review.',
+      });
+    }
+    expect(
+      request.mock.calls.filter(([method, path]) => method === 'POST' && path === '/session')
+    ).toHaveLength(3);
   });
 
   it('allows safe local bash commands without creating a judge session', async () => {
@@ -441,12 +738,139 @@ describe('AutoApproveJudge', () => {
     ];
 
     for (const permission of permissions) {
-      await expect(judge.judge({ permission })).resolves.toEqual({
+      await expect(judge.judge({ permission }, workspace)).resolves.toEqual({
         decision: 'allow',
         reason: 'Safe local command.',
       });
     }
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('allows safe command sequences from multi-pattern permission payloads', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-pattern-sequence',
+            type: 'bash',
+            sessionID: 'session-1',
+            title: 'Inspect repository state',
+            pattern: ['git status*', 'git log*'],
+            metadata: { command: 'git status --short && git log --oneline -10' },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'allow', reason: 'Safe local command.' });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('allows strict filesystem reads, version probes, and Git metadata inspection', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'src'));
+    const request = vi.fn();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+    const commands = [
+      'ls -la src',
+      'cat src/app.ts',
+      'head -n 10 src/app.ts',
+      'tail -n 10 src/app.ts',
+      'wc -l src/app.ts',
+      'stat src/app.ts',
+      'file src/app.ts',
+      'du src',
+      'node --version',
+      'python3 -V',
+      'go version',
+      'git remote -v',
+      'git config --get remote.origin.url',
+      'git tag --list',
+      'git stash list',
+      'git ls-tree HEAD -- src',
+      'git cat-file -t HEAD',
+      'git describe --always HEAD',
+      'git merge-base HEAD HEAD~1',
+    ];
+
+    for (const [index, command] of commands.entries()) {
+      await expect(
+        judge.judge(
+          {
+            permission: {
+              id: `perm-inspection-${index}`,
+              type: 'bash',
+              sessionID: 'session-1',
+              title: `bash ${command}`,
+            },
+          },
+          workspace
+        )
+      ).resolves.toEqual({ decision: 'allow', reason: 'Safe local command.' });
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['outside read', 'cat /etc/hosts'],
+    ['recursive symlink traversal', 'ls -RL src'],
+    ['du symlink traversal', 'du -aL src'],
+    ['wc external file list', 'wc --files0-from=src/paths.list'],
+    ['follow output', 'tail -f src/app.ts'],
+    ['file compilation', 'file --compile'],
+    ['external file list', 'du --files0-from=/etc/hosts'],
+    ['package mutation', 'npm version patch'],
+    ['Git text conversion', 'git diff --textconv'],
+    ['Git remote mutation', 'git remote add origin https://example.com/repo.git'],
+    ['Git global config', 'git config --global user.name'],
+    ['Git tag mutation', 'git tag v1.0.0'],
+    ['Git stash mutation', 'git stash pop'],
+    ['Git branch mutation', 'git branch new-branch'],
+  ])('defers unsafe inspection form %s to the model judge', async (_case, command) => {
+    const { workspace } = createTemporaryWorkspace();
+    mkdirSync(join(workspace, 'src'));
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: `perm-unsafe-${_case}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
+  });
+
+  it('does not locally allow conflicting command metadata', async () => {
+    const { workspace } = createTemporaryWorkspace();
+    const request = createAskJudgeRequest();
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
+
+    await expect(
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-conflicting-command',
+            type: 'bash',
+            sessionID: 'session-1',
+            title: 'bash pwd',
+            metadata: { command: 'pwd', cmd: 'rm -rf src' },
+          },
+        },
+        workspace
+      )
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
 
   it.each([
@@ -468,14 +892,17 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: `perm-${_case}`,
-          type: 'bash',
-          sessionID: 'session-1',
-          title: `bash ${command}`,
+      judge.judge(
+        {
+          permission: {
+            id: `perm-${_case}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -498,14 +925,17 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: `perm-implicit-${_case}`,
-          type: 'bash',
-          sessionID: 'session-1',
-          title: `bash ${command}`,
+      judge.judge(
+        {
+          permission: {
+            id: `perm-implicit-${_case}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -525,14 +955,17 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: `perm-shell-${_case}`,
-          type: 'bash',
-          sessionID: 'session-1',
-          title: `bash ${command}`,
+      judge.judge(
+        {
+          permission: {
+            id: `perm-shell-${_case}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -586,14 +1019,17 @@ describe('AutoApproveJudge', () => {
       ['perm-symlinked-external-git', linkedOutside],
     ]) {
       await expect(
-        judge.judge({
-          permission: {
-            id,
-            type: 'bash',
-            sessionID: 'session-1',
-            title: `bash git -C "${directory}" status --short`,
+        judge.judge(
+          {
+            permission: {
+              id,
+              type: 'bash',
+              sessionID: 'session-1',
+              title: `bash git -C "${directory}" status --short`,
+            },
           },
-        })
+          workspace
+        )
       ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     }
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
@@ -612,14 +1048,17 @@ describe('AutoApproveJudge', () => {
 
     try {
       await expect(
-        judge.judge({
-          permission: {
-            id: 'perm-native-backslash-git',
-            type: 'bash',
-            sessionID: 'session-1',
-            title: 'bash git -C "tmp\\opencode" status --short',
+        judge.judge(
+          {
+            permission: {
+              id: 'perm-native-backslash-git',
+              type: 'bash',
+              sessionID: 'session-1',
+              title: 'bash git -C "tmp\\opencode" status --short',
+            },
           },
-        })
+          workspace
+        )
       ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
@@ -641,15 +1080,18 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: 'perm-symlink-escape',
-          type: 'edit',
-          sessionID: 'session-1',
-          title: 'edit linked/new-file.ts',
-          metadata: { filepath: join(linkedDirectory, 'new-file.ts') },
+      judge.judge(
+        {
+          permission: {
+            id: 'perm-symlink-escape',
+            type: 'edit',
+            sessionID: 'session-1',
+            title: 'edit linked/new-file.ts',
+            metadata: { filepath: join(linkedDirectory, 'new-file.ts') },
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -756,14 +1198,17 @@ describe('AutoApproveJudge', () => {
     );
 
     await expect(
-      judge.judge({
-        permission: {
-          id: `perm-reconstructed-${_case}`,
-          type: 'bash',
-          sessionID: 'session-1',
-          title: `bash ${command}`,
+      judge.judge(
+        {
+          permission: {
+            id: `perm-reconstructed-${_case}`,
+            type: 'bash',
+            sessionID: 'session-1',
+            title: `bash ${command}`,
+          },
         },
-      })
+        workspace
+      )
     ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
     expect(request).toHaveBeenCalledWith('POST', '/session', expect.any(Object));
   });
@@ -1199,7 +1644,6 @@ describe('AutoApproveJudge', () => {
     const { root, workspace } = createTemporaryWorkspace();
     const otherWorkspace = join(root, 'other-workspace');
     mkdirSync(otherWorkspace);
-    let currentWorkspace = workspace;
     let sessionCount = 0;
     const request = vi.fn(async (method: string, path: string) => {
       if (method === 'POST' && path === '/session') {
@@ -1213,14 +1657,10 @@ describe('AutoApproveJudge', () => {
       if (method === 'DELETE') return true;
       throw new Error(`Unexpected request: ${method} ${path}`);
     });
-    const judge = new AutoApproveJudge(
-      { request, getWorkspaceCwd: () => currentWorkspace } as never,
-      new HiddenSessionManager()
-    );
+    const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
 
-    await judge.judge({ permission: cargoBuildPermission('perm-workspace-1') });
-    currentWorkspace = otherWorkspace;
-    await judge.judge({ permission: cargoBuildPermission('perm-workspace-2') });
+    await judge.judge({ permission: cargoBuildPermission('perm-workspace-1') }, workspace);
+    await judge.judge({ permission: cargoBuildPermission('perm-workspace-2') }, otherWorkspace);
 
     expect(sessionCount).toBe(2);
   });
@@ -1276,7 +1716,7 @@ describe('AutoApproveJudge', () => {
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
     const permission = {
       id: 'perm-1',
-      type: 'websearch',
+      type: 'documentation_lookup',
       sessionID: 'session-1',
       title: 'Search documentation',
       metadata: { query: 'one' },
@@ -1344,7 +1784,7 @@ describe('AutoApproveJudge', () => {
 
   it('writes an audit line for every auto-approve decision', async () => {
     mocks.logger.info.mockClear();
-    const { workspace } = createTemporaryWorkspace();
+    const { workspace } = createTemporaryWorkspace({ git: true });
     const filePath = join(workspace, 'src', 'app.ts');
     const request = vi.fn();
     const judge = new AutoApproveJudge(
@@ -1352,15 +1792,18 @@ describe('AutoApproveJudge', () => {
       new HiddenSessionManager()
     );
 
-    await judge.judge({
-      permission: {
-        id: 'perm-edit',
-        type: 'edit',
-        sessionID: 'session-1',
-        title: 'edit src/app.ts',
-        metadata: { filepath: filePath },
+    await judge.judge(
+      {
+        permission: {
+          id: 'perm-edit',
+          type: 'edit',
+          sessionID: 'session-1',
+          title: 'edit src/app.ts',
+          metadata: { filepath: filePath },
+        },
       },
-    });
+      workspace
+    );
 
     expect(mocks.logger.info).toHaveBeenCalledWith(
       expect.stringContaining(`[auto-approve] allow (local-rule) edit "${filePath}`)

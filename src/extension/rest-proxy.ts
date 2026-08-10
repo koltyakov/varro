@@ -269,7 +269,15 @@ export class RestProxy {
         payload.body
       );
       if (judgePermissionRequest) {
-        const data = await this.callbacks.autoApproveJudge.judge(judgePermissionRequest);
+        const permission = asRecord(judgePermissionRequest.permission);
+        const sessionID = typeof permission?.sessionID === 'string' ? permission.sessionID : '';
+        const workspacePath = sessionID
+          ? await this.resolveJudgeWorkspacePath(sessionID)
+          : undefined;
+        const data = await this.callbacks.autoApproveJudge.judge(
+          judgePermissionRequest,
+          workspacePath
+        );
         this.callbacks.postApiResponse(requestGeneration, { id: payload.id, data });
         return;
       }
@@ -1103,6 +1111,23 @@ export class RestProxy {
     const record = asRecord(session);
     if (record) this.rememberSessionPage([record], false);
     return typeof record?.directory === 'string' ? record.directory : undefined;
+  }
+
+  private async resolveJudgeWorkspacePath(sessionID: string) {
+    const currentWorkspace = this.getCurrentWorkspaceResolutionRoot();
+    const cachedDirectory = this.sessionDirectories.get(sessionID);
+    if (cachedDirectory) {
+      if (currentWorkspace && !isSameWorkspacePath(cachedDirectory, currentWorkspace)) {
+        throw new Error('404 Session not found');
+      }
+      return cachedDirectory;
+    }
+
+    const directory = await this.lookupSessionDirectory(sessionID, currentWorkspace);
+    if (currentWorkspace && !isSameWorkspacePath(directory, currentWorkspace)) {
+      throw new Error('404 Session not found');
+    }
+    return directory;
   }
 
   private buildScopedSessionPath(sessionID: string, directory?: string) {

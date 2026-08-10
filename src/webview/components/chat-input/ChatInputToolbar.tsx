@@ -283,7 +283,12 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
               aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
               onClick={props.onToggleMcps}
             >
-              <span class="toolbar-mcp-count-label">MCPs:</span>
+              <span class="toolbar-mcp-count-label">
+                <span class="toolbar-meta-full-label">MCPs:</span>
+                <span class="toolbar-meta-compact-label" aria-hidden="true">
+                  M
+                </span>
+              </span>
               <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
             </button>
           </Show>

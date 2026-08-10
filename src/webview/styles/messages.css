@@ -1777,7 +1777,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   min-height: 24px;
   min-width: 0;
   padding: 0 8px 0 2px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left,
@@ -1787,7 +1787,19 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   min-height: 24px;
   gap: 6px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left {
+  flex: 1 1 auto;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-left .permission-mode-picker {
+  flex: 0 1 auto;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-right {
+  flex: 0 0 auto;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
@@ -1819,7 +1831,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
   color: var(--color-vscode-fg);
 }
 
-@container (max-width: 180px) {
+@container (max-width: 340px) {
   .interactive-session
     .chat-input-toolbars.toolbar-meta
     .toolbar-picker.permission-mode-button
@@ -1829,6 +1841,28 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
     .toolbar-picker.permission-mode-button
     .codicon-chevron {
     display: none;
+  }
+
+  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {
+    width: 26px;
+    min-width: 26px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .interactive-session
+    .chat-input-toolbars.toolbar-meta
+    .toolbar-picker.permission-mode-button
+    .permission-mode-icon {
+    margin-right: 0;
+  }
+
+  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-full-label {
+    display: none;
+  }
+
+  .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-compact-label {
+    display: inline;
   }
 }
 

@@ -826,8 +826,15 @@ describe('RestProxy handleRequest', () => {
 
   it('routes auto-approve judge requests after server startup', async () => {
     const judgeResult = { decision: 'allow' as const, reason: 'safe' };
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-1?directory=%2Frepo') {
+        return Promise.resolve({ id: 'session-1', directory: '/repo' });
+      }
+      return Promise.resolve(undefined);
+    });
     const { proxy, callbacks } = createProxy({
       getStatus: vi.fn(() => ({ state: 'stopped' as const })),
+      server: { ...createCallbacks().server, request: serverRequest } as never,
       autoApproveJudge: {
         judge: vi.fn(() => Promise.resolve(judgeResult)),
         resolveModel: vi.fn(() => Promise.resolve(null)),
@@ -843,12 +850,39 @@ describe('RestProxy handleRequest', () => {
     );
 
     expect(callbacks.ensureServerStarted).toHaveBeenCalledOnce();
-    expect(callbacks.autoApproveJudge.judge).toHaveBeenCalledWith({
-      permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
-      model: { providerID: 'openai', modelID: 'gpt-4.1' },
-      approvedReferences: [{ type: 'bash', title: 'bash npm publish', response: 'reject' }],
-    });
+    expect(callbacks.autoApproveJudge.judge).toHaveBeenCalledWith(
+      {
+        permission: { id: 'perm-1', type: 'bash', sessionID: 'session-1' },
+        model: { providerID: 'openai', modelID: 'gpt-4.1' },
+        approvedReferences: [{ type: 'bash', title: 'bash npm publish', response: 'reject' }],
+      },
+      '/repo'
+    );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 81, data: judgeResult });
+  });
+
+  it('does not judge a permission whose owning session belongs to another workspace', async () => {
+    const serverRequest = vi.fn((method: string, path: string) => {
+      if (method === 'GET' && path === '/session/session-foreign?directory=%2Frepo') {
+        return Promise.resolve({ id: 'session-foreign', directory: '/other' });
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(83, 'POST', '/varro/permission/judge', {
+        permission: { id: 'perm-foreign', type: 'edit', sessionID: 'session-foreign' },
+      })
+    );
+
+    expect(callbacks.autoApproveJudge.judge).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 83,
+      error: '404 Session not found',
+    });
   });
 
   it('resolves the auto-approve judge model', async () => {

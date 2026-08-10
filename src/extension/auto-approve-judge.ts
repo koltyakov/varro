@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import { lstatSync, realpathSync, statSync } from 'fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'path';
 import type {
@@ -7,14 +8,16 @@ import type {
 } from '../shared/protocol';
 import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../shared/protocol';
 import type { PermissionRule } from '../shared/opencode-types';
+import { isKnownReadOnlyPermission } from '../shared/permission-rules';
 import { asRecord } from '../shared/type-utils';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
 import { resolveHelperModel } from './helper-model-selection';
 import { logger } from './logger';
 
-type OpenCodeRequest = Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>;
+type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
 type JudgeModel = NonNullable<AutoApproveJudgeRequest['model']>;
+type GitWorkTree = { gitDirectory: string; commonDirectory: string };
 
 const JUDGE_TITLE_PREFIX = 'Varro permission judge';
 const VERDICT_CACHE_TTL_MS = 15 * 60_000;
@@ -48,35 +51,34 @@ const DENY_ALL_PERMISSION_RULES: PermissionRule[] = [
   { permission: '*', pattern: '*', action: 'deny' },
   { permission: 'StructuredOutput', pattern: '*', action: 'allow' },
 ];
-const SAFE_GIT_INSPECTION_COMMANDS = new Set([
-  'diff',
-  'log',
-  'ls-files',
-  'rev-parse',
-  'show',
-  'status',
-]);
 const SAFE_GIT_BRANCH_FLAGS = new Set(['--show-current', '--list', '-a', '-r', '-v', '-vv']);
+const GIT_PROBE_TIMEOUT_MS = 2_000;
 
 export class AutoApproveJudge {
   private readonly verdictCache = new Map<
     string,
     { decision: 'allow' | 'reject'; reason?: string; expiresAt: number }
   >();
+  private readonly gitWorkTreeProbes = new Map<string, Promise<GitWorkTree | null>>();
 
   constructor(
     private readonly server: OpenCodeRequest,
     private readonly hiddenSessions: HiddenSessionManager,
     private readonly isOpenAIPro: () => Promise<boolean> = async () => false,
-    private readonly getConfiguredModel: () => unknown = () => null
+    private readonly getConfiguredModel: () => unknown = () => null,
+    private readonly resolveGitWorkTree: (
+      workspacePath: string
+    ) => Promise<GitWorkTree | null> = probeGitWorkTree
   ) {}
 
-  async judge(request: AutoApproveJudgeRequest): Promise<AutoApproveJudgeResponse> {
+  async judge(
+    request: AutoApproveJudgeRequest,
+    workspacePath?: string
+  ): Promise<AutoApproveJudgeResponse> {
     const permission = normalizePermissionRequest(request.permission);
     if (!permission) return { decision: 'ask', reason: 'Missing permission context.' };
-    const workspacePath = this.server.getWorkspaceCwd?.();
     const approvedReferences = request.approvedReferences || [];
-    const localDecision = this.judgeLocally(permission, workspacePath);
+    const localDecision = await this.judgeLocally(permission, workspacePath);
     if (localDecision) {
       this.audit('local-rule', permission, localDecision);
       return localDecision;
@@ -255,20 +257,47 @@ export class AutoApproveJudge {
     }
   }
 
-  private judgeLocally(
+  private async judgeLocally(
     permission: NormalizedJudgePermission,
     workspacePath: string | undefined
-  ): AutoApproveJudgeResponse | null {
-    if (permission.type.toLowerCase() === 'webfetch') {
+  ): Promise<AutoApproveJudgeResponse | null> {
+    const type = permission.type.toLowerCase();
+    if (isKnownReadOnlyPermission(type)) {
+      return { decision: 'allow', reason: 'Known read-only permission.' };
+    }
+    if (type === 'webfetch') {
       return { decision: 'allow', reason: 'Web fetch.' };
     }
-    if (isEditPermissionType(permission) && isWorkspaceEditPermission(permission, workspacePath)) {
-      return { decision: 'allow', reason: 'Workspace file edit.' };
+    if (type === 'websearch') {
+      return { decision: 'allow', reason: 'Web search.' };
+    }
+    if (
+      isEditPermissionType(permission) &&
+      (await isWorkspaceEditPermission(permission, workspacePath, (path) =>
+        this.getGitWorkTree(path)
+      ))
+    ) {
+      return { decision: 'allow', reason: 'Git-backed workspace file edit.' };
     }
     if (isSafeLocalBashPermission(permission, workspacePath)) {
       return { decision: 'allow', reason: 'Safe local command.' };
     }
     return null;
+  }
+
+  private getGitWorkTree(workspacePath: string) {
+    const existing = this.gitWorkTreeProbes.get(workspacePath);
+    if (existing) return existing;
+    const probe = this.resolveGitWorkTree(workspacePath);
+    this.gitWorkTreeProbes.set(workspacePath, probe);
+    void probe
+      .finally(() => {
+        if (this.gitWorkTreeProbes.get(workspacePath) === probe) {
+          this.gitWorkTreeProbes.delete(workspacePath);
+        }
+      })
+      .catch(() => undefined);
+    return probe;
   }
 }
 
@@ -280,6 +309,7 @@ type NormalizedJudgePermission = {
   messageID?: string;
   callID?: string;
   pattern?: string | string[];
+  hasMalformedPattern: boolean;
   metadata: Record<string, unknown>;
 };
 
@@ -294,6 +324,10 @@ function normalizePermissionRequest(value: unknown): NormalizedJudgePermission |
   const messageID = getString(record.messageID);
   const callID = getString(record.callID);
   const patternValue = record.pattern ?? record.patterns;
+  const hasMalformedPattern =
+    patternValue !== undefined &&
+    typeof patternValue !== 'string' &&
+    (!Array.isArray(patternValue) || patternValue.some((item) => typeof item !== 'string'));
   const pattern = Array.isArray(patternValue)
     ? patternValue.filter((item): item is string => typeof item === 'string')
     : typeof patternValue === 'string'
@@ -307,6 +341,7 @@ function normalizePermissionRequest(value: unknown): NormalizedJudgePermission |
     ...(messageID ? { messageID } : {}),
     ...(callID ? { callID } : {}),
     ...(pattern !== undefined ? { pattern } : {}),
+    hasMalformedPattern,
     metadata: asRecord(record.metadata) || {},
   };
 }
@@ -332,9 +367,10 @@ function hasUsefulPattern(pattern: NormalizedJudgePermission['pattern']) {
   return Array.isArray(pattern) && pattern.some((item) => item.trim().length > 0);
 }
 
-function isWorkspaceEditPermission(
+async function isWorkspaceEditPermission(
   permission: NormalizedJudgePermission,
-  workspacePath: string | undefined
+  workspacePath: string | undefined,
+  resolveGitWorkTree: (workspacePath: string) => Promise<GitWorkTree | null>
 ) {
   if (!isEditPermissionType(permission)) return false;
   if (hasDeletedFileChange(permission.metadata)) return false;
@@ -342,9 +378,16 @@ function isWorkspaceEditPermission(
   if (!workspace) return false;
 
   const paths = collectPermissionPaths(permission);
-  return (
-    paths !== null && paths.length > 0 && paths.every((item) => isWorkspacePath(item, workspace))
-  );
+  if (
+    paths === null ||
+    paths.length === 0 ||
+    !paths.every((item) => isWorkspacePath(item, workspace))
+  ) {
+    return false;
+  }
+  const workTree = await resolveGitWorkTree(workspace.canonicalPath);
+  if (!workTree) return false;
+  return paths.every((item) => !isGitMetadataPath(item, workspace, workTree));
 }
 
 function isEditPermissionType(permission: NormalizedJudgePermission) {
@@ -434,17 +477,33 @@ function normalizeExternalDirectoryPaths(value: string | string[]): string[] | n
 }
 
 function hasDeletedFileChange(metadata: Record<string, unknown>) {
+  const hasDeleteOperation = (value: Record<string, unknown> | null) => {
+    const kind =
+      getString(value?.type) ||
+      getString(value?.status) ||
+      getString(value?.action) ||
+      getString(value?.operation) ||
+      getString(value?.changeType);
+    return (
+      /^(delete|deleted|remove|removed|unlink|move|moved|rename|renamed)$/i.test(kind || '') ||
+      value?.deleted === true ||
+      value?.removed === true ||
+      value?.moved === true ||
+      value?.renamed === true
+    );
+  };
+  if (hasDeleteOperation(metadata)) return true;
   const files = Array.isArray(metadata.files) ? metadata.files : [];
-  return files.some((item) => {
-    const record = asRecord(item);
-    const kind = getString(record?.type) || getString(record?.status) || getString(record?.action);
-    return /^(delete|deleted|remove|removed)$/i.test(kind || '');
-  });
+  if (files.some((item) => hasDeleteOperation(asRecord(item)))) return true;
+
+  const patchText =
+    getString(metadata.patchText) || getString(metadata.patch_text) || getString(metadata.patch);
+  return !!patchText && /^\*\*\* (?:Delete File|Move to):/m.test(patchText);
 }
 
 function collectPermissionPaths(permission: NormalizedJudgePermission) {
   const paths: string[] = [];
-  let ambiguous = false;
+  let ambiguous = permission.hasMalformedPattern;
   const addPath = (value: unknown) => {
     if (value === undefined || value === null) return;
     if (typeof value !== 'string') {
@@ -466,7 +525,21 @@ function collectPermissionPaths(permission: NormalizedJudgePermission) {
   };
 
   addRecordPaths(permission.metadata);
-  if (Array.isArray(permission.metadata.files)) {
+  const patchText =
+    getString(permission.metadata.patchText) ||
+    getString(permission.metadata.patch_text) ||
+    getString(permission.metadata.patch);
+  if (patchText) {
+    for (const line of patchText.split(/\r?\n/)) {
+      const patchPath = line.match(/^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$/)?.[1];
+      const movePath = line.match(/^\*\*\* Move to:\s*(.+)$/)?.[1];
+      if (patchPath) addPath(patchPath);
+      if (movePath) addPath(movePath);
+    }
+  }
+  if ('files' in permission.metadata && !Array.isArray(permission.metadata.files)) {
+    ambiguous = true;
+  } else if (Array.isArray(permission.metadata.files)) {
     for (const item of permission.metadata.files) {
       const record = asRecord(item);
       if (!record) ambiguous = true;
@@ -478,8 +551,6 @@ function collectPermissionPaths(permission: NormalizedJudgePermission) {
   } else {
     addPath(permission.pattern);
   }
-  const titlePath = permission.title.match(/^(?:edit|apply_patch|patch|write)\s+(.+)$/i)?.[1];
-  addPath(titlePath);
 
   return ambiguous ? null : [...new Set(paths)];
 }
@@ -568,12 +639,78 @@ function isContainedPath(base: string, target: string) {
   );
 }
 
+function isGitMetadataPath(filePath: string, workspace: CanonicalWorkspace, workTree: GitWorkTree) {
+  const targetPath = resolvePathFromWorkspace(filePath, workspace.sourcePath);
+  if (!targetPath) return true;
+  const lexicalSegments = relative(workspace.sourcePath, targetPath).replace(/\\/g, '/').split('/');
+  if (lexicalSegments.some((segment) => segment.toLowerCase() === '.git')) return true;
+  const canonicalTarget = resolveCanonicalPotentialPath(targetPath);
+  return (
+    canonicalTarget === null ||
+    isContainedPath(workTree.gitDirectory, canonicalTarget) ||
+    isContainedPath(workTree.commonDirectory, canonicalTarget)
+  );
+}
+
+function probeGitWorkTree(workspacePath: string): Promise<GitWorkTree | null> {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_'))
+  );
+  env.GIT_OPTIONAL_LOCKS = '0';
+
+  return new Promise((resolvePromise) => {
+    execFile(
+      'git',
+      [
+        '-C',
+        workspacePath,
+        'rev-parse',
+        '--is-inside-work-tree',
+        '--absolute-git-dir',
+        '--git-common-dir',
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        maxBuffer: 1_024,
+        timeout: GIT_PROBE_TIMEOUT_MS,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) {
+          resolvePromise(null);
+          return;
+        }
+        const [insideWorkTree, gitDirectoryValue, commonDirectoryValue] = stdout
+          .trim()
+          .split(/\r?\n/);
+        if (insideWorkTree !== 'true' || !gitDirectoryValue || !commonDirectoryValue) {
+          resolvePromise(null);
+          return;
+        }
+        const gitDirectory = resolveCanonicalPotentialPath(
+          isAbsolute(gitDirectoryValue)
+            ? gitDirectoryValue
+            : resolve(workspacePath, gitDirectoryValue)
+        );
+        const commonDirectory = resolveCanonicalPotentialPath(
+          isAbsolute(commonDirectoryValue)
+            ? commonDirectoryValue
+            : resolve(workspacePath, commonDirectoryValue)
+        );
+        resolvePromise(gitDirectory && commonDirectory ? { gitDirectory, commonDirectory } : null);
+      }
+    );
+  });
+}
+
 function isSafeLocalBashPermission(
   permission: NormalizedJudgePermission,
   workspacePath: string | undefined
 ) {
-  if (permission.type !== 'bash' && permission.type !== 'shell') return false;
-  const command = extractCommand(permission);
+  const type = permission.type.toLowerCase();
+  if (type !== 'bash' && type !== 'shell') return false;
+  const command = extractUnambiguousCommand(permission);
   if (!command) return false;
   if (/[;|`<>\r\n]|\$\(/.test(command)) return false;
   const commands = splitSafeCommandSequence(command);
@@ -582,7 +719,6 @@ function isSafeLocalBashPermission(
 }
 
 function splitSafeCommandSequence(command: string) {
-  if (command.includes('&') && !/(?:^|[^&])&&(?:[^&]|$)/.test(command)) return null;
   const commands = command
     .split(/\s+&&\s+/)
     .map((part) => part.trim())
@@ -593,73 +729,481 @@ function splitSafeCommandSequence(command: string) {
 }
 
 function isSafeLocalCommandSegment(command: string, workspacePath: string | undefined) {
+  const parsed = parseLiteralShellArguments(command);
+  if (!parsed || parsed.length === 0) return false;
+  const args = parsed[0] === 'rtk' ? parsed.slice(1) : parsed;
+  if (args.length === 0) return false;
   return (
-    isSafeGitInspectionCommand(command, workspacePath) ||
-    /^(?:rtk\s+)?(?:pwd|date|uname|whoami)\s*$/.test(command) ||
-    /^(?:rtk\s+)?(?:which\s+\S+|command\s+-v\s+\S+)\s*$/.test(command)
+    isSafeBasicInspectionCommand(args) ||
+    isSafeWorkspaceReadCommand(args, workspacePath) ||
+    isSafeGitInspectionCommand(args, workspacePath)
   );
 }
 
-function isSafeGitInspectionCommand(command: string, workspacePath: string | undefined) {
-  const match = command.match(/^(?:rtk\s+)?git(?:\s+-C\s+("[^"]+"|'[^']+'|\S+))?\s+(\S+)(.*)$/);
-  if (!match) return false;
-  const gitDirectory = match[1];
-  let gitWorkingDirectory = workspacePath;
-  if (gitDirectory) {
-    const literalDirectory = parseLiteralShellArgument(gitDirectory);
+function isSafeBasicInspectionCommand(args: string[]) {
+  const command = args[0];
+  if (args.length === 1 && ['pwd', 'date', 'whoami', 'id'].includes(command || '')) return true;
+  if (command === 'uname') {
+    return args.slice(1).every((arg) => /^-[asnrvmopio]+$/.test(arg));
+  }
+  if (command === 'which') {
+    return args.length === 2 && isSafeExecutableName(args[1]);
+  }
+  if (command === 'command') {
+    return args.length === 3 && args[1] === '-v' && isSafeExecutableName(args[2]);
+  }
+  return isSafeVersionCommand(args);
+}
+
+function isSafeExecutableName(value: string | undefined): value is string {
+  return !!value && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(value);
+}
+
+function isSafeVersionCommand(args: string[]) {
+  const command = args[0];
+  const option = args[1];
+  if (!command || !option || args.length !== 2) return false;
+  if (command === 'go') return option === 'version';
+  if (command === 'java' || command === 'javac') return option === '-version';
+  if (command === 'python' || command === 'python3') {
+    return option === '--version' || option === '-V';
+  }
+  if (command === 'git' || command === 'dotnet') return option === '--version';
+  return (
+    [
+      'node',
+      'npm',
+      'pnpm',
+      'yarn',
+      'bun',
+      'deno',
+      'ruby',
+      'php',
+      'cargo',
+      'rustc',
+      'cmake',
+      'ninja',
+      'make',
+      'docker',
+      'podman',
+      'terraform',
+      'kubectl',
+    ].includes(command) &&
+    (option === '--version' || option === '-v' || option === '-V')
+  );
+}
+
+function isSafeWorkspaceReadCommand(args: string[], workspacePath: string | undefined) {
+  const command = args[0];
+  if (!command) return false;
+  const allowNoPaths = command === 'ls' || command === 'du';
+  const pathCommands = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'stat', 'file', 'du']);
+  if (!pathCommands.has(command)) return false;
+  const workspace = resolveCanonicalWorkspace(workspacePath);
+  if (!workspace) return false;
+
+  const commandArgs = args.slice(1);
+  let pathsOnly = false;
+  const paths: string[] = [];
+  for (let index = 0; index < commandArgs.length; index += 1) {
+    const arg = commandArgs[index]!;
+    if (!pathsOnly && arg === '--') {
+      pathsOnly = true;
+      continue;
+    }
+    if (!pathsOnly && arg.startsWith('-')) {
+      const optionArity = getSafeReadOptionArity(command, arg);
+      if (optionArity === null) return false;
+      if (optionArity === 1) {
+        const value = commandArgs[index + 1];
+        if (!value || !/^\d+$/.test(value)) return false;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg === '-') return false;
+    paths.push(arg);
+  }
+  return (
+    (allowNoPaths || paths.length > 0) && paths.every((path) => isWorkspacePath(path, workspace))
+  );
+}
+
+function getSafeReadOptionArity(command: string, option: string): 0 | 1 | null {
+  if (command === 'ls') {
+    if (/^-[AacdfghiklmnopqrsStux1]+$/.test(option)) return 0;
     if (
-      !literalDirectory ||
-      !workspacePath ||
-      !isExistingWorkspaceDirectory(literalDirectory, workspacePath)
+      [
+        '--all',
+        '--almost-all',
+        '--author',
+        '--classify',
+        '--directory',
+        '--file-type',
+        '--full-time',
+        '--group-directories-first',
+        '--human-readable',
+        '--inode',
+        '--literal',
+        '--numeric-uid-gid',
+        '--quote-name',
+        '--reverse',
+        '--size',
+      ].includes(option) ||
+      /^(?:--block-size|--color|--format|--hide|--ignore|--quoting-style|--sort|--time|--time-style|--width)=\S+$/.test(
+        option
+      )
     ) {
+      return 0;
+    }
+    return null;
+  }
+  if (command === 'cat') {
+    return /^-[AbeEnstTuv]+$/.test(option) ||
+      [
+        '--show-all',
+        '--number-nonblank',
+        '--show-ends',
+        '--number',
+        '--squeeze-blank',
+        '--show-tabs',
+        '--show-nonprinting',
+      ].includes(option)
+      ? 0
+      : null;
+  }
+  if (command === 'head' || command === 'tail') {
+    if (['-n', '--lines', '-c', '--bytes'].includes(option)) return 1;
+    if (/^-(?:\d+|[nc]\d+|[qvz]+)$/.test(option)) return 0;
+    if (/^--(?:lines|bytes)=\d+$/.test(option)) return 0;
+    return ['--quiet', '--silent', '--verbose', '--zero-terminated'].includes(option) ? 0 : null;
+  }
+  if (command === 'wc') {
+    return /^-[cmlLw]+$/.test(option) ||
+      ['--bytes', '--chars', '--lines', '--max-line-length', '--words'].includes(option)
+      ? 0
+      : null;
+  }
+  if (command === 'stat') {
+    return /^-[Lfsx]+$/.test(option) ||
+      ['--dereference', '--file-system', '--terse'].includes(option)
+      ? 0
+      : null;
+  }
+  if (command === 'file') {
+    return /^-[biILhs]+$/.test(option) ||
+      [
+        '--brief',
+        '--mime',
+        '--mime-type',
+        '--dereference',
+        '--no-dereference',
+        '--special-files',
+      ].includes(option)
+      ? 0
+      : null;
+  }
+  if (command === 'du') {
+    return /^-[achkmsx]+$/.test(option) ||
+      [
+        '--all',
+        '--apparent-size',
+        '--bytes',
+        '--count-links',
+        '--human-readable',
+        '--one-file-system',
+        '--separate-dirs',
+        '--summarize',
+      ].includes(option)
+      ? 0
+      : null;
+  }
+  return null;
+}
+
+function isSafeGitInspectionCommand(args: string[], workspacePath: string | undefined) {
+  if (args[0] !== 'git') return false;
+  const workspace = resolveCanonicalWorkspace(workspacePath);
+  if (!workspace) return false;
+
+  let index = 1;
+  let gitWorkingDirectory: string | undefined = workspace.sourcePath;
+  if (args[index] === '-C') {
+    const literalDirectory = args[index + 1];
+    if (!literalDirectory || !isExistingWorkspaceDirectory(literalDirectory, workspacePath)) {
       return false;
     }
-    gitWorkingDirectory = resolvePathFromWorkspace(literalDirectory, workspacePath) || undefined;
+    gitWorkingDirectory =
+      resolvePathFromWorkspace(literalDirectory, workspace.sourcePath) || undefined;
+    index += 2;
   }
-  const subcommand = match[2]!;
-  const args = match[3]!.trim();
-  const parsedArgs = parseLiteralShellArguments(args);
-  if (!parsedArgs || hasUnsafeGitInspectionOption(parsedArgs)) return false;
+  const subcommand = args[index];
+  if (!subcommand) return false;
+  const commandArgs = args.slice(index + 1);
+  if (hasUnsafeGitInspectionOption(commandArgs)) return false;
+
+  if (subcommand === 'status') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set([
+        '-s',
+        '--short',
+        '-b',
+        '--branch',
+        '--porcelain',
+        '--porcelain=v1',
+        '--porcelain=v2',
+        '--show-stash',
+        '--ahead-behind',
+        '--no-ahead-behind',
+        '--ignored',
+        '--no-renames',
+        '-z',
+      ]),
+      optionPrefixes: ['--untracked-files=', '--ignored=', '--column=', '--find-renames='],
+      workspace,
+    });
+  }
   if (subcommand === 'diff') {
-    if (parsedArgs.includes('--no-index')) return false;
-    if (hasOutsideWorkspaceDiffPath(parsedArgs, workspacePath, gitWorkingDirectory)) {
-      return false;
-    }
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set([
+        '--cached',
+        '--staged',
+        '--stat',
+        '--numstat',
+        '--shortstat',
+        '--summary',
+        '--name-only',
+        '--name-status',
+        '--check',
+        '--quiet',
+        '--exit-code',
+        '--color',
+        '--no-color',
+        '--relative',
+        '-p',
+        '--patch',
+      ]),
+      maxRevisions: 2,
+      optionPatterns: [/^-U\d+$/, /^--unified=\d+$/, /^--stat=\S+$/],
+      workspace,
+    });
   }
-  if (SAFE_GIT_INSPECTION_COMMANDS.has(subcommand)) return true;
-  if (subcommand !== 'branch') return false;
-  return parsedArgs.every((arg) => SAFE_GIT_BRANCH_FLAGS.has(arg) || /^--sort=\S+$/.test(arg));
+  if (subcommand === 'log') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set([
+        '--oneline',
+        '--graph',
+        '--decorate',
+        '--no-decorate',
+        '--all',
+        '--branches',
+        '--tags',
+        '--remotes',
+        '--merges',
+        '--no-merges',
+        '--first-parent',
+        '--stat',
+        '--shortstat',
+        '--name-only',
+        '--name-status',
+        '--summary',
+      ]),
+      maxRevisions: 2,
+      optionPatterns: [/^-\d+$/, /^--max-count=\d+$/, /^--decorate=(?:short|full|auto|no)$/],
+      workspace,
+    });
+  }
+  if (subcommand === 'show') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set([
+        '--stat',
+        '--shortstat',
+        '--name-only',
+        '--name-status',
+        '--summary',
+        '--oneline',
+        '--no-patch',
+      ]),
+      maxRevisions: 1,
+      workspace,
+    });
+  }
+  if (subcommand === 'ls-files') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set([
+        '--cached',
+        '--deleted',
+        '--modified',
+        '--others',
+        '--ignored',
+        '--stage',
+        '--unmerged',
+        '--eol',
+        '--full-name',
+        '--exclude-standard',
+      ]),
+      workspace,
+    });
+  }
+  if (subcommand === 'rev-parse') return isSafeGitRevParse(commandArgs);
+  if (subcommand === 'branch') {
+    return commandArgs.every(
+      (arg) =>
+        SAFE_GIT_BRANCH_FLAGS.has(arg) ||
+        /^--sort=(?:refname|-refname|committerdate|-committerdate|authordate|-authordate|version:refname)$/.test(
+          arg
+        )
+    );
+  }
+  if (subcommand === 'remote') return isSafeGitRemote(commandArgs);
+  if (subcommand === 'config') return isSafeGitConfig(commandArgs);
+  if (subcommand === 'tag') {
+    return commandArgs.every((arg) => arg === '--list' || arg === '-l');
+  }
+  if (subcommand === 'stash') return commandArgs.length === 1 && commandArgs[0] === 'list';
+  if (subcommand === 'ls-tree') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      basePath: gitWorkingDirectory,
+      exactOptions: new Set(['-r', '-d', '-t', '-l', '--long', '--name-only', '--name-status']),
+      maxRevisions: 1,
+      requireRevision: true,
+      workspace,
+    });
+  }
+  if (subcommand === 'cat-file') {
+    return (
+      commandArgs.length === 2 &&
+      ['-e', '-p', '-t', '-s'].includes(commandArgs[0] || '') &&
+      isSafeGitRevision(commandArgs[1])
+    );
+  }
+  if (subcommand === 'describe') {
+    return validateGitOptionsAndPaths(commandArgs, {
+      exactOptions: new Set(['--all', '--tags', '--always', '--long', '--exact-match', '--dirty']),
+      maxRevisions: 1,
+      optionPatterns: [/^--abbrev=\d+$/, /^--candidates=\d+$/],
+      workspace,
+    });
+  }
+  if (subcommand === 'merge-base') {
+    return (
+      commandArgs.length >= 2 &&
+      commandArgs.every(
+        (arg) =>
+          ['--all', '--octopus', '--independent', '--is-ancestor'].includes(arg) ||
+          isSafeGitRevision(arg)
+      )
+    );
+  }
+  return false;
 }
 
 function hasUnsafeGitInspectionOption(args: string[]) {
   return args.some(
     (argument) =>
+      argument === '--no-index' ||
       argument === '--output' ||
       argument.startsWith('--output=') ||
       argument === '--ext-diff' ||
-      argument.startsWith('--ext-diff=')
+      argument.startsWith('--ext-diff=') ||
+      argument === '--textconv' ||
+      argument.startsWith('--textconv=') ||
+      argument === '--help' ||
+      argument === '-h'
   );
 }
 
-function hasOutsideWorkspaceDiffPath(
+function validateGitOptionsAndPaths(
   args: string[],
-  workspacePath: string | undefined,
-  gitWorkingDirectory: string | undefined
+  options: {
+    workspace: CanonicalWorkspace;
+    basePath?: string;
+    exactOptions: Set<string>;
+    optionPrefixes?: string[];
+    optionPatterns?: RegExp[];
+    maxRevisions?: number;
+    requireRevision?: boolean;
+  }
 ) {
-  const workspace = resolveCanonicalWorkspace(workspacePath);
-  if (!workspace) return true;
-  const basePath = gitWorkingDirectory || workspace.sourcePath;
   let pathsOnly = false;
+  let revisionCount = 0;
 
   for (const argument of args) {
     if (argument === '--') {
       pathsOnly = true;
       continue;
     }
-    if (!pathsOnly && argument.startsWith('-')) continue;
-    if (!isWorkspacePath(argument, workspace, basePath)) return true;
+    if (pathsOnly) {
+      if (argument.startsWith(':')) return false;
+      if (!isWorkspacePath(argument, options.workspace, options.basePath)) return false;
+      continue;
+    }
+    if (
+      options.exactOptions.has(argument) ||
+      options.optionPrefixes?.some((prefix) => argument.startsWith(prefix)) ||
+      options.optionPatterns?.some((pattern) => pattern.test(argument))
+    ) {
+      continue;
+    }
+    if (revisionCount < (options.maxRevisions || 0) && isSafeGitRevision(argument)) {
+      revisionCount += 1;
+      continue;
+    }
+    return false;
   }
-  return false;
+  return !options.requireRevision || revisionCount > 0;
+}
+
+function isSafeGitRevision(value: string | undefined): value is string {
+  return !!value && /^[A-Za-z0-9][A-Za-z0-9._/@~^:+-]*$/.test(value);
+}
+
+function isSafeGitRevParse(args: string[]) {
+  const safeQueries = new Set([
+    '--show-toplevel',
+    '--show-prefix',
+    '--show-cdup',
+    '--git-dir',
+    '--absolute-git-dir',
+    '--is-inside-work-tree',
+    '--is-bare-repository',
+    '--is-shallow-repository',
+    '--show-superproject-working-tree',
+    '--show-object-format',
+    '--abbrev-ref',
+    '--verify',
+    '--short',
+  ]);
+  return args.length > 0 && args.every((arg) => safeQueries.has(arg) || isSafeGitRevision(arg));
+}
+
+function isSafeGitRemote(args: string[]) {
+  if (args.length === 0) return true;
+  if (args.length === 1) return args[0] === '-v' || args[0] === '--verbose';
+  if (args[0] !== 'get-url') return false;
+  const values = args.slice(1);
+  const names = values.filter((arg) => arg !== '--all' && arg !== '--push');
+  return names.length === 1 && isSafeGitRevision(names[0]);
+}
+
+function isSafeGitConfig(args: string[]) {
+  const modifiers = new Set(['--show-origin', '--show-scope', '--fixed-value']);
+  const values = args.filter((arg) => !modifiers.has(arg));
+  const action = values[0];
+  if (action === '--list' || action === '-l') return values.length === 1;
+  if (!['--get', '--get-all', '--get-regexp', '--get-urlmatch'].includes(action || '')) {
+    return false;
+  }
+  return values.length >= 2 && values.length <= 3 && values.slice(1).every(isSafeGitConfigValue);
+}
+
+function isSafeGitConfigValue(value: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9.^$/:_-]*$/.test(value);
 }
 
 function parseLiteralShellArguments(value: string): string[] | null {
@@ -716,29 +1260,44 @@ function parseLiteralShellArguments(value: string): string[] | null {
   return args;
 }
 
-function parseLiteralShellArgument(value: string) {
-  const unquoted =
-    (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
-      ? value.slice(1, -1)
-      : value;
-  if (!unquoted || /[$~*?[\]{}\\]/.test(unquoted)) return null;
-  return unquoted;
-}
-
-function extractCommand(permission: NormalizedJudgePermission) {
-  const metadataCommand =
-    getString(permission.metadata.command) ||
-    getString(permission.metadata.cmd) ||
-    getString(permission.metadata.bash) ||
-    getString(permission.metadata.shell);
-  if (metadataCommand) return metadataCommand.trim();
-  if (typeof permission.pattern === 'string' && permission.pattern.trim()) {
-    return permission.pattern.trim();
+function extractUnambiguousCommand(permission: NormalizedJudgePermission) {
+  const metadataCommands: string[] = [];
+  for (const key of ['command', 'cmd', 'bash', 'shell']) {
+    if (!(key in permission.metadata)) continue;
+    const command = getString(permission.metadata[key]);
+    if (!command) return null;
+    metadataCommands.push(command.trim());
   }
-  return permission.title
+  const uniqueMetadataCommands = [...new Set(metadataCommands)];
+  if (uniqueMetadataCommands.length > 1) return null;
+  if (permission.hasMalformedPattern) return null;
+
+  const metadataCommand = uniqueMetadataCommands[0];
+  if (metadataCommand && Array.isArray(permission.pattern)) return metadataCommand;
+
+  let patternCommand: string | null = null;
+  if (typeof permission.pattern === 'string') {
+    patternCommand = permission.pattern.trim() || null;
+  } else if (Array.isArray(permission.pattern)) {
+    if (permission.pattern.length !== 1) return null;
+    patternCommand = permission.pattern[0]?.trim() || null;
+  }
+
+  if (metadataCommand) {
+    if (patternCommand && !/[*?[\]{}]/.test(patternCommand) && patternCommand !== metadataCommand) {
+      return null;
+    }
+    return metadataCommand;
+  }
+  if (patternCommand && !/[*?[\]{}]/.test(patternCommand)) return patternCommand;
+
+  const titleCommand = permission.title
     .replace(/^run\s+command:\s*/i, '')
     .replace(/^(?:bash|shell)\s+/i, '')
     .trim();
+  return titleCommand && titleCommand.toLowerCase() !== permission.type.toLowerCase()
+    ? titleCommand
+    : null;
 }
 
 /**
@@ -791,7 +1350,7 @@ function stableSerialize(value: unknown): string {
 
 function describePermissionSubject(permission: NormalizedJudgePermission) {
   if (permission.type === 'bash' || permission.type === 'shell') {
-    return extractCommand(permission) || permission.title;
+    return extractUnambiguousCommand(permission) || permission.title;
   }
   if (isEditPermissionType(permission)) {
     const paths = collectPermissionPaths(permission);

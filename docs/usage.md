@@ -296,7 +296,7 @@ OpenCode approval flows stay inside the chat UI.
 
 `Default` allows read-style tools and asks before actions that can modify state.
 
-`Auto approve` is the first-run mode. It applies conservative local rules to eligible workspace edits and commands. Requests that cannot be decided locally may be sent, with their command, path, metadata, and recent approval examples, to the configured model in a temporary hidden judge session. Allowed verdicts are cached briefly for identical permission context. Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
+`Auto approve` is the first-run mode. It applies conservative local rules to web reads, Git-backed workspace edits, and strictly parsed inspection commands. Edit paths must remain inside the permission-owning session's workspace, and command rules reject unsafe composition or options that can mutate state. Requests that cannot be decided locally may be sent, with their command, path, metadata, and recent approval examples, to the configured model in a temporary hidden judge session. Allowed verdicts are cached briefly for identical permission context. Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
 
 The judge uses `varro.chat.autoApproveModel` first, then OpenCode's `small_model`, OpenAI GPT Luna, GitHub Copilot GPT Luna, and the selected Varro session model. Right-click a model in the Models view to set the VS Code user setting.
 

@@ -49,11 +49,42 @@ test('narrow toolbar keeps provider limit and composer controls within their row
 
   await expect(page.locator('.toolbar-limit-chip')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
-  await expect
-    .poll(() =>
-      page.locator('.chat-input-toolbars').evaluateAll((rows) =>
-        rows.every((row) => row.scrollWidth <= row.clientWidth + 1)
+  const metaRow = page.locator('.chat-input-toolbars.toolbar-meta');
+  for (const width of [348, 260]) {
+    await page.setViewportSize({ width, height: 260 });
+    await expect
+      .poll(() =>
+        metaRow.evaluate((row) => {
+          const left = row.querySelector<HTMLElement>('.toolbar-meta-left');
+          const right = row.querySelector<HTMLElement>('.toolbar-meta-right');
+          if (!left || !right) return false;
+          return Math.abs(left.getBoundingClientRect().top - right.getBoundingClientRect().top) <= 1;
+        })
       )
-    )
-    .toBe(true);
+      .toBe(true);
+    await expect(metaRow.locator('.permission-mode-button .toolbar-picker-label')).toBeHidden();
+    const compactLimitLabel = metaRow.locator(
+      '.toolbar-limit-chip-label .toolbar-meta-compact-label'
+    );
+    await expect(compactLimitLabel).toBeVisible();
+    await expect(compactLimitLabel).toHaveText('L');
+    await expect(metaRow.locator('.toolbar-limit-chip-label .toolbar-meta-full-label')).toBeHidden();
+    await expect
+      .poll(() =>
+        page.locator('.chat-input-toolbars').evaluateAll((rows) =>
+          rows.every((row) => row.scrollWidth <= row.clientWidth + 1)
+        )
+      )
+      .toBe(true);
+  }
+});
+
+test('narrow toolbar abbreviates the MCP label', async ({ page }) => {
+  await page.setViewportSize({ width: 260, height: 260 });
+  await page.goto('/e2e/harness/index.html?scenario=mcp-pickers');
+
+  const mcpLabel = page.locator('.toolbar-mcp-count-label');
+  await expect(mcpLabel.locator('.toolbar-meta-compact-label')).toBeVisible();
+  await expect(mcpLabel.locator('.toolbar-meta-compact-label')).toHaveText('M');
+  await expect(mcpLabel.locator('.toolbar-meta-full-label')).toBeHidden();
 });

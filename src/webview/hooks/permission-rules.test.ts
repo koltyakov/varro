@@ -40,6 +40,8 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('edit')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('task')).toMatchObject({ pattern: '*', action: 'ask' });
     expect(byPermission.get('question')).toMatchObject({ pattern: '*', action: 'ask' });
+    expect(byPermission.get('webfetch')).toMatchObject({ pattern: '*', action: 'ask' });
+    expect(byPermission.get('websearch')).toMatchObject({ pattern: '*', action: 'ask' });
   });
 
   it('overrides agent allow-all for unknown permissions while preserving read-only allowances', () => {

@@ -23,6 +23,11 @@
   color: var(--color-vscode-muted);
   pointer-events: none;
   position: absolute;
+  left: 4px;
+  right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inline-chip {

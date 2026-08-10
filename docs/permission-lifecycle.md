@@ -181,18 +181,28 @@ Auto mode has two decision stages.
 
 The extension host first applies narrow deterministic rules. The current local policy allows:
 
-- `webfetch`
-- Workspace-contained edits when all canonicalized paths remain inside the workspace and no file is
-  being deleted
-- A small set of read-only shell commands, including safe Git inspection and basic identity or
-  environment checks
+- Known read-only permissions as a defensive fallback if OpenCode emits an ask despite the session
+  rules
+- `webfetch` and `websearch`
+- Workspace-contained edits when the permission-owning session directory is inside a Git work tree,
+  all canonicalized paths remain inside that workspace, and no file is being deleted
+- Strict read-only shell commands, including workspace-contained file inspection, exact tool-version
+  probes, safe Git inspection, and basic identity or environment checks
 - External-directory access only when every canonicalized requested path is contained by an exact
   external-directory scope that the user previously approved with `Always` in the same conversation
   tree
 
+The workspace used for local rules and verdict caching comes from the permission-owning session, not
+the active editor or a webview-supplied path. Git membership is checked with a bounded, shell-free
+probe whose inherited `GIT_*` environment is removed. A missing directory, non-work-tree, failed
+probe, malformed path, or ambiguous command falls through to model or manual judgment rather than
+being locally approved.
+
 Shell parsing deliberately rejects command substitution, pipelines, redirection, unsafe separators,
-ambiguous quoting, outside-workspace Git paths, and mutating Git operations. Expand local rules only
-with adversarial tests for paths, symlinks, quoting, command composition, and side effects.
+ambiguous quoting, outside-workspace paths, dangerous read-command flags, arbitrary Git options, and
+mutating Git operations. Safe `&&` sequences are allowed only when every segment independently
+matches the local policy. Expand local rules only with adversarial tests for paths, symlinks, quoting,
+command composition, options, and side effects.
 
 External-directory requests are never delegated to the model judge. Ambiguous paths, sibling paths,
 mixed approved and unapproved path sets, and approvals made with `Once` must ask the user. This keeps
