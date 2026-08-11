@@ -5426,7 +5426,14 @@ export function MessageList() {
 
   function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
     disengageBottomFollow();
-    return alignMountedMessage(preview);
+    const aligned = alignMountedMessage(preview);
+    const currentPreview = untrack(stickyUserMessagePreview);
+    if (aligned && currentPreview?.id === preview.id) {
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = preview.id;
+      previousStickyPreviewBounds = null;
+    }
+    return aligned;
   }
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {

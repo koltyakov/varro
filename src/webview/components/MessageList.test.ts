@@ -7883,6 +7883,66 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.restore();
   });
 
+  it('hides the first prompt sticky after navigating to it in a running session', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 1200;
+    setState('activeSessionId', 'session-1');
+    startLoading(1);
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'First prompt')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Running response')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 500);
+        }
+        const row = this.classList.contains('interactive-item-container')
+          ? this
+          : this.closest<HTMLElement>('[data-msg-id]');
+        if (row?.dataset.msgId === 'user-1') {
+          const documentTop = this.classList.contains('user-message-card') ? 4 : 0;
+          return new DOMRect(0, documentTop - scrollTopValue, 500, 52);
+        }
+        if (row?.dataset.msgId === 'assistant-1') return new DOMRect(0, 20, 500, 320);
+        return new DOMRect(0, -600, 500, 40);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = Math.max(0, value);
+      },
+    });
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
+    expect(sticky?.textContent).toContain('First prompt');
+    sticky?.click();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(scrollTopValue).toBe(0);
+    expect(
+      container
+        ?.querySelector<HTMLElement>('[data-msg-id="user-1"] .user-message-card')
+        ?.getBoundingClientRect().bottom
+    ).toBeGreaterThan(0);
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+    animationFrames.restore();
+  });
+
   it('scrolls a measured terminal-attachment prompt within the message list only', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const scrollIntoView = vi.fn();
