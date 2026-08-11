@@ -43,6 +43,7 @@ export interface MessageRouterCallbacks {
   openSessionInOpenCode(sessionId: string): void | Promise<void>;
   exportSession(sessionId: string): Promise<void>;
   generateUsageReport(includeAllTime: boolean): Promise<void>;
+  openFolder(): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
   restartServer(force: boolean): Promise<void>;
@@ -116,6 +117,9 @@ export class MessageRouter {
           break;
         case 'usage/report':
           await this.callbacks.generateUsageReport(msg.payload.includeAllTime);
+          break;
+        case 'vscode/open-folder':
+          await this.callbacks.openFolder();
           break;
         case 'vscode/open-settings':
           await this.handleOpenSettingsMessage(msg);

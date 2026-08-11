@@ -606,6 +606,7 @@ export type WebviewMessage =
   | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
   | { type: 'session/export'; payload: { sessionId: string } }
   | { type: 'usage/report'; payload: { includeAllTime: boolean } }
+  | { type: 'vscode/open-folder' }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }
   | { type: 'server/restart'; payload?: { force: true } }

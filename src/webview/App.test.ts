@@ -58,6 +58,7 @@ describe('AppRoot', () => {
     appMocks.ralphError.current = null;
     ralphStore.setShowRalphForm(false);
     appMocks.cleanupBridge.mockReset();
+    appMocks.postMessage.mockReset().mockReturnValue(true);
     appMocks.useOpenCode.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -127,6 +128,30 @@ describe('AppRoot', () => {
     setConnectionInitialized(true);
 
     expect(container?.textContent).not.toContain('Loading workspace...');
+    expect(container?.textContent).toContain('New Chat');
+  });
+
+  it('suggests opening a folder and opens the native folder picker', () => {
+    setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
+    setConnectionInitialized(true);
+    setState('editorContext', {
+      ...state.editorContext,
+      workspacePath: null,
+      workspaceFolders: [],
+    });
+    mountAppRoot();
+
+    expect(container?.textContent).toContain('Open a folder to use Varro');
+    expect(container?.textContent).not.toContain('New Chat');
+
+    const openFolderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Open Folder'
+    );
+    openFolderButton?.click();
+    expect(appMocks.postMessage).toHaveBeenCalledWith({ type: 'vscode/open-folder' });
+
+    setState('editorContext', 'workspaceFolders', [{ name: 'repo', path: '/repo' }]);
+    expect(container?.textContent).not.toContain('Open a folder to use Varro');
     expect(container?.textContent).toContain('New Chat');
   });
 

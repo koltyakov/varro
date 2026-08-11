@@ -792,6 +792,9 @@ describe('webview message validation', () => {
   });
 
   it('validates workspace selection, command state, and session diff identity', () => {
+    expect(parseWebviewMessage({ type: 'vscode/open-folder' })).toEqual({
+      type: 'vscode/open-folder',
+    });
     expect(
       parseWebviewMessage({ type: 'workspace/select', payload: { path: '/repo/packages/app' } })
     ).toEqual({ type: 'workspace/select', payload: { path: '/repo/packages/app' } });

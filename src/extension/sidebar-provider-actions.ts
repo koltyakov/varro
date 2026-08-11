@@ -108,6 +108,9 @@ export function createSidebarProviderActions(
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
+    openFolder: async () => {
+      await vscode.commands.executeCommand('workbench.action.files.openFolder');
+    },
     openSettings: async (query) => {
       await vscode.commands.executeCommand(
         'workbench.action.openSettings',

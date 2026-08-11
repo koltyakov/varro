@@ -7,7 +7,7 @@ import { ServerStatus } from './components/ServerStatus';
 import { SessionActionFeedback } from './components/chat/SessionActionFeedback';
 import { RestartBlocked } from './components/RestartBlocked';
 import { ralphRunner } from './components/ralph/ralph-runner';
-import { cleanupBridge } from './lib/bridge';
+import { cleanupBridge, postMessage } from './lib/bridge';
 import { ralphStore } from './lib/stores/ralph-store';
 import { observeSurfaceContrast } from './lib/theme';
 
@@ -44,6 +44,8 @@ const showChat = () =>
 const isRestoringWorkspace = () =>
   defaultAppState.state.serverStatus.state === 'running' && !connectionInitialized();
 
+const hasNoOpenFolder = () => defaultAppState.state.editorContext.workspaceFolders?.length === 0;
+
 function renderErrorFallback(err: Error) {
   return <ErrorFallback err={err} />;
 }
@@ -59,16 +61,18 @@ export function App() {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-vscode-sidebar text-vscode-fg">
-      <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
-        <Show
-          when={defaultAppState.state.restartBlocked}
-          fallback={
-            <Show when={showChat()} fallback={<ServerStatus />}>
-              <Chat />
-            </Show>
-          }
-        >
-          <RestartBlocked />
+      <Show when={!hasNoOpenFolder()} fallback={<NoFolderOpen />}>
+        <Show when={!isRestoringWorkspace()} fallback={<WorkspaceLoading />}>
+          <Show
+            when={defaultAppState.state.restartBlocked}
+            fallback={
+              <Show when={showChat()} fallback={<ServerStatus />}>
+                <Chat />
+              </Show>
+            }
+          >
+            <RestartBlocked />
+          </Show>
         </Show>
       </Show>
       <Show when={ralphStore.showRalphForm()}>
@@ -81,6 +85,40 @@ export function App() {
         errorRetry={defaultAppState.errorRetry}
         onDismissError={() => defaultAppState.setError(null)}
       />
+    </div>
+  );
+}
+
+function NoFolderOpen() {
+  return (
+    <div class="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-10 text-center">
+      <svg
+        class="h-10 w-10 text-vscode-muted"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.19c.6 0 1.17.24 1.59.66l1.06 1.06c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 9v8.25A2.25 2.25 0 0 1 18 19.5H6a2.25 2.25 0 0 1-2.25-2.25V6.75Z"
+        />
+      </svg>
+      <div>
+        <p class="text-[13px] font-medium text-vscode-fg">Open a folder to use Varro</p>
+        <p class="mt-1.5 max-w-64 text-[12px] leading-relaxed text-vscode-muted">
+          Varro needs a workspace folder to understand and work with your project.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="rounded bg-vscode-button-bg px-3 py-1.5 text-[12px] font-medium text-vscode-button-fg hover:bg-vscode-button-hover"
+        onClick={() => postMessage({ type: 'vscode/open-folder' })}
+      >
+        Open Folder
+      </button>
     </div>
   );
 }

@@ -27,6 +27,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openSessionInOpenCode: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
+    openFolder: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
     restartServer: vi.fn(() => Promise.resolve()),
@@ -167,6 +168,15 @@ describe('MessageRouter', () => {
     await router.handleMessage({ type: 'usage/report', payload: { includeAllTime: true } });
 
     expect(cb.generateUsageReport).toHaveBeenCalledWith(true);
+  });
+
+  it('dispatches vscode/open-folder', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'vscode/open-folder' });
+
+    expect(cb.openFolder).toHaveBeenCalledOnce();
   });
 
   it('dispatches session/open-in-opencode', async () => {

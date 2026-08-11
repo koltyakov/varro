@@ -287,6 +287,16 @@ describe('createSidebarProviderActions', () => {
     );
   });
 
+  it('opens the native folder picker', async () => {
+    const { actions } = createActionFixture();
+
+    await actions.openFolder();
+
+    expect(mocks.vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.action.files.openFolder'
+    );
+  });
+
   it('opens https links externally and rejects unsupported urls', async () => {
     const { actions } = createActionFixture();
 
