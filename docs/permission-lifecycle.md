@@ -204,7 +204,7 @@ The extension host first applies narrow deterministic rules. The current local p
   rules
 - OpenCode `task` subagent launches as the same defensive fallback; delegated actions remain subject
   to the child session's inherited permission mode
-- `webfetch` and `websearch`
+- `websearch`; URL-targeted `webfetch` requests continue to the model judge or manual approval
 - Workspace-contained edits when the permission-owning session directory is inside a Git work tree,
   all canonicalized paths remain inside that workspace, and no file is being deleted
 - Strict read-only shell commands, including workspace-contained file inspection, exact tool-version
@@ -239,6 +239,10 @@ conversation tree, but the judge must recheck the complete current details and m
 scope. The judge prompt defines OpenCode's built-in tool and permission semantics, including that a
 `*` pattern is a rule-matching scope rather than an operation, while treating unknown custom or MCP
 tools as potentially arbitrary.
+
+`webfetch` is judged using its exact URL context. Clearly identified ordinary public read-only content
+may be allowed, while local or private-network targets, credential-bearing URLs, sensitive query
+parameters, unclear destinations, and possible private-data disclosure must fall back to the user.
 
 The judge model is resolved in this order:
 

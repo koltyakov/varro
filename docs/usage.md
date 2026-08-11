@@ -303,10 +303,11 @@ agent determine which actions are allowed, denied, or sent to Varro for manual a
 not add session-level permission rules in this mode.
 
 `Auto approve` is the first-run mode. Its deterministic rules allow known read-only permissions,
-subagent launches, web fetches and searches, non-deleting edits whose canonical paths stay inside the
-permission-owning session's Git-backed workspace, and strictly parsed inspection commands. Actions
-inside a subagent remain subject to the inherited permission mode. Ambiguous or out-of-workspace paths
-and command composition or options that may mutate state fall through to model or manual review.
+subagent launches, web searches, non-deleting edits whose canonical paths stay inside the
+permission-owning session's Git-backed workspace, and strictly parsed inspection commands. Web fetches
+and other requests not decided locally fall through to model or manual review. Actions inside a
+subagent remain subject to the inherited permission mode. Ambiguous or out-of-workspace paths and
+command composition or options that may mutate state also require further review.
 
 Requests not decided by local rules may be sent, with their command, path, metadata, and recent user
 permission decisions, to the configured model in a temporary hidden judge session. The judge may

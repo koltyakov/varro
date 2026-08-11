@@ -65,8 +65,8 @@ function resolveToolAction(rules: PermissionRule[], tool: string) {
 }
 
 describe('AutoApproveJudge', () => {
-  it('allows webfetch without creating a judge session', async () => {
-    const request = vi.fn();
+  it('routes webfetch through the model judge', async () => {
+    const request = createAskJudgeRequest();
     const judge = new AutoApproveJudge({ request } as never, new HiddenSessionManager());
 
     await expect(
@@ -75,11 +75,18 @@ describe('AutoApproveJudge', () => {
           id: 'perm-webfetch',
           type: 'webfetch',
           sessionID: 'session-1',
-          title: 'webfetch',
+          title: 'Fetch OpenCode documentation',
+          metadata: { url: 'https://opencode.ai/docs' },
         },
       })
-    ).resolves.toEqual({ decision: 'allow', reason: 'Web fetch.' });
-    expect(request).not.toHaveBeenCalled();
+    ).resolves.toEqual({ decision: 'ask', reason: 'Needs user review.' });
+    expect(request).toHaveBeenCalledWith(
+      'POST',
+      '/session/judge-session-1/message',
+      expect.objectContaining({
+        system: expect.stringContaining('For `webfetch`'),
+      })
+    );
   });
 
   it('allows websearch without creating a judge session', async () => {

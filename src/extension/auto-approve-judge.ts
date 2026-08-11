@@ -278,9 +278,6 @@ export class AutoApproveJudge {
     if (type === 'task') {
       return { decision: 'allow', reason: 'OpenCode subagent launch.' };
     }
-    if (type === 'webfetch') {
-      return { decision: 'allow', reason: 'Web fetch.' };
-    }
     if (type === 'websearch') {
       return { decision: 'allow', reason: 'Web search.' };
     }
@@ -1381,6 +1378,7 @@ function buildJudgeSystemPrompt() {
     'The `edit` permission covers the file-changing `edit`, `write`, and `apply_patch` tools. `bash` and `shell` execute commands. Judge these from the actual paths, commands, and metadata.',
     '`todowrite` only manages the coding session task list; `question` asks the user; and `skill` loads instructions into context. These calls do not themselves edit files, run commands, or access the network.',
     '`task` launches a subagent, so its risk depends on the delegated instructions and available tools. `webfetch` retrieves a URL; `websearch` submits a search query; `external_directory` expands filesystem scope; and `doom_loop` asks whether to repeat an identical tool call.',
+    'For `webfetch`, allow clearly identified public documentation and other ordinary public read-only content. Return ask for local or private-network targets, credential-bearing URLs, sensitive query parameters, unclear destinations, or requests that could disclose private data.',
     'Unknown custom or MCP tools can have arbitrary side effects. Return ask unless their behavior and exact requested action are clear.',
     'Permission patterns are OpenCode rule-matching scopes. `*` is a catch-all for that permission, not a shell glob, filesystem operation, or evidence of danger by itself. Judge the current action from its permission type, title, and metadata, and use patterns only to understand approval scope.',
     'Return allow when the action is clearly non-destructive and expected for coding work, such as checking versions, inspecting local state, or running local npm scripts/tests/builds.',
