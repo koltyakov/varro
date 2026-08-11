@@ -5186,10 +5186,7 @@ export function MessageList() {
     for (const key of activityCompletionTimers.keys()) clearActivityCompletionTimer(key);
     for (const key of activityShowTimers.keys()) clearActivityShowTimer(key);
   });
-  const assistantActivityProjection = createMemo<{
-    groupMap: Map<string, AssistantActivityGroupInfo[]>;
-    immediatelyGroupedPartKeys: ReadonlySet<string>;
-  }>(
+  const assistantActivityGroupMap = createMemo<Map<string, AssistantActivityGroupInfo[]>>(
     (previous) => {
       trackMessageBlockExpansionState();
       const activeMessageIds = activeActivityMessageIds();
@@ -5208,86 +5205,14 @@ export function MessageList() {
         const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
         return retainedActivityPartKeys().has(ownerKey) || exitingActivityPartKeys().has(ownerKey);
       };
-      const regularGroupMap = preserveAssistantActivityGroupKeys(
+      return preserveAssistantActivityGroupKeys(
         getAssistantActivityGroupMap(activityMessages, isNormallyIncluded, isBoundaryPart),
-        previous.groupMap,
+        previous,
         { pinPreviousOwner: ownerIsTransitioning }
       );
-      const regularGroupByPartKey = new Map(
-        [...regularGroupMap.values()].flatMap((groups) =>
-          groups.flatMap((group) =>
-            group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
-          )
-        )
-      );
-      const immediatelyGroupedPartKeys = new Set<string>();
-      let expandedGroupKey: string | null = null;
-
-      for (const message of activityMessages) {
-        if (
-          message.info.role === 'user' ||
-          (isAssistantMessage(message.info) && message.info.mode === 'subagent')
-        ) {
-          expandedGroupKey = null;
-          continue;
-        }
-
-        for (const part of message.parts) {
-          if (isAssistantActivityPart(part) && canCompactActivityPart(part)) {
-            const partKey = getAssistantActivityPartKey(part);
-            const regularGroup = regularGroupByPartKey.get(partKey);
-            if (regularGroup) {
-              expandedGroupKey = getMessageBlockExpanded(regularGroup.key)
-                ? regularGroup.key
-                : null;
-              continue;
-            }
-            if (
-              expandedGroupKey &&
-              isAssistantActivityPartRunning(part) &&
-              activeMessageIds.has(part.messageID)
-            ) {
-              immediatelyGroupedPartKeys.add(partKey);
-              continue;
-            }
-          }
-          if (isBoundaryPart(part)) expandedGroupKey = null;
-        }
-      }
-
-      if (immediatelyGroupedPartKeys.size === 0) {
-        return { groupMap: regularGroupMap, immediatelyGroupedPartKeys };
-      }
-
-      return {
-        groupMap: preserveAssistantActivityGroupKeys(
-          getAssistantActivityGroupMap(
-            activityMessages,
-            (part) =>
-              isNormallyIncluded(part) ||
-              immediatelyGroupedPartKeys.has(getAssistantActivityPartKey(part)),
-            isBoundaryPart
-          ),
-          regularGroupMap,
-          {
-            pinPreviousOwner: (group) => {
-              const ownerKey = `${group.ownerMessageId}\u0000${group.ownerPartId}`;
-              return ownerIsTransitioning(group) || immediatelyGroupedPartKeys.has(ownerKey);
-            },
-          }
-        ),
-        immediatelyGroupedPartKeys,
-      };
     },
-    { groupMap: new Map(), immediatelyGroupedPartKeys: new Set() }
+    new Map()
   );
-  const assistantActivityGroupMap = () => assistantActivityProjection().groupMap;
-  const displayedActiveActivityPartKeys = createMemo<ReadonlySet<string>>(() => {
-    const visible = visibleActiveActivityPartKeys();
-    const immediate = assistantActivityProjection().immediatelyGroupedPartKeys;
-    if (immediate.size === 0) return visible;
-    return new Set([...visible, ...immediate]);
-  });
   const compactActivityDisclosureLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
@@ -5295,7 +5220,7 @@ export function MessageList() {
       (key) => getMessageBlockExpanded(key) ?? false,
       (part) => {
         const key = getAssistantActivityPartKey(part);
-        if (displayedActiveActivityPartKeys().has(key)) return 'active';
+        if (visibleActiveActivityPartKeys().has(key)) return 'active';
         if (retainedActivityPartKeys().has(key)) return 'retained';
         if (exitingActivityPartKeys().has(key)) return 'exiting';
         return 'grouped';
@@ -5375,17 +5300,14 @@ export function MessageList() {
     trackMessageBlockExpansionState();
     const previous = knownZeroHeightMessageIds();
     const activityMessages = compactActivityMessages();
-    const immediatelyGroupedPartKeys = assistantActivityProjection().immediatelyGroupedPartKeys;
-    const delayedActivityPartKeys = new Set(
-      [...activityShowTimers.keys()].filter((key) => !immediatelyGroupedPartKeys.has(key))
-    );
+    const delayedActivityPartKeys = new Set(activityShowTimers.keys());
     const candidates = getRenderEmptyAssistantMessageIds(
       activityMessages,
       assistantActivityGroupMap(),
       (key) => getMessageBlockExpanded(key) ?? false,
       {
         delayed: delayedActivityPartKeys,
-        visibleActive: displayedActiveActivityPartKeys(),
+        visibleActive: visibleActiveActivityPartKeys(),
         retained: retainedActivityPartKeys(),
         exiting: exitingActivityPartKeys(),
       },
@@ -6027,7 +5949,7 @@ export function MessageList() {
               assistantActivityGroupMap={assistantActivityGroupMap()}
               retainedActivityPartKeys={retainedActivityPartKeys()}
               exitingActivityPartKeys={exitingActivityPartKeys()}
-              visibleActiveActivityPartKeys={displayedActiveActivityPartKeys()}
+              visibleActiveActivityPartKeys={visibleActiveActivityPartKeys()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

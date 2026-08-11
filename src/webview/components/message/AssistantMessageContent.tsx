@@ -429,8 +429,6 @@ export function AssistantMessageContent(props: {
   const isActiveActivityTrayPart = (part: Part) => {
     if (!isLocallyCompactActivityCandidate(part)) return false;
     const key = getAssistantActivityPartKey(part);
-    const activityGroup = compactActivityGroupByPartKey().get(key);
-    if (activityGroup && isActivityGroupExpanded(activityGroup.key)) return false;
     return (
       (isAssistantActivityPartRunning(part) &&
         (!props.visibleActiveActivityPartKeys ||
@@ -465,7 +463,7 @@ export function AssistantMessageContent(props: {
       return groups.length > 0 ? groups : null;
     }
   );
-  const baseCompactActivityGroupByPartKey = createMemo(
+  const compactActivityGroupByPartKey = createMemo(
     () =>
       new Map<string, AssistantActivityGroupInfo>(
         effectiveCompactActivityGroups()?.flatMap((group) =>
@@ -473,31 +471,6 @@ export function AssistantMessageContent(props: {
         ) || []
       )
   );
-  const compactActivityGroupByPartKey = createMemo(() => {
-    const groups = new Map(baseCompactActivityGroupByPartKey());
-    let expandedGroup: AssistantActivityGroupInfo | null = null;
-
-    for (const part of orderedDisplayParts()) {
-      if (isAssistantActivityPart(part)) {
-        const existingGroup = groups.get(getAssistantActivityPartKey(part));
-        if (existingGroup) {
-          expandedGroup = isActivityGroupExpanded(existingGroup.key) ? existingGroup : null;
-          continue;
-        }
-        if (
-          expandedGroup &&
-          isLocallyCompactActivityCandidate(part) &&
-          isAssistantActivityPartRunning(part)
-        ) {
-          groups.set(getAssistantActivityPartKey(part), expandedGroup);
-          continue;
-        }
-      }
-      expandedGroup = null;
-    }
-
-    return groups;
-  });
   const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
     if (group.ownerMessageId !== props.info.id) return null;
     return orderedDisplayParts().some((part) => part.id === group.ownerPartId)

@@ -284,8 +284,13 @@ describe('AssistantMessageContent', () => {
     expect(summary()?.textContent).not.toContain('command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(summary()?.classList).not.toContain('assistant-activity-summary-settling');
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
-    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
+    expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-activity-part-id="bash-1"]')
+        ?.closest('.assistant-activity-details')
+    ).toBeNull();
 
     setParts((current) => [
       ...current.slice(0, -1),

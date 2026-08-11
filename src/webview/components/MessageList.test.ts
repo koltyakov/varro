@@ -1350,7 +1350,7 @@ describe('MessageList compact activity', () => {
     expect(container?.querySelector('[data-activity-part-id="search-1"]')).toBeNull();
   });
 
-  it('adds running activity in a new message directly to expanded Explored', async () => {
+  it('keeps running activity outside an expanded Explored group', async () => {
     const completed = toolPart('command-completed', 'assistant-1', 'call-command-completed');
     completed.state = {
       status: 'completed',
@@ -1391,16 +1391,24 @@ describe('MessageList compact activity', () => {
     replaceMessages([user, first, second]);
     await Promise.resolve();
 
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
     expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
     expect(summary?.textContent).toContain('Explored: 1 command');
-    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).toContain(
       'interactive-item-render-empty'
     );
 
-    await vi.advanceTimersByTimeAsync(499);
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
-    expect(container?.querySelector('.assistant-active-activity-tray')).toBeNull();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
+    expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
+    expect(
+      container
+        ?.querySelector('[data-activity-part-id="command-running"]')
+        ?.closest('.assistant-activity-details')
+    ).toBeNull();
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
+      'interactive-item-render-empty'
+    );
   });
 
   it('skips the minimum visible hold when response text is already streaming', async () => {

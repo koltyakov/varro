@@ -468,6 +468,17 @@ input:focus-visible {
   flex: 0 0 auto;
 }
 
+/* Revealed timestamps extend into the following row's gap. Let them escape
+   virtualized row paint containment and keep that row above adjacent content. */
+.interactive-list-track.virtualized
+  .interactive-item-container.interactive-request:has(
+    > .chat-turn-user > .message-sent-time.is-visible
+  ) {
+  position: relative;
+  z-index: var(--z-lifted);
+  contain: layout style;
+}
+
 .interactive-list-track.virtualized
   .interactive-item-off-core
   :is(.shimmer-progress, .thinking-in-progress, .tool-status-running, .tool-call-spinner) {
@@ -552,6 +563,7 @@ input:focus-visible {
   position: absolute;
   top: 100%;
   right: var(--chat-radius-card);
+  z-index: var(--z-lifted);
 }
 
 .latest-user-message-sticky-time {

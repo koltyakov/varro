@@ -38,8 +38,8 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   const trayItems = tray.locator('.assistant-active-activity-items');
   await trayItems.evaluate(async (element) => {
     await Promise.all(
-      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap((item) =>
-        item.getAnimations().map((animation) => animation.finished)
+      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap(
+        (item) => item.getAnimations().map((animation) => animation.finished)
       )
     );
   });
@@ -245,7 +245,9 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
     ),
     JSON.stringify({ loadingTopBefore, samples: transition.loadingTops })
   ).toBe(true);
-  expect(Math.abs(transition.loadingTops[1]! - transition.loadingTops[0]!)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(transition.loadingTops[1]! - transition.loadingTops[0]!)).toBeLessThanOrEqual(
+    1.5
+  );
   expect(
     transition.loadingTops.every(
       (top, index) => index === 0 || transition.loadingTops[index - 1]! - top <= 5
@@ -267,9 +269,7 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
 });
 
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
-  await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
   await expect(activeTool).toBeVisible();
   const gaps = await activeTool.evaluate((element) => {
@@ -351,36 +351,40 @@ test('keeps a cross-message active tool adjacent to Explored after entrance', as
   await expect(tray).not.toHaveClass(/has-active-summary/);
   await expect(row.locator('.assistant-activity-summary')).toHaveCount(0);
 
-  const geometry = await activeTool.evaluate(async (element, summaryElement) => {
-    const rowElement = element.closest<HTMLElement>('.interactive-item-container');
-    const shell = element.closest<HTMLElement>('.assistant-turn-content');
-    const trayElement = element.closest<HTMLElement>('.assistant-active-activity-tray');
-    if (!summaryElement || !rowElement || !shell || !trayElement) {
-      throw new Error('Cross-message activity geometry is missing');
-    }
-    const entranceAnimationNames = new Set([
-      'streamed-message-row-in',
-      'assistant-active-activity-in',
-      'assistant-active-activity-row-in',
-      'assistant-active-activity-shell-in',
-    ]);
-    await Promise.allSettled(
-      rowElement
-        .getAnimations({ subtree: true })
-        .filter(
-          (animation): animation is CSSAnimation =>
-            animation instanceof CSSAnimation && entranceAnimationNames.has(animation.animationName)
-        )
-        .map((animation) => animation.finished)
-    );
-    if (!element.isConnected) throw new Error('Cross-message active tool was removed');
-    return {
-      gap:
-        element.getBoundingClientRect().top -
-        (summaryElement as HTMLElement).getBoundingClientRect().bottom,
-      trayIsOnlyChild: trayElement.parentElement?.children.length === 1,
-    };
-  }, await summary.elementHandle());
+  const geometry = await activeTool.evaluate(
+    async (element, summaryElement) => {
+      const rowElement = element.closest<HTMLElement>('.interactive-item-container');
+      const shell = element.closest<HTMLElement>('.assistant-turn-content');
+      const trayElement = element.closest<HTMLElement>('.assistant-active-activity-tray');
+      if (!summaryElement || !rowElement || !shell || !trayElement) {
+        throw new Error('Cross-message activity geometry is missing');
+      }
+      const entranceAnimationNames = new Set([
+        'streamed-message-row-in',
+        'assistant-active-activity-in',
+        'assistant-active-activity-row-in',
+        'assistant-active-activity-shell-in',
+      ]);
+      await Promise.allSettled(
+        rowElement
+          .getAnimations({ subtree: true })
+          .filter(
+            (animation): animation is CSSAnimation =>
+              animation instanceof CSSAnimation &&
+              entranceAnimationNames.has(animation.animationName)
+          )
+          .map((animation) => animation.finished)
+      );
+      if (!element.isConnected) throw new Error('Cross-message active tool was removed');
+      return {
+        gap:
+          element.getBoundingClientRect().top -
+          (summaryElement as HTMLElement).getBoundingClientRect().bottom,
+        trayIsOnlyChild: trayElement.parentElement?.children.length === 1,
+      };
+    },
+    await summary.elementHandle()
+  );
 
   expect(geometry.trayIsOnlyChild).toBe(true);
   expect(geometry.gap).toBeCloseTo(12, 0);
@@ -508,9 +512,7 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
 });
 
 test('hides sibling active tools while one tool is expanded', async ({ page }) => {
-  await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=3');
   const items = page.locator('.assistant-active-activity-item');
   await expect(items).toHaveCount(3);
   const firstItem = items.first();
@@ -531,7 +533,7 @@ test('hides sibling active tools while one tool is expanded', async ({ page }) =
   await expect.poll(visiblePartIds).toEqual(['tool-active-0', 'tool-active-1', 'tool-active-2']);
 });
 
-test('adds active tools directly to an expanded Explored group', async ({ page }) => {
+test('keeps active tools outside an expanded Explored group', async ({ page }) => {
   await page.clock.install();
   await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
@@ -584,9 +586,15 @@ test('adds active tools directly to an expanded Explored group', async ({ page }
     }
   });
 
-  await expect(details).toHaveCount(initialDetailCount + 1);
+  await expect(details).toHaveCount(initialDetailCount);
   await expect(summary).toHaveText(initialSummary || '');
-  await expect(page.locator('.assistant-active-activity-tray')).toHaveCount(0);
+  await page.clock.fastForward(500);
+  const activeItem = page.locator('[data-activity-part-id="tool-expanded-running"]');
+  await expect(page.locator('.assistant-active-activity-tray')).toHaveCount(1);
+  await expect(activeItem).toBeVisible();
+  await expect(
+    activeItem.locator('xpath=ancestor::*[contains(@class, "assistant-activity-details")]')
+  ).toHaveCount(0);
 });
 
 test('hides Thinking while an apply_patch tool is shown inline', async ({ page }) => {
@@ -1023,16 +1031,51 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
     const userBox = precedingUser.getBoundingClientRect();
     const timestampBox = element.getBoundingClientRect();
     const summaryBox = activitySummary.getBoundingClientRect();
+    const activityGroup = activitySummary.closest<HTMLElement>('.assistant-activity-group');
+    if (!activityGroup) throw new Error('Explored activity group is missing');
     return {
       userToSummary: summaryBox.top - userBox.bottom,
       timestampAfterUser: timestampBox.top >= userBox.bottom,
       timestampBeforeSummary: timestampBox.bottom <= summaryBox.top,
+      timestampZIndex: Number(getComputedStyle(element).zIndex),
+      activityGroupZIndex: Number(getComputedStyle(activityGroup).zIndex),
     };
   });
   await page.keyboard.up('Alt');
   expect(revealedGeometry.userToSummary).toBeCloseTo(12, 0);
   expect(revealedGeometry.timestampAfterUser).toBe(true);
   expect(revealedGeometry.timestampBeforeSummary).toBe(true);
+  expect(revealedGeometry.timestampZIndex).toBeGreaterThan(revealedGeometry.activityGroupZIndex);
+});
+
+test('keeps revealed timestamps above Explored in virtualized rows', async ({ page }) => {
+  await page.setViewportSize({ width: 410, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const userRow = page.locator('[data-msg-id="message-tool-cards-user-69"]');
+  const timestamp = userRow.locator('.message-sent-time');
+  await page.keyboard.down('Alt');
+  await expect(timestamp).toBeVisible();
+  const stacking = await timestamp.evaluate((element) => {
+    const row = element.closest<HTMLElement>('.interactive-item-container');
+    const followingActivity = row?.nextElementSibling?.querySelector<HTMLElement>(
+      '.assistant-activity-group'
+    );
+    if (!row || !followingActivity) throw new Error('Virtualized timestamp fixtures are missing');
+    return {
+      rowContain: getComputedStyle(row).contain,
+      rowZIndex: Number(getComputedStyle(row).zIndex),
+      activityZIndex: Number(getComputedStyle(followingActivity).zIndex),
+      extendsPastRow:
+        element.getBoundingClientRect().bottom > row.getBoundingClientRect().bottom,
+    };
+  });
+  await page.keyboard.up('Alt');
+
+  expect(stacking.extendsPastRow).toBe(true);
+  expect(stacking.rowContain).not.toContain('paint');
+  expect(stacking.rowZIndex).toBeGreaterThan(stacking.activityZIndex);
 });
 
 test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {
@@ -1161,9 +1204,7 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
 
 test('keeps the hidden Thinking slot fixed while an active tool is visible', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 });
-  await page.goto(
-    '/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
 
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
   const loading = page.locator('.interactive-loading-row .loading-indicator');
@@ -2142,9 +2183,7 @@ test('sticky and visible-row geometry survive inline-file-change values and widt
   page,
 }) => {
   await page.setViewportSize({ width: 800, height: 900 });
-  await page.goto(
-    '/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1'
-  );
+  await page.goto('/e2e/harness/index.html?scenario=diff-preview-large-transcript&multiFileDiff=1');
   const list = page.locator('.interactive-list');
   await list.evaluate((element) => {
     element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
