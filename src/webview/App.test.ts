@@ -69,6 +69,7 @@ describe('AppRoot', () => {
     container?.remove();
     container = null;
     resetDefaultAppState();
+    vi.useRealTimers();
   });
 
   it('does not reset singleton state during render', () => {
@@ -181,6 +182,7 @@ describe('AppRoot', () => {
   });
 
   it('shows transient warnings with warning semantics', () => {
+    vi.useFakeTimers();
     setState('serverStatus', { state: 'running', url: 'http://127.0.0.1:4096' });
     setConnectionInitialized(true);
     mountAppRoot();
@@ -192,6 +194,15 @@ describe('AppRoot', () => {
     expect(warningToast?.classList.contains('is-warning')).toBe(true);
     expect(warningToast?.getAttribute('role')).toBe('status');
     expect(warningToast?.getAttribute('aria-live')).toBe('polite');
+
+    vi.advanceTimersByTime(1_600);
+    expect(document.body.querySelector('.session-action-feedback')).not.toBeNull();
+
+    vi.advanceTimersByTime(3_400);
+    expect(warningToast?.classList.contains('is-leaving')).toBe(true);
+
+    vi.advanceTimersByTime(160);
+    expect(document.body.querySelector('.session-action-feedback')).toBeNull();
   });
 
   it('clears the retry action whenever the error changes', () => {

@@ -3703,6 +3703,32 @@ describe('ChatInput', () => {
     }
   });
 
+  it('warns when pasting an image for a model without vision support', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      setupModelState();
+      setState('providers', 0, 'models', 'gpt-4o', 'capabilities', 'vision', false);
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor) throw new Error('Expected composer editor');
+
+      dispatchImagePaste(editor, [new File(['image'], 'unsupported.png', { type: 'image/png' })]);
+
+      expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+        "Current model doesn't support vision",
+        'warning'
+      );
+
+      fileReader.resolve('unsupported.png');
+      await flushAsyncWork();
+      expect(state.clipboardImages).toHaveLength(1);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
   it.each(['image first', 'mention first'])(
     'retains an image and mention-only file attachment when %s completes',
     async (completionOrder) => {

@@ -2,7 +2,8 @@ import { Show, createSignal, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
 
-const VISIBLE_MS = 1_600;
+const SUCCESS_VISIBLE_MS = 1_600;
+const WARNING_VISIBLE_MS = 5_000;
 /* Matches the `session-action-feedback-out` animation duration, so the toast
    finishes fading before it leaves the DOM. */
 const LEAVE_MS = 160;
@@ -26,11 +27,12 @@ export function showSessionActionFeedback(
   reset();
   setKind(nextKind);
   setMessage(nextMessage);
-  leaveTimeout = setTimeout(() => setLeaving(true), VISIBLE_MS);
+  const visibleMs = nextKind === 'warning' ? WARNING_VISIBLE_MS : SUCCESS_VISIBLE_MS;
+  leaveTimeout = setTimeout(() => setLeaving(true), visibleMs);
   clearTimeoutHandle = setTimeout(() => {
     setMessage(null);
     setLeaving(false);
-  }, VISIBLE_MS + LEAVE_MS);
+  }, visibleMs + LEAVE_MS);
 }
 
 interface SessionActionFeedbackProps {

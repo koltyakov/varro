@@ -2057,6 +2057,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
+    if (!currentModelSupportsVision()) {
+      showSessionActionFeedback("Current model doesn't support vision", 'warning');
+    }
+
     if (!pastedText || pasteHandledAsContextOnly) e.preventDefault();
     const transaction: PasteTransaction = {
       event: e,
