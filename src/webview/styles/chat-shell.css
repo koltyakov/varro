@@ -561,14 +561,14 @@ input:focus-visible {
 
 .chat-turn-user > .message-sent-time {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 2px);
   right: var(--chat-radius-card);
   z-index: var(--z-lifted);
 }
 
 .latest-user-message-sticky-time {
   position: absolute;
-  top: calc(100% + 3px);
+  top: calc(100% + 2px);
   right: var(--chat-radius-card);
   z-index: 1;
 }

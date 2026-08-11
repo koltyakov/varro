@@ -284,6 +284,11 @@ async function runScenario(scenario, vscodeExecutable) {
       [
         '--no-sandbox',
         '--disable-gpu-sandbox',
+        // Each scenario uses a throwaway user data directory, so the OS keychain
+        // has no encryption key for it. Without these flags macOS shows a modal
+        // "Keychain Not Found" dialog that blocks the extension host forever.
+        '--password-store=basic',
+        '--use-mock-keychain',
         '--disable-updates',
         '--disable-extensions',
         '--disable-workspace-trust',

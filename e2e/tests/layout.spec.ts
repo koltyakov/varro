@@ -1035,16 +1035,16 @@ test('keeps Explored spacing consistent beside user blocks', async ({ page }) =>
     if (!activityGroup) throw new Error('Explored activity group is missing');
     return {
       userToSummary: summaryBox.top - userBox.bottom,
-      timestampAfterUser: timestampBox.top >= userBox.bottom,
-      timestampBeforeSummary: timestampBox.bottom <= summaryBox.top,
+      timestampGap: timestampBox.top - userBox.bottom,
+      timestampOverlap: timestampBox.bottom - summaryBox.top,
       timestampZIndex: Number(getComputedStyle(element).zIndex),
       activityGroupZIndex: Number(getComputedStyle(activityGroup).zIndex),
     };
   });
   await page.keyboard.up('Alt');
   expect(revealedGeometry.userToSummary).toBeCloseTo(12, 0);
-  expect(revealedGeometry.timestampAfterUser).toBe(true);
-  expect(revealedGeometry.timestampBeforeSummary).toBe(true);
+  expect(revealedGeometry.timestampGap).toBeCloseTo(2, 0);
+  expect(revealedGeometry.timestampOverlap).toBeCloseTo(2, 0);
   expect(revealedGeometry.timestampZIndex).toBeGreaterThan(revealedGeometry.activityGroupZIndex);
 });
 

@@ -57,7 +57,7 @@
   "dependencies": {
     "@opencode-ai/sdk": "^1.18.16",
     "dompurify": "^3.4.13",
-    "highlight.js": "11.11.1",
+    "highlight.js": "11.11.2",
     "jsonc-parser": "^3.3.1",
     "marked": "18.0.9",
     "solid-js": "1.9.14"

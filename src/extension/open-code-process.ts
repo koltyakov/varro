@@ -1540,9 +1540,10 @@ export class OpenCodeProcess {
 
   private bindInjectedConfigOwner(configPath: string | null, proc: ChildProcess, owner: string) {
     if (!configPath) return;
-    if (!proc.pid) {
-      throw new Error('Failed to bind temporary OpenCode config to the managed child process');
-    }
+    // A child without a PID never started, so there is no owner to record. Node still emits the
+    // real spawn failure - ENOENT for a bad varro.server.command - on the next tick. Throwing a
+    // generic bind error here would be delivered first and would mask that actionable message.
+    if (!proc.pid) return;
     writeFileSync(
       join(dirname(configPath), INJECTED_CONFIG_OWNER_FILE),
       `${JSON.stringify({ pid: proc.pid, owner, createdAt: Date.now() })}\n`,

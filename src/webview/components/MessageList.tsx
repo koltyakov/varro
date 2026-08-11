@@ -3900,6 +3900,13 @@ export function MessageList() {
     if (nestedScrollerWillConsumeWheel(event)) return;
     pendingExpansionScrollAnchor = null;
     directMovementAnchor = null;
+    // The container viewport rect cannot change while this handler runs, so read it at most
+    // once instead of forcing layout again for the sticky handoff check below.
+    let wheelContainerRect: DOMRect | null = null;
+    const getWheelContainerRect = () => {
+      wheelContainerRect ??= containerRef!.getBoundingClientRect();
+      return wheelContainerRect;
+    };
     if (containerRef && !editingMessage()) {
       const metrics = shouldVirtualize() ? virtualMetrics() : null;
       const index = metrics
@@ -3911,7 +3918,7 @@ export function MessageList() {
       const messageId = index === null ? null : messageIds()[index];
       const row = messageId ? mountedMessageRows.get(messageId) : null;
       if (messageId && row) {
-        const containerRect = containerRef.getBoundingClientRect();
+        const containerRect = getWheelContainerRect();
         const rect = row.getBoundingClientRect();
         if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
           directMovementAnchor = {
@@ -3932,8 +3939,7 @@ export function MessageList() {
       if (
         currentStickyPreview &&
         currentStickySource &&
-        currentStickySource.getBoundingClientRect().bottom - deltaY >
-          containerRef.getBoundingClientRect().top
+        currentStickySource.getBoundingClientRect().bottom - deltaY > getWheelContainerRect().top
       ) {
         beginUpwardStickyHandoff(currentStickyPreview.id, false);
         setStickyUserMessagePreview(null);
@@ -4001,12 +4007,12 @@ export function MessageList() {
     if (!containerRef || !(event.target instanceof Element)) return false;
     const deltaY = getWheelDeltaPixels(event);
     for (let element: Element | null = event.target; element && element !== containerRef;) {
-      if (element instanceof HTMLElement) {
+      // Most ancestors cannot scroll at all. Checking overflowing geometry first keeps
+      // getComputedStyle - which forces a style recalculation - off the wheel hot path.
+      if (element instanceof HTMLElement && element.scrollHeight > element.clientHeight + 1) {
         const styles = getComputedStyle(element);
         const overflowY = styles.overflowY;
-        const scrollable =
-          (overflowY === 'auto' || overflowY === 'scroll') &&
-          element.scrollHeight > element.clientHeight + 1;
+        const scrollable = overflowY === 'auto' || overflowY === 'scroll';
         if (
           scrollable &&
           (styles.overscrollBehaviorY === 'contain' ||
