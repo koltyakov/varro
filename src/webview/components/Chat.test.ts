@@ -2609,6 +2609,11 @@ describe('header status badges', () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    await vi.waitFor(() =>
+      expect(document.body.querySelector<HTMLElement>('[role="dialog"]')).toBeInstanceOf(
+        HTMLElement
+      )
+    );
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(container?.querySelector('.settings-panel')).toBeNull();
     expect(dialog?.textContent).toContain('Re-authenticate provider');
