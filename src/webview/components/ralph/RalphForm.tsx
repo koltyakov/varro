@@ -16,7 +16,7 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { ralphRunner } from './ralph-runner';
 import { buildAnchorMessage, getDefaultPromptTemplate } from '../../../shared/ralph-prompts';
 import { ModelPickerButton, VariantPicker } from '../chat-input/ToolbarPickers';
-import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
+import { getVariantsForModel } from '../../lib/model-variants';
 import { formatVariantLabel } from '../../lib/format';
 import { getLeafPathName } from '../../lib/path-display';
 import { trapModalFocus } from '../../lib/modal-focus';
@@ -132,7 +132,7 @@ export function RalphForm() {
     const preference = variantPreference();
     if (preference === null) return null;
     if (preference && variants.includes(preference)) return preference;
-    return getPreferredVariant(sel.providerID, sel.modelID, visibleProviders()) || variants[0];
+    return null;
   });
 
   createEffect<boolean>((wasVisible = false) => {

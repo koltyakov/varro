@@ -320,7 +320,7 @@ describe('session-send helpers', () => {
     ]);
   });
 
-  it('strips clipboard placeholders for non-vision models and applies preferred variant fallback', () => {
+  it('strips clipboard placeholders and leaves reasoning at the OpenCode default', () => {
     const result = buildSessionSendBody(
       createState({
         selectedAgent: null,
@@ -363,7 +363,6 @@ describe('session-send helpers', () => {
         model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
         noReply: true,
         parts: [{ type: 'text', text: 'See later' }],
-        variant: 'high',
       },
       effectiveModel: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
     });

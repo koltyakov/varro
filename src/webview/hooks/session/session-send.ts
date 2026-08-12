@@ -29,7 +29,7 @@ import {
   getContextFileAttachmentSequence,
 } from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
-import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
+import { getVariantsForModel } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
 import { getModelVariantSelectionKey } from '../../lib/state-model-selection';
@@ -311,10 +311,7 @@ export function buildSessionSendBody(
       );
       const validRememberedVariant =
         rememberedVariant && variants.includes(rememberedVariant) ? rememberedVariant : null;
-      body.variant =
-        validRememberedVariant ||
-        getPreferredVariant(body.model.providerID, body.model.modelID, composerState.providers) ||
-        undefined;
+      body.variant = validRememberedVariant || undefined;
     }
   }
   if (options?.noReply) body.noReply = true;

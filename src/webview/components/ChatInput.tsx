@@ -101,7 +101,7 @@ import {
   getProviderLimitCompactBadges,
   hasProviderLimitWindowWithinThreshold,
 } from '../lib/format';
-import { getPreferredVariant, getVariantsForModel } from '../lib/model-variants';
+import { getVariantsForModel } from '../lib/model-variants';
 import { getContextWindow } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
 import { modelSupportsVision } from '../lib/model-capabilities';
@@ -2626,10 +2626,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (rememberedVariant === null) return null;
     if (rememberedVariant && variants.includes(rememberedVariant)) return rememberedVariant;
 
-    return (
-      getPreferredVariant(currentModel().providerID, currentModel().modelID, state.providers) ||
-      variants[0]
-    );
+    return null;
   });
 
   const toolbarFitDependencies = createMemo(() => ({
@@ -2983,12 +2980,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               onSelect={(sel) => {
                 if (sel.providerID && sel.modelID) {
                   const rememberedVariant = getStoredVariantForModel(sel.providerID, sel.modelID);
-                  const matchedVariant =
-                    sel.variant ||
-                    (rememberedVariant === undefined
-                      ? getPreferredVariant(sel.providerID, sel.modelID, state.providers)
-                      : rememberedVariant) ||
-                    undefined;
+                  const matchedVariant = sel.variant || rememberedVariant || undefined;
                   void handleSelectedModelChange({
                     providerID: sel.providerID,
                     modelID: sel.modelID,

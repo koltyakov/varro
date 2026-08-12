@@ -8,7 +8,7 @@ import {
   hasProviderLimitWindowWithinThreshold,
 } from '../../lib/format';
 import { getContextWindow } from '../../lib/message-metrics';
-import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
+import { getVariantsForModel } from '../../lib/model-variants';
 import { getProviderIcon } from '../../lib/provider-icons';
 import {
   getProviderLimit,
@@ -76,13 +76,10 @@ export function ManagedSubagentFooter(props: {
     const current = currentModel();
     if (current.variant) return formatVariantLabel(current.variant);
     const remembered = getStoredVariantForModel(current.providerID, current.modelID);
-    if (remembered === null) return 'Default';
-    const effectiveVariant =
-      (remembered && availableVariants().includes(remembered) ? remembered : null) ||
-      getPreferredVariant(current.providerID, current.modelID, state.providers) ||
-      availableVariants()[0] ||
-      null;
-    return effectiveVariant ? formatVariantLabel(effectiveVariant) : null;
+    if (remembered && availableVariants().includes(remembered)) {
+      return formatVariantLabel(remembered);
+    }
+    return availableVariants().length > 0 ? 'Default' : null;
   });
   const currentSessionMessages = createMemo(() =>
     getMessageEntriesForSession(state.messages, state.activeSessionId)

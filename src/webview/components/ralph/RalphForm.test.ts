@@ -321,7 +321,7 @@ describe('RalphForm', () => {
     expect((input as HTMLInputElement | null)?.value).toBe('RALPH.md');
   });
 
-  it('starts the loop with the effective reasoning level', async () => {
+  it('starts the loop with OpenCode default reasoning', async () => {
     stateMock.selectedModel = { providerID: 'openai', modelID: 'gpt-5.5' };
     stateMock.providers = [
       {
@@ -360,7 +360,7 @@ describe('RalphForm', () => {
     expect(ralphRunner.start).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceDirectory: '/repo',
-        model: { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' },
+        model: { providerID: 'openai', modelID: 'gpt-5.5' },
       })
     );
     expect(clientMocks.create).toHaveBeenCalledWith(expect.anything(), { directory: '/repo' });

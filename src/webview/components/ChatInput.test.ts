@@ -4870,7 +4870,7 @@ describe('ChatInput', () => {
     expect(state.selectedModel).toEqual({
       providerID: 'openai',
       modelID: 'gpt-5.5',
-      variant: 'low',
+      variant: undefined,
     });
 
     setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'high' });
