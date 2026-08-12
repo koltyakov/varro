@@ -466,7 +466,11 @@ export function AssistantMessageContent(props: {
     () =>
       new Map<string, AssistantActivityGroupInfo>(
         effectiveCompactActivityGroups()?.flatMap((group) =>
-          group.parts.map((part) => [getAssistantActivityPartKey(part), group] as const)
+          group.parts.flatMap((part) =>
+            isLocallyCompactActivityCandidate(part)
+              ? [[getAssistantActivityPartKey(part), group] as const]
+              : []
+          )
         ) || []
       )
   );

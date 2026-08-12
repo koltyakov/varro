@@ -235,15 +235,80 @@ export const client = {
       const path = '/provider/auth';
       return requireRecord(await apiCall('GET', path), path) as ProviderAuthMethodsByProvider;
     },
-    async authorizeProvider(body: {
-      providerID: string;
-      method: number;
-      inputs?: Record<string, string>;
-    }): Promise<ProviderAuthAuthorization> {
-      return apiCall('POST', `/provider/${encodeURIComponent(body.providerID)}/oauth/authorize`, {
+    async providerCatalog(): Promise<{
+      all: Provider[];
+      default: Record<string, string>;
+      connected: string[];
+    }> {
+      const path = '/provider';
+      const response = requireRecord(await apiCall('GET', path), path);
+      return {
+        all: requireArray<Provider>(response.all, path),
+        default: requireRecord(response.default, path) as Record<string, string>,
+        connected: requireArray<string>(response.connected, path),
+      };
+    },
+    async authorizeProvider(
+      body: {
+        providerID: string;
+        method: number;
+        inputs?: Record<string, string>;
+      },
+      options?: { signal?: AbortSignal }
+    ): Promise<ProviderAuthAuthorization> {
+      const path = `/provider/${encodeURIComponent(body.providerID)}/oauth/authorize`;
+      const requestBody = {
         method: body.method,
         ...(body.inputs ? { inputs: body.inputs } : {}),
-      });
+      };
+      return options?.signal
+        ? apiCall('POST', path, requestBody, { signal: options.signal })
+        : apiCall('POST', path, requestBody);
+    },
+    async completeProviderAuth(
+      body: {
+        providerID: string;
+        method: number;
+        code?: string;
+      },
+      options?: { signal?: AbortSignal }
+    ): Promise<boolean> {
+      return apiCall(
+        'POST',
+        `/provider/${encodeURIComponent(body.providerID)}/oauth/callback`,
+        {
+          method: body.method,
+          ...(body.code ? { code: body.code } : {}),
+        },
+        {
+          timeoutMs: 315_000,
+          retries: 0,
+          ...(options?.signal ? { signal: options.signal } : {}),
+        }
+      );
+    },
+    async connectApiProvider(
+      body: {
+        providerID: string;
+        key: string;
+        metadata?: Record<string, string>;
+      },
+      options?: { signal?: AbortSignal }
+    ): Promise<boolean> {
+      const path = `/auth/${encodeURIComponent(body.providerID)}`;
+      const requestBody = {
+        type: 'api',
+        key: body.key,
+        ...(body.metadata && Object.keys(body.metadata).length > 0
+          ? { metadata: body.metadata }
+          : {}),
+      };
+      return options?.signal
+        ? apiCall('PUT', path, requestBody, { signal: options.signal })
+        : apiCall('PUT', path, requestBody);
+    },
+    async disconnectProvider(providerID: string): Promise<boolean> {
+      return apiCall('DELETE', `/auth/${encodeURIComponent(providerID)}`);
     },
     async workspaceStatus(): Promise<WorkspaceStatusEntry[]> {
       const path = '/experimental/workspace/status';

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, MessageEntry, Part } from '../../types';
+import { getToolFileChanges } from '../../lib/tool-file-change';
 
 const { upsertPart, applyMessagePartDelta } = vi.hoisted(() => ({
   upsertPart: vi.fn(),
@@ -202,8 +203,30 @@ describe('projected tool input lifecycle', () => {
 
     expect(currentToolPart(harness).state).toMatchObject({
       status: 'pending',
+      input: { command: 'ls' },
       raw: '{"command":"ls"}',
     });
+  });
+
+  it('exposes a completed apply_patch input before input.ended', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.input.started', { name: 'apply_patch' });
+    emit(harness, 'session.next.tool.input.delta', {
+      delta: JSON.stringify({
+        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
+      }),
+    });
+
+    const part = currentToolPart(harness);
+    expect(part.state).toMatchObject({
+      status: 'pending',
+      input: {
+        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
+      },
+    });
+    expect(getToolFileChanges(part.tool, part.state)).toMatchObject([
+      { kind: 'added', path: 'src/new.ts' },
+    ]);
   });
 
   it('drops an input delta that arrives before input.started', () => {
@@ -314,11 +337,35 @@ describe('projected tool execution', () => {
     });
   });
 
-  it('coerces a non-object tool input to an empty object', () => {
+  it('parses JSON text tool input', () => {
     const harness = createHarness();
-    emit(harness, 'session.next.tool.called', { name: 'bash', input: 'ls -la' });
+    emit(harness, 'session.next.tool.called', {
+      name: 'apply_patch',
+      input: JSON.stringify({
+        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+content\n*** End Patch',
+      }),
+    });
 
-    expect(currentToolPart(harness).state).toMatchObject({ status: 'running', input: {} });
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'running',
+      input: {
+        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+content\n*** End Patch',
+      },
+    });
+  });
+
+  it('preserves parsed pending input when tool.called omits usable input', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.input.ended', {
+      name: 'write',
+      input: '{"filePath":"src/new.ts","content":"value"}',
+    });
+    emit(harness, 'session.next.tool.called', { name: 'write', input: '' });
+
+    expect(currentToolPart(harness).state).toMatchObject({
+      status: 'running',
+      input: { filePath: 'src/new.ts', content: 'value' },
+    });
   });
 
   it('merges progress metadata into a running tool', () => {
@@ -334,11 +381,33 @@ describe('projected tool execution', () => {
       status: 'running',
       time: { start: 1000 },
       metadata: {
+        pct: 40,
         structured: { pct: 40 },
         content: [{ type: 'text', text: 'working' }],
         progress: 'working',
       },
     });
+  });
+
+  it('exposes structured file progress as running file metadata', () => {
+    const harness = createHarness();
+    emit(harness, 'session.next.tool.called', { name: 'write', timestamp: 1000 });
+    emit(harness, 'session.next.tool.progress', {
+      structured: {
+        files: [{ type: 'create', relativePath: 'src/new.ts' }],
+      },
+    });
+
+    const part = currentToolPart(harness);
+    expect(part.state).toMatchObject({
+      status: 'running',
+      metadata: {
+        files: [{ type: 'create', relativePath: 'src/new.ts' }],
+      },
+    });
+    expect(getToolFileChanges(part.tool, part.state)).toMatchObject([
+      { kind: 'added', path: 'src/new.ts' },
+    ]);
   });
 
   it('ignores progress for a tool that is not running', () => {

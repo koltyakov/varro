@@ -104,6 +104,7 @@ describe('client', () => {
       if (path === '/global/health') return Promise.resolve({ healthy: true, version: '1.0.0' });
       if (path === '/session/status') return Promise.resolve({});
       if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      if (path === '/provider') return Promise.resolve({ all: [], default: {}, connected: [] });
       if (path === '/provider/auth') return Promise.resolve({});
       return Promise.resolve([]);
     });
@@ -159,8 +160,12 @@ describe('client', () => {
       messageID: 'message-1',
     });
     await client.config.providers();
+    await client.config.providerCatalog();
     await client.config.providerAuth();
     await client.config.authorizeProvider({ providerID: 'openai', method: 0 });
+    await client.config.completeProviderAuth({ providerID: 'openai', method: 0, code: 'code-1' });
+    await client.config.connectApiProvider({ providerID: 'anthropic', key: 'key-1' });
+    await client.config.disconnectProvider('openai');
     await client.config.workspaceStatus();
     await client.mcp.authenticate('browser server');
     await client.agent.list();
@@ -234,8 +239,17 @@ describe('client', () => {
         },
       ],
       ['GET', '/config/providers'],
+      ['GET', '/provider'],
       ['GET', '/provider/auth'],
       ['POST', '/provider/openai/oauth/authorize', { method: 0 }],
+      [
+        'POST',
+        '/provider/openai/oauth/callback',
+        { method: 0, code: 'code-1' },
+        { timeoutMs: 315_000, retries: 0 },
+      ],
+      ['PUT', '/auth/anthropic', { type: 'api', key: 'key-1' }],
+      ['DELETE', '/auth/openai'],
       ['GET', '/experimental/workspace/status'],
       ['POST', '/mcp/browser%20server/auth/authenticate'],
       ['GET', '/agent'],
@@ -914,6 +928,44 @@ describe('client', () => {
       method: 1,
       inputs: { apiKey: 'sk-test' },
     });
+  });
+
+  it('loads the full provider catalog', async () => {
+    const { client } = await loadClient();
+    const response = {
+      all: [{ id: 'anthropic', name: 'Anthropic' }],
+      default: { anthropic: 'claude' },
+      connected: ['anthropic'],
+    };
+    bridgeMocks.apiCall.mockResolvedValue(response);
+
+    await expect(client.config.providerCatalog()).resolves.toEqual(response);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('GET', '/provider');
+  });
+
+  it('forwards API provider credentials and metadata', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await client.config.connectApiProvider({
+      providerID: 'openai',
+      key: 'sk-test',
+      metadata: { organization: 'org-1' },
+    });
+
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('PUT', '/auth/openai', {
+      type: 'api',
+      key: 'sk-test',
+      metadata: { organization: 'org-1' },
+    });
+  });
+
+  it('removes encoded provider credentials', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockResolvedValue(true);
+
+    await expect(client.config.disconnectProvider('custom provider')).resolves.toBe(true);
+    expect(bridgeMocks.apiCall).toHaveBeenCalledWith('DELETE', '/auth/custom%20provider');
   });
 
   it('does not include modelID param when providerLimit is called with null modelID', async () => {

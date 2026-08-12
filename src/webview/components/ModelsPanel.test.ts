@@ -14,6 +14,11 @@ const clientMocks = vi.hoisted(() => ({
   openCodeConfig: vi.fn(),
   saveModelRouting: vi.fn(),
   providerAuth: vi.fn(),
+  providerCatalog: vi.fn(),
+  authorizeProvider: vi.fn(),
+  completeProviderAuth: vi.fn(),
+  connectApiProvider: vi.fn(),
+  disconnectProvider: vi.fn(),
   workspaceStatus: vi.fn(),
 }));
 
@@ -31,6 +36,11 @@ vi.mock('../lib/client', () => ({
     },
     config: {
       providerAuth: clientMocks.providerAuth,
+      providerCatalog: clientMocks.providerCatalog,
+      authorizeProvider: clientMocks.authorizeProvider,
+      completeProviderAuth: clientMocks.completeProviderAuth,
+      connectApiProvider: clientMocks.connectApiProvider,
+      disconnectProvider: clientMocks.disconnectProvider,
       workspaceStatus: clientMocks.workspaceStatus,
     },
   },
@@ -84,6 +94,20 @@ beforeEach(() => {
   clientMocks.providerAuth.mockResolvedValue({
     openai: [{ type: 'api', label: 'API key' }],
   });
+  clientMocks.providerCatalog.mockResolvedValue({
+    all: [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {},
+      },
+    ],
+    default: {},
+    connected: ['openai'],
+  });
+  clientMocks.connectApiProvider.mockResolvedValue(true);
+  clientMocks.disconnectProvider.mockResolvedValue(true);
   clientMocks.workspaceStatus.mockResolvedValue([{ workspaceID: 'ws-1', status: 'connected' }]);
   refreshRoutingStateMock.mockImplementation(async () => {
     setState('providerAuthMethods', {
@@ -203,16 +227,332 @@ describe('ModelsPanel', () => {
     expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
   });
 
-  it('opens provider logout from the minus button', () => {
+  it('opens the embedded disconnect dialog from the minus button', async () => {
     cleanup = render(() => ModelsPanel(), container!);
 
     const logoutButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="Log out provider"]'
+      '[aria-label="Remove provider"]'
     );
     logoutButton?.click();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(logoutButton).toBeInstanceOf(HTMLButtonElement);
+    expect(document.body.textContent).toContain('Disconnect provider');
+    expect(providerSetupMocks.openProviderLogout).not.toHaveBeenCalled();
+  });
+
+  it('uses terminal provider actions on Option-click', () => {
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const addButton = container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]');
+    const removeButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Remove provider"]'
+    );
+    addButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    removeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+
+    expect(addButton).toBeInstanceOf(HTMLButtonElement);
+    expect(providerSetupMocks.openProviderSetup).toHaveBeenCalledOnce();
     expect(providerSetupMocks.openProviderLogout).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('disconnects the selected provider credential and refreshes providers', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [
+        { id: 'openai', name: 'OpenAI', source: 'api', models: {} },
+        { id: 'anthropic', name: 'Anthropic', source: 'api', models: {} },
+        { id: 'opencode', name: 'OpenCode Zen', source: 'api', models: {} },
+      ],
+      default: {},
+      connected: ['anthropic', 'opencode'],
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Remove provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Anthropic');
+    expect(dialog?.textContent).not.toContain('OpenAI');
+    expect(dialog?.textContent).not.toContain('OpenCode Zen');
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
+    expect(dialog?.textContent).toContain('Remove the saved credential');
+    findButton(dialog, 'Disconnect')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(clientMocks.disconnectProvider).toHaveBeenCalledWith('anthropic');
+    expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('opens immediately with a skeleton and shows providers only after loading', async () => {
+    let resolveCatalog!: (value: {
+      all: Array<{ id: string; name: string; source: 'api'; models: Record<string, never> }>;
+      default: Record<string, string>;
+      connected: string[];
+    }) => void;
+    clientMocks.providerCatalog.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCatalog = resolve;
+      })
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+
+    const button = container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]');
+    button?.click();
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).toBeInstanceOf(HTMLElement);
+    expect(dialog?.querySelector('.provider-connect-skeleton')).toBeInstanceOf(HTMLElement);
+    expect(dialog?.querySelector('.provider-connect-option')).toBeNull();
+    expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeNull();
+
+    resolveCatalog({
+      all: [{ id: 'openai', name: 'OpenAI', source: 'api', models: {} }],
+      default: {},
+      connected: [],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(dialog?.querySelector('.provider-connect-skeleton')).toBeNull();
+    expect(dialog?.querySelector('.provider-connect-option')?.textContent).toContain('OpenAI');
+    expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeInstanceOf(
+      HTMLInputElement
+    );
+  });
+
+  it('connects an API provider from the embedded dialog', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
+    const keyInput = dialog?.querySelector<HTMLInputElement>('input[type="password"]');
+    if (keyInput) {
+      keyInput.value = 'sk-test';
+      keyInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+    findButton(dialog, 'Connect')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(clientMocks.connectApiProvider).toHaveBeenCalledWith(
+      {
+        providerID: 'openai',
+        key: 'sk-test',
+        metadata: {},
+      },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(send).toHaveBeenCalledWith({ type: 'providers/refresh' });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('returns to auth methods when credential entry is cancelled', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
+    expect(dialog?.querySelector('input[type="password"]')).toBeInstanceOf(HTMLInputElement);
+
+    findButton(dialog, 'Cancel')?.click();
+
+    expect(document.body.querySelector('[role="dialog"]')).toBe(dialog);
+    expect(dialog?.querySelector('input[type="password"]')).toBeNull();
+    expect(dialog?.querySelector('.provider-connect-method')).toBeInstanceOf(HTMLButtonElement);
+    expect(dialog?.textContent).toContain('Choose how you want to authenticate.');
+  });
+
+  it('searches every provider returned by OpenCode, including unconfigured providers', async () => {
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [
+        { id: 'openai', name: 'OpenAI', source: 'api', models: {} },
+        { id: 'anthropic', name: 'Anthropic', source: 'api', models: {} },
+        { id: 'custom-cloud', name: 'Custom Cloud', source: 'api', models: {} },
+      ],
+      default: {},
+      connected: [],
+    });
+    setState('providerAuthMethods', {
+      anthropic: [{ type: 'oauth', label: 'Claude subscription' }],
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    const options = () =>
+      Array.from(dialog?.querySelectorAll<HTMLElement>('.provider-connect-option') ?? []);
+    expect(options().map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Anthropic'),
+      expect.stringContaining('Custom Cloud'),
+      expect.stringContaining('OpenAI'),
+    ]);
+
+    const search = dialog?.querySelector<HTMLInputElement>('[aria-label="Search providers"]');
+    if (search) {
+      search.value = 'custom';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+
+    expect(options()).toHaveLength(1);
+    expect(options()[0]?.textContent).toContain('Custom Cloud');
+    options()[0]?.click();
+    expect(dialog?.textContent).toContain('API key');
+  });
+
+  it('renders the provider scrollbar as an overlay above the rows', async () => {
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: Array.from({ length: 20 }, (_, index) => ({
+        id: `provider-${index}`,
+        name: `Provider ${index}`,
+        source: 'api' as const,
+        models: {},
+      })),
+      default: {},
+      connected: [],
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    const options = dialog?.querySelector<HTMLElement>('.provider-connect-options');
+    Object.defineProperties(options!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 100 },
+    });
+    options?.dispatchEvent(new Event('scroll'));
+
+    const thumb = dialog?.querySelector<HTMLElement>('.provider-connect-scrollbar-thumb');
+    expect(thumb).toBeInstanceOf(HTMLElement);
+    expect(thumb?.style.height).toBe('25px');
+    expect(thumb?.style.transform).toBe('translateY(25px)');
+  });
+
+  it('uses a styled listbox for provider authentication prompts', async () => {
+    refreshRoutingStateMock.mockImplementationOnce(() => Promise.resolve());
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [{ id: 'gitlab', name: 'GitLab', source: 'api', models: {} }],
+      default: {},
+      connected: [],
+    });
+    setState('providerAuthMethods', {
+      gitlab: [
+        {
+          type: 'oauth',
+          label: 'GitLab Copilot',
+          prompts: [
+            {
+              type: 'select',
+              key: 'deployment',
+              message: 'Select GitLab deployment type',
+              options: [
+                { label: 'GitLab.com', value: 'cloud', hint: 'Hosted by GitLab' },
+                { label: 'Self-managed', value: 'self-managed' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = Array.from(document.body.querySelectorAll<HTMLElement>('[role="dialog"]')).at(
+      -1
+    );
+    const providerOption = Array.from(
+      dialog?.querySelectorAll<HTMLButtonElement>('.provider-connect-option') ?? []
+    ).find((option) => option.textContent?.includes('GitLab'));
+    expect(providerOption?.textContent).toContain('GitLab');
+    providerOption?.click();
+    const methodOption = dialog?.querySelector<HTMLButtonElement>('.provider-connect-method');
+    expect(methodOption?.textContent).toContain('GitLab Copilot');
+    methodOption?.click();
+
+    expect(dialog?.querySelector('select')).toBeNull();
+    const trigger = dialog?.querySelector<HTMLButtonElement>('.provider-connect-select-trigger');
+    expect(trigger).toBeInstanceOf(HTMLButtonElement);
+    trigger?.click();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(dialog?.querySelector('.provider-connect-body')?.classList).toContain('has-open-select');
+    expect(dialog?.querySelector('[role="listbox"]')).toBeInstanceOf(HTMLElement);
+    expect(dialog?.textContent).toContain('Hosted by GitLab');
+
+    trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(trigger?.textContent).toContain('Self-managed');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(dialog?.querySelector('.provider-connect-body')?.classList).not.toContain(
+      'has-open-select'
+    );
+  });
+
+  it('can copy an auto-authorization code and close while waiting', async () => {
+    clientMocks.providerCatalog.mockResolvedValue({
+      all: [{ id: 'github-copilot', name: 'GitHub Copilot', source: 'api', models: {} }],
+      default: {},
+      connected: [],
+    });
+    setState('providerAuthMethods', {
+      'github-copilot': [{ type: 'oauth', label: 'GitHub Copilot' }],
+    });
+    clientMocks.authorizeProvider.mockResolvedValue({
+      url: 'https://github.com/login/device',
+      method: 'auto',
+      instructions: 'Enter code: 69FA-4C72',
+    });
+    let callbackSignal: AbortSignal | undefined;
+    clientMocks.completeProviderAuth.mockImplementation(
+      (_body: unknown, options?: { signal?: AbortSignal }) => {
+        callbackSignal = options?.signal;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+        });
+      }
+    );
+    cleanup = render(() => ModelsPanel(), container!);
+
+    container?.querySelector<HTMLButtonElement>('[aria-label="Add provider"]')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-option')?.click();
+    dialog?.querySelector<HTMLButtonElement>('.provider-connect-method')?.click();
+    findButton(dialog, 'Continue in browser')?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(dialog?.textContent).toContain('Enter code: 69FA-4C72');
+    expect(dialog?.querySelector('[aria-label*="Copy authorization code"]')).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(callbackSignal?.aborted).toBe(false);
+    dialog?.querySelector<HTMLButtonElement>('[aria-label="Close"]')?.click();
+
+    expect(callbackSignal?.aborted).toBe(true);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('shows a loading indicator long enough to be perceptible', async () => {
@@ -566,3 +906,9 @@ describe('ModelsPanel', () => {
     expect(container?.querySelector('.settings-model-row')).toBeNull();
   });
 });
+
+function findButton(root: ParentNode | null | undefined, text: string) {
+  return Array.from(root?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+    (button) => button.textContent?.trim() === text
+  );
+}

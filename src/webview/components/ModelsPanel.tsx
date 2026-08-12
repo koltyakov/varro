@@ -20,8 +20,10 @@ import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
-import type { OpenCodeModelRouting } from '../types';
+import type { OpenCodeModelRouting, Provider } from '../types';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
+import { ProviderConnectionDialog } from './ProviderConnectionDialog';
+import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
@@ -55,6 +57,17 @@ export function ModelsPanel() {
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
+  const [providerConnectionData, setProviderConnectionData] = createSignal<{
+    providers: Provider[];
+    error: string;
+    loading: boolean;
+  } | null>(null);
+  const [providerDisconnectionData, setProviderDisconnectionData] = createSignal<{
+    providers: Provider[];
+    connected: string[];
+    error: string;
+    loading: boolean;
+  } | null>(null);
   let bodyRef: HTMLDivElement | undefined;
   let reloadIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -155,6 +168,48 @@ export function ModelsPanel() {
     postMessage({ type: 'providers/refresh' });
   }
 
+  async function openProviderConnection() {
+    if (providerConnectionData()) return;
+    const loadingState = { providers: [], error: '', loading: true };
+    setProviderConnectionData(loadingState);
+    try {
+      const catalog = await client.config.providerCatalog();
+      if (providerConnectionData() !== loadingState) return;
+      setProviderConnectionData({ providers: catalog.all, error: '', loading: false });
+    } catch (error) {
+      if (providerConnectionData() !== loadingState) return;
+      setProviderConnectionData({
+        providers: [],
+        error: error instanceof Error ? error.message : String(error),
+        loading: false,
+      });
+    }
+  }
+
+  async function openProviderDisconnection() {
+    if (providerDisconnectionData()) return;
+    const loadingState = { providers: [], connected: [], error: '', loading: true };
+    setProviderDisconnectionData(loadingState);
+    try {
+      const catalog = await client.config.providerCatalog();
+      if (providerDisconnectionData() !== loadingState) return;
+      setProviderDisconnectionData({
+        providers: catalog.all,
+        connected: catalog.connected,
+        error: '',
+        loading: false,
+      });
+    } catch (error) {
+      if (providerDisconnectionData() !== loadingState) return;
+      setProviderDisconnectionData({
+        providers: [],
+        connected: [],
+        error: error instanceof Error ? error.message : String(error),
+        loading: false,
+      });
+    }
+  }
+
   onCleanup(() => clearTimeout(reloadIndicatorTimer));
 
   onMount(() => {
@@ -220,9 +275,11 @@ export function ModelsPanel() {
             <button
               type="button"
               class="chat-header-btn"
-              onClick={openProviderLogout}
-              title="Log out provider"
-              aria-label="Log out provider"
+              onClick={(event) =>
+                event.altKey ? openProviderLogout() : void openProviderDisconnection()
+              }
+              title="Disconnect provider (Option-click for terminal manager)"
+              aria-label="Remove provider"
             >
               <svg viewBox="0 0 16 16" fill="currentColor">
                 <path d="M3 7.25h10a.75.75 0 010 1.5H3a.75.75 0 010-1.5z" />
@@ -231,8 +288,10 @@ export function ModelsPanel() {
             <button
               type="button"
               class="chat-header-btn"
-              onClick={openProviderSetup}
-              title="Add provider"
+              onClick={(event) =>
+                event.altKey ? openProviderSetup() : void openProviderConnection()
+              }
+              title="Connect provider (Option-click for terminal setup)"
               aria-label="Add provider"
             >
               <svg viewBox="0 0 16 16" fill="currentColor">
@@ -433,6 +492,27 @@ export function ModelsPanel() {
               </For>
             </div>
           </Portal>
+        )}
+      </Show>
+      <Show when={providerConnectionData()}>
+        {(data) => (
+          <ProviderConnectionDialog
+            catalogProviders={data().providers}
+            providerLoadError={data().error}
+            isLoadingProviders={data().loading}
+            onClose={() => setProviderConnectionData(null)}
+          />
+        )}
+      </Show>
+      <Show when={providerDisconnectionData()}>
+        {(data) => (
+          <ProviderDisconnectionDialog
+            catalogProviders={data().providers}
+            connectedProviderIDs={data().connected}
+            providerLoadError={data().error}
+            isLoadingProviders={data().loading}
+            onClose={() => setProviderDisconnectionData(null)}
+          />
         )}
       </Show>
     </div>

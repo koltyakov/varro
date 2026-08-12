@@ -2236,7 +2236,6 @@ describe('MessageList compact activity', () => {
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
 
     upsertPart({ ...patch, tool: 'functions.apply_patch' });
-    await Promise.resolve();
 
     const patchTitle = [...(container?.querySelectorAll('.tool-invocation-title') || [])].find(
       (element) => element.textContent?.endsWith('apply_patch')

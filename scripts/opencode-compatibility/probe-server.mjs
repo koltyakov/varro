@@ -408,6 +408,13 @@ async function runProbe() {
     validate: (value) =>
       isRecord(value) && Array.isArray(value.providers) && isRecord(value.default),
   });
+  await request('GET /provider', 'GET', '/provider', {
+    validate: (value) =>
+      isRecord(value) &&
+      Array.isArray(value.all) &&
+      isRecord(value.default) &&
+      Array.isArray(value.connected),
+  });
   await request('GET /config honors custom, project, then inline precedence', 'GET', '/config', {
     validate: (value) =>
       isRecord(value) &&

@@ -114,9 +114,10 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     if (eventName === 'session.next.tool.input.delta') {
       const delta = getEventString(props, 'delta') || inputText;
       if (!delta || !existingTool || existingTool.state.status !== 'pending') return true;
+      const raw = `${existingTool.state.raw || ''}${delta}`;
       sessionStore.upsertPart({
         ...existingTool,
-        state: { ...existingTool.state, raw: `${existingTool.state.raw || ''}${delta}` },
+        state: { ...existingTool.state, input: parseToolInput(raw), raw },
       });
       return true;
     }
@@ -148,7 +149,12 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     }
 
     if (eventName === 'session.next.tool.called') {
-      const input = asToolInput(props.input);
+      const eventInput =
+        typeof props.input === 'string' ? parseToolInput(props.input) : asToolInput(props.input);
+      const input =
+        Object.keys(eventInput).length > 0 || !existingTool
+          ? eventInput
+          : getToolStateInput(existingTool);
       sessionStore.upsertPart({
         id: callID,
         sessionID: sessionId,
@@ -170,13 +176,15 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     if (eventName === 'session.next.tool.progress') {
       if (!existingTool || existingTool.state.status !== 'running') return true;
       const progress = getEventString(props, 'progress');
+      const structured = asToolMetadata(props.structured);
       sessionStore.upsertPart({
         ...existingTool,
         state: {
           ...existingTool.state,
           metadata: {
             ...existingTool.state.metadata,
-            structured: asToolMetadata(props.structured),
+            ...structured,
+            structured,
             content: props.content,
             ...(progress ? { progress } : {}),
           },

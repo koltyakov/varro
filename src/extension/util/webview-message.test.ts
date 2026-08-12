@@ -134,6 +134,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/authenticate')).toBe(true);
     expect(isAllowedApiRequest('GET', '/provider/auth')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/provider')).toBe(true);
+    expect(isAllowedApiRequest('PUT', '/auth/openai')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/auth/openai')).toBe(true);
     expect(isAllowedApiRequest('GET', '/vcs/status')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/authorize')).toBe(true);
     expect(isAllowedApiRequest('POST', '/provider/openai/oauth/callback')).toBe(true);
@@ -202,6 +205,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/varro/session-trash/session-1/delete')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash/session-1/restore')).toBe(false);
     expect(isAllowedApiRequest('GET', '/provider/openai/oauth/authorize')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/provider')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/auth/openai')).toBe(false);
+    expect(isAllowedApiRequest('DELETE', '/auth/openai?force=true')).toBe(false);
     expect(isAllowedApiRequest('POST', '/session/session-1/permissions/perm-1')).toBe(false);
   });
 
