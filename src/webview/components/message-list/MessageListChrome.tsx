@@ -176,6 +176,41 @@ export function StickyUserMessagePreviewCard(props: {
   );
 }
 
+export function TurnNavigationRail(props: {
+  turns: readonly StickyUserMessagePreview[];
+  activeTurnId: string | null;
+  loadingTurnId?: string | null;
+  onSelect: (turn: StickyUserMessagePreview) => void;
+}) {
+  return (
+    <nav class="turn-navigation" aria-label="Conversation turns">
+      <For each={props.turns}>
+        {(turn, index) => {
+          const active = () => turn.id === props.activeTurnId;
+          const loading = () => turn.id === props.loadingTurnId;
+          const label = () => {
+            const text = turn.text.replaceAll(/\s+/g, ' ').trim();
+            return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+          };
+          return (
+            <button
+              type="button"
+              class={`turn-navigation-marker${active() ? ' is-active' : ''}${
+                loading() ? ' is-loading' : ''
+              }`}
+              aria-label={`Go to turn ${index() + 1}: ${label()}`}
+              aria-current={active() ? 'step' : undefined}
+              title={`Turn ${index() + 1}: ${label()}`}
+              disabled={loading()}
+              onClick={() => props.onSelect(turn)}
+            />
+          );
+        }}
+      </For>
+    </nav>
+  );
+}
+
 export function ChatContentBottomFade() {
   return (
     <div class="interactive-list-bottom-fade-wrap" aria-hidden="true">

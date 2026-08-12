@@ -64,6 +64,25 @@ export function getStickyUserMessagePreview(
   return fallback;
 }
 
+export function getUserMessageNavigationPreviews(
+  messages: MessageEntry[],
+  subagentSessionIds: ReadonlySet<string> = getSubagentSessionIds(messages)
+): StickyUserMessagePreview[] {
+  const previews: StickyUserMessagePreview[] = [];
+  for (const [index, entry] of messages.entries()) {
+    if (entry.info.role !== 'user' || subagentSessionIds.has(entry.info.sessionID)) continue;
+    const text = getUserMessagePreviewText(entry.parts);
+    if (text === EMPTY_USER_MESSAGE_PREVIEW) continue;
+    previews.push({
+      id: entry.info.id,
+      index,
+      text,
+      ...getStickyUserMessageCounts(entry.parts),
+    });
+  }
+  return previews;
+}
+
 export function getNextVisibleUserMessageTopMap(
   messages: Array<{ info: Message }>,
   observedVisibleMessageBounds: ReadonlyMap<string, { top: number; bottom: number }>

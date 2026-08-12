@@ -25,6 +25,7 @@ import {
   ChatContentBottomFade,
   PendingActionRows,
   StickyUserMessagePreviewCard,
+  TurnNavigationRail,
 } from './MessageListChrome';
 
 let container: HTMLDivElement | null = null;
@@ -91,6 +92,38 @@ describe('MessageListChrome', () => {
       container?.querySelector('.latest-user-message-sticky-shell > .prompt-number-badge')
         ?.textContent
     ).toBe('4');
+  });
+
+  it('renders conversation turn markers and selects a turn', () => {
+    const turns = [
+      {
+        id: 'msg-1',
+        index: 0,
+        text: 'First prompt',
+        attachmentCount: 0,
+        imageCount: 0,
+      },
+      {
+        id: 'msg-2',
+        index: 2,
+        text: 'Second prompt',
+        attachmentCount: 0,
+        imageCount: 0,
+      },
+    ];
+    const onSelect = vi.fn();
+    cleanup = render(
+      () => <TurnNavigationRail turns={turns} activeTurnId="msg-2" onSelect={onSelect} />,
+      container!
+    );
+
+    const markers = container?.querySelectorAll<HTMLButtonElement>('.turn-navigation-marker');
+    expect(markers).toHaveLength(2);
+    expect(markers?.[1]?.getAttribute('aria-current')).toBe('step');
+    expect(markers?.[0]?.getAttribute('aria-label')).toBe('Go to turn 1: First prompt');
+
+    markers?.[0]?.click();
+    expect(onSelect).toHaveBeenCalledWith(turns[0]);
   });
 
   it('reveals the reserved sticky timestamp without mounting new content', () => {

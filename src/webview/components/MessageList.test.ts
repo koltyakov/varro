@@ -31,7 +31,13 @@ import type {
   UserMessage,
 } from '../types';
 import type { AssistantActivityGroupInfo } from '../lib/assistant-activity';
-import { MessageList, getNewlyAppendedMessageIds, getPromptNumberMap } from './MessageList';
+import {
+  MessageList,
+  getActiveTurnMessageId,
+  getActiveTurnNavigationMessageId,
+  getNewlyAppendedMessageIds,
+  getPromptNumberMap,
+} from './MessageList';
 import {
   getChangedInlinePreviewMessageIds,
   getCompactActivityDisclosureLayoutSignatures,
@@ -3960,6 +3966,50 @@ describe('buildPlanDocumentContent', () => {
   });
 });
 
+describe('getActiveTurnMessageId', () => {
+  const messages: MessageEntry[] = [
+    { info: userMessage('user-1'), parts: [] },
+    { info: assistantMessage('assistant-1'), parts: [] },
+    { info: userMessage('user-2'), parts: [] },
+    { info: assistantMessage('assistant-2'), parts: [] },
+  ];
+
+  it('uses the first visible user bubble instead of the previous sticky turn', () => {
+    expect(getActiveTurnMessageId(messages, 2, 'user-1', 'user-1')).toBe('user-2');
+  });
+
+  it('uses the sticky turn when the first visible bubble is an assistant response', () => {
+    expect(getActiveTurnMessageId(messages, 3, 'user-2', 'user-1')).toBe('user-2');
+  });
+
+  it('finds the preceding turn when no sticky preview is available', () => {
+    expect(getActiveTurnMessageId(messages, 3, null, 'user-1')).toBe('user-2');
+  });
+
+  it('uses the sticky turn while visible geometry is unavailable', () => {
+    expect(getActiveTurnMessageId(messages, null, 'user-2', 'user-1')).toBe('user-2');
+  });
+});
+
+describe('getActiveTurnNavigationMessageId', () => {
+  const turns = ['user-1', 'user-2', 'user-3', 'user-4'].map((id, index) => ({
+    id,
+    index: index * 2,
+    text: `Prompt ${index + 1}`,
+    attachmentCount: 0,
+    imageCount: 0,
+  }));
+
+  it('keeps the clicked turn active while earlier turns remain visible', () => {
+    expect(getActiveTurnNavigationMessageId(turns, 'user-1', 'user-3')).toBe('user-3');
+    expect(getActiveTurnNavigationMessageId(turns, 'user-2', 'user-3')).toBe('user-3');
+  });
+
+  it('advances past the clicked turn while scrolling down', () => {
+    expect(getActiveTurnNavigationMessageId(turns, 'user-4', 'user-3')).toBe('user-4');
+  });
+});
+
 describe('getStickyUserMessagePreview', () => {
   it('returns the preceding user prompt for the first visible assistant message', () => {
     expect(
@@ -7634,6 +7684,82 @@ describe('MessageList sticky prompt preview', () => {
 
     expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
 
+    animationFrames.restore();
+  });
+
+  it('updates the active turn marker after a completed marker jump and later scroll', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    const messageTop = new Map<string, number>([
+      ['user-1', 0],
+      ['assistant-1', 80],
+      ['user-2', 500],
+      ['assistant-2', 580],
+    ]);
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('text-1', 'Prompt 1')] },
+      { info: assistantMessage('assistant-1'), parts: [textPart('text-2', 'Response 1')] },
+      { info: userMessage('user-2'), parts: [textPart('text-3', 'Prompt 2')] },
+      { info: assistantMessage('assistant-2'), parts: [textPart('text-4', 'Response 2')] },
+    ]);
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 500);
+        }
+        const row = this.classList.contains('interactive-item-container')
+          ? this
+          : this.closest<HTMLElement>('[data-msg-id]');
+        const top = row?.dataset.msgId ? messageTop.get(row.dataset.msgId) : undefined;
+        const height = row?.dataset.msgId?.startsWith('user-') ? 80 : 420;
+        return top === undefined
+          ? new DOMRect(0, -600, 500, 40)
+          : new DOMRect(0, top - scrollTopValue, 500, height);
+      }
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    container
+      ?.querySelector<HTMLButtonElement>('.turn-navigation-marker[title^="Turn 2:"]')
+      ?.click();
+    animationFrames.flush();
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.turn-navigation-marker[aria-current="step"]')?.getAttribute('title')
+    ).toContain('Turn 2:');
+    expect(
+      container?.querySelector('[data-msg-id="user-2"] .user-message-card')?.classList
+    ).toContain('turn-navigation-destination');
+
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    scrollTopValue = 0;
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('.turn-navigation-marker[aria-current="step"]')?.getAttribute('title')
+    ).toContain('Turn 1:');
     animationFrames.restore();
   });
 

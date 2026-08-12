@@ -390,6 +390,89 @@ input:focus-visible {
   animation: jump-to-latest-in 120ms ease-out;
 }
 
+.turn-navigation {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  z-index: var(--z-chrome-raised);
+  display: none;
+  max-height: min(50%, 240px);
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 4px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  transform: translateY(-50%);
+  scrollbar-width: none;
+}
+
+@media (min-width: 1100px) {
+  .turn-navigation {
+    display: flex;
+  }
+}
+
+.turn-navigation::-webkit-scrollbar {
+  display: none;
+}
+
+.turn-navigation-marker {
+  position: relative;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 11px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.turn-navigation-marker::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
+  transform: translate(-50%, -50%);
+  transition:
+    width 100ms ease,
+    height 100ms ease,
+    background-color 100ms ease,
+    border-color 100ms ease;
+}
+
+.turn-navigation-marker:hover::before {
+  background: color-mix(in srgb, var(--color-vscode-fg) 68%, transparent);
+}
+
+.turn-navigation-marker.is-active::before {
+  width: 7px;
+  height: 7px;
+  border-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
+  background: var(--color-vscode-accent);
+}
+
+.turn-navigation-marker:focus-visible {
+  outline: 1px solid var(--color-vscode-accent);
+  outline-offset: 1px;
+}
+
+.turn-navigation-marker.is-loading {
+  cursor: progress;
+  animation: turn-navigation-loading 700ms ease-in-out infinite alternate;
+}
+
+@keyframes turn-navigation-loading {
+  to {
+    opacity: 0.35;
+  }
+}
+
 .jump-to-latest-button:hover {
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 80%, var(--color-vscode-fg) 8%);
   border-color: color-mix(in srgb, var(--color-vscode-accent) 60%, transparent);

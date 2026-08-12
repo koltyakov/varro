@@ -3,6 +3,7 @@ import type { MessageEntry } from '../../types';
 import {
   getStickyUserMessagePreview,
   getNextVisibleUserMessageTopMap,
+  getUserMessageNavigationPreviews,
   shouldShowStickyUserMessagePreview,
   isMessageHiddenBehindStickyPreview,
 } from './sticky-preview';
@@ -168,6 +169,34 @@ describe('getStickyUserMessagePreview', () => {
       attachmentCount: 0,
       imageCount: 0,
     });
+  });
+});
+
+describe('getUserMessageNavigationPreviews', () => {
+  it('returns previewable user turns in transcript order', () => {
+    expect(
+      getUserMessageNavigationPreviews([
+        user('u1', 'First'),
+        assistant('a1'),
+        user('empty', ''),
+        user('u2', 'Second'),
+      ])
+    ).toEqual([
+      { id: 'u1', index: 0, text: 'First', attachmentCount: 0, imageCount: 0 },
+      { id: 'u2', index: 3, text: 'Second', attachmentCount: 0, imageCount: 0 },
+    ]);
+  });
+
+  it('excludes prompts from managed subagent sessions', () => {
+    const subagentPrompt = user('subagent-user', 'Internal prompt');
+    subagentPrompt.info.sessionID = 'child-session';
+
+    expect(
+      getUserMessageNavigationPreviews(
+        [user('u1', 'Visible prompt'), subagentPrompt],
+        new Set(['child-session'])
+      ).map((preview) => preview.id)
+    ).toEqual(['u1']);
   });
 });
 

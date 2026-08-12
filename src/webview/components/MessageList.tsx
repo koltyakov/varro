@@ -91,10 +91,12 @@ import {
   LoadingRow,
   PendingActionRows,
   StickyUserMessagePreviewCard,
+  TurnNavigationRail,
 } from './message-list/MessageListChrome';
 import {
   getSubagentSessionIds,
   getStickyUserMessagePreview,
+  getUserMessageNavigationPreviews,
   isMessageHiddenBehindStickyPreview,
   STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX,
   shouldShowStickyUserMessagePreview,
@@ -244,6 +246,33 @@ export function getPromptNumberMap(messages: readonly MessageEntry[]) {
     result.set(message.info.id, promptNumber);
   }
   return result;
+}
+
+export function getActiveTurnMessageId(
+  messages: readonly MessageEntry[],
+  firstVisibleIndex: number | null,
+  stickyTurnId: string | null,
+  fallbackTurnId: string | null,
+): string | null {
+  if (firstVisibleIndex === null) return stickyTurnId ?? fallbackTurnId;
+  const firstVisibleMessage = messages[firstVisibleIndex];
+  if (firstVisibleMessage?.info.role === 'user') return firstVisibleMessage.info.id;
+  if (stickyTurnId) return stickyTurnId;
+  for (let index = firstVisibleIndex; index >= 0; index -= 1) {
+    if (messages[index]?.info.role === 'user') return messages[index]!.info.id;
+  }
+  return fallbackTurnId;
+}
+
+export function getActiveTurnNavigationMessageId(
+  turns: readonly StickyUserMessagePreview[],
+  viewportTurnId: string | null,
+  selectedTurnId: string | null,
+): string | null {
+  if (!selectedTurnId || !viewportTurnId) return selectedTurnId ?? viewportTurnId;
+  const selectedIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
+  const viewportIndex = turns.findIndex((turn) => turn.id === viewportTurnId);
+  return viewportIndex > selectedIndex ? viewportTurnId : selectedTurnId;
 }
 
 export function MessageList() {
@@ -423,6 +452,11 @@ export function MessageList() {
   let upwardStickyHandoffReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let stickyJumpSettleEpoch = 0;
   const [stickyNavigationInProgress, setStickyNavigationInProgress] = createSignal(false);
+  const [activeTurnNavigationTargetId, setActiveTurnNavigationTargetId] = createSignal<string | null>(
+    null,
+  );
+  let pendingTurnNavigationAnimationMessageId: string | null = null;
+  let turnNavigationAnimationEpoch = 0;
   let editRevealEpoch = 0;
   let historyOwnedEdit: { messageId: string; sessionId: string } | null = null;
   let pendingExpansionScrollAnchor: ExpansionScrollAnchor | null = null;
@@ -713,6 +747,12 @@ export function MessageList() {
   const promptNumberMap = createMemo(() =>
     getPromptNumberMap(
       mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId))
+    )
+  );
+  const turnNavigationPreviews = createMemo(() =>
+    getUserMessageNavigationPreviews(
+      mergeOlderHistory(messages(), getSessionHistoryPrompts(state.activeSessionId)),
+      subagentSessionIds()
     )
   );
 
@@ -3744,6 +3784,9 @@ export function MessageList() {
       now - lastScrollInputAt <= SCROLL_INPUT_WINDOW_MS ||
       now - lastUserOwnedScrollMovementAt <= USER_SCROLL_IDLE_MS;
     const actualScrollMovement = !suppressSyncScrollTop && Math.abs(scrollDelta) > 0.5;
+    if (actualScrollMovement && scrollDelta < 0 && userScrollInputActive) {
+      setActiveTurnNavigationTargetId(null);
+    }
     if (actualScrollMovement && historyAnchorSettling && userScrollInputActive) {
       historyAnchorSettleOwner = null;
       historyAnchorSettling = false;
@@ -4067,6 +4110,8 @@ export function MessageList() {
     deferredScrollToBottomRequestKey = null;
     stickyJumpSettleEpoch += 1;
     setStickyNavigationInProgress(false);
+    pendingTurnNavigationAnimationMessageId = null;
+    setActiveTurnNavigationTargetId(null);
     setPendingStickyJump(null);
   }
 
@@ -5351,6 +5396,48 @@ export function MessageList() {
     trackLayoutVersion();
     return distanceFromBottom() > JUMP_TO_LATEST_MIN_HIDDEN_CONTENT_PX;
   });
+  const activeTurnMessageId = createMemo(() => {
+    scrollTop();
+    stickyPreviewGeometryVersion();
+    const navigationTargetId = activeTurnNavigationTargetId();
+    const sticky = stickyUserMessagePreviewCandidate();
+    const visibleMessages = messages();
+    if (visibleMessages.length === 0) return null;
+    const container = containerRef;
+    let firstVisibleIndex: number | null = null;
+    if (container) {
+      const containerBounds = container.getBoundingClientRect();
+      const visibleTop = containerBounds.top + getMessageJumpTopInset();
+      const containerBottom = containerBounds.bottom;
+      for (const [index, entry] of visibleMessages.entries()) {
+        const row = mountedMessageRows.get(entry.info.id);
+        if (!row) continue;
+        const bubble = row.querySelector<HTMLElement>('.chat-turn-content');
+        if (!bubble) continue;
+        const bounds = bubble.getBoundingClientRect();
+        if (bounds.bottom <= visibleTop || bounds.top >= containerBottom) continue;
+        firstVisibleIndex = index;
+        break;
+      }
+    }
+    if (firstVisibleIndex === null && shouldVirtualize()) {
+      firstVisibleIndex = getFirstVisibleMessageIndexFromVirtualMetrics({
+        metrics: virtualMetrics(),
+        scrollTop: getVirtualScrollTop(stickyPreviewScrollTop() || scrollTop()),
+      });
+    }
+    const viewportTurnId = getActiveTurnMessageId(
+      visibleMessages,
+      firstVisibleIndex,
+      sticky?.id ?? null,
+      turnNavigationPreviews()[0]?.id ?? null,
+    );
+    return getActiveTurnNavigationMessageId(
+      turnNavigationPreviews(),
+      viewportTurnId,
+      navigationTargetId,
+    );
+  });
 
   async function waitForMessageRow(
     preview: StickyUserMessagePreview,
@@ -5430,6 +5517,7 @@ export function MessageList() {
   function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
     disengageBottomFollow();
     const aligned = alignMountedMessage(preview);
+    if (aligned) animateTurnNavigationDestination(preview.id);
     const currentPreview = untrack(stickyUserMessagePreview);
     if (aligned && currentPreview?.id === preview.id) {
       setStickyUserMessagePreview(null);
@@ -5439,8 +5527,28 @@ export function MessageList() {
     return aligned;
   }
 
+  function animateTurnNavigationDestination(messageId: string) {
+    if (pendingTurnNavigationAnimationMessageId !== messageId) return;
+    pendingTurnNavigationAnimationMessageId = null;
+    const target = mountedMessageRows.get(messageId)?.querySelector<HTMLElement>('.user-message-card');
+    if (!target) return;
+    const animationEpoch = ++turnNavigationAnimationEpoch;
+    target.classList.remove('turn-navigation-destination');
+    void target.offsetWidth;
+    target.classList.add('turn-navigation-destination');
+    const clear = () => {
+      if (turnNavigationAnimationEpoch === animationEpoch) {
+        target.classList.remove('turn-navigation-destination');
+      }
+    };
+    target.addEventListener('animationend', clear, { once: true });
+    setTimeout(clear, 1_000);
+  }
+
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
-    if (stickyNavigationOwnsScroll()) return;
+    if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    pendingTurnNavigationAnimationMessageId = preview.id;
+    setActiveTurnNavigationTargetId(preview.id);
     finishWidthResizeNow();
     resumeAutoScrollAfterDiffFocus = false;
     disengageBottomFollow();
@@ -5452,7 +5560,8 @@ export function MessageList() {
       const settleEpoch = ++stickyJumpSettleEpoch;
       setStickyNavigationInProgress(true);
       const clearNavigation = () => {
-        if (stickyJumpSettleEpoch === settleEpoch) setStickyNavigationInProgress(false);
+        if (stickyJumpSettleEpoch !== settleEpoch) return;
+        setStickyNavigationInProgress(false);
       };
       if (!navigateToMountedMessage(preview)) {
         void waitAndNavigateToMessage(preview, () => stickyJumpSettleEpoch === settleEpoch).finally(
@@ -5481,6 +5590,8 @@ export function MessageList() {
       };
       setPendingStickyJump(jump);
       void loadAndScrollToStickyPreview(jump);
+    } else {
+      setActiveTurnNavigationTargetId(null);
     }
   }
 
@@ -5559,7 +5670,8 @@ export function MessageList() {
     };
     const clearPendingJump = () => {
       releaseLoadingOwner();
-      if (pendingStickyJump() === jump) setPendingStickyJump(null);
+      if (pendingStickyJump() !== jump) return;
+      setPendingStickyJump(null);
     };
     const isCurrentJump = () =>
       pendingStickyJump() === jump &&
@@ -5653,6 +5765,8 @@ export function MessageList() {
 
   function resetPendingHistoryGeneration() {
     activeSessionGeneration += 1;
+    pendingTurnNavigationAnimationMessageId = null;
+    setActiveTurnNavigationTargetId(null);
     historyAnchorSettleOwner = null;
     for (const pendingAnchor of pendingOlderHistoryAnchors.values()) {
       pendingAnchor.invalidated = true;
@@ -6030,6 +6144,18 @@ export function MessageList() {
           </Show>
         </div>
       </div>
+      <Show
+        when={
+          turnNavigationPreviews().length > 1 && !editingMessage() && !hasExpandedDiffOverlay()
+        }
+      >
+        <TurnNavigationRail
+          turns={turnNavigationPreviews()}
+          activeTurnId={activeTurnMessageId()}
+          loadingTurnId={pendingStickyJump()?.preview.id}
+          onSelect={handleStickyPreviewClick}
+        />
+      </Show>
       <ChatContentBottomFade />
       <Show when={showJumpToLatest() && !hasExpandedDiffOverlay()}>
         <button

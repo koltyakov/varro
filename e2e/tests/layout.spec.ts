@@ -1650,6 +1650,55 @@ test('sticky preview follows live prompt geometry when the assistant row grows',
   await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
 });
 
+test('turn navigation marks the user prompt it navigates to as active', async ({ page }) => {
+  await page.setViewportSize({ width: 1099, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+
+  const list = page.locator('.interactive-list');
+  const rail = page.locator('.turn-navigation');
+  const markers = page.locator('.turn-navigation-marker');
+  const secondPrompt = page.locator('[data-msg-id="message-sticky-user-2"] .user-message-card');
+  await expect(markers).toHaveCount(2);
+  await expect(rail).toBeHidden();
+
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await expect(rail).toBeVisible();
+  const railClearance = await rail.evaluate((element) => {
+    const shell = element.closest<HTMLElement>('.interactive-list-shell');
+    const track = shell?.querySelector<HTMLElement>('.interactive-list-track');
+    if (!shell || !track) throw new Error('Message list geometry is missing');
+    const shellBounds = shell.getBoundingClientRect();
+    const trackBounds = track.getBoundingClientRect();
+    const railBounds = element.getBoundingClientRect();
+    const dotRadius = 3.5;
+    const dotCenter = railBounds.left + railBounds.width / 2;
+    return {
+      railInset: railBounds.left - shellBounds.left,
+      edgeGap: dotCenter - dotRadius - shellBounds.left,
+      accentGap: trackBounds.left - dotCenter - dotRadius,
+    };
+  });
+  expect(railClearance.railInset).toBeCloseTo(8, 0);
+  expect(railClearance.accentGap).toBeGreaterThanOrEqual(railClearance.edgeGap - 1);
+
+  await list.evaluate((element) => {
+    const firstAssistant = element.querySelector<HTMLElement>(
+      '[data-msg-id="message-sticky-assistant-1"] .chat-turn-content'
+    );
+    if (!firstAssistant) throw new Error('First assistant bubble is missing');
+    element.scrollTop +=
+      firstAssistant.getBoundingClientRect().top - element.getBoundingClientRect().top - 12;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(markers.nth(0)).toHaveAttribute('aria-current', 'step');
+
+  await markers.nth(1).click();
+
+  await expect(secondPrompt).toBeInViewport();
+  await expect(markers.nth(1)).toHaveAttribute('aria-current', 'step');
+  await expect(markers.nth(0)).not.toHaveAttribute('aria-current', 'step');
+});
+
 test('virtualized sticky preview remains visible through active tool layout changes', async ({
   page,
 }) => {
