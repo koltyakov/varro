@@ -100,7 +100,7 @@ Supporting host components define the main boundaries:
 - `src/extension/ralph-host.ts`: persisted Ralph execution independent of webview lifetime
 - `src/extension/commit-message-service.ts` and `usage-report-service.ts`: repository-aware commit generation and retained-history usage reports
 - `src/extension/queued-message-store.ts`: authoritative workspace-state persistence for queued prompts and attachment data
-- `src/extension/provider-file-refresh-controller.ts`: OpenCode config and auth file observation, provider invalidation, and server revalidation
+- `src/extension/provider-file-refresh-controller.ts`: OpenCode config and auth file observation, provider invalidation, server revalidation, and immediate acknowledgement of completed embedded reauthentication
 - `src/extension/session-diff-document-provider.ts` and `tool-output-document-provider.ts`: read-only editor documents opened from the webview
 
 It also exposes the Varro extension-host API namespace, `/varro/*`.
@@ -203,6 +203,7 @@ It stores:
 - selected agent/model/variant
 - selected MCPs per session
 - hidden providers and models
+- provider authentication methods and reconnect state
 - permission modes
 - current-document context toggles
 - failed-session and usage-limit state
@@ -249,7 +250,8 @@ Key components:
 - `src/webview/components/QuestionPrompt.tsx`: inline question UI
 - `src/webview/components/TodoList.tsx`: task progress surface
 - `src/webview/components/DiffView.tsx`: file change summaries
-- `src/webview/components/ModelsPanel.tsx`: model visibility and routing settings
+- `src/webview/components/ModelsPanel.tsx`: model visibility, routing settings, and provider connection management
+- `src/webview/components/ProviderConnectionDialog.tsx` and `ProviderDisconnectionDialog.tsx`: OpenCode-backed API-key/OAuth connection, credential removal, and terminal fallbacks
 - `src/webview/components/ralph/RalphForm.tsx`: Ralph loop setup form for plan path, iteration cap, model selection, and prompt-template overrides
 - `src/webview/components/ralph/RalphDashboard.tsx` and `RalphIterationCard.tsx`: manager-session dashboard, controls, stop reasons, and per-iteration summaries
 
@@ -286,7 +288,7 @@ The webview sends:
 - `session/export` and `session/open-in-opencode` to export or hand a session to the OpenCode TUI
 - `usage/report` to open recent or retained all-time usage accounting in a Markdown document
 - `terminal/run` to launch setup commands such as `opencode auth login`
-- `providers/watch`, `providers/refresh`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
+- `providers/watch`, `providers/refresh`, `providers/reauthenticated`, `config/update`, and `webview/focus` for provider, preference, and focus synchronization
 - `ralph/*` for host-owned Ralph lifecycle and state synchronization
 
 ### Extension to webview
@@ -375,5 +377,7 @@ The webview adds more derived states on top of that data.
 - Finder or browser drops that do not expose file paths fall back to temporary file writes in `varro-drops`.
 - The event stream can be degraded while REST remains healthy, so the UI treats live updates and request availability separately.
 - Provider limits are best-effort metadata; they are not guaranteed for every provider or model.
+- Provider connection management calls OpenCode's `/provider`, `/provider/auth`, provider OAuth, and `/auth/:providerID` endpoints through the existing request bridge. The extension host never receives API keys or authorization codes as dedicated protocol messages.
+- Authentication failures are projected into provider reconnect state. The failed assistant response and Models view can open a provider-locked reauthentication dialog; after success, `providers/reauthenticated` lets the extension host consume an authentication-only file change without an unnecessary server restart.
 - Ralph runs persist in the extension host's workspace Memento and reattach on activation, independent of webview lifetime; runs persisted by older builds in webview localStorage are migrated to the host through `ralph/sync`.
 - Server startup is lazy and workspace-scoped, which keeps activation lightweight and helps multi-project use against a shared OpenCode instance.

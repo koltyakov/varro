@@ -258,7 +258,7 @@ Browser preferences and drafts use `BrowserPersistence`, which reads VS Code web
 Permission handling is governed by the lifecycle, inheritance, timeout, and visibility invariants in [Permission Lifecycle And Safety](permission-lifecycle.md). Read that contract before changing permission rules, automatic judging, pending snapshots, or child-session approvals.
 
 - Initializes the UI once the server reports `running`
-- Loads sessions, agents, providers, MCP status, and questions
+- Loads sessions, agents, providers, provider authentication methods, MCP status, and questions
 - Subscribes to extension messages and OpenCode server events
 - Builds prompt parts before sending messages
 - Keeps session state in sync during streaming, compaction, follow-up actions, usage-limit retries, and permission mode changes
@@ -270,7 +270,9 @@ Permission handling is governed by the lifecycle, inheritance, timeout, and visi
 
 - `src/shared/protocol.ts` defines extension-to-webview and webview-to-extension messages.
 - `src/webview/lib/bridge.ts` wraps `postMessage` and API request/response correlation.
-- `src/webview/lib/client.ts` exposes typed helpers for OpenCode endpoints such as `/session`, `/agent`, `/config/providers`, `/question`, `/mcp`, and Varro pseudo-endpoints.
+- `src/webview/lib/client.ts` exposes typed helpers for OpenCode endpoints such as `/session`, `/agent`, `/config/providers`, `/provider`, `/provider/auth`, provider OAuth, `/auth/:providerID`, `/question`, `/mcp`, and Varro pseudo-endpoints.
+
+Provider credentials are submitted from the webview directly through the existing `api/request` proxy to OpenCode. `ProviderConnectionDialog` supports API-key and OAuth methods advertised by OpenCode, while `ProviderDisconnectionDialog` removes saved credentials. Terminal login and logout remain fallback paths. On successful targeted reauthentication, the webview sends `providers/reauthenticated` so `ProviderFileRefreshController` can acknowledge an authentication-only file change without restarting the server; configuration changes still follow the normal deferred invalidation path.
 
 ## Context Semantics
 

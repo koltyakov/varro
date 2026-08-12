@@ -18,13 +18,13 @@ Install the OpenCode CLI:
 npm install -g opencode-ai
 ```
 
-If OpenCode does not have any providers configured yet, log in:
+If OpenCode does not have any providers configured yet, either connect one from Varro's Models view or log in from a terminal:
 
 ```sh
 opencode auth login
 ```
 
-From inside Varro, `/connect` opens a VS Code terminal and runs `opencode auth login` for you.
+From inside Varro, `/connect` opens a VS Code terminal and runs `opencode auth login` for you. The no-provider recovery screen uses the same terminal flow.
 
 Varro connects to `http://127.0.0.1:4096` by default. It does not start OpenCode at extension activation time. Instead, it starts or attaches to the server the first time the chat view needs it.
 
@@ -181,9 +181,18 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Choose a reasoning variant when the selected model exposes variants.
 - Open the MCP picker to connect or disconnect session MCPs.
 - Open the model picker footer to hide or show providers and individual models.
+- Use the add and remove actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
 - In the model settings view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
 
 The model settings view also shows whether a model exposes tools, variants, vision support, and a known context-window size. A lightning marker identifies GPT model names containing `Fast`; its tooltip notes that fast models can be more expensive.
+
+### Provider Connections
+
+The Models view reads OpenCode's provider catalog and authentication methods. Depending on the provider plugin, the connection dialog can accept an API key, collect provider-specific fields, or open an OAuth authorization page in your browser. Some OAuth flows finish automatically; others ask you to paste an authorization code back into Varro. OpenCode stores the resulting credential.
+
+Disconnect removes the selected saved credential from OpenCode. Providers without a usable embedded method, providers missing from the dialog, and connection problems can use the terminal fallback instead.
+
+When an assistant response fails because a provider credential expired, was revoked, or is otherwise unauthorized, the response offers `Re-authenticate`. The Models view also marks that provider with `Reconnect`. Successful embedded reauthentication refreshes provider data without requiring a server restart when only authentication changed; send a new prompt to continue the failed turn.
 
 The composer can show model and session metadata:
 
@@ -193,7 +202,7 @@ The composer can show model and session metadata:
 
 If a provider or model hits a usage limit, Varro shows a usage-limit banner with actions to stop retrying or switch providers.
 
-Provider and authentication changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows `Provider update queued` and applies it after active work finishes.
+Provider and configuration changes are revalidated without interrupting running agents. When applying a refresh must wait, the Models view shows a queued configuration update and applies it after active work finishes. Embedded reauthentication can refresh an authentication-only change immediately.
 
 ### Provider-Limit Polling And Credentials
 
@@ -422,7 +431,8 @@ There are also deprecated debug-only settings used for development and recovery 
 - OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.16` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
-- No models available: run `/connect` or `opencode auth login`, then reopen Varro.
+- No models available: connect a provider from the Models view, run `/connect`, or run `opencode auth login`, then reload providers or reopen Varro.
+- Provider authentication failed: use `Re-authenticate` on the failed response or provider row, complete the API-key or OAuth flow, then send a new prompt. Use terminal setup if the embedded method is unavailable.
 - Provider badge missing: quota metadata is only shown when OpenCode or the provider exposes usable limit information.
 - Images do not send: select a model with vision support.
 - Live updates are reconnecting: REST requests still work, but session status can lag until the event stream recovers.

@@ -89,4 +89,6 @@ Before release, manually inspect situations that are not deterministic on every 
 - Leaving an update terminal open on Windows, where the OpenCode executable can remain reserved.
 - OpenCode versions newer than Varro's tested ceiling and malformed version output.
 - No providers, provider API failure, provider login cancellation, and invalid provider credentials.
+- Embedded API-key and OAuth connection, code-based and automatic OAuth completion, provider disconnection, terminal fallbacks, and provider-catalog load failure.
+- Expired or revoked provider credentials, targeted reauthentication from both a failed response and the Models view, and authentication-only refresh while another agent is running.
 - Corrupt `opencode.json`, invalid injected config, and an unsupported or non-OpenCode process on the configured port.

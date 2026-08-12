@@ -17,7 +17,7 @@ Varro builds on OpenCode instead of replacing it. Your local OpenCode configurat
 - **Built for the whole agent loop.** Prompts, streaming output, reasoning, tool activity, permissions, questions, todos, plans, and changed files stay in one readable flow.
 - **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
 - **Parallel work that stays understandable.** Workspace sessions clearly identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar keep background sessions visible.
-- **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, and per-session MCP connections are available from the composer.
+- **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, provider connections, and per-session MCP connections are available inside the workbench.
 - **Commit messages where you commit.** Generate a repository-aware message from staged changes in VS Code, without leaving Source Control or handing commit control to the model.
 - **Usage you can act on.** Provider limits and reset windows appear next to model controls when available, while detailed accounting covers context fill, input, output, reasoning, cache, and sub-agent tokens.
 - **Compact by design.** The complete workflow remains readable in a sidebar, with an optional session pane for larger layouts.
@@ -54,6 +54,8 @@ Provider-limit status is shown when OpenCode metadata or a supported provider en
 ## Models And MCPs
 
 The model picker loads providers and models from OpenCode. It shows known capabilities such as tool support, reasoning variants, vision support, and context-window size. Providers and individual models can be hidden from the picker without changing the underlying OpenCode configuration.
+
+The Models view can connect and disconnect provider credentials through OpenCode using available API-key or OAuth methods. If a provider rejects an expired or revoked credential, Varro offers targeted reauthentication from the failed response and the Models view. Terminal-based OpenCode setup remains available as a fallback.
 
 MCP servers are also loaded from OpenCode and can be connected or disconnected per session.
 
