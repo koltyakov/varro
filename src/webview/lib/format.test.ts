@@ -10,6 +10,7 @@ import {
   formatProviderLimitCompact,
   formatProviderLimitCompactPrefix,
   formatProviderLimitTitle,
+  formatProviderLimitWindowValue,
   formatVariantInitial,
   formatVariantLabel,
   getProviderLimitCompactBadges,
@@ -179,6 +180,25 @@ describe('format helpers', () => {
     expect(formatProviderLimitCompactPrefix(limit)).toBe('D');
     expect(formatProviderLimitCompact(limit)).toBe('24%');
     expect(formatProviderLimitTitle(limit, 60_000)).toBe('Requests: 12 / 50 left, resets in 1m');
+  });
+
+  it('keeps provider request counts precise when compact rounding would be misleading', () => {
+    const window = {
+      id: 'monthly',
+      label: 'Monthly Premium Requests',
+      unit: 'requests' as const,
+      remaining: 1_431,
+      limit: 1_500,
+      resetAt: null,
+      percent: 4.6,
+    };
+    const limit = availableLimit([window]);
+
+    expect(formatProviderLimitWindowValue(window, window.remaining)).toBe('1,431');
+    expect(formatProviderLimitWindowValue(window, window.limit)).toBe('1,500');
+    expect(formatProviderLimitTitle(limit)).toBe(
+      'Monthly Premium Requests: 1,431 / 1,500 left (4.6% used)'
+    );
   });
 
   it('keeps a compact badge for a single unprefixed window', () => {
@@ -659,7 +679,7 @@ describe('format helpers', () => {
     ]);
 
     expect(formatProviderLimitTitle(limit, 0)).toBe(
-      'Subsec: 1 / 10 left, resets in <1s | Seconds: 2 left, resets in 20s | Hours: 3 / 3k left, resets in 1h | Days: 4 / 40 left, resets in 3d'
+      'Subsec: 1 / 10 left, resets in <1s | Seconds: 2 left, resets in 20s | Hours: 3 / 3,000 left, resets in 1h | Days: 4 / 40 left, resets in 3d'
     );
   });
 

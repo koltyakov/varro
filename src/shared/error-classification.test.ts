@@ -85,6 +85,27 @@ describe('isProviderAuthFailure', () => {
     ).toBe(true);
   });
 
+  it('detects terminal OAuth refresh failures that require reconnection', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'UnknownError',
+        data: { message: 'OAuth refresh rejected credentials (invalid_grant)' },
+      })
+    ).toBe(true);
+    expect(
+      isProviderAuthFailure({
+        name: 'UnknownError',
+        data: { message: 'The refresh token has expired' },
+      })
+    ).toBe(true);
+    expect(
+      isProviderAuthFailure({
+        name: 'UnknownError',
+        data: { message: 'The refresh token has been revoked' },
+      })
+    ).toBe(true);
+  });
+
   it('rejects retryable non-auth errors', () => {
     expect(
       isProviderAuthFailure({

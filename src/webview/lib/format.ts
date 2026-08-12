@@ -328,7 +328,13 @@ function getProviderLimitWindowPeriodLabel(window: ProviderLimitWindow) {
 }
 
 function formatWindowValue(window: ProviderLimitWindow, value: number) {
-  return window.unit === 'usd' ? `$${formatCompactValue(value, 'usd')}` : formatCompactValue(value);
+  if (window.unit === 'usd') return `$${formatCompactValue(value, 'usd')}`;
+  if (window.unit !== 'tokens' && Math.abs(value) < 10_000) {
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: value < 10 ? 1 : 0 }).format(
+      value
+    );
+  }
+  return formatCompactValue(value);
 }
 
 function formatPercent(value: number) {

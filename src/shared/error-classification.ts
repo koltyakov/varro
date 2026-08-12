@@ -12,7 +12,7 @@ export function friendlyErrorName(name: string | null | undefined): string | nul
 }
 
 const AUTH_INVALIDATED_RE =
-  /authentication token has been invalidated|token refresh failed:\s*401\b|try signing in again/i;
+  /authentication token has been invalidated|token refresh failed:\s*401\b|invalid_grant|refresh token (?:has )?(?:expired|been revoked|been invalidated)|try signing in again/i;
 
 export function isProviderAuthFailure(
   error:
