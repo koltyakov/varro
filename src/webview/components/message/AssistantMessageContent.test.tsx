@@ -381,6 +381,28 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('[data-part-id="edit-inline"]')).not.toBeNull();
   });
 
+  it('keeps file edit cards outside the compact activity disclosure while streaming', () => {
+    setShowInlineFileChanges(false);
+    const edit = fileEditPart('edit-inline', 'src/app.ts');
+    edit.state = completedToolState(
+      {
+        filePath: 'src/app.ts',
+        oldString: 'const value = 1;',
+        newString: 'const value = 2;',
+      },
+      'Edited src/app.ts'
+    );
+
+    renderAssistantMessageContent({
+      info: createAssistantMessage({ time: { created: 0 } }),
+      parts: [edit],
+    });
+
+    expect(container?.querySelector('.assistant-activity-summary')).toBeNull();
+    expect(container?.querySelector('.assistant-file-edit-stack')).not.toBeNull();
+    expect(container?.querySelector('[data-part-id="edit-inline"]')).not.toBeNull();
+  });
+
   it('moves completed inline file edits into compact history', () => {
     setShowInlineFileChanges(true);
     const edit = previewFileEditPart('edit-history', 'src/history.ts');
@@ -917,14 +939,14 @@ describe('AssistantMessageContent', () => {
       summaryCount: 1,
       pagerCount: 0,
       detailCount: 0,
-      renderedPartCount: 0,
+      renderedPartCount: 2,
     },
     {
       inlineChanges: false,
       detailsShown: true,
       summaryCount: 1,
       pagerCount: 0,
-      detailCount: 3,
+      detailCount: 1,
       renderedPartCount: 3,
     },
     {

@@ -417,7 +417,6 @@ export function AssistantMessageContent(props: {
   const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
-      showInlineFileChanges: showInlineFileChanges(),
       keepEditInline: props.info.time.completed === undefined && !props.info.error,
     }) &&
     (part.type !== 'tool' ||

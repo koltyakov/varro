@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { DroppedFile } from '../../shared/protocol';
+import type { ChatModelSelection, DroppedFile } from '../../shared/protocol';
 import type { ClipboardImage } from './app-state-types';
 
 export type MessageEditContext = {
@@ -15,6 +15,7 @@ export type MessageEditRequest = {
   sessionId: string;
   text: string;
   context: MessageEditContext;
+  model: ChatModelSelection | null;
 };
 
 const [editingMessage, setEditingMessage] = createSignal<MessageEditRequest | null>(null);
@@ -43,10 +44,11 @@ export function startEditingMessage(
   messageId: string,
   sessionId: string,
   text: string,
-  context: MessageEditContext = { files: [], images: [], terminalSelection: null }
+  context: MessageEditContext = { files: [], images: [], terminalSelection: null },
+  model: ChatModelSelection | null = null
 ) {
   if (!editingMessage()) clearMessageEditDraftBackup();
-  setEditingMessage({ messageId, sessionId, text, context });
+  setEditingMessage({ messageId, sessionId, text, context, model });
 }
 
 export function stopEditingMessage(messageId: string) {

@@ -1,6 +1,6 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
 import type { PermissionMode } from '../../../shared/protocol';
-import type { SessionSelectionOptions } from '../../lib/app-state-types';
+import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
 let currentOpenCodeRuntime = createOpenCodeRuntime();
@@ -119,6 +119,7 @@ export async function editMessage(
   options?: {
     allowEmptyText?: boolean;
     queuedAttachments?: QueuedAttachmentSnapshot;
+    selectedModel?: SelectedModel;
     onOptimisticPublish?: () => void;
   }
 ) {

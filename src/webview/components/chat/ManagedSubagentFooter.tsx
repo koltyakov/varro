@@ -72,16 +72,17 @@ export function ManagedSubagentFooter(props: {
     const current = currentModel();
     return getVariantsForModel(current.providerID, current.modelID, state.providers);
   });
-  const effectiveVariant = createMemo(() => {
+  const effectiveVariantLabel = createMemo(() => {
     const current = currentModel();
-    if (current.variant) return current.variant;
+    if (current.variant) return formatVariantLabel(current.variant);
     const remembered = getStoredVariantForModel(current.providerID, current.modelID);
-    if (remembered && availableVariants().includes(remembered)) return remembered;
-    return (
+    if (remembered === null) return 'Default';
+    const effectiveVariant =
+      (remembered && availableVariants().includes(remembered) ? remembered : null) ||
       getPreferredVariant(current.providerID, current.modelID, state.providers) ||
       availableVariants()[0] ||
-      null
-    );
+      null;
+    return effectiveVariant ? formatVariantLabel(effectiveVariant) : null;
   });
   const currentSessionMessages = createMemo(() =>
     getMessageEntriesForSession(state.messages, state.activeSessionId)
@@ -209,13 +210,13 @@ export function ManagedSubagentFooter(props: {
                   </span>
                 </span>
               </Show>
-              <Show when={effectiveVariant()}>
-                {(variant) => (
+              <Show when={effectiveVariantLabel()}>
+                {(variantLabel) => (
                   <span
                     class="toolbar-picker managed-subagent-info-chip managed-subagent-reasoning"
                     title="Thinking level"
                   >
-                    <span class="toolbar-picker-label">{formatVariantLabel(variant())}</span>
+                    <span class="toolbar-picker-label">{variantLabel()}</span>
                   </span>
                 )}
               </Show>

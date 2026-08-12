@@ -26,6 +26,7 @@ describe('message-edit-state', () => {
       sessionId: 'session-1',
       text: 'prompt',
       context: { files: [], images: [], terminalSelection: null },
+      model: null,
     });
     expect(editingMessageId()).toBe('message-1');
   });

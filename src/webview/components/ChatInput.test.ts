@@ -2650,6 +2650,104 @@ describe('ChatInput', () => {
     expect(state.terminalSelection).toEqual({ text: 'pwd', terminalName: 'draft-terminal' });
   });
 
+  it('uses the edited prompt model and reasoning without changing the composer on cancel', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          current: {
+            id: 'current',
+            name: 'Current model',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, max: {} },
+          },
+          original: {
+            id: 'original',
+            name: 'Original model',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'current' });
+    setState('selectedModel', { providerID: 'openai', modelID: 'current', variant: 'max' });
+    setState('messages', [
+      {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'openai', modelID: 'original', variant: 'high' },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, {
+      providerID: 'openai',
+      modelID: 'original',
+      variant: 'high',
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Original model');
+    expect(container?.querySelector('[title="Thinking level"]')?.textContent).toContain('High');
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'current',
+      variant: 'max',
+    });
+
+    container
+      ?.querySelector<HTMLButtonElement>('[title="Cancel editing (Esc)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Current model');
+    expect(container?.querySelector('[title="Thinking level"]')?.textContent).toContain('Max');
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'current',
+      variant: 'max',
+    });
+
+    startEditingMessage('message-1', 'session-1', 'edited prompt', undefined, {
+      providerID: 'openai',
+      modelID: 'original',
+      variant: 'high',
+    });
+    await Promise.resolve();
+    container?.querySelector<HTMLElement>('.rich-composer')?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    await flushAsyncWork();
+
+    expect(editMessageMock).toHaveBeenCalledWith(
+      'message-1',
+      'edited prompt',
+      expect.objectContaining({
+        selectedModel: { providerID: 'openai', modelID: 'original', variant: 'high' },
+      })
+    );
+    expect(state.selectedModel).toEqual({
+      providerID: 'openai',
+      modelID: 'original',
+      variant: 'high',
+    });
+  });
+
   it('restores edited text and preserves the prior draft when an optimistic send fails', async () => {
     setState('activeSessionId', 'session-1');
     setInputText('original draft');

@@ -65,7 +65,7 @@ vi.mock('../../lib/client', () => ({
 
 vi.mock('../../lib/state', () => ({
   desktopSessionPaneSide: () => stateMock.desktopSessionPaneSide,
-  getStoredVariantForModel: vi.fn(() => null),
+  getStoredVariantForModel: vi.fn(() => undefined),
   getVisibleProviders: vi.fn((providers: Provider[]) => providers),
   isSessionAwaitingInput: vi.fn(() => false),
   state: stateMock,

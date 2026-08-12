@@ -299,7 +299,7 @@ describe('ToolbarPickers', () => {
     expect(onSelect).toHaveBeenCalledWith(agents[0]);
   });
 
-  it('shows and hides the variant picker popover and forwards selection', async () => {
+  it('shows and selects the default reasoning option', async () => {
     const onToggle = vi.fn();
     const onSelect = vi.fn();
     const [showPicker, setShowPicker] = createSignal(false);
@@ -330,12 +330,13 @@ describe('ToolbarPickers', () => {
     await flushMicrotasks();
 
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
-    expect(options).toHaveLength(2);
-    expect(options[1]?.className).toContain('selected');
+    expect(options).toHaveLength(3);
+    expect(options[0]?.textContent).toContain('Default');
+    expect(options[2]?.className).toContain('selected');
 
     options[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
-    expect(onSelect).toHaveBeenCalledWith('low');
+    expect(onSelect).toHaveBeenCalledWith(null);
   });
 
   it('right-aligns the variant picker popover when a boundary is provided', async () => {

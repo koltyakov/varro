@@ -67,6 +67,23 @@ export function readStoredStringRecord(key: string): Record<string, string> {
   return normalizeStoredRecord(readStored<unknown>(key), normalizeStoredString);
 }
 
+export function readStoredNullableStringRecord(key: string): Record<string, string | null> {
+  const record = asStoredRecord(readStored<unknown>(key));
+  if (!record) return {};
+
+  const entries: Array<[string, string | null]> = [];
+  for (const [entryKey, value] of Object.entries(record)) {
+    if (!normalizeStoredString(entryKey)) continue;
+    if (value === null) {
+      entries.push([entryKey, null]);
+      continue;
+    }
+    const normalized = normalizeStoredString(value);
+    if (normalized) entries.push([entryKey, normalized]);
+  }
+  return Object.fromEntries(entries);
+}
+
 export function readStoredSelectedModel(key: string): SelectedModel | null {
   return normalizeStoredSelectedModel(readStored<unknown>(key));
 }

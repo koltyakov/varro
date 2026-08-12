@@ -295,7 +295,7 @@ test('keeps the active tool gap fixed through its entrance animation', async ({ 
 
 test('keeps a cross-message active tool adjacent to Explored after entrance', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards');
-  const summary = page.locator('.assistant-activity-summary').first();
+  const summary = page.locator('.assistant-activity-summary').last();
   await expect(summary).toContainText('Explored');
 
   await page.evaluate(() => {
@@ -376,10 +376,16 @@ test('keeps a cross-message active tool adjacent to Explored after entrance', as
           .map((animation) => animation.finished)
       );
       if (!element.isConnected) throw new Error('Cross-message active tool was removed');
+      const summaryRow = (summaryElement as HTMLElement).closest<HTMLElement>(
+        '.interactive-item-container'
+      );
       return {
         gap:
           element.getBoundingClientRect().top -
           (summaryElement as HTMLElement).getBoundingClientRect().bottom,
+        sourceRowCorrection: Number.parseFloat(
+          summaryRow?.style.getPropertyValue('--interactive-item-block-correction') || '0'
+        ),
         trayIsOnlyChild: trayElement.parentElement?.children.length === 1,
       };
     },
@@ -387,7 +393,9 @@ test('keeps a cross-message active tool adjacent to Explored after entrance', as
   );
 
   expect(geometry.trayIsOnlyChild).toBe(true);
-  expect(geometry.gap).toBeCloseTo(12, 0);
+  expect(geometry.sourceRowCorrection).toBeGreaterThanOrEqual(0);
+  expect(geometry.sourceRowCorrection).toBeLessThan(1);
+  expect(geometry.gap - geometry.sourceRowCorrection).toBeCloseTo(12, 0);
 });
 
 test('keeps streamed response text fixed when it follows Explored', async ({ page }) => {
@@ -459,14 +467,21 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
       const currentRow = document.querySelector<HTMLElement>(
         '[data-msg-id="message-streamed-after-explored"]'
       );
-      const currentSummary = document.querySelector<HTMLElement>('.assistant-activity-summary');
+      const currentSummary = [
+        ...document.querySelectorAll<HTMLElement>('.assistant-activity-summary'),
+      ].at(-1);
       if (!currentRow || !currentSummary) throw new Error('Streamed response geometry is missing');
       const current = currentRow.querySelector<HTMLElement>('.rendered-markdown p');
       if (!current) throw new Error('Streamed response content is missing');
       const box = current.getBoundingClientRect();
+      const sourceRowCorrection = Number.parseFloat(
+        currentSummary
+          .closest<HTMLElement>('.interactive-item-container')
+          ?.style.getPropertyValue('--interactive-item-block-correction') || '0'
+      );
       return {
         top: box.top,
-        gap: box.top - currentSummary.getBoundingClientRect().bottom,
+        gap: box.top - currentSummary.getBoundingClientRect().bottom - sourceRowCorrection,
       };
     };
     const collectedSamples = [measure()];
@@ -537,7 +552,33 @@ test('keeps active tools outside an expanded Explored group', async ({ page }) =
   await page.clock.install();
   await page.clock.pauseAt(new Date('2030-01-01T00:00:00Z'));
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&compactToolOutput=1');
-  const summary = page.locator('.assistant-activity-summary').first();
+  await page.evaluate(() => {
+    const sessionId = 'session-tool-cards';
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: {
+        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
+      };
+    };
+    const assistant = harnessWindow.__varroE2E
+      ?.getSessionMessages?.(sessionId)
+      .find((message) => message.info.id === 'message-tool-cards-assistant');
+    if (!assistant) throw new Error('Expanded activity fixture is missing');
+    const info = { ...assistant.info, time: { created: Date.now() } };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+    harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+    for (const [type, properties] of [
+      ['message.updated', { info }],
+      ['session.status', { sessionID: sessionId, status: { type: 'busy' } }],
+    ] as const) {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    }
+  });
+
+  const summaries = page.locator('.assistant-activity-summary');
+  await expect(summaries).toHaveCount(2);
+  const summary = summaries.last();
   await summary.click();
   await expect(summary).toHaveAttribute('aria-expanded', 'true');
   const details = page.locator('.assistant-activity-detail');
@@ -549,17 +590,9 @@ test('keeps active tools outside an expanded Explored group', async ({ page }) =
     const messageId = 'message-tool-cards-assistant';
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
-        getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
-        updateMessageInfo?: (info: Record<string, unknown>) => void;
         updateMessagePart?: (part: Record<string, unknown>) => void;
-        updateSessionStatus?: (id: string, status: { type: 'busy' }) => void;
       };
     };
-    const assistant = harnessWindow.__varroE2E
-      ?.getSessionMessages?.(sessionId)
-      .find((message) => message.info.id === messageId);
-    if (!assistant) throw new Error('Expanded activity fixture is missing');
-    const info = { ...assistant.info, time: { created: Date.now() } };
     const part = {
       id: 'tool-expanded-running',
       sessionID: sessionId,
@@ -574,16 +607,11 @@ test('keeps active tools outside an expanded Explored group', async ({ page }) =
         time: { start: Date.now() },
       },
     };
-    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
     harnessWindow.__varroE2E?.updateMessagePart?.(part);
-    harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
-    for (const [type, properties] of [
-      ['message.updated', { info }],
-      ['message.part.updated', { part }],
-      ['session.status', { sessionID: sessionId, status: { type: 'busy' } }],
-    ] as const) {
-      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
-    }
+    window.postMessage(
+      { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
+      '*'
+    );
   });
 
   await expect(details).toHaveCount(initialDetailCount);
@@ -1156,7 +1184,7 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
   const summaries = page.locator('.assistant-activity-summary');
   const markdown = page.getByText('Thinking spacing reference.', { exact: true });
   const thinkingBox = page.locator('.assistant-active-activity-item .chat-thinking-box');
-  await expect(summaries).toHaveCount(2);
+  await expect(summaries).toHaveCount(3);
   await expect(markdown).toBeVisible();
   await expect(thinkingBox.locator('.thinking-label-text')).toHaveText('Thinking');
   await thinkingBox.locator('.thinking-header').click();
@@ -1168,7 +1196,7 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
     );
     const tray = element.closest<HTMLElement>('.assistant-active-activity-tray');
     const viewport = tray?.querySelector<HTMLElement>('.assistant-active-activity-items');
-    if (!activitySummaries[0] || !activitySummaries[1] || !reference || !tray || !viewport) {
+    if (!activitySummaries[1] || !activitySummaries[2] || !reference || !tray || !viewport) {
       throw new Error('Thinking spacing fixtures are missing');
     }
     const samples: Array<{ boxTop: number; scrollTop: number; trayTop: number }> = [];
@@ -1184,12 +1212,12 @@ test('matches the visual incoming Thinking gap to markdown', async ({ page }) =>
       boxTop: element.getBoundingClientRect().top,
       clientHeight: viewport.clientHeight,
       markdown:
-        reference.getBoundingClientRect().top - activitySummaries[0].getBoundingClientRect().bottom,
+        reference.getBoundingClientRect().top - activitySummaries[1].getBoundingClientRect().bottom,
       scrollHeight: viewport.scrollHeight,
       scrollTop: viewport.scrollTop,
       samples,
       thinking:
-        element.getBoundingClientRect().top - activitySummaries[1].getBoundingClientRect().bottom,
+        element.getBoundingClientRect().top - activitySummaries[2].getBoundingClientRect().bottom,
       trayTop: viewport.getBoundingClientRect().top,
     };
   });

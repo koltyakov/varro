@@ -1170,6 +1170,7 @@ describe('Message user editing', () => {
       sessionId: 'session-1',
       text: 'original prompt',
       context: { files: [], images: [], terminalSelection: null },
+      model: { providerID: 'provider-1', modelID: 'model-1' },
     });
     expect(card?.classList.contains('user-message-card-editable')).toBe(false);
     expect(container?.textContent).toContain('original prompt');
@@ -1209,6 +1210,7 @@ describe('Message user editing', () => {
         ],
         terminalSelection: null,
       },
+      model: { providerID: 'provider-1', modelID: 'model-1' },
     });
   });
 

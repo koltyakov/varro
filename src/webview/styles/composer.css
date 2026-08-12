@@ -843,6 +843,10 @@
   display: none;
 }
 
+.toolbar-popover.variant-popover {
+  max-height: 240px;
+}
+
 .toolbar-popover.agent-popover {
   width: max-content;
   max-width: min(288px, calc(100vw - 24px));

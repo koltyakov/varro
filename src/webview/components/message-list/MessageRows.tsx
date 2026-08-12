@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { isAbortedAssistantError } from '../../../shared/error-classification';
 import { implementPlan, openPlan } from '../../hooks/useOpenCode';
 import {
@@ -135,6 +135,18 @@ export function MessageRow(
     }
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
   });
+  createEffect((wasVirtualPlaceholder) => {
+    const virtualPlaceholder = isVirtualPlaceholder();
+    if (wasVirtualPlaceholder && !virtualPlaceholder) {
+      // Let Solid publish the hydrated class/content before measuring the row's real geometry.
+      queueMicrotask(() => {
+        if (rowRef?.isConnected && !isVirtualPlaceholder()) {
+          props.observeMeasuredRow?.(rowRef, props.msg.info.id, true);
+        }
+      });
+    }
+    return virtualPlaceholder;
+  }, isVirtualPlaceholder());
   onCleanup(() => {
     disposeEntrance?.();
     if (rowRef) props.observeMeasuredRow?.(rowRef, props.msg.info.id, false);

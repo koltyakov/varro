@@ -541,6 +541,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
+  const [editSelectedModel, setEditSelectedModel] = createSignal<RalphSelectedModel | null>(null);
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
@@ -697,12 +698,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     !!state.attachedDiagnostics;
 
   const currentModel = createMemo(() => {
-    const selected = resolveSelectedModel(
-      state.selectedModel,
-      state.providers,
-      state.providerDefaults,
-      { allowHidden: true }
-    );
+    const editing = composerEditingMessage();
+    const editSelection = editing ? editSelectedModel() || editing.model : null;
+    const selected =
+      editSelection ||
+      resolveSelectedModel(state.selectedModel, state.providers, state.providerDefaults, {
+        allowHidden: true,
+      });
     if (selected) {
       const provider = state.providers.find((item) => item.id === selected.providerID);
       const model = provider?.models[selected.modelID];
@@ -1415,6 +1417,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const editing = composerEditingMessage();
     if (editing) {
+      const model = currentModel();
+      const selectedModel =
+        model.providerID && model.modelID
+          ? {
+              providerID: model.providerID,
+              modelID: model.modelID,
+              ...(effectiveVariant() ? { variant: effectiveVariant()! } : {}),
+            }
+          : editing.model || undefined;
       const submittedEdit = captureEditDraftBackup();
       const previousDraft = getMessageEditDraftBackup();
       const hasEditableAttachments =
@@ -1439,6 +1450,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         sent = await editMessage(editing.messageId, text, {
           allowEmptyText: hasEditableAttachments,
           queuedAttachments,
+          selectedModel,
           onOptimisticPublish: () => {
             optimisticPublished = true;
             resetMessageEditState();
@@ -1449,6 +1461,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         sent = await sendMessage(text);
       }
       if (sent) {
+        if (selectedModel) {
+          setSelectedModel(selectedModel, {
+            sessionId: editing.sessionId,
+            persistGlobal: true,
+            rememberVariant: selectedModel.variant ?? null,
+          });
+        }
         if (!optimisticPublished) resetMessageEditState();
       } else if (
         composerSessionId() === sendSessionId &&
@@ -1456,7 +1475,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         inputText() === ''
       ) {
         if (optimisticPublished) {
-          startEditingMessage(editing.messageId, editing.sessionId, text, submittedEdit);
+          startEditingMessage(
+            editing.messageId,
+            editing.sessionId,
+            text,
+            submittedEdit,
+            selectedModel || null
+          );
           if (previousDraft) setMessageEditDraftBackup(previousDraft);
         }
         setInputText(text);
@@ -2355,6 +2380,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const editing = composerEditingMessage();
     if (!editing) {
       activeEditMessageId = null;
+      setEditSelectedModel(null);
       return;
     }
     if (editing.messageId === activeEditMessageId) return;
@@ -2362,6 +2388,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setMessageEditDraftBackup(untrack(captureEditDraftBackup));
     }
     activeEditMessageId = editing.messageId;
+    setEditSelectedModel(editing.model ? { ...editing.model } : null);
     applyComposerEditState(editing.context, editing.text, activeContextEnabled(editing.sessionId));
     queueMicrotask(() => {
       if (richEditorRef) {
@@ -2584,6 +2611,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
 
   const effectiveVariant = createMemo(() => {
+    if (composerEditingMessage()) return currentModel().variant;
+
     const variants = availableVariants();
     if (variants.length === 0) return null;
     if (currentModel().variant && variants.includes(currentModel().variant!)) {
@@ -2594,6 +2623,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       currentModel().providerID,
       currentModel().modelID
     );
+    if (rememberedVariant === null) return null;
     if (rememberedVariant && variants.includes(rememberedVariant)) return rememberedVariant;
 
     return (
@@ -2688,7 +2718,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     ralphStore.updateRunModel(managerSessionId, nextModel);
   }
 
-  async function handleSelectedModelChange(nextModel: RalphSelectedModel) {
+  async function handleSelectedModelChange(
+    nextModel: RalphSelectedModel,
+    rememberVariant?: string | null
+  ) {
+    if (composerEditingMessage()) {
+      setEditSelectedModel(nextModel);
+      return;
+    }
+
     const activeRun = activeRalphRun();
     const activeRunWasRunning = activeRun?.status === 'running';
     const previousRalphModel = activeRun?.config.model ?? null;
@@ -2698,7 +2736,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       variant: state.selectedModel?.variant,
     };
 
-    setSelectedModel(nextModel, { sessionId: composerSessionId(), persistGlobal: true });
+    setSelectedModel(nextModel, {
+      sessionId: composerSessionId(),
+      persistGlobal: true,
+      ...(rememberVariant !== undefined ? { rememberVariant } : {}),
+    });
     syncActiveRalphModel(nextModel);
 
     const usageLimit = activeUsageLimit();
@@ -2796,7 +2838,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const selectedVariantLabel = () => {
     const variant = effectiveVariant();
-    if (!variant) return '';
+    if (!variant) {
+      return isToolbarControlCompacted(toolbarCompactMode(), 'reasoning') ? 'D' : 'Default';
+    }
     return isToolbarControlCompacted(toolbarCompactMode(), 'reasoning')
       ? formatVariantInitial(variant)
       : formatVariantLabel(variant);
@@ -2938,10 +2982,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             <LazyModelPicker
               onSelect={(sel) => {
                 if (sel.providerID && sel.modelID) {
+                  const rememberedVariant = getStoredVariantForModel(sel.providerID, sel.modelID);
                   const matchedVariant =
                     sel.variant ||
-                    getStoredVariantForModel(sel.providerID, sel.modelID) ||
-                    getPreferredVariant(sel.providerID, sel.modelID, state.providers) ||
+                    (rememberedVariant === undefined
+                      ? getPreferredVariant(sel.providerID, sel.modelID, state.providers)
+                      : rememberedVariant) ||
                     undefined;
                   void handleSelectedModelChange({
                     providerID: sel.providerID,
@@ -3241,11 +3287,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             onSelectVariant={(variant) => {
               const m = currentModel();
-              void handleSelectedModelChange({
-                providerID: m.providerID!,
-                modelID: m.modelID!,
-                variant,
-              });
+              void handleSelectedModelChange(
+                {
+                  providerID: m.providerID!,
+                  modelID: m.modelID!,
+                  ...(variant ? { variant } : {}),
+                },
+                variant
+              );
               setShowVariantPicker(false);
             }}
             contextUsage={contextUsage()}
@@ -3404,11 +3453,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           onSelectVariant={(variant) => {
             const m = currentModel();
-            void handleSelectedModelChange({
-              providerID: m.providerID!,
-              modelID: m.modelID!,
-              variant,
-            });
+            void handleSelectedModelChange(
+              {
+                providerID: m.providerID!,
+                modelID: m.modelID!,
+                ...(variant ? { variant } : {}),
+              },
+              variant
+            );
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}

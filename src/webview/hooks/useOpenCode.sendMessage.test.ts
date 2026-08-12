@@ -109,7 +109,7 @@ describe('sendMessage', () => {
       modelID: 'gpt-5',
       variant: 'medium',
     });
-    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeUndefined();
   });
 
   it('starts title fallback as soon as OpenCode accepts the prompt', async () => {

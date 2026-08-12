@@ -248,7 +248,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px var(--chat-horizontal-padding);
+  padding: 2px 0;
   margin-bottom: 10px;
 }
 

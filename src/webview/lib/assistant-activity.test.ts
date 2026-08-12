@@ -148,25 +148,21 @@ describe('assistant activity summaries', () => {
 
     expect(
       shouldCompactAssistantActivityPart(edit, {
-        showInlineFileChanges: true,
         keepEditInline: true,
       })
     ).toBe(false);
     expect(
       shouldCompactAssistantActivityPart(edit, {
-        showInlineFileChanges: true,
         keepEditInline: false,
       })
     ).toBe(true);
     expect(
       shouldCompactAssistantActivityPart(edit, {
-        showInlineFileChanges: false,
         keepEditInline: true,
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldCompactAssistantActivityPart(read, {
-        showInlineFileChanges: true,
         keepEditInline: true,
       })
     ).toBe(true);
@@ -180,7 +176,6 @@ describe('assistant activity summaries', () => {
 
     expect(
       shouldCompactAssistantActivityPart(patch, {
-        showInlineFileChanges: false,
         keepEditInline: false,
       })
     ).toBe(false);
@@ -195,7 +190,6 @@ describe('assistant activity summaries', () => {
     };
     expect(
       shouldCompactAssistantActivityPart(patch, {
-        showInlineFileChanges: false,
         keepEditInline: false,
       })
     ).toBe(true);

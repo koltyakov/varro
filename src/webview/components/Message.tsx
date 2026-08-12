@@ -340,7 +340,7 @@ export function Message(props: {
     !isActiveSessionWorking() &&
     hasUserMessageEditableContent(normalizedParts());
   const handleUserCardClick = (event: MouseEvent) => {
-    if (!canEditUserMessage() || isEditingUserMessage()) return;
+    if (props.info.role !== 'user' || !canEditUserMessage() || isEditingUserMessage()) return;
     const target = event.target;
     if (target instanceof Element && target.closest('button, a, textarea')) return;
     const selection = window.getSelection();
@@ -349,7 +349,8 @@ export function Message(props: {
       props.info.id,
       props.info.sessionID,
       getUserMessageEditText(normalizedParts()),
-      getUserMessageEditContext(normalizedParts())
+      getUserMessageEditContext(normalizedParts()),
+      props.info.model
     );
   };
 

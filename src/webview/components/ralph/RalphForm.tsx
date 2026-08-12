@@ -88,6 +88,10 @@ export function RalphForm() {
   const [showAdvanced, setShowAdvanced] = createSignal(false);
   const [promptTemplate, setPromptTemplate] = createSignal(getDefaultPromptTemplate());
   const [model, setModel] = createSignal<RalphSelectedModel | null>(state.selectedModel);
+  const [variantPreference, setVariantPreference] = createSignal<string | null | undefined>(
+    state.selectedModel?.variant ??
+      getStoredVariantForModel(state.selectedModel?.providerID, state.selectedModel?.modelID)
+  );
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [isPickingPlan, setIsPickingPlan] = createSignal(false);
   const [showModelPicker, setShowModelPicker] = createSignal(false);
@@ -125,9 +129,9 @@ export function RalphForm() {
     const sel = model();
     const variants = availableVariants();
     if (!sel || variants.length === 0) return null;
-    if (sel.variant && variants.includes(sel.variant)) return sel.variant;
-    const rememberedVariant = getStoredVariantForModel(sel.providerID, sel.modelID);
-    if (rememberedVariant && variants.includes(rememberedVariant)) return rememberedVariant;
+    const preference = variantPreference();
+    if (preference === null) return null;
+    if (preference && variants.includes(preference)) return preference;
     return getPreferredVariant(sel.providerID, sel.modelID, visibleProviders()) || variants[0];
   });
 
@@ -139,7 +143,12 @@ export function RalphForm() {
       setPlanWorkspaceDirectory(
         normalizeRalphWorkspaceDirectory(state.editorContext.workspacePath)
       );
-      setModel(getInitialRalphModelSelection());
+      const initialModel = getInitialRalphModelSelection();
+      setModel(initialModel);
+      setVariantPreference(
+        initialModel?.variant ??
+          getStoredVariantForModel(initialModel?.providerID, initialModel?.modelID)
+      );
       setErrorMessage(null);
     }
     return visible;
@@ -395,7 +404,7 @@ export function RalphForm() {
                       variants={availableVariants()}
                       selectedVariant={effectiveVariant() ?? null}
                       selectedLabel={
-                        effectiveVariant() ? formatVariantLabel(effectiveVariant()!) : ''
+                        effectiveVariant() ? formatVariantLabel(effectiveVariant()!) : 'Default'
                       }
                       showPicker={showVariantPicker()}
                       getLabel={formatVariantLabel}
@@ -409,8 +418,9 @@ export function RalphForm() {
                           setModel({
                             providerID: sel.providerID,
                             modelID: sel.modelID,
-                            variant,
+                            ...(variant ? { variant } : {}),
                           });
+                          setVariantPreference(variant);
                         }
                         setShowVariantPicker(false);
                       }}
@@ -429,16 +439,27 @@ export function RalphForm() {
                               sel.modelID,
                               visibleProviders()
                             );
-                            const prev = model();
+                            const preference = variantPreference();
+                            const rememberedVariant = getStoredVariantForModel(
+                              sel.providerID,
+                              sel.modelID
+                            );
                             const keepVariant =
-                              prev?.variant && variants.includes(prev.variant)
-                                ? prev.variant
-                                : undefined;
+                              preference === null
+                                ? null
+                                : preference && variants.includes(preference)
+                                  ? preference
+                                  : rememberedVariant === null
+                                    ? null
+                                    : rememberedVariant && variants.includes(rememberedVariant)
+                                      ? rememberedVariant
+                                      : undefined;
                             setModel({
                               providerID: sel.providerID,
                               modelID: sel.modelID,
                               ...(keepVariant ? { variant: keepVariant } : {}),
                             });
+                            setVariantPreference(keepVariant);
                           }
                         }}
                         onClose={() => setShowModelPicker(false)}

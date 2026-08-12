@@ -114,15 +114,13 @@ export function isAssistantActivityPartRunning(part: AssistantActivityPart) {
 
 export function shouldCompactAssistantActivityPart(
   part: AssistantActivityPart,
-  options: { showInlineFileChanges: boolean; keepEditInline: boolean }
+  options: { keepEditInline: boolean }
 ) {
   if (part.type === 'tool' && isPermissionRejectedToolError(part.state)) return false;
   if (part.type === 'tool' && isApplyPatchTool(part.tool) && isAssistantActivityPartRunning(part)) {
     return false;
   }
-  return (
-    !options.showInlineFileChanges || !isAssistantEditActivityPart(part) || !options.keepEditInline
-  );
+  return !isAssistantEditActivityPart(part) || !options.keepEditInline;
 }
 
 export function getAssistantActivityGroupMap(

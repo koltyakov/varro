@@ -2,7 +2,7 @@ import type { ChatModelSelection, DroppedFile, EditorDiagnostic } from '../../sh
 
 export type SelectedModel = ChatModelSelection;
 export type SessionSelectionOptions = { markSeen?: boolean; selectedModel?: SelectedModel };
-export type ModelVariantSelections = Record<string, string>;
+export type ModelVariantSelections = Record<string, string | null>;
 
 export type SessionSelectedAgents = Record<string, string>;
 export type SessionSelectedModels = Record<string, SelectedModel>;

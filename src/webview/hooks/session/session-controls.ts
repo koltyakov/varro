@@ -125,7 +125,7 @@ export async function editMessageWithDependencies(
       text: string,
       sessionId: string,
       queuedAttachments?: QueuedAttachmentSnapshot,
-      optimisticModel?: ResolvedModel
+      selectedModel?: ResolvedModel
     ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
     stopLoading(): void;
     setError(message: string): void;
@@ -135,6 +135,7 @@ export async function editMessageWithDependencies(
   options?: {
     allowEmptyText?: boolean;
     queuedAttachments?: QueuedAttachmentSnapshot;
+    selectedModel?: ResolvedModel;
     onOptimisticPublish?: () => void;
   }
 ) {
@@ -149,8 +150,9 @@ export async function editMessageWithDependencies(
   if (!target || target.info.role !== 'user' || target.info.sessionID !== sessionId) return false;
 
   const messagesToDelete = messages.slice(targetIndex).toReversed();
+  const selectedModel = options?.selectedModel ?? target.info.model;
   const sendEditedMessage = deps.prepareEditedMessageSend
-    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, target.info.model)
+    ? deps.prepareEditedMessageSend(text, sessionId, options?.queuedAttachments, selectedModel)
     : (beforeOptimisticPublish?: () => void) => {
         beforeOptimisticPublish?.();
         return deps.sendEditedMessage(text, sessionId, options?.queuedAttachments);
@@ -319,7 +321,7 @@ type SessionControlDependencies = {
     text: string,
     sessionId: string,
     queuedAttachments?: QueuedAttachmentSnapshot,
-    optimisticModel?: ResolvedModel
+    selectedModel?: ResolvedModel
   ): (beforeOptimisticPublish?: () => void) => Promise<boolean>;
   invalidateMessageSync(sessionId: string): void;
   deferMessageRemovals(sessionId: string, messageIds: string[]): () => void;
@@ -390,6 +392,7 @@ export class SessionControlOperations {
     options?: {
       allowEmptyText?: boolean;
       queuedAttachments?: QueuedAttachmentSnapshot;
+      selectedModel?: ResolvedModel;
       onOptimisticPublish?: () => void;
     }
   ) => {

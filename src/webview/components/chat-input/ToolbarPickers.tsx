@@ -287,7 +287,7 @@ export function VariantPicker(props: {
   showPicker: boolean;
   getLabel: (variant: string) => string;
   onToggle: () => void;
-  onSelect: (variant: string) => void;
+  onSelect: (variant: string | null) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
 
@@ -329,11 +329,17 @@ export function VariantPicker(props: {
       <Show when={props.showPicker}>
         <div
           ref={setPopoverRef}
-          class="toolbar-popover"
+          class="toolbar-popover variant-popover"
           onClick={(e) => e.stopPropagation()}
           style={popoverStyle()}
         >
           <div class="toolbar-popover-header">Reasoning</div>
+          <button
+            class={`toolbar-popover-item ${props.selectedVariant === null ? 'selected' : ''}`}
+            onClick={() => props.onSelect(null)}
+          >
+            Default
+          </button>
           <For each={props.variants}>
             {(variant) => (
               <button

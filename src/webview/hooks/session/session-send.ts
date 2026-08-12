@@ -18,6 +18,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import type {
   AttachedDiagnostics,
   ClipboardImage,
+  ModelVariantSelections,
   QueuedMessage,
   SelectedModel,
 } from '../../lib/app-state-types';
@@ -28,9 +29,10 @@ import {
   getContextFileAttachmentSequence,
 } from '../../lib/attachment-order';
 import { modelSupportsVision } from '../../lib/model-capabilities';
-import { getPreferredVariant } from '../../lib/model-variants';
+import { getPreferredVariant, getVariantsForModel } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
+import { getModelVariantSelectionKey } from '../../lib/state-model-selection';
 import {
   clearPendingOptimisticUserMessage,
   trackPendingOptimisticUserMessage,
@@ -49,6 +51,7 @@ type ComposerState = {
   selectedModel: SelectedModel | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  modelVariantSelections: ModelVariantSelections;
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
@@ -81,7 +84,9 @@ export type QueuedAttachmentSnapshot = Pick<
 
 type SessionSendOptions = SendFlowOptions & {
   agent?: string;
+  selectedModel?: SelectedModel;
   optimisticModel?: SelectedModel;
+  preserveModelSelection?: boolean;
   preserveScrollPosition?: boolean;
   queuedAttachments?: QueuedAttachmentSnapshot;
   preserveComposer?: boolean;
@@ -294,9 +299,23 @@ export function buildSessionSendBody(
     body.variant =
       normalizeModelVariant(effectiveModel.modelID, effectiveModel.variant) || undefined;
   } else if (body.model) {
-    body.variant =
-      getPreferredVariant(body.model.providerID, body.model.modelID, composerState.providers) ||
-      undefined;
+    const rememberedVariant =
+      composerState.modelVariantSelections[
+        getModelVariantSelectionKey(body.model.providerID, body.model.modelID)
+      ];
+    if (rememberedVariant !== null) {
+      const variants = getVariantsForModel(
+        body.model.providerID,
+        body.model.modelID,
+        composerState.providers
+      );
+      const validRememberedVariant =
+        rememberedVariant && variants.includes(rememberedVariant) ? rememberedVariant : null;
+      body.variant =
+        validRememberedVariant ||
+        getPreferredVariant(body.model.providerID, body.model.modelID, composerState.providers) ||
+        undefined;
+    }
   }
   if (options?.noReply) body.noReply = true;
   if (options?.delivery) body.delivery = options.delivery;
@@ -606,13 +625,22 @@ export class SessionSendOperations {
       routingStore.getSelectedAgentForSession(targetSessionId) ??
       appStore.state.selectedAgent;
     const selectedModel =
-      routingStore.getSelectedModelForSession(targetSessionId) ?? appStore.state.selectedModel;
+      options?.selectedModel ??
+      routingStore.getSelectedModelForSession(targetSessionId) ??
+      appStore.state.selectedModel;
+    const modelVariantSelections = { ...appStore.state.modelVariantSelections };
+    if (options?.selectedModel && !options.selectedModel.variant) {
+      modelVariantSelections[
+        getModelVariantSelectionKey(options.selectedModel.providerID, options.selectedModel.modelID)
+      ] = null;
+    }
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
     const capturedComposerState: ComposerState = {
       selectedAgent,
       selectedModel: selectedModel ? { ...selectedModel } : null,
       providers: [...appStore.state.providers],
       providerDefaults: { ...appStore.state.providerDefaults },
+      modelVariantSelections,
       editorContext: {
         ...appStore.state.editorContext,
         activeFile: appStore.state.editorContext.activeFile
@@ -656,8 +684,10 @@ export class SessionSendOperations {
           requestMessageListScrollToBottom: uiStore.requestMessageListScrollToBottom,
           startLoading: uiStore.startLoading,
           setError: uiStore.setError,
-          applyEffectiveModel: (model, sessionId) =>
-            routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
+          applyEffectiveModel: options?.preserveModelSelection
+            ? () => {}
+            : (model, sessionId) =>
+                routingStore.setSelectedModel(model, { sessionId, persistGlobal: false }),
           resetTodoSync: this.deps.resetTodoSync,
           clearTodos: composerStore.clearTodos,
           clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,

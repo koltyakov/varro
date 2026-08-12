@@ -11,7 +11,7 @@ import { DEFAULT_PROVIDER_LIMIT_POLL_INTERVAL_SECONDS } from '../../../shared/pr
 import { isPlaceholderSessionTitle } from '../../../shared/session-title';
 import { onMessage, postMessage } from '../../lib/bridge';
 import * as clientModule from '../../lib/client';
-import type { SessionSelectionOptions } from '../../lib/app-state-types';
+import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import { appStore } from '../../lib/stores/app-store';
 import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
@@ -153,6 +153,7 @@ export interface OpenCodeRuntime {
     options?: {
       allowEmptyText?: boolean;
       queuedAttachments?: QueuedAttachmentSnapshot;
+      selectedModel?: SelectedModel;
       onOptimisticPublish?: () => void;
     }
   ): Promise<boolean>;
@@ -1979,11 +1980,13 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     isSessionWorking: (sessionId) => isSessionTreeStatusWorking(sessionId),
     sendEditedMessage: (text, sessionId, queuedAttachments) =>
       sessionSendOperations.sendMessage(text, { targetSessionId: sessionId, queuedAttachments }),
-    prepareEditedMessageSend: (text, sessionId, queuedAttachments, optimisticModel) =>
+    prepareEditedMessageSend: (text, sessionId, queuedAttachments, selectedModel) =>
       sessionSendOperations.prepareSendMessage(text, {
         targetSessionId: sessionId,
         queuedAttachments,
-        optimisticModel,
+        selectedModel,
+        optimisticModel: selectedModel,
+        preserveModelSelection: true,
         preserveScrollPosition: true,
       }),
     unrevertSession: (sessionId) => client.session.unrevert(sessionId),
@@ -2302,6 +2305,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     options?: {
       allowEmptyText?: boolean;
       queuedAttachments?: QueuedAttachmentSnapshot;
+      selectedModel?: SelectedModel;
       onOptimisticPublish?: () => void;
     }
   ) {

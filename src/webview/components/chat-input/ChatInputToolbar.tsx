@@ -91,7 +91,7 @@ type ToolbarSharedProps = {
   variantPopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   getVariantLabel: (variant: string) => string;
   onToggleVariantPicker: () => void;
-  onSelectVariant: (variant: string) => void;
+  onSelectVariant: (variant: string | null) => void;
   contextUsage: ContextUsageInfo | null;
   showContextControl: boolean;
   contextButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);

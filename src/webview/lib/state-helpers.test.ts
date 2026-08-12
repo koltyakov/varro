@@ -973,7 +973,7 @@ describe('state helpers', () => {
     expect(stateModule.getSelectedModelForSession('session-1')).toEqual(sessionModel);
     expect(stateModule.getPersistedSelectedModel()).toEqual(defaultModel);
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5')).toBe('medium');
-    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeUndefined();
   });
 
   it('switches between global defaults and active-session routing with the session picker', async () => {
@@ -1006,7 +1006,7 @@ describe('state helpers', () => {
     stateModule.setPersistentShowSessionPicker(false);
     expect(stateModule.state.selectedModel).toEqual(sessionModel);
     expect(stateModule.getPersistedSelectedModel()).toEqual(defaultModel);
-    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeNull();
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-4o')).toBeUndefined();
   });
 
   it('normalizes persisted routing state while preserving valid entries', async () => {
@@ -1030,7 +1030,7 @@ describe('state helpers', () => {
     );
     window.localStorage.setItem(
       'varro.modelVariantSelections',
-      JSON.stringify({ 'openai:gpt-5': 'medium', invalid: false })
+      JSON.stringify({ 'openai:gpt-5': 'medium', 'openai:gpt-5.5': null, invalid: false })
     );
     window.localStorage.setItem(
       'varro.sessionSelectedMcps',
@@ -1053,7 +1053,10 @@ describe('state helpers', () => {
     expect(stateModule.state.sessionSelectedModels).toEqual({
       'session-1': { providerID: 'openai', modelID: 'gpt-4o', variant: 'high' },
     });
-    expect(stateModule.state.modelVariantSelections).toEqual({ 'openai:gpt-5': 'medium' });
+    expect(stateModule.state.modelVariantSelections).toEqual({
+      'openai:gpt-5': 'medium',
+      'openai:gpt-5.5': null,
+    });
     expect(stateModule.state.sessionSelectedMcps).toEqual({
       'session-1': ['docs', 'browser-bridge'],
     });
@@ -1107,6 +1110,32 @@ describe('state helpers', () => {
 
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.4')).toBe('medium');
     expect(stateModule.getStoredVariantForModel('openai', 'gpt-5.5')).toBe('low');
+  });
+
+  it('remembers an explicit default reasoning selection', async () => {
+    const stateModule = await loadState();
+
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-5', variant: 'max' },
+      { sessionId: 'session-1' }
+    );
+    stateModule.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-5' },
+      { sessionId: 'session-1', rememberVariant: null }
+    );
+
+    expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+    expect(stateModule.getSelectedModelForSession('session-1')).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5',
+    });
+    expect(stateModule.getStoredVariantForModel('openai', 'gpt-5')).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem('varro.modelVariantSelections')!)).toEqual({
+      'openai:gpt-5': null,
+    });
+    expect(JSON.parse(window.localStorage.getItem('varro.sessionSelectedModels')!)).toEqual({
+      'session-1': { providerID: 'openai', modelID: 'gpt-5' },
+    });
   });
 
   it('tracks global and per-session selected agents independently', async () => {

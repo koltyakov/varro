@@ -67,6 +67,7 @@ function createState(overrides?: {
   selectedModel?: { providerID: string; modelID: string; variant?: string } | null;
   providers?: Provider[];
   providerDefaults?: Record<string, string>;
+  modelVariantSelections?: Record<string, string | null>;
   editorContext?: EditorContext;
   terminalSelection?: { text: string; terminalName: string } | null;
   droppedFiles?: DroppedFile[];
@@ -90,6 +91,7 @@ function createState(overrides?: {
       }),
     ],
     providerDefaults: { openai: 'gpt-4o' },
+    modelVariantSelections: {},
     editorContext: createEditorContext(),
     terminalSelection: null,
     droppedFiles: [],
@@ -364,6 +366,37 @@ describe('session-send helpers', () => {
         variant: 'high',
       },
       effectiveModel: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+    });
+  });
+
+  it('omits the variant for an explicit default reasoning selection', () => {
+    const result = buildSessionSendBody(
+      createState({
+        selectedAgent: null,
+        selectedModel: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+        providers: [
+          provider('openrouter', {
+            'qwen3-coder-30b': {
+              id: 'qwen3-coder-30b',
+              name: 'Qwen3 Coder 30B',
+              capabilities: { toolcall: true },
+              cost: { input: 0, output: 0 },
+              variants: { low: {}, high: {}, max: {} },
+            },
+          }),
+        ],
+        providerDefaults: { openrouter: 'qwen3-coder-30b' },
+        modelVariantSelections: { 'openrouter:qwen3-coder-30b': null },
+        editorContext: createEditorContext({ workspacePath: null }),
+      }),
+      'session-1',
+      'Use the model default',
+      () => true
+    );
+
+    expect(result?.body).toEqual({
+      model: { providerID: 'openrouter', modelID: 'qwen3-coder-30b' },
+      parts: [{ type: 'text', text: 'Use the model default' }],
     });
   });
 

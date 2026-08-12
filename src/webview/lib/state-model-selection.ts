@@ -1,4 +1,4 @@
-import { produce } from 'solid-js/store';
+import { produce, reconcile } from 'solid-js/store';
 import type { Command, Provider } from '../types';
 import type { SelectedModel } from './app-state-types';
 import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
@@ -20,9 +20,9 @@ export function getModelVariantSelectionKey(providerID: string, modelID: string)
 export function getStoredVariantForModel(
   providerID: string | null | undefined,
   modelID: string | null | undefined
-): string | null {
-  if (!providerID || !modelID) return null;
-  return state.modelVariantSelections[getModelVariantSelectionKey(providerID, modelID)] || null;
+): string | null | undefined {
+  if (!providerID || !modelID) return undefined;
+  return state.modelVariantSelections[getModelVariantSelectionKey(providerID, modelID)];
 }
 
 export function getSelectedAgentForSession(sessionId: string | null | undefined): string | null {
@@ -45,20 +45,26 @@ export function getSelectedMcpsForSession(sessionId: string | null | undefined):
 
 export function setSelectedModel(
   model: SelectedModel | null,
-  options?: { sessionId?: string | null; persistGlobal?: boolean }
+  options?: {
+    sessionId?: string | null;
+    persistGlobal?: boolean;
+    rememberVariant?: string | null;
+  }
 ) {
   const persistGlobal = options?.persistGlobal ?? true;
   const sessionId = options?.sessionId;
 
   if (!modelsEqual(state.selectedModel, model)) {
-    setState('selectedModel', model);
+    setState('selectedModel', reconcile(model));
   }
   if (persistGlobal) writeStored(STORAGE_KEYS.selectedModel, model);
 
-  if (persistGlobal && model?.variant) {
+  const rememberedVariant =
+    options && 'rememberVariant' in options ? options.rememberVariant : model?.variant;
+  if (persistGlobal && model && rememberedVariant !== undefined) {
     const key = getModelVariantSelectionKey(model.providerID, model.modelID);
-    if (state.modelVariantSelections[key] !== model.variant) {
-      const nextSelections = { ...state.modelVariantSelections, [key]: model.variant };
+    if (state.modelVariantSelections[key] !== rememberedVariant) {
+      const nextSelections = { ...state.modelVariantSelections, [key]: rememberedVariant };
       setState('modelVariantSelections', nextSelections);
       writeStored(STORAGE_KEYS.modelVariantSelections, nextSelections);
     }
@@ -66,7 +72,7 @@ export function setSelectedModel(
 
   if (sessionId) {
     if (model) {
-      setState('sessionSelectedModels', sessionId, model);
+      setState('sessionSelectedModels', sessionId, reconcile(model));
     } else {
       setState(
         'sessionSelectedModels',

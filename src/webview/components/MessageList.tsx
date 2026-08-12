@@ -681,7 +681,6 @@ export function MessageList() {
   });
   const visibleRunningInlineFileEdit = createMemo(() => {
     messageStructureVersion();
-    const showInlineChanges = showInlineFileChanges();
     return untrack(() =>
       messages().some((message) =>
         message.parts.some(
@@ -691,7 +690,6 @@ export function MessageList() {
             shouldShowAssistantPartInline(part) &&
             isAssistantEditActivityPart(part) &&
             !shouldCompactAssistantActivityPart(part, {
-              showInlineFileChanges: showInlineChanges,
               keepEditInline: true,
             })
         )
@@ -5043,7 +5041,6 @@ export function MessageList() {
   const canCompactActivityPart = (part: AssistantActivityPart) =>
     shouldShowAssistantPartInline(part) &&
     shouldCompactAssistantActivityPart(part, {
-      showInlineFileChanges: showInlineFileChanges(),
       keepEditInline: keepTrailingTurnEditMessageIds().has(part.messageID),
     }) &&
     (part.type !== 'tool' ||

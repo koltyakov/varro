@@ -2030,6 +2030,23 @@ describe('MessageList compact activity', () => {
       )
     ).toEqual(['app.ts', 'second.ts']);
 
+    setShowInlineFileChanges(false);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(0);
+    expect(
+      container?.querySelectorAll('.assistant-file-edit-stack .file-change-card')
+    ).toHaveLength(2);
+    expect(summaries().map((summary) => summary.textContent)).toEqual([
+      expect.stringContaining('Explored: 1 edit'),
+      expect.stringContaining('Explored: 1 file'),
+    ]);
+
+    setShowInlineFileChanges(true);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.diff-view-file')).toHaveLength(2);
+
     setState('questions', [{ id: 'question-1', sessionID: 'session-1', questions: [] }]);
     setState('sessionStatus', reconcile({ 'session-1': { type: 'idle' } }));
     await Promise.resolve();
@@ -2522,6 +2539,7 @@ describe('MessageList history pagination', () => {
     let scrollTopValue = 0;
     let scrollTopWrites = 0;
     let rowRectReads = 0;
+    let hydratedRowRectReads = 0;
     let misreportVirtualPlaceholderHeight = false;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
@@ -2537,6 +2555,12 @@ describe('MessageList history pagination', () => {
         }
         if (this.dataset.msgId) {
           rowRectReads += 1;
+          if (
+            this.dataset.msgId === 'older-49' &&
+            !this.classList.contains('interactive-item-virtual-placeholder')
+          ) {
+            hydratedRowRectReads += 1;
+          }
           const index = state.messages.findIndex(
             (message) => message.info.id === this.dataset.msgId
           );
@@ -2675,12 +2699,14 @@ describe('MessageList history pagination', () => {
 
     document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
     await vi.advanceTimersByTimeAsync(100);
+    hydratedRowRectReads = 0;
     animationFrames.flush(performance.now());
     await Promise.resolve();
     const hydratedRow = container?.querySelector<HTMLElement>('[data-msg-id="older-49"]');
     expect(hydratedRow).toBeInstanceOf(HTMLDivElement);
     expect(hydratedRow?.classList).not.toContain('interactive-item-virtual-placeholder');
     expect(hydratedRow?.childElementCount).toBeGreaterThan(0);
+    expect(hydratedRowRectReads).toBeGreaterThan(0);
     animationFrames.restore();
   });
 
@@ -8184,6 +8210,7 @@ describe('MessageList sticky prompt preview', () => {
         ],
         terminalSelection: null,
       },
+      model: { providerID: 'openai', modelID: 'gpt-5.4' },
     });
 
     animationFrames.restore();
@@ -8270,6 +8297,7 @@ describe('MessageList sticky prompt preview', () => {
         ],
         terminalSelection: null,
       },
+      model: { providerID: 'openai', modelID: 'gpt-5.4' },
     });
 
     animationFrames.restore();
@@ -9967,6 +9995,95 @@ describe('MessageList auto-scroll', () => {
     // Compact activity already gives the follower rows zero height, so hiding thinking removes only
     // the disclosure owner's provisional height.
     expect(bottomSpacer() - bottomPadBefore).toBe(-100);
+    animationFrames.restore();
+  });
+
+  it('invalidates an offscreen active edit height when inline previews are disabled', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, 500, 5000);
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, index * 100 - scrollTopValue, 500, 100);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    const editMessageId = 'assistant-0';
+    const edit = toolPart('edit-0', editMessageId, 'call-edit-0');
+    edit.tool = 'apply_patch';
+    edit.state = {
+      status: 'completed',
+      input: {
+        patchText:
+          '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-const value = 1;\n+const value = 2;\n*** End Patch',
+      },
+      output: 'Done',
+      title: 'apply_patch',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    setShowInlineFileChanges(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId, { parentID: 'user-1' }),
+          parts:
+            index === 0
+              ? [edit]
+              : [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 2000;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector(`[data-msg-id="${editMessageId}"]`)).toBeNull();
+    const topSpacer = () =>
+      Number.parseFloat(
+        container?.querySelector<HTMLElement>('.virtual-spacer-top')?.style.height || '0'
+      );
+    const topPadBefore = topSpacer();
+
+    setShowInlineFileChanges(false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(container?.querySelector(`[data-msg-id="${editMessageId}"]`)).toBeNull();
+    expect(topSpacer() - topPadBefore).toBe(60);
     animationFrames.restore();
   });
 
