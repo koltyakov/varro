@@ -17,7 +17,11 @@ import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collaps
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { formatMessageSentTime } from '../lib/message-time';
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
-import { openProviderSetup } from '../lib/provider-setup';
+import {
+  markProviderAuthFailure,
+  providerAuthRestoredForMessage,
+  requestProviderConnection,
+} from '../lib/provider-connection-state';
 import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
 import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
@@ -171,11 +175,34 @@ export function Message(props: {
     const error = assistant()?.error;
     return !isAbortedAssistantError(error) && isProviderAuthFailure(error);
   });
+  const providerAuthProviderID = createMemo(() => {
+    const info = assistant();
+    if (!info) return null;
+    const data = info.error?.data;
+    const errorProviderID = data && 'providerID' in data ? data.providerID : undefined;
+    return typeof errorProviderID === 'string' && errorProviderID.trim()
+      ? errorProviderID
+      : info.providerID;
+  });
+  createEffect(() => {
+    const info = assistant();
+    const providerID = providerAuthProviderID();
+    if (info && providerID && providerAuthRequired()) {
+      markProviderAuthFailure(providerID, info.id);
+    }
+  });
+  const providerAuthRestored = createMemo(() => {
+    const info = assistant();
+    return !!info && providerAuthRestoredForMessage(info.id);
+  });
   const assistantErrorMessage = createMemo(() => {
     const error = assistant()?.error;
     if (isAbortedAssistantError(error)) return null;
     if (coveredByUsageLimitBanner()) return null;
     if (providerAuthRequired()) {
+      if (providerAuthRestored()) {
+        return 'Authentication restored. Send a new prompt to continue.';
+      }
       return 'You are signed out of this provider. Re-authenticate to continue.';
     }
     const message = error?.data?.message?.trim();
@@ -189,7 +216,11 @@ export function Message(props: {
   const assistantErrorAction = createMemo(() => {
     if (!(props.isLastAssistant ?? false) || !canRetryAssistant()) return undefined;
     if (providerAuthRequired()) {
-      return { label: 'Re-authenticate', run: openProviderSetup };
+      if (providerAuthRestored()) return undefined;
+      return {
+        label: 'Re-authenticate',
+        run: () => requestProviderConnection(providerAuthProviderID()!),
+      };
     }
 
     return {

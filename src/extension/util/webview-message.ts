@@ -89,6 +89,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'permission/reveal': true,
   'providers/watch': true,
   'providers/refresh': true,
+  'providers/reauthenticated': true,
   'terminal-selection/clear': true,
   'terminal/run': true,
   'session/open-in-opencode': true,
@@ -131,6 +132,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'ready':
     case 'context/request':
     case 'providers/refresh':
+    case 'providers/reauthenticated':
     case 'terminal-selection/clear':
     case 'files/clear':
     case 'files/pick':

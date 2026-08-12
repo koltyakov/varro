@@ -4,6 +4,7 @@ import type { SelectedModel } from './app-state-types';
 import type { McpStatus, ProviderLimitStatus } from '../../shared/protocol';
 import type { ProviderAuthMethodsByProvider } from '../../shared/opencode-types';
 import { setState, state } from './app-state';
+import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
 export function getSelectedModelForSession(
@@ -195,7 +196,9 @@ export function isModelVisible(providerID: string, modelID: string) {
 
 export function getVisibleProviders(providers: Provider[]) {
   return providers
-    .filter((provider) => isProviderVisible(provider.id))
+    .filter(
+      (provider) => isProviderVisible(provider.id) && !providerRequiresReconnection(provider.id)
+    )
     .map((provider) => ({
       ...provider,
       models: Object.fromEntries(

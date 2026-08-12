@@ -37,7 +37,13 @@ type ProviderFileRefreshDependencies = {
 type PendingRefreshScope = 'workspace' | 'global';
 type PersistedPendingRefreshState =
   | { version: 1; revalidateAuth: boolean }
-  | { version: 2; scope: PendingRefreshScope; revalidateAuth: boolean };
+  | { version: 2; scope: PendingRefreshScope; revalidateAuth: boolean }
+  | {
+      version: 3;
+      scope: PendingRefreshScope;
+      revalidateAuth: boolean;
+      source: 'auth' | 'config';
+    };
 
 export class ProviderFileRefreshController {
   private static readonly PENDING_STATE_KEY = 'varro.providerRefresh.pending';
@@ -53,6 +59,8 @@ export class ProviderFileRefreshController {
   private observedFilesSignature: string | null = null;
   private pendingScope: PendingRefreshScope | null = null;
   private authChangePending = false;
+  private configChangePending = false;
+  private pendingAuthOnlyInvalidation = false;
   private authRevalidationPending = false;
   private pendingStatusPosted = false;
   private invalidationInFlight = false;
@@ -80,6 +88,10 @@ export class ProviderFileRefreshController {
     if (isPersistedPendingState(pendingState)) {
       this.pendingScope = pendingState.version === 1 ? 'global' : pendingState.scope;
       this.authRevalidationPending = pendingState.revalidateAuth;
+      this.pendingAuthOnlyInvalidation =
+        pendingState.version === 3
+          ? pendingState.source === 'auth'
+          : this.pendingScope === 'global' && pendingState.revalidateAuth;
     }
     dependencies.server.on('status', this.handleServerStatus);
   }
@@ -143,14 +155,43 @@ export class ProviderFileRefreshController {
     await this.maybeRestart(generation, 0);
   }
 
+  async acknowledgeEmbeddedReauthentication() {
+    const generation = ++this.refreshGeneration;
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    const signature = await this.readFilesSignature();
+    if (this.disposed || generation !== this.refreshGeneration) return;
+    if (!this.configChangePending) this.observedFilesSignature = signature;
+    this.authChangePending = false;
+    if (this.pendingAuthOnlyInvalidation && !this.configChangePending) {
+      this.pendingScope = null;
+      this.pendingAuthOnlyInvalidation = false;
+      this.authRevalidationPending = false;
+      await this.clearPersistedPendingState();
+      if (this.pendingStatusPosted) {
+        this.pendingStatusPosted = false;
+        this.dependencies.postPendingStatus(false);
+      }
+    }
+    this.dependencies.clearProviderLimitCache();
+    this.dependencies.postRefresh();
+    if (this.configChangePending) {
+      await this.refreshState(++this.refreshGeneration, true);
+    }
+  }
+
   async refreshState(generation = ++this.refreshGeneration, requireSignatureChange = false) {
     if (this.disposed || generation !== this.refreshGeneration) return;
     const signature = await this.readFilesSignature();
     if (this.disposed || generation !== this.refreshGeneration) return;
     if (requireSignatureChange && this.observedFilesSignature === null) {
       this.observedFilesSignature = signature;
+      this.updatePendingInvalidationSource(requireSignatureChange);
       this.authRevalidationPending ||= this.authChangePending;
       this.authChangePending = false;
+      this.configChangePending = false;
       this.dependencies.clearProviderLimitCache();
       await this.markRefreshPending('global');
       this.dependencies.postRefresh();
@@ -166,8 +207,10 @@ export class ProviderFileRefreshController {
     }
     this.dependencies.clearProviderLimitCache();
     this.observedFilesSignature = signature;
+    this.updatePendingInvalidationSource(requireSignatureChange);
     this.authRevalidationPending ||= this.authChangePending;
     this.authChangePending = false;
+    this.configChangePending = false;
     await this.markRefreshPending('global');
     this.dependencies.postRefresh();
     await this.maybeRestart(generation, 0);
@@ -227,7 +270,8 @@ export class ProviderFileRefreshController {
   }
 
   private scheduleRefresh(authChanged: boolean) {
-    this.authChangePending ||= authChanged;
+    if (authChanged) this.authChangePending = true;
+    else this.configChangePending = true;
     const generation = ++this.refreshGeneration;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
@@ -335,6 +379,7 @@ export class ProviderFileRefreshController {
       // was refreshing); a signature change during the refresh is still caught
       // by the next activation's signature comparison.
       this.pendingScope = null;
+      this.pendingAuthOnlyInvalidation = false;
       await this.clearPersistedPendingState();
       if (!this.disposed && this.pendingStatusPosted) {
         this.pendingStatusPosted = false;
@@ -363,6 +408,13 @@ export class ProviderFileRefreshController {
     } catch {
       return null;
     }
+  }
+
+  private updatePendingInvalidationSource(requireSignatureChange: boolean) {
+    const authOnly = requireSignatureChange && this.authChangePending && !this.configChangePending;
+    this.pendingAuthOnlyInvalidation = this.pendingScope
+      ? this.pendingAuthOnlyInvalidation && authOnly
+      : authOnly;
   }
 
   private async isServerIdle(): Promise<boolean | null> {
@@ -423,9 +475,10 @@ export class ProviderFileRefreshController {
     }
     try {
       await this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, {
-        version: 2,
+        version: 3,
         scope: this.pendingScope,
         revalidateAuth: this.authRevalidationPending,
+        source: this.pendingAuthOnlyInvalidation ? 'auth' : 'config',
       });
     } catch (err) {
       logger.warn(
@@ -464,9 +517,17 @@ function isPersistedPendingState(value: unknown): value is PersistedPendingRefre
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   if (record.version === 1) return typeof record.revalidateAuth === 'boolean';
-  return (
+  if (
     record.version === 2 &&
     (record.scope === 'workspace' || record.scope === 'global') &&
     typeof record.revalidateAuth === 'boolean'
+  ) {
+    return true;
+  }
+  return (
+    record.version === 3 &&
+    (record.scope === 'workspace' || record.scope === 'global') &&
+    typeof record.revalidateAuth === 'boolean' &&
+    (record.source === 'auth' || record.source === 'config')
   );
 }

@@ -51,6 +51,10 @@ import {
 } from '../lib/state';
 import { ralphStore } from '../lib/stores/ralph-store';
 import { clearDirectSessionReturn, rememberDirectSessionReturn } from '../lib/session-navigation';
+import {
+  requestProviderConnection,
+  resetProviderConnectionState,
+} from '../lib/provider-connection-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -139,6 +143,7 @@ afterEach(() => {
   setShowSettings(false);
   stopLoading();
   clearDirectSessionReturn();
+  resetProviderConnectionState();
   for (const run of ralphStore.getAllRuns()) {
     ralphStore.removeRun(run.config.managerSessionId);
   }
@@ -2582,6 +2587,35 @@ describe('header status badges', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.settings-panel')).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it('opens locked provider re-authentication over chat without showing Models', async () => {
+    vi.spyOn(client.config, 'providerCatalog').mockResolvedValue({
+      all: [
+        { id: 'github-copilot', name: 'GitHub Copilot', source: 'api', models: {} },
+        { id: 'openai', name: 'OpenAI', source: 'api', models: {} },
+      ],
+      default: {},
+      connected: ['github-copilot'],
+    });
+    setState('providerAuthMethods', {
+      'github-copilot': [{ type: 'oauth', label: 'Login with GitHub Copilot' }],
+    });
+    setState('sessions', [session('session-1', 500)]);
+    setState('activeSessionId', 'session-1');
+    cleanup = render(() => Chat(), container!);
+
+    requestProviderConnection('github-copilot');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+    expect(container?.querySelector('.settings-panel')).toBeNull();
+    expect(dialog?.textContent).toContain('Re-authenticate provider');
+    expect(dialog?.textContent).toContain('GitHub Copilot');
+    expect(dialog?.textContent).toContain('Login with GitHub Copilot');
+    expect(dialog?.textContent).not.toContain('Back to providers');
+    expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeNull();
   });
 
   it('renders settings from the session picker on narrow screens', () => {

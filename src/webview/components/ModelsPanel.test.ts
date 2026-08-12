@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
+import { reconcile } from 'solid-js/store';
 import type { Session } from '../types';
+import {
+  markProviderAuthFailure,
+  resetProviderConnectionState,
+} from '../lib/provider-connection-state';
 import { setState } from '../lib/state';
 import { ModelsPanel } from './ModelsPanel';
 
@@ -174,6 +179,8 @@ beforeEach(() => {
   ]);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('providerAuthMethods', reconcile({}));
+  resetProviderConnectionState();
 });
 
 afterEach(() => {
@@ -195,6 +202,8 @@ afterEach(() => {
   setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('providerAuthMethods', reconcile({}));
+  resetProviderConnectionState();
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
   }
@@ -325,6 +334,18 @@ describe('ModelsPanel', () => {
     expect(dialog?.querySelector('[aria-label="Search providers"]')).toBeInstanceOf(
       HTMLInputElement
     );
+  });
+
+  it('hides fallback models while a provider requires re-authentication', async () => {
+    markProviderAuthFailure('openai', 'failed-message');
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain(
+      'Authentication is required to load available models.'
+    );
+    expect(container?.querySelector('.settings-model-row')).toBeNull();
+    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('Reconnect');
   });
 
   it('connects an API provider from the embedded dialog', async () => {

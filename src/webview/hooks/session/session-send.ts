@@ -584,7 +584,6 @@ export class SessionSendOperations {
     workspaceGeneration: number;
     promise: Promise<string | null>;
   } | null = null;
-
   constructor(private readonly deps: StateBoundSendDependencies) {}
 
   private readonly createSessionForSend = (

@@ -20,6 +20,7 @@ type ProviderRefreshAccess = {
   sessionState: { markSessionBusy(sessionID: string): unknown };
   setProviderWatchActive(active: boolean): void;
   startProviderFileObservation(): void;
+  providerReauthenticated(): Promise<void>;
 };
 
 afterEach(() => {
@@ -72,10 +73,7 @@ describe('SidebarProvider provider refresh', () => {
 
     expect(server.restart).toHaveBeenCalledOnce();
     expect(posted).toContainEqual({ type: 'providers/refresh' });
-    expect(posted).toContainEqual({
-      type: 'providers/refresh',
-      payload: { revalidateAuth: true },
-    });
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
     await provider.dispose();
   });
 
@@ -94,6 +92,159 @@ describe('SidebarProvider provider refresh', () => {
     await provider.handleMessage({ type: 'providers/refresh' });
 
     expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('acknowledges embedded reauthentication without restarting OpenCode', async () => {
+    vi.useFakeTimers();
+    const server = createServer();
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+
+    access.startProviderFileObservation();
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 2,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('reauth'));
+    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+
+    await provider.handleMessage({ type: 'providers/reauthenticated' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/global/dispose');
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('cancels a deferred auth-file restart after embedded reauthentication', async () => {
+    vi.useFakeTimers();
+    let idle = false;
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return undefined;
+      }),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+
+    access.startProviderFileObservation();
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 2,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('reauth'));
+    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+
+    await provider.handleMessage({ type: 'providers/reauthenticated' });
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('cancels a restored deferred auth-only restart after embedded reauthentication', async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, unknown>([
+      [
+        'varro.providerRefresh.pending',
+        {
+          version: 3,
+          scope: 'global',
+          revalidateAuth: true,
+          source: 'auth',
+        },
+      ],
+    ]);
+    const workspaceState = {
+      get: vi.fn((key: string, fallback?: unknown) =>
+        values.has(key) ? values.get(key) : fallback
+      ),
+      update: vi.fn(async (key: string, value: unknown) => {
+        if (value === undefined) values.delete(key);
+        else values.set(key, value);
+      }),
+    };
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? { active: { type: 'busy' } } : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({
+      server,
+      workspaceState: workspaceState as never,
+    });
+    const { posted } = attachTestView(provider);
+
+    await provider.handleMessage({ type: 'providers/reauthenticated' });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(server.restart).not.toHaveBeenCalled();
+    expect(values.has('varro.providerRefresh.pending')).toBe(false);
+    expect(posted).toContainEqual({ type: 'providers/refresh' });
+    await provider.dispose();
+  });
+
+  it('preserves a concurrent config refresh after embedded reauthentication', async () => {
+    vi.useFakeTimers();
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const access = provider as unknown as ProviderRefreshAccess;
+
+    access.startProviderFileObservation();
+    await vi.advanceTimersByTimeAsync(0);
+    providerFileSystem.stat.mockResolvedValue({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 2,
+      size: 6,
+    });
+    providerFileSystem.readFile.mockResolvedValue(Buffer.from('changed'));
+    const authWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[3]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    const configWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+    authWatcher?.onDidChange.mock.calls[0]?.[0]();
+    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+
+    await provider.handleMessage({ type: 'providers/reauthenticated' });
+
+    expect(server.restart).toHaveBeenCalledOnce();
     await provider.dispose();
   });
 
@@ -356,9 +507,10 @@ describe('SidebarProvider provider refresh', () => {
 
     await firstAccess.refreshProviderState();
     expect(values.get('varro.providerRefresh.pending')).toEqual({
-      version: 2,
+      version: 3,
       scope: 'global',
       revalidateAuth: false,
+      source: 'config',
     });
     await first.provider.dispose();
 

@@ -276,6 +276,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         server,
         post: (message) => this.post(message),
         refreshProviders: () => this.refreshProviderState(),
+        providerReauthenticated: () => this.providerReauthenticated(),
         postContext: () => this.postContext(),
         postTerminalSelection: (selection) => this.postTerminalSelection(selection),
         postConfigState: () => this.postConfigState(),
@@ -416,6 +417,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async refreshProviderState(generation?: number, requireSignatureChange = false) {
     await this.providerFileRefresh.refreshState(generation, requireSignatureChange);
+  }
+
+  private async providerReauthenticated() {
+    await this.providerFileRefresh.acknowledgeEmbeddedReauthentication();
   }
 
   private async refreshOpenCodeWorkspaceState() {

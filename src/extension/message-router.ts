@@ -38,6 +38,7 @@ export interface MessageRouterCallbacks {
   requestContext(): void;
   selectWorkspace(path: string): Promise<void>;
   refreshProviders(): Promise<void>;
+  providerReauthenticated(): Promise<void>;
   clearTerminalSelection(): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
   openSessionInOpenCode(sessionId: string): void | Promise<void>;
@@ -102,6 +103,9 @@ export class MessageRouter {
           break;
         case 'providers/refresh':
           await this.handleProvidersRefreshMessage();
+          break;
+        case 'providers/reauthenticated':
+          await this.callbacks.providerReauthenticated();
           break;
         case 'terminal-selection/clear':
           this.handleTerminalSelectionClearMessage();

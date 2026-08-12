@@ -22,6 +22,7 @@ function createCallbacks(): MessageRouterCallbacks {
     requestContext: vi.fn(),
     selectWorkspace: vi.fn(() => Promise.resolve()),
     refreshProviders: vi.fn(() => Promise.resolve()),
+    providerReauthenticated: vi.fn(() => Promise.resolve()),
     clearTerminalSelection: vi.fn(),
     runInTerminal: vi.fn(),
     openSessionInOpenCode: vi.fn(),
@@ -128,6 +129,13 @@ describe('MessageRouter', () => {
     const router = new MessageRouter(cb);
     await router.handleMessage({ type: 'providers/refresh' });
     expect(cb.refreshProviders).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches providers/reauthenticated', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    await router.handleMessage({ type: 'providers/reauthenticated' });
+    expect(cb.providerReauthenticated).toHaveBeenCalledOnce();
   });
 
   it('dispatches terminal-selection/clear', async () => {

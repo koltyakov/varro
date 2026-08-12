@@ -460,6 +460,12 @@ describe('webview message validation', () => {
     });
   });
 
+  it('accepts embedded provider reauthentication completion', () => {
+    expect(parseWebviewMessage({ type: 'providers/reauthenticated' })).toEqual({
+      type: 'providers/reauthenticated',
+    });
+  });
+
   it('accepts providers/watch with active state', () => {
     expect(parseWebviewMessage({ type: 'providers/watch', payload: { active: true } })).toEqual({
       type: 'providers/watch',

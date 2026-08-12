@@ -4,7 +4,13 @@ import { createSignal } from 'solid-js';
 import type { FilePart, Part, ToolPart } from '../types';
 import { client } from '../lib/client';
 import { editingMessage, resetMessageEditState } from '../lib/message-edit-state';
-import { setState as setAppState } from '../lib/state';
+import {
+  providerConnectionRequest,
+  providerRequiresReconnection,
+  resolveProviderAuthFailure,
+  resetProviderConnectionState,
+} from '../lib/provider-connection-state';
+import { setShowSettings, setState as setAppState, showSettings } from '../lib/state';
 import {
   Message,
   getAssistantContainerVariant,
@@ -18,15 +24,10 @@ import { resetToolCallExpansionState } from './ToolCall';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 const selectSessionMock = vi.hoisted(() => vi.fn());
-const openProviderSetupMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
   selectSession: selectSessionMock,
-}));
-
-vi.mock('../lib/provider-setup', () => ({
-  openProviderSetup: openProviderSetupMock,
 }));
 
 let container: HTMLDivElement | null = null;
@@ -62,7 +63,8 @@ afterEach(() => {
   document.body.classList.remove('chat-image-preview-open');
   retryMessageMock.mockReset();
   selectSessionMock.mockReset();
-  openProviderSetupMock.mockReset();
+  resetProviderConnectionState();
+  setShowSettings(false);
   setAppState('sessions', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
@@ -2077,6 +2079,7 @@ describe('Message assistant final answer rendering', () => {
       error: {
         name: 'ProviderAuthError',
         data: {
+          providerID: 'github-copilot',
           message: 'Token refresh failed: 401',
         },
       },
@@ -2113,8 +2116,17 @@ describe('Message assistant final answer rendering', () => {
 
     (reauthenticateButton as HTMLButtonElement).click();
 
-    expect(openProviderSetupMock).toHaveBeenCalledTimes(1);
+    expect(providerConnectionRequest()?.providerID).toBe('github-copilot');
+    expect(providerRequiresReconnection('github-copilot')).toBe(true);
+    expect(showSettings()).toBe(false);
     expect(retryMessageMock).not.toHaveBeenCalled();
+
+    resolveProviderAuthFailure('github-copilot');
+
+    expect(errorBlock?.textContent).toContain(
+      'Authentication restored. Send a new prompt to continue.'
+    );
+    expect(container?.querySelector('.assistant-message-flow-item-error-action')).toBeNull();
   });
 
   it('shows friendly label for MessageOutputLengthError (no data.message)', () => {

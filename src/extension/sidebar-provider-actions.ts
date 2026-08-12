@@ -37,6 +37,7 @@ export interface SidebarProviderActionDeps {
   server: OpenCodeServer;
   post(message: ExtensionMessage): void;
   refreshProviders(): Promise<void>;
+  providerReauthenticated(): Promise<void>;
   postContext(): void;
   postTerminalSelection(selection: { text: string; terminalName: string } | null): void;
   postConfigState(): void;
@@ -97,6 +98,7 @@ export function createSidebarProviderActions(
       await deps.contextProvider.selectWorkspace(path);
     },
     refreshProviders: () => deps.refreshProviders(),
+    providerReauthenticated: () => deps.providerReauthenticated(),
     clearTerminalSelection: () => {
       deps.contextProvider.clearTerminalSelection();
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);

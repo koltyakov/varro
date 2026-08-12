@@ -4,6 +4,10 @@ import type { Provider } from '../types';
 import { ModelPicker } from './ModelPicker';
 import { resetDefaultAppState, setShowSettings, setState, showSettings } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
+import {
+  markProviderAuthFailure,
+  resetProviderConnectionState,
+} from '../lib/provider-connection-state';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -44,6 +48,7 @@ async function flushMicrotasks(count = 2) {
 
 beforeEach(() => {
   resetDefaultAppState();
+  resetProviderConnectionState();
   window.localStorage.removeItem(STORAGE_KEYS.modelPickerOpened);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -60,6 +65,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   setShowSettings(false);
   resetDefaultAppState();
+  resetProviderConnectionState();
   vi.restoreAllMocks();
 });
 
@@ -120,6 +126,26 @@ describe('ModelPicker', () => {
         item.textContent?.trim()
       )
     ).toEqual(['Newer', 'Older', 'Default']);
+  });
+
+  it('hides providers that require re-authentication', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+      createProvider('github-copilot', 'GitHub Copilot', {
+        'gpt-5': createModel('gpt-5', 'GPT-5 Copilot'),
+      }),
+    ]);
+    markProviderAuthFailure('github-copilot', 'failed-message');
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(container?.textContent).toContain('OpenAI');
+    expect(container?.textContent).toContain('GPT-5');
+    expect(container?.textContent).not.toContain('GitHub Copilot');
+    expect(container?.textContent).not.toContain('GPT-5 Copilot');
   });
 
   it('shows search only when more than ten models are visible and filters by provider or model query', async () => {

@@ -17,6 +17,10 @@ import {
 import { sortProviderModels } from '../lib/model-ordering';
 import { isRunningSessionStatus } from '../lib/session-event-reducer';
 import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
+import {
+  providerRequiresReconnection,
+  requestProviderConnection,
+} from '../lib/provider-connection-state';
 import { client } from '../lib/client';
 import { postMessage } from '../lib/bridge';
 import { refreshRoutingState } from '../hooks/useOpenCode';
@@ -61,6 +65,7 @@ export function ModelsPanel() {
     providers: Provider[];
     error: string;
     loading: boolean;
+    initialProviderID: string | null;
   } | null>(null);
   const [providerDisconnectionData, setProviderDisconnectionData] = createSignal<{
     providers: Provider[];
@@ -168,20 +173,26 @@ export function ModelsPanel() {
     postMessage({ type: 'providers/refresh' });
   }
 
-  async function openProviderConnection() {
+  async function openProviderConnection(initialProviderID: string | null = null) {
     if (providerConnectionData()) return;
-    const loadingState = { providers: [], error: '', loading: true };
+    const loadingState = { providers: [], error: '', loading: true, initialProviderID };
     setProviderConnectionData(loadingState);
     try {
       const catalog = await client.config.providerCatalog();
       if (providerConnectionData() !== loadingState) return;
-      setProviderConnectionData({ providers: catalog.all, error: '', loading: false });
+      setProviderConnectionData({
+        providers: catalog.all,
+        error: '',
+        loading: false,
+        initialProviderID,
+      });
     } catch (error) {
       if (providerConnectionData() !== loadingState) return;
       setProviderConnectionData({
         providers: [],
         error: error instanceof Error ? error.message : String(error),
         loading: false,
+        initialProviderID,
       });
     }
   }
@@ -385,6 +396,7 @@ export function ModelsPanel() {
                   <ProviderSection
                     provider={provider}
                     models={models}
+                    reconnectRequired={providerRequiresReconnection(provider.id)}
                     forceExpanded={normalizedQuery().length > 0}
                     routing={routing()}
                     previousRouting={state.providerRefreshPending ? previousRouting() : null}
@@ -500,6 +512,7 @@ export function ModelsPanel() {
             catalogProviders={data().providers}
             providerLoadError={data().error}
             isLoadingProviders={data().loading}
+            initialProviderID={data().initialProviderID}
             onClose={() => setProviderConnectionData(null)}
           />
         )}
@@ -522,6 +535,7 @@ export function ModelsPanel() {
 function ProviderSection(props: {
   provider: SettingsProvider;
   models: SettingsModel[];
+  reconnectRequired: boolean;
   forceExpanded: boolean;
   routing: OpenCodeModelRouting;
   previousRouting: OpenCodeModelRouting | null;
@@ -537,7 +551,7 @@ function ProviderSection(props: {
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();
   const isFullProviderView = () => props.models.length === allModels().length;
-  const isExpanded = () => props.forceExpanded || expanded();
+  const isExpanded = () => props.forceExpanded || props.reconnectRequired || expanded();
 
   function toggleProvider() {
     const visible = !allEnabled();
@@ -571,106 +585,122 @@ function ProviderSection(props: {
           </svg>
           <span class="settings-provider-name">{props.provider.name}</span>
           <span class="settings-provider-count">
-            {enabledCount()}/{props.models.length}
+            {props.reconnectRequired ? 'Reconnect' : `${enabledCount()}/${props.models.length}`}
           </span>
         </button>
-        <ProviderCheckbox
-          checked={allEnabled()}
-          indeterminate={someEnabled()}
-          onChange={toggleProvider}
-        />
+        <Show when={!props.reconnectRequired}>
+          <ProviderCheckbox
+            checked={allEnabled()}
+            indeterminate={someEnabled()}
+            onChange={toggleProvider}
+          />
+        </Show>
       </div>
 
       <Show when={isExpanded()}>
-        <div class="settings-model-list">
-          <For each={props.models}>
-            {(model) => {
-              const supportsTools = () =>
-                modelSupportsTools(props.provider.id, model.id, state.providers);
-              const supportsVariants = () =>
-                modelSupportsVariants(props.provider.id, model.id, state.providers);
-              const supportsVision = () =>
-                modelSupportsVision(props.provider.id, model.id, state.providers);
-              const routeTags = () =>
-                getModelRouteTags(
-                  props.routing,
-                  props.provider.id,
-                  model.id,
-                  props.previousRouting
-                );
-              const releaseDate = () => formatModelReleaseDate(model.release_date);
+        <Show
+          when={!props.reconnectRequired}
+          fallback={
+            <div class="settings-provider-auth-required">
+              <span>Authentication is required to load available models.</span>
+              <button type="button" onClick={() => requestProviderConnection(props.provider.id)}>
+                Re-authenticate
+              </button>
+            </div>
+          }
+        >
+          <div class="settings-model-list">
+            <For each={props.models}>
+              {(model) => {
+                const supportsTools = () =>
+                  modelSupportsTools(props.provider.id, model.id, state.providers);
+                const supportsVariants = () =>
+                  modelSupportsVariants(props.provider.id, model.id, state.providers);
+                const supportsVision = () =>
+                  modelSupportsVision(props.provider.id, model.id, state.providers);
+                const routeTags = () =>
+                  getModelRouteTags(
+                    props.routing,
+                    props.provider.id,
+                    model.id,
+                    props.previousRouting
+                  );
+                const releaseDate = () => formatModelReleaseDate(model.release_date);
 
-              return (
-                <label
-                  class="settings-model-row"
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    props.onOpenContextMenu({
-                      x: event.clientX,
-                      y: event.clientY,
-                      providerID: props.provider.id,
-                      modelID: model.id,
-                    });
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    class="settings-checkbox"
-                    checked={isModelVisible(props.provider.id, model.id)}
-                    onChange={(e) =>
-                      setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
-                    }
-                  />
-                  <span class="settings-model-name-wrap">
-                    <span class="settings-model-name">
-                      <FormattedModelName name={model.name} />
-                    </span>
-                    <Show when={state.providerDefaults[props.provider.id] === model.id}>
-                      <span class="model-default-label">(default)</span>
-                    </Show>
-                  </span>
-                  <Show
-                    when={
-                      supportsTools() ||
-                      supportsVariants() ||
-                      supportsVision() ||
-                      model.limit?.context ||
-                      releaseDate() ||
-                      routeTags().length > 0
-                    }
+                return (
+                  <label
+                    class="settings-model-row"
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      props.onOpenContextMenu({
+                        x: event.clientX,
+                        y: event.clientY,
+                        providerID: props.provider.id,
+                        modelID: model.id,
+                      });
+                    }}
                   >
-                    <span class="settings-model-meta">
-                      <span class="model-release-date">
-                        <Show when={releaseDate()}>{(date) => date()}</Show>
+                    <input
+                      type="checkbox"
+                      class="settings-checkbox"
+                      checked={isModelVisible(props.provider.id, model.id)}
+                      onChange={(e) =>
+                        setModelVisible(props.provider.id, model.id, e.currentTarget.checked)
+                      }
+                    />
+                    <span class="settings-model-name-wrap">
+                      <span class="settings-model-name">
+                        <FormattedModelName name={model.name} />
                       </span>
-                      <span class="settings-model-badges">
-                        <For each={routeTags()}>{(tag) => <ModelRouteBadge tag={tag} />}</For>
-                        <Show when={supportsTools()}>
-                          <span class="model-capability-tag model-capability-tag-tools">Tools</span>
-                        </Show>
-                        <Show when={supportsVariants()}>
-                          <span class="model-capability-tag model-capability-tag-variants">
-                            Variants
-                          </span>
-                        </Show>
-                        <Show when={supportsVision()}>
-                          <span class="model-capability-tag model-capability-tag-vision">
-                            Vision
-                          </span>
-                        </Show>
-                        <Show when={model.limit?.context}>
-                          <span class="settings-model-ctx">
-                            {formatContextLimit(model.limit!.context)}
-                          </span>
-                        </Show>
-                      </span>
+                      <Show when={state.providerDefaults[props.provider.id] === model.id}>
+                        <span class="model-default-label">(default)</span>
+                      </Show>
                     </span>
-                  </Show>
-                </label>
-              );
-            }}
-          </For>
-        </div>
+                    <Show
+                      when={
+                        supportsTools() ||
+                        supportsVariants() ||
+                        supportsVision() ||
+                        model.limit?.context ||
+                        releaseDate() ||
+                        routeTags().length > 0
+                      }
+                    >
+                      <span class="settings-model-meta">
+                        <span class="model-release-date">
+                          <Show when={releaseDate()}>{(date) => date()}</Show>
+                        </span>
+                        <span class="settings-model-badges">
+                          <For each={routeTags()}>{(tag) => <ModelRouteBadge tag={tag} />}</For>
+                          <Show when={supportsTools()}>
+                            <span class="model-capability-tag model-capability-tag-tools">
+                              Tools
+                            </span>
+                          </Show>
+                          <Show when={supportsVariants()}>
+                            <span class="model-capability-tag model-capability-tag-variants">
+                              Variants
+                            </span>
+                          </Show>
+                          <Show when={supportsVision()}>
+                            <span class="model-capability-tag model-capability-tag-vision">
+                              Vision
+                            </span>
+                          </Show>
+                          <Show when={model.limit?.context}>
+                            <span class="settings-model-ctx">
+                              {formatContextLimit(model.limit!.context)}
+                            </span>
+                          </Show>
+                        </span>
+                      </span>
+                    </Show>
+                  </label>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
       </Show>
     </div>
   );

@@ -197,6 +197,34 @@
   color: var(--color-vscode-muted);
 }
 
+.settings-provider-auth-required {
+  margin: 6px var(--space-5) 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background));
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-provider-auth-required button {
+  flex: none;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  padding: 3px 9px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  cursor: pointer;
+}
+
+.settings-provider-auth-required button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
 .provider-connect-overlay {
   position: fixed;
   inset: 0;

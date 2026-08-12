@@ -12,7 +12,7 @@ import {
   getSessionTreeRootId,
   setShowSettings,
 } from '../lib/state';
-import { createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
+import { Show, createSignal, onMount, onCleanup, createEffect, createMemo, on } from 'solid-js';
 import { selectSession, deleteSessionImmediately } from '../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { ChatWorkspace } from './chat/ChatWorkspace';
@@ -43,6 +43,13 @@ import {
 } from '../lib/bridge';
 import { compareSessionsByActivity } from '../lib/session-order';
 import {
+  consumeProviderConnectionRequest,
+  providerConnectionRequest,
+} from '../lib/provider-connection-state';
+import { client } from '../lib/client';
+import type { Provider } from '../types';
+import { ProviderConnectionDialog } from './ProviderConnectionDialog';
+import {
   clearDirectSessionReturn,
   clearDirectSessionReturnUnless,
   getDirectSessionReturnId,
@@ -72,6 +79,45 @@ function isDesktopSessionPaneRight() {
 }
 
 export function Chat() {
+  const [providerConnectionData, setProviderConnectionData] = createSignal<{
+    providers: Provider[];
+    error: string;
+    loading: boolean;
+    providerID: string;
+  } | null>(null);
+
+  createEffect(() => {
+    const request = providerConnectionRequest();
+    if (!request || providerConnectionData()) return;
+    consumeProviderConnectionRequest(request.id);
+    const loadingState = {
+      providers: [],
+      error: '',
+      loading: true,
+      providerID: request.providerID,
+    };
+    setProviderConnectionData(loadingState);
+    void client.config.providerCatalog().then(
+      (catalog) => {
+        if (providerConnectionData() !== loadingState) return;
+        setProviderConnectionData({
+          providers: catalog.all,
+          error: '',
+          loading: false,
+          providerID: request.providerID,
+        });
+      },
+      (error: unknown) => {
+        if (providerConnectionData() !== loadingState) return;
+        setProviderConnectionData({
+          providers: [],
+          error: error instanceof Error ? error.message : String(error),
+          loading: false,
+          providerID: request.providerID,
+        });
+      }
+    );
+  });
   const [sessionFilter, setSessionFilter] = createSignal<SessionListFilter | null>(null);
   const [subagentParentId, setSubagentParentId] = createSignal<string | null>(null);
   const [sidebarSubagentParentId, setSidebarSubagentParentId] = createSignal<string | null>(null);
@@ -623,65 +669,80 @@ export function Chat() {
   });
 
   return (
-    <ChatWorkspace
-      shouldRenderWorkspace={shouldRenderWorkspace()}
-      isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
-      showSessionPicker={showSessionPicker()}
-      showSettings={showSettings()}
-      showReconnectBanner={showReconnectBanner()}
-      slowApiRequests={slowApiRequests()}
-      sessionFilter={sessionFilter()}
-      subagentParentId={subagentParentId()}
-      sidebarSubagentParentId={sidebarSubagentParentId()}
-      sessionListFilterLabel={sessionListFilterLabel()}
-      sessionListFilterPrefix={sessionListFilterPrefix()}
-      sessionListFilterTitle={sessionListFilterTitle()}
-      sidebarSessionListFilterLabel={sidebarSessionListFilterLabel()}
-      sidebarSessionListFilterTitle={sidebarSessionListFilterTitle()}
-      primarySessionsCount={primarySessionsCount()}
-      shouldShowFailedBadge={shouldShowHeaderBadge('failed')}
-      shouldShowAttentionBadge={shouldShowHeaderBadge('attention')}
-      shouldShowPlanReadyBadge={shouldShowHeaderBadge('plan-ready')}
-      shouldShowCompletedBadge={shouldShowHeaderBadge('completed')}
-      shouldShowRunningBadge={shouldShowHeaderBadge('running')}
-      failedSessionsCount={failedSessionsCount()}
-      attentionSessionsCount={attentionSessionsCount()}
-      planReadySessionsCount={planReadySessionsCount()}
-      completedSessionsCount={completedSessionsCount()}
-      runningSessionsCount={runningSessionsCount()}
-      sessionSidebarFailedCount={sessionSidebarFailedCount()}
-      sessionSidebarAttentionCount={sessionSidebarAttentionCount()}
-      sessionSidebarPlanReadyCount={sessionSidebarPlanReadyCount()}
-      sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
-      sessionSidebarRunningCount={sessionSidebarRunningCount()}
-      activeTitle={activeTitle()}
-      activeBackTitle={activeBackTitle()}
-      showDesktopBackButton={
-        isDesktopSessionLayout() &&
-        (!!activeSession()?.parentID || !!getDirectSessionReturnId(state.activeSessionId))
-      }
-      activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
-      activeSubagentCount={activeSubagentCount()}
-      activeSubagentLabel={activeSubagentLabel()}
-      managedSubagentParentId={activeSession()?.parentID || null}
-      managedSubagentParentTitle={managedSubagentParentTitle()}
-      onClearSessionListView={clearSessionListView}
-      onOpenAllSessions={() => {
-        void openAllSessions();
-      }}
-      onReturnToManagedSubagentParent={returnToManagedSubagentParent}
-      onOpenParentSession={openSubagentListParentSession}
-      onOpenSubagentSessions={openSubagentSessions}
-      onOpenSidebarSubagentSessions={openSidebarSubagentSessions}
-      onOpenTopLevelSidebarSessions={openTopLevelSidebarSessions}
-      onOpenFailedSessions={openFailedSessions}
-      onOpenAttentionSessions={openAttentionSessions}
-      onOpenPlanReadySessions={openPlanReadySessions}
-      onOpenCompletedSessions={openCompletedSessions}
-      onOpenRunningSessions={openRunningSessions}
-      onCreateSessionFromPicker={startNewChatDraft}
-      onCreateSession={startNewChatDraft}
-    />
+    <>
+      <ChatWorkspace
+        shouldRenderWorkspace={shouldRenderWorkspace()}
+        isDesktopSessionPaneRight={isDesktopSessionPaneRight()}
+        showSessionPicker={showSessionPicker()}
+        showSettings={showSettings()}
+        showReconnectBanner={showReconnectBanner()}
+        slowApiRequests={slowApiRequests()}
+        sessionFilter={sessionFilter()}
+        subagentParentId={subagentParentId()}
+        sidebarSubagentParentId={sidebarSubagentParentId()}
+        sessionListFilterLabel={sessionListFilterLabel()}
+        sessionListFilterPrefix={sessionListFilterPrefix()}
+        sessionListFilterTitle={sessionListFilterTitle()}
+        sidebarSessionListFilterLabel={sidebarSessionListFilterLabel()}
+        sidebarSessionListFilterTitle={sidebarSessionListFilterTitle()}
+        primarySessionsCount={primarySessionsCount()}
+        shouldShowFailedBadge={shouldShowHeaderBadge('failed')}
+        shouldShowAttentionBadge={shouldShowHeaderBadge('attention')}
+        shouldShowPlanReadyBadge={shouldShowHeaderBadge('plan-ready')}
+        shouldShowCompletedBadge={shouldShowHeaderBadge('completed')}
+        shouldShowRunningBadge={shouldShowHeaderBadge('running')}
+        failedSessionsCount={failedSessionsCount()}
+        attentionSessionsCount={attentionSessionsCount()}
+        planReadySessionsCount={planReadySessionsCount()}
+        completedSessionsCount={completedSessionsCount()}
+        runningSessionsCount={runningSessionsCount()}
+        sessionSidebarFailedCount={sessionSidebarFailedCount()}
+        sessionSidebarAttentionCount={sessionSidebarAttentionCount()}
+        sessionSidebarPlanReadyCount={sessionSidebarPlanReadyCount()}
+        sessionSidebarCompletedCount={sessionSidebarCompletedCount()}
+        sessionSidebarRunningCount={sessionSidebarRunningCount()}
+        activeTitle={activeTitle()}
+        activeBackTitle={activeBackTitle()}
+        showDesktopBackButton={
+          isDesktopSessionLayout() &&
+          (!!activeSession()?.parentID || !!getDirectSessionReturnId(state.activeSessionId))
+        }
+        activeSubagentRootId={activeSubagentCount() > 0 ? activeSubagentRootId() : null}
+        activeSubagentCount={activeSubagentCount()}
+        activeSubagentLabel={activeSubagentLabel()}
+        managedSubagentParentId={activeSession()?.parentID || null}
+        managedSubagentParentTitle={managedSubagentParentTitle()}
+        onClearSessionListView={clearSessionListView}
+        onOpenAllSessions={() => {
+          void openAllSessions();
+        }}
+        onReturnToManagedSubagentParent={returnToManagedSubagentParent}
+        onOpenParentSession={openSubagentListParentSession}
+        onOpenSubagentSessions={openSubagentSessions}
+        onOpenSidebarSubagentSessions={openSidebarSubagentSessions}
+        onOpenTopLevelSidebarSessions={openTopLevelSidebarSessions}
+        onOpenFailedSessions={openFailedSessions}
+        onOpenAttentionSessions={openAttentionSessions}
+        onOpenPlanReadySessions={openPlanReadySessions}
+        onOpenCompletedSessions={openCompletedSessions}
+        onOpenRunningSessions={openRunningSessions}
+        onCreateSessionFromPicker={startNewChatDraft}
+        onCreateSession={startNewChatDraft}
+      />
+      <Show when={providerConnectionData()}>
+        {(data) => (
+          <ProviderConnectionDialog
+            catalogProviders={data().providers}
+            providerLoadError={data().error}
+            isLoadingProviders={data().loading}
+            initialProviderID={data().providerID}
+            lockProvider
+            reauthentication
+            onClose={() => setProviderConnectionData(null)}
+          />
+        )}
+      </Show>
+    </>
   );
 }
 

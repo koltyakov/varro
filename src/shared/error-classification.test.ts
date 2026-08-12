@@ -106,6 +106,18 @@ describe('isProviderAuthFailure', () => {
     ).toBe(true);
   });
 
+  it('detects GitHub Copilot rejecting an invalid OAuth token', () => {
+    expect(
+      isProviderAuthFailure({
+        name: 'APIError',
+        data: {
+          message: 'Unauthorized: unauthorized: AuthenticateToken authentication failed',
+          statusCode: 401,
+        },
+      })
+    ).toBe(true);
+  });
+
   it('rejects retryable non-auth errors', () => {
     expect(
       isProviderAuthFailure({

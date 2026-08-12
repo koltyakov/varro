@@ -213,7 +213,8 @@ describe('projected tool input lifecycle', () => {
     emit(harness, 'session.next.tool.input.started', { name: 'apply_patch' });
     emit(harness, 'session.next.tool.input.delta', {
       delta: JSON.stringify({
-        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
+        patchText:
+          '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
       }),
     });
 
@@ -221,7 +222,8 @@ describe('projected tool input lifecycle', () => {
     expect(part.state).toMatchObject({
       status: 'pending',
       input: {
-        patchText: '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
+        patchText:
+          '*** Begin Patch\n*** Add File: src/new.ts\n+export const value = true;\n*** End Patch',
       },
     });
     expect(getToolFileChanges(part.tool, part.state)).toMatchObject([

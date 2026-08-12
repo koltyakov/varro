@@ -18,6 +18,7 @@ import type { Provider } from '../types';
 import { postMessage } from '../lib/bridge';
 import { client } from '../lib/client';
 import { trapModalFocus } from '../lib/modal-focus';
+import { resolveProviderAuthFailure } from '../lib/provider-connection-state';
 import { openProviderSetup } from '../lib/provider-setup';
 import { state } from '../lib/state';
 import { CopyIconButton } from './CopyIconButton';
@@ -26,9 +27,14 @@ export function ProviderConnectionDialog(props: {
   catalogProviders: Provider[];
   providerLoadError: string;
   isLoadingProviders: boolean;
+  initialProviderID?: string | null;
+  lockProvider?: boolean;
+  reauthentication?: boolean;
   onClose: () => void;
 }) {
-  const [providerID, setProviderID] = createSignal<string | null>(null);
+  const [providerID, setProviderID] = createSignal<string | null>(
+    props.lockProvider ? props.initialProviderID?.trim() || null : null
+  );
   const [providerQuery, setProviderQuery] = createSignal('');
   const [activeProviderIndex, setActiveProviderIndex] = createSignal(0);
   const [methodIndex, setMethodIndex] = createSignal<number | null>(null);
@@ -43,6 +49,7 @@ export function ProviderConnectionDialog(props: {
   const [isSubmitting, setIsSubmitting] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');
   let authController: AbortController | undefined;
+  let initialProviderApplied = false;
 
   const providers = createMemo(() => {
     if (props.isLoadingProviders) return [];
@@ -105,6 +112,13 @@ export function ProviderConnectionDialog(props: {
     setAuthorizationCode('');
     setErrorMessage('');
   }
+
+  createEffect(() => {
+    if (initialProviderApplied || props.isLoadingProviders) return;
+    initialProviderApplied = true;
+    const id = props.initialProviderID?.trim();
+    if (id && providers().some((provider) => provider.id === id)) chooseProvider(id);
+  });
 
   function handleProviderSearchKeyDown(event: KeyboardEvent) {
     const options = filteredProviders();
@@ -233,10 +247,14 @@ export function ProviderConnectionDialog(props: {
   }
 
   function finish() {
+    const id = providerID();
+    if (id) resolveProviderAuthFailure(id);
     setApiKey('');
     setAuthorizationCode('');
     setInputs({});
-    postMessage({ type: 'providers/refresh' });
+    postMessage(
+      props.reauthentication ? { type: 'providers/reauthenticated' } : { type: 'providers/refresh' }
+    );
     props.onClose();
   }
 
@@ -266,7 +284,7 @@ export function ProviderConnectionDialog(props: {
           <div class="provider-connect-header">
             <div>
               <div id="provider-connect-title" class="provider-connect-title">
-                Connect provider
+                {props.reauthentication ? 'Re-authenticate provider' : 'Connect provider'}
               </div>
               <Show when={selectedProvider()}>
                 {(provider) => <div class="provider-connect-subtitle">{provider().name}</div>}
@@ -329,197 +347,203 @@ export function ProviderConnectionDialog(props: {
                 </div>
               }
             >
-              <Show
-                when={selectedMethod()}
-                fallback={
-                  <div class="provider-connect-methods">
-                    <button
-                      type="button"
-                      class="provider-connect-back"
-                      onClick={() => setProviderID(null)}
-                    >
-                      <BackArrowIcon />
-                      Back to providers
-                    </button>
-                    <div class="provider-connect-intro">Choose how you want to authenticate.</div>
-                    <For each={selectedProvider()?.methods ?? []}>
-                      {(method, index) => (
+              <Show when={!props.isLoadingProviders} fallback={<ProviderListSkeleton />}>
+                <Show
+                  when={selectedMethod()}
+                  fallback={
+                    <div class="provider-connect-methods">
+                      <Show when={!props.lockProvider}>
                         <button
                           type="button"
-                          class="provider-connect-method"
-                          onClick={() => chooseMethod(index())}
+                          class="provider-connect-back"
+                          onClick={() => setProviderID(null)}
                         >
-                          <span>{method.label}</span>
-                          <span class="provider-connect-method-type">
-                            {method.type === 'api' ? 'API key' : 'OAuth'}
-                          </span>
+                          <BackArrowIcon />
+                          Back to providers
                         </button>
-                      )}
-                    </For>
-                    <Show when={(selectedProvider()?.methods.length ?? 0) === 0}>
-                      <div class="provider-connect-empty">
-                        This provider has no embedded authentication methods. Use terminal setup
-                        instead.
-                      </div>
-                    </Show>
-                  </div>
-                }
-              >
-                {(method) => (
-                  <form
-                    class="provider-connect-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void (authorization()?.method === 'code' ? submitCode() : connect());
-                    }}
-                  >
-                    <button type="button" class="provider-connect-back" onClick={returnToMethods}>
-                      <BackArrowIcon />
-                      Back to methods
-                    </button>
-                    <Show when={!authorization()}>
-                      <Show when={method().type === 'oauth' && visiblePrompts().length === 0}>
-                        <div class="provider-connect-oauth-handoff">
-                          <div class="provider-connect-oauth-icon" aria-hidden="true">
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                            >
-                              <path d="M8.5 12a3.5 3.5 0 117 0v2.5h-7V12z" />
-                              <path d="M7 14.5h10v6H7z" />
-                              <path d="M12 17v1" />
-                              <path d="M12 3v2M4.9 5.9l1.4 1.4M19.1 5.9l-1.4 1.4" />
-                            </svg>
-                          </div>
-                          <div>
-                            <div class="provider-connect-oauth-title">
-                              Continue with {selectedProvider()?.name}
-                            </div>
-                            <div class="provider-connect-oauth-copy">
-                              Your browser will open to complete authorization. OpenCode securely
-                              stores the resulting credential.
-                            </div>
-                          </div>
+                      </Show>
+                      <div class="provider-connect-intro">Choose how you want to authenticate.</div>
+                      <For each={selectedProvider()?.methods ?? []}>
+                        {(method, index) => (
+                          <button
+                            type="button"
+                            class="provider-connect-method"
+                            onClick={() => chooseMethod(index())}
+                          >
+                            <span>{method.label}</span>
+                            <span class="provider-connect-method-type">
+                              {method.type === 'api' ? 'API key' : 'OAuth'}
+                            </span>
+                          </button>
+                        )}
+                      </For>
+                      <Show when={(selectedProvider()?.methods.length ?? 0) === 0}>
+                        <div class="provider-connect-empty">
+                          This provider has no embedded authentication methods. Use terminal setup
+                          instead.
                         </div>
                       </Show>
-                      <For each={visiblePrompts()}>
-                        {(prompt) => (
-                          <div class="provider-connect-field">
-                            <span>{prompt.message}</span>
-                            <Show
-                              when={prompt.type === 'select'}
-                              fallback={
+                    </div>
+                  }
+                >
+                  {(method) => (
+                    <form
+                      class="provider-connect-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void (authorization()?.method === 'code' ? submitCode() : connect());
+                      }}
+                    >
+                      <button type="button" class="provider-connect-back" onClick={returnToMethods}>
+                        <BackArrowIcon />
+                        Back to methods
+                      </button>
+                      <Show when={!authorization()}>
+                        <Show when={method().type === 'oauth' && visiblePrompts().length === 0}>
+                          <div class="provider-connect-oauth-handoff">
+                            <div class="provider-connect-oauth-icon" aria-hidden="true">
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                              >
+                                <path d="M8.5 12a3.5 3.5 0 117 0v2.5h-7V12z" />
+                                <path d="M7 14.5h10v6H7z" />
+                                <path d="M12 17v1" />
+                                <path d="M12 3v2M4.9 5.9l1.4 1.4M19.1 5.9l-1.4 1.4" />
+                              </svg>
+                            </div>
+                            <div>
+                              <div class="provider-connect-oauth-title">
+                                Continue with {selectedProvider()?.name}
+                              </div>
+                              <div class="provider-connect-oauth-copy">
+                                Your browser will open to complete authorization. OpenCode securely
+                                stores the resulting credential.
+                              </div>
+                            </div>
+                          </div>
+                        </Show>
+                        <For each={visiblePrompts()}>
+                          {(prompt) => (
+                            <div class="provider-connect-field">
+                              <span>{prompt.message}</span>
+                              <Show
+                                when={prompt.type === 'select'}
+                                fallback={
+                                  <input
+                                    class="provider-connect-input"
+                                    type="text"
+                                    value={inputs()[prompt.key] ?? ''}
+                                    placeholder={(prompt as ProviderAuthPromptText).placeholder}
+                                    onInput={(event) =>
+                                      updateInput(prompt.key, event.currentTarget.value)
+                                    }
+                                    disabled={isSubmitting()}
+                                    required
+                                  />
+                                }
+                              >
+                                <PromptSelect
+                                  prompt={prompt as ProviderAuthPromptSelect}
+                                  value={inputs()[prompt.key] ?? ''}
+                                  onChange={(value) => updateInput(prompt.key, value)}
+                                  disabled={isSubmitting()}
+                                />
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                        <Show when={method().type === 'api'}>
+                          <label class="provider-connect-field">
+                            <span>API key</span>
+                            <input
+                              class="provider-connect-input"
+                              type="password"
+                              value={apiKey()}
+                              onInput={(event) => setApiKey(event.currentTarget.value)}
+                              autocomplete="off"
+                              disabled={isSubmitting()}
+                              required
+                            />
+                          </label>
+                        </Show>
+                      </Show>
+
+                      <Show when={authorization()}>
+                        {(auth) => (
+                          <div class="provider-connect-authorization">
+                            <AuthorizationInstructions text={auth().instructions} />
+                            <button
+                              type="button"
+                              class="provider-connect-secondary"
+                              onClick={() =>
+                                postMessage({
+                                  type: 'vscode/open-external',
+                                  payload: { url: auth().url },
+                                })
+                              }
+                            >
+                              Open authorization page
+                            </button>
+                            <Show when={auth().method === 'code'}>
+                              <label class="provider-connect-field">
+                                <span>Authorization code</span>
                                 <input
                                   class="provider-connect-input"
                                   type="text"
-                                  value={inputs()[prompt.key] ?? ''}
-                                  placeholder={(prompt as ProviderAuthPromptText).placeholder}
+                                  value={authorizationCode()}
                                   onInput={(event) =>
-                                    updateInput(prompt.key, event.currentTarget.value)
+                                    setAuthorizationCode(event.currentTarget.value)
                                   }
                                   disabled={isSubmitting()}
                                   required
                                 />
-                              }
-                            >
-                              <PromptSelect
-                                prompt={prompt as ProviderAuthPromptSelect}
-                                value={inputs()[prompt.key] ?? ''}
-                                onChange={(value) => updateInput(prompt.key, value)}
-                                disabled={isSubmitting()}
-                              />
+                              </label>
                             </Show>
                           </div>
                         )}
-                      </For>
-                      <Show when={method().type === 'api'}>
-                        <label class="provider-connect-field">
-                          <span>API key</span>
-                          <input
-                            class="provider-connect-input"
-                            type="password"
-                            value={apiKey()}
-                            onInput={(event) => setApiKey(event.currentTarget.value)}
-                            autocomplete="off"
-                            disabled={isSubmitting()}
-                            required
-                          />
-                        </label>
                       </Show>
-                    </Show>
 
-                    <Show when={authorization()}>
-                      {(auth) => (
-                        <div class="provider-connect-authorization">
-                          <AuthorizationInstructions text={auth().instructions} />
-                          <button
-                            type="button"
-                            class="provider-connect-secondary"
-                            onClick={() =>
-                              postMessage({
-                                type: 'vscode/open-external',
-                                payload: { url: auth().url },
-                              })
-                            }
-                          >
-                            Open authorization page
-                          </button>
-                          <Show when={auth().method === 'code'}>
-                            <label class="provider-connect-field">
-                              <span>Authorization code</span>
-                              <input
-                                class="provider-connect-input"
-                                type="text"
-                                value={authorizationCode()}
-                                onInput={(event) => setAuthorizationCode(event.currentTarget.value)}
-                                disabled={isSubmitting()}
-                                required
-                              />
-                            </label>
-                          </Show>
+                      <Show when={errorMessage()}>
+                        <div class="provider-connect-error" role="alert">
+                          {errorMessage()}
                         </div>
-                      )}
-                    </Show>
+                      </Show>
 
-                    <Show when={errorMessage()}>
-                      <div class="provider-connect-error" role="alert">
-                        {errorMessage()}
+                      <div class="provider-connect-actions">
+                        <button
+                          type="button"
+                          class="provider-connect-secondary"
+                          onClick={returnToMethods}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          class="provider-connect-primary"
+                          disabled={
+                            !canConnect() ||
+                            Boolean(authorization() && authorization()?.method !== 'code')
+                          }
+                        >
+                          {isSubmitting()
+                            ? authorization()?.method === 'auto'
+                              ? 'Waiting for authorization...'
+                              : 'Connecting...'
+                            : authorization()?.method === 'code'
+                              ? 'Complete connection'
+                              : method().type === 'oauth'
+                                ? 'Continue in browser'
+                                : 'Connect'}
+                        </button>
                       </div>
-                    </Show>
-
-                    <div class="provider-connect-actions">
-                      <button
-                        type="button"
-                        class="provider-connect-secondary"
-                        onClick={returnToMethods}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        class="provider-connect-primary"
-                        disabled={
-                          !canConnect() ||
-                          Boolean(authorization() && authorization()?.method !== 'code')
-                        }
-                      >
-                        {isSubmitting()
-                          ? authorization()?.method === 'auto'
-                            ? 'Waiting for authorization...'
-                            : 'Connecting...'
-                          : authorization()?.method === 'code'
-                            ? 'Complete connection'
-                            : method().type === 'oauth'
-                              ? 'Continue in browser'
-                              : 'Connect'}
-                      </button>
-                    </div>
-                  </form>
-                )}
+                    </form>
+                  )}
+                </Show>
               </Show>
             </Show>
           </div>

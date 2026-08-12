@@ -119,6 +119,7 @@ function createActionFixture() {
     setActiveChatModel: vi.fn(),
     revealPermission: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
+    providerReauthenticated: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),
     postTerminalSelection: vi.fn(),
     postConfigState: vi.fn(),

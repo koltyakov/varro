@@ -603,6 +603,7 @@ export type WebviewMessage =
   | { type: 'permission/reveal'; payload: { permissionId: string } }
   | { type: 'providers/watch'; payload: { active: boolean } }
   | { type: 'providers/refresh' }
+  | { type: 'providers/reauthenticated' }
   | { type: 'terminal-selection/clear' }
   | { type: 'terminal/run'; payload: { command: string; title?: string } }
   | { type: 'session/open-in-opencode'; payload: { sessionId: string } }
