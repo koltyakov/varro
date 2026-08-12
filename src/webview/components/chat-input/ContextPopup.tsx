@@ -6,9 +6,21 @@ import {
   flipPopupDownIfNeeded,
   observePopupViewport,
 } from '../../lib/popup-position';
+import type {
+  ContextBreakdownKey,
+  ContextBreakdownSegment,
+} from '../../../shared/context-breakdown';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
+
+const BREAKDOWN_LABELS: Record<ContextBreakdownKey, string> = {
+  system: 'System',
+  user: 'User',
+  assistant: 'Assistant',
+  tool: 'Tool Calls',
+  other: 'Other',
+};
 
 type ContextTokens = {
   total: number;
@@ -35,6 +47,8 @@ export function ContextPopup(props: {
   boundaryRef?: HTMLElement;
   alignTo?: 'left' | 'right';
   usage: { used: number; limit: number; percent: number };
+  breakdown: ContextBreakdownSegment[];
+  nestedBreakdown: ContextBreakdownSegment[];
   tokens: ContextTokens;
   cost?: number | null;
   subagentTokens: ContextTokens;
@@ -46,6 +60,9 @@ export function ContextPopup(props: {
   onCompact: () => void;
 }) {
   const [subagentsExpanded, setSubagentsExpanded] = createSignal(false);
+  const [nestedBreakdown, setNestedBreakdown] = createSignal(false);
+  const visibleBreakdown = () =>
+    nestedBreakdown() && props.nestedBreakdown.length > 0 ? props.nestedBreakdown : props.breakdown;
   const contextUsageAvailable = () => props.usage.used > 0;
   const sessionTokensAvailable = () => props.tokens.total > 0;
   const overallTotal = () => props.tokens.total + props.subagentTokens.total;
@@ -124,6 +141,78 @@ export function ContextPopup(props: {
           )}
         </Show>
       </div>
+
+      <Show when={visibleBreakdown().length > 0}>
+        <div class="context-popup-breakdown-header">
+          <div class="context-popup-breakdown-title">Context Breakdown</div>
+          <label class="context-breakdown-nested">
+            <input
+              type="checkbox"
+              checked={nestedBreakdown()}
+              onChange={(event) => setNestedBreakdown(event.currentTarget.checked)}
+            />
+            <svg
+              class="context-breakdown-checkbox context-breakdown-checkbox-unchecked"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <svg
+              class="context-breakdown-checkbox context-breakdown-checkbox-checked"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <path
+                d="M7 12.5L10 15.5L17 8.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span>nested</span>
+          </label>
+        </div>
+        <div class="context-breakdown-bar" aria-label="Estimated context breakdown">
+          <For each={visibleBreakdown()}>
+            {(segment) => (
+              <div
+                class={`context-breakdown-segment ${segment.key}`}
+                style={{ width: `${segment.percent}%` }}
+              />
+            )}
+          </For>
+        </div>
+        <div class="context-breakdown-legend">
+          <For each={visibleBreakdown()}>
+            {(segment) => (
+              <div class="context-breakdown-item">
+                <span class={`context-breakdown-dot ${segment.key}`} />
+                <span>{BREAKDOWN_LABELS[segment.key]}</span>
+                <span class="context-breakdown-percent">{segment.percent.toFixed(1)}%</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
 
       <Show when={props.subagentTokens.total > 0}>
         <button

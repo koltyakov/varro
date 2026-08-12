@@ -1,4 +1,5 @@
 import type { OpenCodeInstallMethod } from './opencode-install';
+import type { ContextBreakdownSegment } from './context-breakdown';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
@@ -139,6 +140,7 @@ export type SessionDiffSummary = {
   tokens: number;
   model?: { providerID: string; modelID: string; variant?: string };
   tokenBreakdown?: SessionTokenBreakdown;
+  nestedContextBreakdown?: ContextBreakdownSegment[];
   durationMs: number;
   activeStartedAt: number | null;
 };

@@ -26,6 +26,10 @@ import {
   ContextUsageButton,
   formatContextUsageTitle,
 } from '../chat-input/ContextPopup';
+import {
+  estimateContextBreakdown,
+  estimateNestedContextBreakdown,
+} from '../../../shared/context-breakdown';
 import { ProviderLimitPopup } from '../chat-input/ProviderLimitPopup';
 import { ProviderLimitChip } from '../chat-input/ToolbarPickers';
 import {
@@ -94,6 +98,18 @@ export function ManagedSubagentFooter(props: {
     }
     const limit = currentModel().contextLimit;
     return limit ? { used: 0, limit, percent: 0 } : null;
+  });
+  const contextBreakdown = createMemo(() => {
+    const inputTokens = getLatestAssistantMessageInfoWithTokens(currentSessionMessages(), {
+      includeSubagents: true,
+    })?.tokens.input;
+    return estimateContextBreakdown(currentSessionMessages(), inputTokens ?? 0);
+  });
+  const nestedContextBreakdown = createMemo(() => {
+    const sessionIds = new Set(getSessionTreeIds(state.activeSessionId));
+    return estimateNestedContextBreakdown(
+      [...sessionIds].map((id) => getMessageEntriesForSession(state.messages, id))
+    );
   });
   const tokenBreakdown = createMemo(() => {
     const sessionId = state.activeSessionId;
@@ -277,6 +293,8 @@ export function ManagedSubagentFooter(props: {
                         boundaryRef={inputFrameRef}
                         alignTo="right"
                         usage={usage()}
+                        breakdown={contextBreakdown()}
+                        nestedBreakdown={nestedContextBreakdown()}
                         tokens={tokenBreakdown().session}
                         cost={sessionCost()}
                         subagentTokens={tokenBreakdown().subagents}

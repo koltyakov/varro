@@ -1,5 +1,6 @@
 import { Show } from 'solid-js';
 import type { Agent } from '../../types';
+import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
 import type {
   AutoApproveActivity,
   PermissionMode,
@@ -93,6 +94,8 @@ type ToolbarSharedProps = {
   onToggleVariantPicker: () => void;
   onSelectVariant: (variant: string | null) => void;
   contextUsage: ContextUsageInfo | null;
+  contextBreakdown: ContextBreakdownSegment[];
+  nestedContextBreakdown: ContextBreakdownSegment[];
   showContextControl: boolean;
   contextButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   contextPopupRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
@@ -335,6 +338,8 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                     boundaryRef={props.inputFrameRef}
                     alignTo="right"
                     usage={contextUsage()}
+                    breakdown={props.contextBreakdown}
+                    nestedBreakdown={props.nestedContextBreakdown}
                     tokens={props.sessionTokens}
                     cost={props.sessionCost}
                     subagentTokens={props.subagentTokens}

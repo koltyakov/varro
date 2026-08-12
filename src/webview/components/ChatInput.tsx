@@ -142,6 +142,10 @@ import {
   type QueuedMessageItem,
 } from './chat-input/QueuedMessages';
 import { UsageLimitBanner } from './chat-input/UsageLimitBanner';
+import {
+  estimateContextBreakdown,
+  estimateNestedContextBreakdown,
+} from '../../shared/context-breakdown';
 import type {
   DroppedFile,
   ExtensionMessage,
@@ -538,6 +542,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const [completeTokenBreakdown, setCompleteTokenBreakdown] = createSignal<{
     rootId: string;
     breakdown: SessionTokenBreakdown;
+    nestedBreakdown: ReturnType<typeof estimateNestedContextBreakdown>;
   } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
@@ -2481,6 +2486,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return { used: 0, limit, percent: 0 };
   });
 
+  const contextBreakdown = createMemo(() => {
+    const inputTokens = getLatestAssistantMessageInfoWithTokens(currentSessionMessageEntries(), {
+      includeSubagents: true,
+    })?.tokens.input;
+    return estimateContextBreakdown(currentSessionMessageEntries(), inputTokens ?? 0);
+  });
+  const nestedContextBreakdown = createMemo(() => {
+    const sessionId = composerSessionId();
+    if (!sessionId) return [];
+    const rootId = getSessionTreeRootId(sessionId) || sessionId;
+    const sessionIds = new Set(getSessionTreeIds(rootId));
+    const complete = completeTokenBreakdown();
+    if (complete?.rootId === rootId && complete.nestedBreakdown.length > 0) {
+      return complete.nestedBreakdown;
+    }
+    return estimateNestedContextBreakdown(
+      [...sessionIds].map((id) => getMessageEntriesForSession(state.messages, id))
+    );
+  });
+
   const localSessionTokenBreakdown = createMemo(() => {
     const sessionId = composerSessionId();
     if (!sessionId) {
@@ -2531,7 +2556,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       ) {
         return;
       }
-      setCompleteTokenBreakdown({ rootId, breakdown: summary.tokenBreakdown });
+      setCompleteTokenBreakdown({
+        rootId,
+        breakdown: summary.tokenBreakdown,
+        nestedBreakdown: summary.nestedContextBreakdown ?? [],
+      });
     } catch {}
   }
 
@@ -3290,6 +3319,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               setShowVariantPicker(false);
             }}
             contextUsage={contextUsage()}
+            contextBreakdown={contextBreakdown()}
+            nestedContextBreakdown={nestedContextBreakdown()}
             showContextControl={!!contextUsage()}
             contextButtonRef={(el) => {
               contextButtonRef = el;
@@ -3456,6 +3487,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             setShowVariantPicker(false);
           }}
           contextUsage={contextUsage()}
+          contextBreakdown={contextBreakdown()}
+          nestedContextBreakdown={nestedContextBreakdown()}
           showContextControl={!!contextUsage() && !composerEditingMessage()}
           contextButtonRef={(el) => {
             contextButtonRef = el;

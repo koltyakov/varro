@@ -5,7 +5,7 @@
   right: -4px;
   z-index: var(--z-popover);
   margin-bottom: 6px;
-  width: 200px;
+  width: 240px;
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 120px);
   overflow-y: auto;
@@ -88,7 +88,8 @@
   font-family: var(--font-sans);
 }
 
-.context-popup-section {
+.context-popup-section,
+.context-popup-breakdown-title {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -111,6 +112,129 @@
   background: transparent;
   text-align: left;
   cursor: pointer;
+}
+
+.context-popup-breakdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-vscode-border-soft);
+}
+
+.context-popup-breakdown-header .context-popup-breakdown-title {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.context-breakdown-nested {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.context-breakdown-nested input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.context-breakdown-checkbox {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.context-breakdown-checkbox-checked {
+  display: none;
+}
+
+.context-breakdown-nested input:checked ~ .context-breakdown-checkbox-unchecked {
+  display: none;
+}
+
+.context-breakdown-nested input:checked ~ .context-breakdown-checkbox-checked {
+  display: block;
+}
+
+.context-breakdown-nested input:focus-visible ~ .context-breakdown-checkbox {
+  outline: 1px solid var(--color-vscode-focus-border);
+  outline-offset: 1px;
+}
+
+.context-breakdown-bar {
+  display: flex;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
+}
+
+.context-breakdown-segment.system,
+.context-breakdown-dot.system {
+  background: var(--color-vscode-info);
+}
+
+.context-breakdown-segment.user,
+.context-breakdown-dot.user {
+  background: var(--color-vscode-success);
+}
+
+.context-breakdown-segment.assistant,
+.context-breakdown-dot.assistant {
+  background: var(--color-vscode-accent);
+}
+
+.context-breakdown-segment.tool,
+.context-breakdown-dot.tool {
+  background: var(--color-vscode-warning);
+}
+
+.context-breakdown-segment.other,
+.context-breakdown-dot.other {
+  background: var(--color-vscode-muted);
+}
+
+.context-breakdown-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 9px;
+  margin-top: 6px;
+}
+
+.context-breakdown-item {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--color-vscode-muted);
+  white-space: nowrap;
+}
+
+.context-breakdown-dot {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.context-breakdown-percent {
+  color: color-mix(in srgb, var(--color-vscode-muted) 72%, transparent);
+  font-family: var(--font-mono);
 }
 
 .context-popup-section-toggle:hover {

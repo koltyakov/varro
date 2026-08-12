@@ -1067,6 +1067,14 @@ describe('ChatInput', () => {
     expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
     expect(container?.querySelector('.context-popup-pct')?.textContent).toBe('50%');
     expect(container?.querySelector('.context-popup-stat')?.textContent).toBe('500/1,000tokens');
+    expect(container?.querySelector('.context-popup-breakdown-title')?.textContent).toBe(
+      'Context Breakdown'
+    );
+    expect(
+      container?.querySelector<HTMLInputElement>('.context-breakdown-nested input')?.checked
+    ).toBe(false);
+    expect(container?.querySelector('.context-breakdown-nested')?.textContent).toBe('nested');
+    expect(container?.querySelector('.context-breakdown-item')?.textContent).toBe('Other100.0%');
   });
 
   it('hides context usage before a new session starts', () => {
@@ -1270,6 +1278,10 @@ describe('ChatInput', () => {
         },
         subagentCount: 1,
       },
+      nestedContextBreakdown: [
+        { key: 'tool', tokens: 700, percent: 50 },
+        { key: 'other', tokens: 700, percent: 50 },
+      ],
       durationMs: 0,
       activeStartedAt: null,
     });
@@ -1285,6 +1297,16 @@ describe('ChatInput', () => {
       );
     });
     expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1');
+
+    const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
+    nested?.click();
+    await Promise.resolve();
+
+    expect(
+      [...(container?.querySelectorAll('.context-breakdown-item') || [])].map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Tool Calls50.0%', 'Other50.0%']);
   });
 
   it('removes the provider limit title while the popup is open', async () => {

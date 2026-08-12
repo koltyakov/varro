@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import { existsSync } from 'fs';
 import { posix, win32 } from 'path';
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import {
+  estimateNestedContextBreakdown,
+  type ContextMessageEntry,
+} from '../shared/context-breakdown';
+import type { Message, Part } from '../shared/opencode-types';
 import { VARRO_API_ENDPOINTS } from '../shared/protocol';
 import type {
   AutoApproveJudgeReference,
@@ -567,13 +572,17 @@ export class RestProxy {
       this.readSessionListForSummary(),
     ]);
     const diffStats = summarizeSessionDiff(diffs);
-    const tokenBreakdown = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
+    const summary = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
+    const tokenBreakdown = summary.tokenBreakdown;
     const model = summarizeSessionModel(messages);
     return {
       ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
       tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
       ...(model ? { model } : {}),
       tokenBreakdown,
+      ...(summary.nestedContextBreakdown.length > 0
+        ? { nestedContextBreakdown: summary.nestedContextBreakdown }
+        : {}),
       ...summarizeSessionDuration(messages),
     };
   }
@@ -626,30 +635,35 @@ export class RestProxy {
     const descendants = collectDescendantSessions(sessionsValue, sessionID);
     const session = summarizeSessionTokenUsage(rootMessages);
     const subagents = emptySessionTokenUsage();
-    const sessionsWithoutTokenSnapshots: string[] = [];
-
-    for (const descendant of descendants) {
-      const snapshot = summarizeTokenUsageRecord(asRecord(descendant.tokens));
-      if (snapshot.total > 0) addSessionTokenUsage(subagents, snapshot);
-      else sessionsWithoutTokenSnapshots.push(descendant.id);
-    }
-
     const messageLists = await mapWithConcurrency(
-      sessionsWithoutTokenSnapshots,
+      descendants,
       SESSION_SUMMARY_DESCENDANT_CONCURRENCY,
-      (id) =>
+      (descendant) =>
         this.withSessionSummaryDescendantSlot(() =>
-          this.callbacks.server.request('GET', `/session/${encodeURIComponent(id)}/message`)
+          this.callbacks.server.request(
+            'GET',
+            `/session/${encodeURIComponent(descendant.id)}/message`
+          )
         )
     );
-    for (const messages of messageLists) {
-      addSessionTokenUsage(subagents, summarizeSessionTokenUsage(messages));
+    for (let index = 0; index < descendants.length; index += 1) {
+      const snapshot = summarizeTokenUsageRecord(asRecord(descendants[index]?.tokens));
+      addSessionTokenUsage(
+        subagents,
+        snapshot.total > 0 ? snapshot : summarizeSessionTokenUsage(messageLists[index])
+      );
     }
     return {
-      session,
-      subagents,
-      subagentCount: descendants.length,
-    } satisfies SessionTokenBreakdown;
+      tokenBreakdown: {
+        session,
+        subagents,
+        subagentCount: descendants.length,
+      } satisfies SessionTokenBreakdown,
+      nestedContextBreakdown: estimateNestedContextBreakdown([
+        normalizeContextMessages(rootMessages),
+        ...messageLists.map(normalizeContextMessages),
+      ]),
+    };
   }
 
   private readSessionListForSummary(): Promise<unknown> {
@@ -1833,6 +1847,21 @@ function summarizeSessionTokenUsage(value: unknown): SessionTokenUsage {
     addSessionTokenUsage(usage, summarizeTokenUsageRecord(tokens));
   }
   return usage;
+}
+
+function normalizeContextMessages(value: unknown): ContextMessageEntry[] {
+  if (!Array.isArray(value)) return [];
+  const messages: ContextMessageEntry[] = [];
+  for (const valueEntry of value) {
+    const entry = asRecord(valueEntry);
+    const info = asRecord(entry?.info);
+    if (info?.role !== 'user' && info?.role !== 'assistant') continue;
+    messages.push({
+      info: info as Message,
+      parts: Array.isArray(entry?.parts) ? (entry.parts as Part[]) : [],
+    });
+  }
+  return messages;
 }
 
 function summarizeTokenUsageRecord(tokens: Record<string, unknown> | undefined): SessionTokenUsage {

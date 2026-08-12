@@ -1041,6 +1041,7 @@ describe('RestProxy handleRequest', () => {
       ['GET', '/session/session-1/diff'],
       ['GET', '/session/session-1/message'],
       ['GET', '/session?limit=1000000'],
+      ['GET', '/session/child-1/message'],
       ['GET', '/session/grandchild-1/message'],
     ]);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -1070,6 +1071,10 @@ describe('RestProxy handleRequest', () => {
           },
           subagentCount: 2,
         },
+        nestedContextBreakdown: [
+          { key: 'assistant', tokens: 10, percent: 0.3 },
+          { key: 'other', tokens: 3_990, percent: 99.8 },
+        ],
         durationMs: 10_000,
         activeStartedAt: 13_000,
       },

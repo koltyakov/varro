@@ -11,10 +11,10 @@ type AssistantMessageLookupOptions = {
   includeSubagents?: boolean;
 };
 
-export function getMessageEntriesForSession(
-  messages: readonly MessageInfoEntry[],
+export function getMessageEntriesForSession<T extends MessageInfoEntry>(
+  messages: readonly T[],
   sessionId: string | null
-): MessageInfoEntry[] {
+): T[] {
   if (!sessionId) return [];
   return messages.filter((entry) => entry.info.sessionID === sessionId);
 }
