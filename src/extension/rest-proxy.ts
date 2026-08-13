@@ -126,7 +126,10 @@ export interface RestProxyCallbacks {
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
   ensureServerStarted(): Promise<string | undefined>;
-  refreshOpenCodeConfig?(): Promise<void>;
+  refreshOpenCodeConfig?(
+    previousRouting: OpenCodeModelRouting,
+    currentRouting: OpenCodeModelRouting
+  ): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
 }
@@ -1554,8 +1557,8 @@ export class RestProxy {
         `Project ${target.path.endsWith('.jsonc') ? 'opencode.jsonc' : 'opencode.json'} changed while updating model routing; please retry`
       );
     }
+    const previousRouting = this.normalizeOpenCodeModelRouting(config);
     await vscode.workspace.fs.writeFile(uri, encoded);
-    await this.callbacks.refreshOpenCodeConfig?.();
     let effectiveConfig = files.reduce<Record<string, unknown>>(
       (merged, file) =>
         mergeOpenCodeConfig(merged, file.path === target.path ? nextTargetConfig : file.config),
@@ -1564,7 +1567,9 @@ export class RestProxy {
     if (!files.some((file) => file.path === target.path)) {
       effectiveConfig = mergeOpenCodeConfig(effectiveConfig, nextTargetConfig);
     }
-    return this.normalizeOpenCodeModelRouting(effectiveConfig);
+    const currentRouting = this.normalizeOpenCodeModelRouting(effectiveConfig);
+    await this.callbacks.refreshOpenCodeConfig?.(previousRouting, currentRouting);
+    return currentRouting;
   }
 
   private async readConfigStat(uri: vscode.Uri) {

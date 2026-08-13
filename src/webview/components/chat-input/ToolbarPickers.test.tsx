@@ -299,6 +299,55 @@ describe('ToolbarPickers', () => {
     expect(onSelect).toHaveBeenCalledWith(agents[0]);
   });
 
+  it('limits the agent popover to the input host', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
+    cleanup = render(
+      () => (
+        <div class="chat-input-container">
+          <AgentPicker
+            agents={[createAgent()]}
+            selectedAgent="planner"
+            selectedLabel="Planner"
+            focusIndex={0}
+            showPicker={true}
+            getLabel={(agent) => agent.name}
+            getDetail={(agent) => agent.description ?? 'No description'}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+            onFocusIndex={vi.fn()}
+          />
+        </div>
+      ),
+      container!
+    );
+    const boundary = container?.querySelector<HTMLElement>('.chat-input-container');
+    const popup = container?.querySelector<HTMLElement>('.agent-popover');
+    const trigger = container?.querySelector<HTMLElement>('.toolbar-picker');
+    const parent = popup?.parentElement;
+    vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
+    vi.spyOn(boundary!, 'getBoundingClientRect').mockReturnValue({
+      ...boundary!.getBoundingClientRect(),
+      left: 100,
+      right: 350,
+    });
+    vi.spyOn(parent!, 'getBoundingClientRect').mockReturnValue({
+      ...parent!.getBoundingClientRect(),
+      left: 300,
+      right: 340,
+    });
+    vi.spyOn(trigger!, 'getBoundingClientRect').mockReturnValue({
+      ...trigger!.getBoundingClientRect(),
+      left: 300,
+      right: 340,
+    });
+    vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(288);
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+
+    expect(popup?.style.width).toBe('250px');
+    expect(popup?.style.left).toBe('-200px');
+  });
+
   it('shows and selects the default reasoning option', async () => {
     const onToggle = vi.fn();
     const onSelect = vi.fn();

@@ -139,6 +139,7 @@ export interface AppState {
   draftSelectedMcps: string[] | null;
   hiddenProviders: string[];
   hiddenModels: string[];
+  pinnedModels: string[];
   lastSeenSessions: Record<string, number>;
   completedSessionResponses: Record<string, number>;
   skippedPlanSessions: Record<string, number>;
@@ -324,6 +325,7 @@ export function createAppState(): AppStateInstance {
     draftSelectedMcps: null,
     hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
     hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
+    pinnedModels: readStoredStringArray(STORAGE_KEYS.pinnedModels),
     lastSeenSessions: initialLastSeenSessions,
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,

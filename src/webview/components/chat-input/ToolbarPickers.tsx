@@ -223,7 +223,38 @@ export function AgentPicker(props: {
     const reposition = () => {
       if (!popupEl) return;
       flipPopupDownIfNeeded(popupEl);
-      clampPopupToViewport(popupEl);
+      const trigger = popupEl.parentElement?.querySelector<HTMLElement>('.toolbar-picker');
+      const boundary = popupEl.closest<HTMLElement>('.chat-input-container');
+      const positionedParent = popupEl.offsetParent;
+      if (!trigger || !boundary || !(positionedParent instanceof HTMLElement)) {
+        clampPopupToViewport(popupEl);
+        return;
+      }
+
+      popupEl.style.width = '';
+      popupEl.style.left = '0px';
+      popupEl.style.right = 'auto';
+      popupEl.style.transform = '';
+      const viewportMargin = 8;
+      const boundaryBox = boundary.getBoundingClientRect();
+      const triggerBox = trigger.getBoundingClientRect();
+      const parentBox = positionedParent.getBoundingClientRect();
+      const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+      const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+      const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
+      const naturalWidth = Math.min(288, popupEl.scrollWidth || popupEl.getBoundingClientRect().width);
+      const maximumWidth = Math.min(naturalWidth, boundaryWidth);
+      const triggerLeft = Math.max(boundaryLeft, triggerBox.left);
+      const availableRightWidth = boundaryRight - triggerLeft;
+      const canRemainRightOpening = availableRightWidth >= Math.min(220, maximumWidth);
+      const width = canRemainRightOpening
+        ? Math.min(maximumWidth, availableRightWidth)
+        : maximumWidth;
+      const left = canRemainRightOpening
+        ? triggerLeft
+        : Math.max(boundaryLeft, Math.min(triggerBox.right - width, boundaryRight - width));
+      popupEl.style.width = `${width}px`;
+      popupEl.style.left = `${Math.round(left - parentBox.left)}px`;
     };
 
     onCleanup(observePopupViewport(popupEl, reposition));

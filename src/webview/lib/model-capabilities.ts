@@ -153,3 +153,30 @@ export function modelSupportsPdf(
   if (Array.isArray(input)) return input.includes('pdf');
   return asRecord(input)?.pdf === true;
 }
+
+export function modelSupportsAudio(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[]
+): boolean {
+  return modelSupportsInputModality(providerID, modelID, providers, 'audio');
+}
+
+export function modelSupportsVideo(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[]
+): boolean {
+  return modelSupportsInputModality(providerID, modelID, providers, 'video');
+}
+
+function modelSupportsInputModality(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[],
+  modality: 'audio' | 'video'
+): boolean {
+  const input = getModel(providerID, modelID, providers)?.capabilities?.input;
+  if (Array.isArray(input)) return input.includes(modality);
+  return asRecord(input)?.[modality] === true;
+}

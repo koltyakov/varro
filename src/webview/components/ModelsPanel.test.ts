@@ -7,6 +7,7 @@ import {
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
 import { setState } from '../lib/state';
+import { STORAGE_KEYS } from '../lib/state-storage';
 import { ModelsPanel } from './ModelsPanel';
 
 declare global {
@@ -179,6 +180,8 @@ beforeEach(() => {
   ]);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('pinnedModels', []);
+  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
 });
@@ -202,6 +205,8 @@ afterEach(() => {
   setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('pinnedModels', []);
+  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
   if (originalResizeObserver) {
@@ -772,8 +777,69 @@ describe('ModelsPanel', () => {
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     );
     expect(row?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
+    expect(row?.querySelector('.settings-model-date-cell')).toBeInstanceOf(HTMLElement);
+    expect(row?.querySelector('.settings-model-ctx')?.textContent).toBe('400k');
+    expect(row?.querySelector('.settings-model-ctx')?.parentElement?.classList).toContain(
+      'settings-model-meta'
+    );
     expect(row?.querySelector('.model-default-label')?.textContent).toBe('(default)');
     expect(row?.querySelector('.model-expanded-meta')).toBeNull();
+
+    const rowWithoutDate = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    );
+    expect(rowWithoutDate?.querySelector('.settings-model-date-cell')).toBeInstanceOf(HTMLElement);
+    expect(rowWithoutDate?.querySelector('.model-release-date')).toBeNull();
+    expect(
+      rowWithoutDate
+        ?.closest('.settings-provider')
+        ?.querySelector<HTMLElement>('.settings-model-list')
+        ?.style.getPropertyValue('--settings-capability-count')
+    ).toBe('2');
+  });
+
+  it('shows compact capability icons without hiding universally supported features', async () => {
+    setState('providers', 0, 'models', 'gpt-5', 'capabilities', {
+      toolcall: true,
+      vision: true,
+      input: ['text', 'image', 'pdf', 'audio', 'video'],
+    });
+    setState('providers', 0, 'models', 'gpt-5-mini', 'capabilities', {
+      toolcall: true,
+      vision: true,
+      input: ['text', 'image'],
+    });
+
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const rows = Array.from(container?.querySelectorAll('.settings-model-row') ?? []);
+    const fullRow = rows.find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    );
+    const miniRow = rows.find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
+    );
+    const capabilityLabels = Array.from(
+      fullRow?.querySelectorAll(
+        '.settings-model-badges .model-capability-tag:not(.settings-route-tag)'
+      ) ?? []
+    ).map((tag) => tag.textContent?.trim());
+
+    expect(capabilityLabels).toEqual(['Tools', 'Vision', 'PDF', 'Audio', 'Video']);
+    expect(fullRow?.querySelector('.model-capability-tag-tools')?.getAttribute('title')).toBe(
+      'Tools'
+    );
+    expect(
+      fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
+    ).toBe('Vision');
+    expect(fullRow?.querySelectorAll('.settings-capability-icon svg')).toHaveLength(5);
+    expect(fullRow?.querySelector('.settings-capability-universal')).toBeNull();
+    expect(fullRow?.querySelector('.model-capability-tag-audio')).toBeInstanceOf(HTMLElement);
+    expect(fullRow?.querySelector('.model-capability-tag-video')).toBeInstanceOf(HTMLElement);
+    expect(miniRow?.querySelector('.model-capability-tag-pdf')).toBeNull();
+    expect(miniRow?.querySelector('.model-capability-tag-audio')).toBeNull();
+    expect(miniRow?.querySelector('.model-capability-tag-video')).toBeNull();
   });
 
   it('shows routing tags loaded from opencode config and agents', async () => {
@@ -804,6 +870,12 @@ describe('ModelsPanel', () => {
         expect.stringContaining('settings-route-tag-agent'),
       ])
     );
+    expect(tags.every((tag) => tag.parentElement?.classList.contains('settings-model-routes'))).toBe(
+      true
+    );
+    expect(
+      tags.every((tag) => tag.closest('.settings-model-name-wrap') instanceof HTMLElement)
+    ).toBe(true);
   });
 
   it('accepts preview routing payloads without normalized agentModels', async () => {
@@ -862,6 +934,44 @@ describe('ModelsPanel', () => {
       modelID: 'gpt-5',
     });
     expect(refreshRoutingStateMock).toHaveBeenCalled();
+  });
+
+  it('shows pinned models and pins or unpins them from the context menu', async () => {
+    setState('pinnedModels', ['openai:gpt-5']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    ) as HTMLElement;
+    expect(row.querySelector('[aria-label="Pinned model"]')).not.toBeNull();
+
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const menu = document.querySelector('.settings-context-menu') as HTMLElement;
+    const unpinButton = Array.from(
+      menu.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    ).find((item) => item.textContent === 'Unpin model');
+    expect(unpinButton).toBeTruthy();
+    expect(menu.children[0]).toBe(unpinButton);
+    expect(menu.children[1]?.getAttribute('role')).toBe('separator');
+
+    unpinButton?.click();
+    await Promise.resolve();
+    expect(row.querySelector('[aria-label="Pinned model"]')).toBeNull();
+    expect(document.querySelector('.settings-context-menu')).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([]);
+
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const pinButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
+    ).find((item) => item.textContent === 'Pin model');
+    pinButton?.click();
+    await Promise.resolve();
+
+    expect(row.querySelector('[aria-label="Pinned model"]')).not.toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([
+      'openai:gpt-5',
+    ]);
   });
 
   it('reverses assigned model actions and unsets the routing assignment', async () => {

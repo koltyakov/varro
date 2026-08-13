@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import {
   attachTestView,
   createServer,
@@ -15,7 +16,10 @@ const providerFileSystem = getProviderSignatureFileSystemMock();
 type ProviderRefreshAccess = {
   initializeProviderFileSignature(): Promise<void>;
   readProviderFilesSignature(): Promise<string>;
-  refreshOpenCodeWorkspaceState(): Promise<void>;
+  refreshOpenCodeWorkspaceState(
+    previousRouting?: OpenCodeModelRouting,
+    currentRouting?: OpenCodeModelRouting
+  ): Promise<void>;
   refreshProviderState(generation?: number, requireSignatureChange?: boolean): Promise<void>;
   sessionState: { markSessionBusy(sessionID: string): unknown };
   setProviderWatchActive(active: boolean): void;
@@ -428,6 +432,45 @@ describe('SidebarProvider provider refresh', () => {
     expect(server.request).toHaveBeenCalledWith('POST', '/instance/dispose');
     expect(server.restart).not.toHaveBeenCalled();
     expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    await provider.dispose();
+  });
+
+  it('cancels a queued workspace reload when model routing is reverted', async () => {
+    vi.useFakeTimers();
+    let idle = false;
+    const server = createServer({
+      request: vi.fn(async (_method: string, path: string) => {
+        if (path === '/question' || path === '/permission') return [];
+        if (path === '/session/status') return idle ? {} : { active: { type: 'busy' } };
+        return true;
+      }),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const { posted } = attachTestView(provider);
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.setProviderWatchActive(true);
+    await vi.advanceTimersByTimeAsync(0);
+    posted.length = 0;
+    const original = {
+      smallModel: { providerID: 'openai', modelID: 'gpt-5-mini' },
+      agentModels: {},
+      commitMessageModel: null,
+      autoApproveModel: null,
+    } satisfies OpenCodeModelRouting;
+    const changed = {
+      ...original,
+      smallModel: { providerID: 'openai', modelID: 'gpt-5-nano' },
+    } satisfies OpenCodeModelRouting;
+
+    await access.refreshOpenCodeWorkspaceState(original, changed);
+    await access.refreshOpenCodeWorkspaceState(changed, original);
+
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: true } });
+    expect(posted).toContainEqual({ type: 'providers/status', payload: { pending: false } });
+    idle = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(server.request).not.toHaveBeenCalledWith('POST', '/instance/dispose');
+    expect(server.restart).not.toHaveBeenCalled();
     await provider.dispose();
   });
 

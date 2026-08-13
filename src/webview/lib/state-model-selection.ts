@@ -194,6 +194,20 @@ export function isModelVisible(providerID: string, modelID: string) {
   );
 }
 
+export function isModelPinned(providerID: string, modelID: string) {
+  return state.pinnedModels.includes(modelVisibilityKey(providerID, modelID));
+}
+
+export function setModelPinned(providerID: string, modelID: string, pinned: boolean) {
+  const key = modelVisibilityKey(providerID, modelID);
+  const next = pinned
+    ? [...state.pinnedModels.filter((item) => item !== key), key]
+    : state.pinnedModels.filter((item) => item !== key);
+
+  setState('pinnedModels', next);
+  writeStored(STORAGE_KEYS.pinnedModels, next);
+}
+
 export function getVisibleProviders(providers: Provider[]) {
   return providers
     .filter(

@@ -1012,6 +1012,7 @@ describe('state helpers', () => {
   it('normalizes persisted routing state while preserving valid entries', async () => {
     window.localStorage.setItem('varro.hiddenProviders', JSON.stringify(['openai', 42, '', null]));
     window.localStorage.setItem('varro.hiddenModels', JSON.stringify(['openai:gpt-4o', false, '']));
+    window.localStorage.setItem('varro.pinnedModels', JSON.stringify(['openai:gpt-5', false, '']));
     window.localStorage.setItem('varro.selectedAgent', JSON.stringify({ name: 'build' }));
     window.localStorage.setItem(
       'varro.selectedModel',
@@ -1046,6 +1047,7 @@ describe('state helpers', () => {
 
     expect(stateModule.state.hiddenProviders).toEqual(['openai']);
     expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
+    expect(stateModule.state.pinnedModels).toEqual(['openai:gpt-5']);
     expect(stateModule.isProviderVisible('openai')).toBe(false);
     expect(stateModule.state.selectedAgent).toBeNull();
     expect(stateModule.state.selectedModel).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
@@ -1073,6 +1075,7 @@ describe('state helpers', () => {
     const persisted = {
       'varro.hiddenProviders': { openai: true },
       'varro.hiddenModels': ['openai:gpt-4o', null],
+      'varro.pinnedModels': ['openai:gpt-5', null],
       'varro.selectedAgent': ['build'],
       'varro.selectedModel': 'openai/gpt-5',
       'varro.sessionSelectedAgents': ['build'],
@@ -1090,6 +1093,7 @@ describe('state helpers', () => {
 
       expect(stateModule.state.hiddenProviders).toEqual([]);
       expect(stateModule.state.hiddenModels).toEqual(['openai:gpt-4o']);
+      expect(stateModule.state.pinnedModels).toEqual(['openai:gpt-5']);
       expect(stateModule.state.selectedAgent).toBeNull();
       expect(stateModule.state.selectedModel).toBeNull();
       expect(stateModule.state.sessionSelectedAgents).toEqual({});
@@ -1188,6 +1192,13 @@ describe('state helpers', () => {
     expect(stateModule.state.questions[0]?.questions).toHaveLength(1);
 
     stateModule.setState('providers', providers);
+    stateModule.setModelPinned('openai', 'gpt-4.1', true);
+    expect(stateModule.isModelPinned('openai', 'gpt-4.1')).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem('varro.pinnedModels')!)).toEqual([
+      'openai:gpt-4.1',
+    ]);
+    stateModule.setModelPinned('openai', 'gpt-4.1', false);
+    expect(stateModule.isModelPinned('openai', 'gpt-4.1')).toBe(false);
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'gpt-4.1' });
     stateModule.setProviderVisible('openai', false);
     expect(stateModule.state.hiddenProviders).toEqual(['openai']);

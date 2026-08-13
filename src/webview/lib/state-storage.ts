@@ -14,6 +14,7 @@ export const STORAGE_KEYS = {
   projectCurrentDocumentEnabled: 'varro.projectCurrentDocumentEnabled',
   hiddenProviders: 'varro.hiddenProviders',
   hiddenModels: 'varro.hiddenModels',
+  pinnedModels: 'varro.pinnedModels',
   modelPickerOpened: 'varro.modelPickerOpened',
   lastSeenSessions: 'varro.lastSeenSessions',
   completedSessionResponses: 'varro.completedSessionResponses',

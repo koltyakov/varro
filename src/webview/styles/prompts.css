@@ -535,6 +535,7 @@ body.vscode-high-contrast
     .composer-completion-menu,
     .toolbar-popover,
     .dropdown-menu,
+    .model-picker-details,
     .provider-limit-popup,
     .context-popup
   ),
@@ -549,6 +550,7 @@ body.vscode-high-contrast-light
     .composer-completion-menu,
     .toolbar-popover,
     .dropdown-menu,
+    .model-picker-details,
     .provider-limit-popup,
     .context-popup
   ) {

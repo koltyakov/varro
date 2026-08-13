@@ -1377,7 +1377,10 @@ test('image previews reserve stable 16:9 frames before loading', async ({ page }
 
   await page.setViewportSize({ width: 1000, height: 800 });
   const resizedFrames = await measureFrames();
-  expect(resizedFrames[0]).toEqual({ width: 498, height: 280.125 });
+  const resizedFrame = resizedFrames[0];
+  if (!resizedFrame) throw new Error('Image preview frame is missing');
+  expect(resizedFrame.width).toBeGreaterThan(498);
+  expect(resizedFrame.width / resizedFrame.height).toBeCloseTo(16 / 9, 2);
 });
 
 test('the first image message does not overlap the sticky prompt', async ({ page }) => {

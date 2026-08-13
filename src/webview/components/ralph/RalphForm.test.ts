@@ -444,7 +444,7 @@ describe('RalphForm', () => {
     modelButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushMicrotasks();
 
-    expect(document.body.textContent).not.toContain('Manage Models');
+    expect(document.body.textContent).not.toContain('Manage models');
   });
 
   it('identifies a previously active blank session for cleanup', () => {

@@ -973,7 +973,7 @@
 
 .toolbar-popover.agent-popover {
   width: max-content;
-  max-width: min(288px, calc(100vw - 24px));
+  max-width: 288px;
 }
 
 .toolbar-popover-item {

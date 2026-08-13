@@ -1,16 +1,14 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { getVisibleProviders, setShowSettings, state } from '../lib/state';
 import {
-  formatVariantLabel as formatThinkingLabel,
-  formatContextLimit,
-  formatModelReleaseDate,
-} from '../lib/format';
-import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
-import {
-  modelSupportsTools,
-  modelSupportsVariants,
-  modelSupportsVision,
-} from '../lib/model-capabilities';
+  getVisibleProviders,
+  isModelPinned,
+  setModelPinned,
+  setShowSettings,
+  state,
+} from '../lib/state';
+import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
+import { observePopupViewport } from '../lib/popup-position';
+import { modelSupportsVariants } from '../lib/model-capabilities';
 import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
@@ -21,7 +19,7 @@ interface ModelSelection {
   variant?: string;
 }
 
-const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage Models" button when opening the model picker
+const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage models" button when opening the model picker
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
@@ -35,6 +33,7 @@ export function ModelPicker(props: {
     props.currentSelection !== undefined ? props.currentSelection : state.selectedModel;
   let anchorRef: HTMLDivElement | undefined;
   let menuRef: HTMLDivElement | undefined;
+  let listRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   const visibleProviders = createMemo(() =>
     getVisibleProviders(state.providers).toSorted(compareProviders)
@@ -44,10 +43,10 @@ export function ModelPicker(props: {
     providerID: string;
     modelID: string;
     name: string;
-    contextLimit?: number;
   };
   type ModelEntry = {
     item: FlatItem;
+    provider: VisibleProvider;
     model: VisibleProvider['models'][string];
     searchText: string;
   };
@@ -59,6 +58,17 @@ export function ModelPicker(props: {
 
   const [query, setQuery] = createSignal('');
   const [animateManageModels, setAnimateManageModels] = createSignal(false);
+  const [detailsTop, setDetailsTop] = createSignal(36);
+  const [hoveredEntry, setHoveredEntry] = createSignal<{
+    provider: VisibleProvider;
+    model: VisibleProvider['models'][string];
+  } | null>(null);
+  const [showDetails, setShowDetails] = createSignal(false);
+  const [scrollMetrics, setScrollMetrics] = createSignal({
+    clientHeight: 0,
+    scrollHeight: 0,
+    scrollTop: 0,
+  });
   const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
 
   const providerEntries = createMemo<ProviderEntry[]>(() =>
@@ -70,30 +80,44 @@ export function ModelPicker(props: {
           providerID: provider.id,
           modelID: model.id,
           name: model.name,
-          contextLimit: model.limit?.context,
         },
+        provider,
         model,
         searchText: `${model.name}\n${model.id}`.toLocaleLowerCase(),
       })),
     }))
   );
 
-  const totalModelCount = createMemo(() =>
-    providerEntries().reduce((acc, provider) => acc + provider.models.length, 0)
-  );
-  const showSearch = createMemo(() => totalModelCount() > 10);
-
-  const filteredProviders = createMemo<ProviderEntry[]>(() => {
+  const filteredGroups = createMemo(() => {
     const search = normalizedQuery();
-    if (!search) return providerEntries();
+    const pinnedByKey = new Map<string, ModelEntry>();
+    for (const providerEntry of providerEntries()) {
+      for (const entry of providerEntry.models) {
+        if (isModelPinned(entry.item.providerID, entry.item.modelID)) {
+          pinnedByKey.set(`${entry.item.providerID}:${entry.item.modelID}`, entry);
+        }
+      }
+    }
+    const pinnedModels = state.pinnedModels
+      .map((key) => pinnedByKey.get(key))
+      .filter((entry): entry is ModelEntry => Boolean(entry))
+      .filter(
+        (entry) =>
+          !search ||
+          entry.searchText.includes(search) ||
+          `${entry.provider.name}\n${entry.provider.id}`.toLocaleLowerCase().includes(search)
+      );
 
     const filtered: ProviderEntry[] = [];
     for (const providerEntry of providerEntries()) {
+      const unpinnedModels = providerEntry.models.filter(
+        (entry) => !isModelPinned(entry.item.providerID, entry.item.modelID)
+      );
       if (providerEntry.searchText.includes(search)) {
-        filtered.push(providerEntry);
+        if (unpinnedModels.length > 0) filtered.push({ ...providerEntry, models: unpinnedModels });
         continue;
       }
-      const models = providerEntry.models.filter((model) => model.searchText.includes(search));
+      const models = unpinnedModels.filter((model) => model.searchText.includes(search));
       if (models.length > 0) {
         filtered.push({
           provider: providerEntry.provider,
@@ -102,12 +126,16 @@ export function ModelPicker(props: {
         });
       }
     }
-    return filtered;
+    return [
+      ...(pinnedModels.length > 0 ? [{ name: 'Pinned', models: pinnedModels }] : []),
+      ...filtered.map((entry) => ({ name: entry.provider.name, models: entry.models })),
+    ];
   });
 
+  const [focusIndex, setFocusIndex] = createSignal(0);
   const flatItems = createMemo<FlatItem[]>(() => {
     const items: FlatItem[] = [];
-    for (const { models } of filteredProviders()) {
+    for (const { models } of filteredGroups()) {
       for (const model of models) {
         items.push(model.item);
       }
@@ -123,8 +151,6 @@ export function ModelPicker(props: {
     );
     return idx >= 0 ? idx : 0;
   };
-
-  const [focusIndex, setFocusIndex] = createSignal(0);
 
   createEffect(() => {
     if (normalizedQuery()) {
@@ -180,187 +206,282 @@ export function ModelPicker(props: {
     }
 
     const reposition = () => {
-      if (anchorRef && menuRef) {
-        const editBanner = anchorRef
-          .closest('.interactive-input-part')
-          ?.querySelector<HTMLElement>('.composer-edit-banner');
-        placeDropdownAnchor(anchorRef, menuRef, props.popupGap ?? 10, 8, editBanner);
-      }
+      if (!anchorRef || !menuRef) return;
+      const host = anchorRef.offsetParent;
+      const button = host?.querySelector<HTMLElement>('.model-picker-btn');
+      if (!(host instanceof HTMLElement) || !button) return;
+
+      const hostBox = host.getBoundingClientRect();
+      const buttonBox = button.getBoundingClientRect();
+      const gap = props.popupGap ?? 6;
+      const viewportMargin = 8;
+      const defaultMenuWidth = 285;
+      const minimumMenuWidth = 220;
+      const boundaryLeft = Math.max(viewportMargin, hostBox.left);
+      const boundaryRight = Math.min(window.innerWidth - viewportMargin, hostBox.right);
+      const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
+      const maximumMenuWidth = Math.min(defaultMenuWidth, boundaryWidth);
+      const triggerLeft = Math.max(boundaryLeft, buttonBox.left);
+      const availableRightWidth = boundaryRight - triggerLeft;
+      const canRemainRightOpening =
+        availableRightWidth >= Math.min(minimumMenuWidth, maximumMenuWidth);
+      const menuWidth = canRemainRightOpening
+        ? Math.min(maximumMenuWidth, availableRightWidth)
+        : maximumMenuWidth;
+      const viewportLeft = canRemainRightOpening
+        ? triggerLeft
+        : Math.max(boundaryLeft, Math.min(buttonBox.right - menuWidth, boundaryRight - menuWidth));
+      anchorRef.style.width = `${menuWidth}px`;
+      anchorRef.style.left = `${Math.round(viewportLeft - hostBox.left)}px`;
+      anchorRef.style.right = 'auto';
+      anchorRef.style.bottom = `${Math.round(hostBox.bottom - buttonBox.top + gap)}px`;
+      anchorRef.style.paddingBottom = '0px';
+      const menuHeight = Math.max(0, Math.min(360, buttonBox.top - 8));
+      const searchHeight =
+        menuRef.querySelector<HTMLElement>('.model-picker-search')?.offsetHeight ?? 0;
+      const footerHeight =
+        menuRef.querySelector<HTMLElement>('.dropdown-footer')?.offsetHeight ?? 0;
+      menuRef.style.maxHeight = `${menuHeight}px`;
+      if (listRef)
+        listRef.style.maxHeight = `${Math.max(0, menuHeight - searchHeight - footerHeight)}px`;
     };
 
-    if (showSearch()) {
-      searchInputRef?.focus();
-    } else {
-      menuRef?.focus();
-    }
+    searchInputRef?.focus();
 
     if (!menuRef) return;
-    onCleanup(observePopupViewport(menuRef, reposition));
+    const stopObservingViewport = observePopupViewport(menuRef, reposition);
+    const listObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollMetrics);
+    if (listRef) listObserver?.observe(listRef);
+    onCleanup(() => {
+      stopObservingViewport();
+      listObserver?.disconnect();
+    });
   });
 
   const getItemIndex = (providerID: string, modelID: string) => {
     return flatItems().findIndex((i) => i.providerID === providerID && i.modelID === modelID);
   };
+  const scrollbarThumbHeight = createMemo(() => {
+    const { clientHeight, scrollHeight } = scrollMetrics();
+    if (scrollHeight <= clientHeight) return 0;
+    return Math.max(24, (clientHeight * clientHeight) / scrollHeight);
+  });
+  const scrollbarThumbTop = createMemo(() => {
+    const { clientHeight, scrollHeight, scrollTop } = scrollMetrics();
+    const availableTrack = clientHeight - scrollbarThumbHeight();
+    const availableScroll = scrollHeight - clientHeight;
+    return availableScroll > 0 ? (scrollTop / availableScroll) * availableTrack : 0;
+  });
+
+  function updateScrollMetrics() {
+    if (!listRef) return;
+    setScrollMetrics({
+      clientHeight: listRef.clientHeight,
+      scrollHeight: listRef.scrollHeight,
+      scrollTop: listRef.scrollTop,
+    });
+  }
+
+  createEffect(() => {
+    filteredGroups();
+    queueMicrotask(updateScrollMetrics);
+  });
 
   return (
     <div
       ref={(el) => {
         anchorRef = el;
       }}
-      class="dropdown-anchor absolute inset-x-0 z-50"
+      class="dropdown-anchor model-picker-anchor absolute z-50"
       onClick={props.onClose}
-      style={{ bottom: '100%', 'padding-bottom': `${props.popupGap ?? 10}px` }}
+      style={{ bottom: '100%' }}
     >
       <div
         ref={(el) => {
           menuRef = el;
           props.popoverRef?.(el);
         }}
-        class="dropdown-menu w-full"
+        class="dropdown-menu model-picker-menu w-full"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         onClick={(e) => e.stopPropagation()}
         style={{ outline: 'none' }}
       >
-        <div class="dropdown-header">Models</div>
-
-        <Show when={showSearch()}>
-          <div class="dropdown-search">
-            <input
-              ref={(el) => {
-                searchInputRef = el;
-              }}
-              type="text"
-              class="dropdown-search-input"
-              value={query()}
-              onInput={(e) => setQuery(e.currentTarget.value)}
-              placeholder="Search models"
-              aria-label="Search models"
-              spellcheck={false}
+        <div class="dropdown-search model-picker-search">
+          <svg class="dropdown-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M17 17L21 21"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
             />
-            <Show when={query().length > 0}>
-              <button
-                type="button"
-                class="dropdown-search-clear"
-                onClick={() => {
-                  setQuery('');
-                  searchInputRef?.focus();
-                }}
-                aria-label="Clear search"
-                title="Clear search"
-                tabIndex={-1}
-              >
-                <svg viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-                </svg>
-              </button>
-            </Show>
-          </div>
-        </Show>
+            <path
+              d="M3 11C3 15.4183 6.58172 19 11 19C13.213 19 15.2161 18.1015 16.6644 16.6493C18.1077 15.2022 19 13.2053 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <input
+            ref={(el) => {
+              searchInputRef = el;
+            }}
+            type="text"
+            class="dropdown-search-input"
+            value={query()}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+            placeholder="Search models"
+            aria-label="Search models"
+            spellcheck={false}
+          />
+          <Show when={query().length > 0}>
+            <button
+              type="button"
+              class="dropdown-search-clear"
+              onClick={() => {
+                setQuery('');
+                searchInputRef?.focus();
+              }}
+              aria-label="Clear search"
+              title="Clear search"
+              tabIndex={-1}
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+              </svg>
+            </button>
+          </Show>
+        </div>
 
-        <div class="model-picker-list overflow-y-auto pb-1">
-          <Show
-            when={visibleProviders().length > 0}
-            fallback={
-              <div class="model-picker-empty px-3 text-center text-[11px] text-vscode-muted">
-                No models available
-              </div>
-            }
+        <div class="model-picker-list-frame">
+          <div
+            ref={(element) => (listRef = element)}
+            class="model-picker-list pb-1"
+            onScroll={updateScrollMetrics}
           >
             <Show
-              when={filteredProviders().length > 0}
+              when={visibleProviders().length > 0}
               fallback={
                 <div class="model-picker-empty px-3 text-center text-[11px] text-vscode-muted">
-                  No matching models
+                  No models available
                 </div>
               }
             >
-              <For each={filteredProviders()}>
-                {({ provider, models }) => (
-                  <>
-                    <div class="dropdown-group-header">{provider.name}</div>
-                    <For each={models}>
-                      {(entry) => {
-                        const model = entry.model;
-                        const myIndex = () => getItemIndex(provider.id, model.id);
-                        const supportsTools = () =>
-                          modelSupportsTools(provider.id, model.id, state.providers);
-                        const supportsVariants = () =>
-                          modelSupportsVariants(provider.id, model.id, state.providers);
-                        const supportsVision = () =>
-                          modelSupportsVision(provider.id, model.id, state.providers);
-                        const releaseDate = () => formatModelReleaseDate(model.release_date);
-                        return (
-                          <button
-                            class={`dropdown-item ${isSelected(provider.id, model.id) ? 'selected' : ''} ${focusIndex() === myIndex() ? 'keyboard-focus' : ''}`}
-                            onClick={() => {
-                              props.onSelect({ providerID: provider.id, modelID: model.id });
-                              props.onClose();
-                            }}
-                            onMouseEnter={() => setFocusIndex(myIndex())}
-                          >
-                            <span class="dropdown-name-wrap">
-                              <span class="dropdown-name">
-                                <FormattedModelName name={model.name} />
-                              </span>
-                              <Show when={state.providerDefaults[provider.id] === model.id}>
-                                <span class="model-default-label">(default)</span>
-                              </Show>
-                              <span class="dropdown-check">
-                                <Show when={isSelected(provider.id, model.id)}>
-                                  <svg
-                                    class="h-3 w-3 text-vscode-accent"
-                                    viewBox="0 0 16 16"
-                                    fill="currentColor"
-                                  >
-                                    <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
-                                  </svg>
-                                </Show>
-                              </span>
-                            </span>
-                            <Show
-                              when={
-                                supportsTools() ||
-                                supportsVariants() ||
-                                supportsVision() ||
-                                model.limit?.context ||
-                                releaseDate()
-                              }
+              <Show
+                when={filteredGroups().length > 0}
+                fallback={
+                  <div class="model-picker-empty px-3 text-center text-[11px] text-vscode-muted">
+                    No matching models
+                  </div>
+                }
+              >
+                <For each={filteredGroups()}>
+                  {({ name, models }) => (
+                    <>
+                      <div class="dropdown-group-header">{name}</div>
+                      <For each={models}>
+                        {(entry) => {
+                          const provider = entry.provider;
+                          const model = entry.model;
+                          const myIndex = () => getItemIndex(provider.id, model.id);
+                          const pinned = () => isModelPinned(provider.id, model.id);
+                          return (
+                            <div
+                              class={`model-picker-row ${pinned() ? 'pinned' : ''}`}
+                              onMouseEnter={(event) => {
+                                setFocusIndex(myIndex());
+                                setHoveredEntry({ provider, model });
+                                if (!anchorRef || !menuRef) return;
+                                const anchorBox = anchorRef.getBoundingClientRect();
+                                const rowBox = event.currentTarget.getBoundingClientRect();
+                                setDetailsTop(
+                                  Math.max(
+                                    0,
+                                    Math.min(
+                                      rowBox.top - anchorBox.top,
+                                      window.innerHeight - anchorBox.top - 150
+                                    )
+                                  )
+                                );
+                                setShowDetails(
+                                  menuRef.getBoundingClientRect().right + 235 <= window.innerWidth
+                                );
+                              }}
+                              onMouseLeave={() => {
+                                setHoveredEntry(null);
+                                setShowDetails(false);
+                              }}
                             >
-                              <span class="dropdown-meta">
-                                <Show when={releaseDate()}>
-                                  {(date) => <span class="model-release-date">{date()}</span>}
-                                </Show>
-                                <Show when={supportsTools()}>
-                                  <span class="model-capability-tag model-capability-tag-tools">
-                                    Tools
+                              <button
+                                class={`dropdown-item model-picker-item ${isSelected(provider.id, model.id) ? 'selected' : ''} ${focusIndex() === myIndex() ? 'keyboard-focus' : ''}`}
+                                onClick={() => {
+                                  props.onSelect({ providerID: provider.id, modelID: model.id });
+                                  props.onClose();
+                                }}
+                              >
+                                <span class="dropdown-name-wrap">
+                                  <span class="dropdown-name">
+                                    <FormattedModelName name={model.name} />
                                   </span>
-                                </Show>
-                                <Show when={supportsVariants()}>
-                                  <span class="model-capability-tag model-capability-tag-variants">
-                                    Variants
+                                  <Show when={pinned()}>
+                                    <span class="model-picker-provider-name">{provider.name}</span>
+                                  </Show>
+                                  <Show when={state.providerDefaults[provider.id] === model.id}>
+                                    <span class="model-default-label">(default)</span>
+                                  </Show>
+                                  <span class="dropdown-check">
+                                    <Show when={isSelected(provider.id, model.id)}>
+                                      <svg
+                                        class="h-3 w-3 text-vscode-accent"
+                                        viewBox="0 0 16 16"
+                                        fill="currentColor"
+                                      >
+                                        <path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z" />
+                                      </svg>
+                                    </Show>
                                   </span>
-                                </Show>
-                                <Show when={supportsVision()}>
-                                  <span class="model-capability-tag model-capability-tag-vision">
-                                    Vision
-                                  </span>
-                                </Show>
-                                <Show when={model.limit?.context}>
-                                  <span class="dropdown-hint">
-                                    {formatContextLimit(model.limit!.context)}
-                                  </span>
-                                </Show>
-                              </span>
-                            </Show>
-                          </button>
-                        );
-                      }}
-                    </For>
-                  </>
-                )}
-              </For>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                class="model-picker-pin"
+                                classList={{ active: pinned() }}
+                                onClick={() => setModelPinned(provider.id, model.id, !pinned())}
+                                aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${model.name}`}
+                                title={`${pinned() ? 'Unpin' : 'Pin'} model`}
+                              >
+                                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                  <path
+                                    d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
+                                    stroke="currentColor"
+                                    stroke-width="1.1"
+                                    stroke-linejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          );
+                        }}
+                      </For>
+                    </>
+                  )}
+                </For>
+              </Show>
             </Show>
+          </div>
+          <Show when={scrollbarThumbHeight() > 0}>
+            <div class="model-picker-scrollbar" aria-hidden="true">
+              <div
+                class="model-picker-scrollbar-thumb"
+                style={{
+                  height: `${scrollbarThumbHeight()}px`,
+                  transform: `translateY(${scrollbarThumbTop()}px)`,
+                }}
+              />
+            </div>
           </Show>
         </div>
 
@@ -393,14 +514,64 @@ export function ModelPicker(props: {
               <span
                 class={`dropdown-footer-label text-vscode-muted ${animateManageModels() ? 'shimmer-progress' : ''}`}
               >
-                Manage Models
+                Manage models
               </span>
             </button>
           </div>
         </Show>
       </div>
+      <Show when={showDetails() ? hoveredEntry() : null}>
+        {(entry) => (
+          <div class="model-picker-details" style={{ top: `${detailsTop()}px` }} aria-live="polite">
+            <dl>
+              <div>
+                <dt>Model</dt>
+                <dd>{entry().model.name}</dd>
+              </div>
+              <div>
+                <dt>Provider</dt>
+                <dd>{entry().provider.name}</dd>
+              </div>
+              <div>
+                <dt>Inputs</dt>
+                <dd>{formatModelInputs(entry().model.capabilities.input)}</dd>
+              </div>
+              <div>
+                <dt>Reasoning</dt>
+                <dd>
+                  {entry().model.capabilities.reasoning ||
+                  modelSupportsVariants(entry().provider.id, entry().model.id, state.providers)
+                    ? 'Allows reasoning'
+                    : 'No reasoning'}
+                </dd>
+              </div>
+              <Show when={entry().model.limit?.context}>
+                {(context) => (
+                  <div>
+                    <dt>Context</dt>
+                    <dd>{formatContextLimit(context())}</dd>
+                  </div>
+                )}
+              </Show>
+            </dl>
+          </div>
+        )}
+      </Show>
     </div>
   );
 }
+
+function formatModelInputs(input: VisibleProviderModel['capabilities']['input']): string {
+  if (Array.isArray(input)) return input.join(', ') || 'text';
+  if (input) {
+    const enabled = Object.entries(input)
+      .filter(([, supported]) => supported)
+      .map(([modality]) => modality);
+    if (enabled.length > 0) return enabled.join(', ');
+  }
+  return 'text';
+}
+
+type VisibleProviderModel = ReturnType<typeof getVisibleProviders>[number]['models'][string];
 
 export { formatThinkingLabel, formatContextLimit };

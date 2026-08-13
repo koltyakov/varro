@@ -2131,7 +2131,6 @@ kbd {
   align-items: center;
   justify-content: center;
   width: 100%;
-  max-width: 498px;
   aspect-ratio: 16 / 9;
   margin-inline: auto;
   overflow: hidden;

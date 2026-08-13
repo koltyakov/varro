@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider } from '../types';
 import {
+  modelSupportsAudio,
   modelSupportsReasoning,
   modelSupportsPdf,
   modelSupportsTools,
   modelSupportsVariants,
+  modelSupportsVideo,
   modelSupportsVision,
 } from './model-capabilities';
 
@@ -169,6 +171,30 @@ describe('model capability helpers', () => {
 
     expect(modelSupportsPdf('openai', 'pdf-model', providers)).toBe(true);
     expect(modelSupportsPdf('openai', 'named-pdf', providers)).toBe(false);
+  });
+
+  it('strictly reads Audio and Video support from capabilities.input', () => {
+    const providers: Provider[] = [
+      provider('media', {
+        list: {
+          id: 'list',
+          name: 'List',
+          capabilities: { input: ['text', 'audio', 'video'] },
+          cost: { input: 0, output: 0 },
+        },
+        map: {
+          id: 'map',
+          name: 'Map',
+          capabilities: { input: { text: true, audio: true, image: false, video: false, pdf: false } },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(modelSupportsAudio('media', 'list', providers)).toBe(true);
+    expect(modelSupportsVideo('media', 'list', providers)).toBe(true);
+    expect(modelSupportsAudio('media', 'map', providers)).toBe(true);
+    expect(modelSupportsVideo('media', 'map', providers)).toBe(false);
   });
 
   it('detects variants while ignoring the none placeholder', () => {

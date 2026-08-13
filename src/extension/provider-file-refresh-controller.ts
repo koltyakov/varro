@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { basename, dirname } from 'path';
 import * as vscode from 'vscode';
+import type { OpenCodeModelRouting, OpenCodeModelRoute } from '../shared/opencode-types';
 import type { Persistence } from '../shared/persistence';
 import type { ServerStatus } from '../shared/protocol';
 import { logger } from './logger';
@@ -58,6 +59,7 @@ export class ProviderFileRefreshController {
   private refreshGeneration = 0;
   private observedFilesSignature: string | null = null;
   private pendingScope: PendingRefreshScope | null = null;
+  private workspaceRoutingBaseline: OpenCodeModelRouting | null = null;
   private authChangePending = false;
   private configChangePending = false;
   private pendingAuthOnlyInvalidation = false;
@@ -146,9 +148,29 @@ export class ProviderFileRefreshController {
     this.dependencies.postPendingStatus(this.pendingScope !== null);
   }
 
-  async refreshWorkspaceState(generation = ++this.refreshGeneration) {
+  async refreshWorkspaceState(
+    previousRouting?: OpenCodeModelRouting,
+    currentRouting?: OpenCodeModelRouting,
+    generation = ++this.refreshGeneration
+  ) {
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.clearProviderLimitCache();
+    if (
+      previousRouting &&
+      currentRouting &&
+      ((!this.pendingScope && areOpenCodeRoutesEqual(previousRouting, currentRouting)) ||
+        (this.pendingScope === 'workspace' &&
+          this.workspaceRoutingBaseline &&
+          areOpenCodeRoutesEqual(this.workspaceRoutingBaseline, currentRouting)))
+    ) {
+      await this.cancelWorkspaceRefresh();
+      if (this.disposed || generation !== this.refreshGeneration) return;
+      this.dependencies.postRefresh();
+      return;
+    }
+    if (!this.pendingScope && previousRouting) {
+      this.workspaceRoutingBaseline = previousRouting;
+    }
     await this.markRefreshPending('workspace');
     if (this.disposed || generation !== this.refreshGeneration) return;
     this.dependencies.postRefresh();
@@ -167,6 +189,7 @@ export class ProviderFileRefreshController {
     this.authChangePending = false;
     if (this.pendingAuthOnlyInvalidation && !this.configChangePending) {
       this.pendingScope = null;
+      this.workspaceRoutingBaseline = null;
       this.pendingAuthOnlyInvalidation = false;
       this.authRevalidationPending = false;
       await this.clearPersistedPendingState();
@@ -473,6 +496,7 @@ export class ProviderFileRefreshController {
     if (!this.pendingScope || scope === 'global') {
       this.pendingScope = scope;
     }
+    if (scope === 'global') this.workspaceRoutingBaseline = null;
     try {
       await this.dependencies.persistence.set(ProviderFileRefreshController.PENDING_STATE_KEY, {
         version: 3,
@@ -497,6 +521,23 @@ export class ProviderFileRefreshController {
     }
   }
 
+  private async cancelWorkspaceRefresh() {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    const wasPending = this.pendingScope === 'workspace';
+    if (wasPending) {
+      this.pendingScope = null;
+      await this.clearPersistedPendingState();
+    }
+    this.workspaceRoutingBaseline = null;
+    if (wasPending && this.pendingStatusPosted) {
+      this.pendingStatusPosted = false;
+      this.dependencies.postPendingStatus(false);
+    }
+  }
+
   private async withSignatureTimeout<T>(operation: PromiseLike<T>): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -511,6 +552,21 @@ export class ProviderFileRefreshController {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+function areOpenCodeRoutesEqual(left: OpenCodeModelRouting, right: OpenCodeModelRouting) {
+  if (!areModelRoutesEqual(left.smallModel, right.smallModel)) return false;
+  const agentNames = new Set([...Object.keys(left.agentModels), ...Object.keys(right.agentModels)]);
+  for (const name of agentNames) {
+    if (!areModelRoutesEqual(left.agentModels[name] || null, right.agentModels[name] || null)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areModelRoutesEqual(left: OpenCodeModelRoute | null, right: OpenCodeModelRoute | null) {
+  return left?.providerID === right?.providerID && left?.modelID === right?.modelID;
 }
 
 function isPersistedPendingState(value: unknown): value is PersistedPendingRefreshState {

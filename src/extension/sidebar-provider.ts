@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
+import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import type {
   ChatModelSelection,
   DroppedFile,
@@ -222,7 +223,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
-      refreshOpenCodeConfig: () => this.refreshOpenCodeWorkspaceState(),
+      refreshOpenCodeConfig: (previousRouting, currentRouting) =>
+        this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
       postApiResponse: (requestGeneration, payload) =>
         this.webviewSession.postApiResponse(payload, requestGeneration),
@@ -424,8 +426,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.providerFileRefresh.acknowledgeEmbeddedReauthentication();
   }
 
-  private async refreshOpenCodeWorkspaceState() {
-    await this.providerFileRefresh.refreshWorkspaceState();
+  private async refreshOpenCodeWorkspaceState(
+    previousRouting?: OpenCodeModelRouting,
+    currentRouting?: OpenCodeModelRouting
+  ) {
+    await this.providerFileRefresh.refreshWorkspaceState(previousRouting, currentRouting);
   }
 
   private async readProviderFilesSignature() {

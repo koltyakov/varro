@@ -47,6 +47,7 @@ async function flushMicrotasks(count = 2) {
 }
 
 beforeEach(() => {
+  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   resetDefaultAppState();
   resetProviderConnectionState();
   window.localStorage.removeItem(STORAGE_KEYS.modelPickerOpened);
@@ -64,6 +65,7 @@ afterEach(() => {
   if (originalScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   setShowSettings(false);
+  window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
   resetDefaultAppState();
   resetProviderConnectionState();
   vi.restoreAllMocks();
@@ -89,12 +91,13 @@ describe('ModelPicker', () => {
     expect(container?.querySelectorAll('[title="Fast (more expensive)"]')).toHaveLength(1);
   });
 
-  it('renders an inline release date for desktop layouts', async () => {
+  it('shows model details only while hovering when there is room on the right', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         detailed: createModel('detailed', 'GPT-5 Detailed', {
           release_date: '2026-01-01',
           limit: { context: 400_000, output: 32_000 },
+          capabilities: { toolcall: true, reasoning: true, input: ['text', 'image', 'pdf'] },
         }),
       }),
     ]);
@@ -103,9 +106,30 @@ describe('ModelPicker', () => {
     cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
     await flushMicrotasks();
 
-    expect(container?.querySelector('.model-release-date')?.textContent).toBe('2026/01/01');
-    expect(container?.querySelector('.model-default-label')?.textContent).toBe('(default)');
-    expect(container?.querySelector('.model-expanded-meta')).toBeNull();
+    expect(container?.querySelector('.model-picker-item')?.textContent).toContain('GPT-5 Detailed');
+    expect(container?.querySelector('.model-picker-item')?.textContent).not.toContain('400k');
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
+
+    const row = container?.querySelector<HTMLElement>('.model-picker-row');
+    const menu = container?.querySelector<HTMLElement>('.model-picker-menu');
+    vi.spyOn(menu!, 'getBoundingClientRect').mockReturnValue({
+      ...menu!.getBoundingClientRect(),
+      right: 300,
+    });
+    row?.dispatchEvent(new MouseEvent('mouseenter'));
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain('OpenAI');
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
+      'text, image, pdf'
+    );
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain(
+      'Allows reasoning'
+    );
+    expect(container?.querySelector('.model-picker-details')?.textContent).toContain('400k');
+
+    row?.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
   });
 
   it('orders models by release date without prioritizing the provider default', async () => {
@@ -147,6 +171,53 @@ describe('ModelPicker', () => {
     ).toEqual(['OpenAI', 'Google', 'Alpha', 'Beta', 'Zulu']);
   });
 
+  it('pins models in a top group without selecting or closing the picker', async () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        sol: createModel('sol', 'GPT-5.6 Sol'),
+      }),
+      createProvider('github-copilot', 'GitHub Copilot', {
+        luna: createModel('luna', 'GPT-5.6 Luna'),
+      }),
+    ]);
+
+    cleanup = render(() => ModelPicker({ onSelect, onClose }), container!);
+    await flushMicrotasks();
+
+    const pinButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Pin GPT-5.6 Luna"]'
+    );
+    pinButton?.click();
+    await flushMicrotasks();
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      Array.from(container?.querySelectorAll('.dropdown-group-header') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['Pinned', 'OpenAI']);
+    expect(container?.querySelectorAll('.dropdown-name')).toHaveLength(2);
+    const pinnedRow = container?.querySelector('.model-picker-row.pinned');
+    expect(pinnedRow?.textContent).toContain('GPT-5.6 Luna');
+    expect(pinnedRow?.querySelector('.model-picker-provider-name')?.textContent).toBe(
+      'GitHub Copilot'
+    );
+    expect(pinnedRow?.querySelector('[aria-label="Unpin GPT-5.6 Luna"]')).not.toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([
+      'github-copilot:luna',
+    ]);
+
+    pinnedRow?.querySelector<HTMLButtonElement>('[aria-label="Unpin GPT-5.6 Luna"]')?.click();
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.dropdown-group-header')?.textContent).toBe('OpenAI');
+    expect(container?.textContent).toContain('GitHub Copilot');
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([]);
+  });
+
   it('hides providers that require re-authentication', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
@@ -167,7 +238,7 @@ describe('ModelPicker', () => {
     expect(container?.textContent).not.toContain('GPT-5 Copilot');
   });
 
-  it('shows search only when more than ten models are visible and filters by provider or model query', async () => {
+  it('always shows search and filters by provider or model query', async () => {
     const alphaModels = Object.fromEntries(
       Array.from({ length: 10 }, (_, index) => {
         const id = `alpha-${index + 1}`;
@@ -227,7 +298,7 @@ describe('ModelPicker', () => {
     expect(container?.textContent).toContain('No matching models');
   });
 
-  it('focuses the menu and selects the wrapped keyboard target from the current selection', async () => {
+  it('focuses search and selects the wrapped keyboard target from the current selection', async () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
 
@@ -243,8 +314,11 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const menu = container?.querySelector('.dropdown-menu');
+    const search = container?.querySelector<HTMLInputElement>('[aria-label="Search models"]');
     expect(menu).toBeInstanceOf(HTMLDivElement);
-    expect(document.activeElement).toBe(menu);
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    expect(document.activeElement).toBe(search);
+    expect(container?.querySelector('.dropdown-search-icon')).toBeInstanceOf(SVGElement);
 
     menu?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
@@ -279,7 +353,7 @@ describe('ModelPicker', () => {
     );
 
     const manageButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
-      button.textContent?.includes('Manage Models')
+      button.textContent?.includes('Manage models')
     ) as HTMLButtonElement | undefined;
     expect(manageButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -289,7 +363,7 @@ describe('ModelPicker', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('animates Manage Models only on the first eligible open', () => {
+  it('animates Manage models only on the first eligible open', () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         'gpt-5': createModel('gpt-5', 'GPT-5'),
@@ -317,7 +391,7 @@ describe('ModelPicker', () => {
   it.each([
     { hiddenProviders: ['openai'], hiddenModels: [] },
     { hiddenProviders: [], hiddenModels: ['openai:gpt-5'] },
-  ])('does not animate Manage Models when models or providers are hidden', (visibility) => {
+  ])('does not animate Manage models when models or providers are hidden', (visibility) => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         'gpt-5': createModel('gpt-5', 'GPT-5'),
@@ -351,15 +425,13 @@ describe('ModelPicker', () => {
     );
     await flushMicrotasks();
 
-    const anchor = container?.firstElementChild as HTMLDivElement | null;
     const list = container?.querySelector('.model-picker-list');
-    expect(anchor?.style.paddingBottom).toBe('6px');
     expect(list?.classList.contains('pb-1')).toBe(true);
     expect(list?.classList.contains('py-1')).toBe(false);
-    expect(container?.textContent).not.toContain('Manage Models');
+    expect(container?.textContent).not.toContain('Manage models');
   });
 
-  it('keeps the original popup gap', async () => {
+  it('uses compact dimensions and a constrained height', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {
         'gpt-5': createModel('gpt-5', 'GPT-5'),
@@ -377,7 +449,137 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     const anchor = container?.firstElementChild as HTMLDivElement | null;
+    const menu = container?.querySelector<HTMLElement>('.model-picker-menu');
     expect(anchor?.style.bottom).toBe('100%');
-    expect(anchor?.style.paddingBottom).toBe('10px');
+    expect(anchor?.classList).toContain('model-picker-anchor');
+    expect(menu?.classList).toContain('model-picker-menu');
+  });
+
+  it('opens toward the left when the default width would cross the viewport edge', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(320);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
+    const button = document.createElement('button');
+    button.className = 'model-picker-btn';
+    container?.appendChild(button);
+    vi.spyOn(anchor!, 'offsetParent', 'get').mockReturnValue(container);
+    vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+      ...container!.getBoundingClientRect(),
+      left: 0,
+      right: 320,
+      bottom: 500,
+    });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      ...button.getBoundingClientRect(),
+      left: 260,
+      right: 300,
+      top: 450,
+    });
+    await flushMicrotasks();
+
+    expect(anchor?.style.width).toBe('285px');
+    expect(anchor?.style.left).toBe('15px');
+  });
+
+  it('reduces its width before opening toward the left', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(320);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
+    const button = document.createElement('button');
+    button.className = 'model-picker-btn';
+    container?.appendChild(button);
+    vi.spyOn(anchor!, 'offsetParent', 'get').mockReturnValue(container);
+    vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+      ...container!.getBoundingClientRect(),
+      left: 0,
+      right: 320,
+      bottom: 500,
+    });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      ...button.getBoundingClientRect(),
+      left: 50,
+      right: 90,
+      top: 450,
+    });
+    await flushMicrotasks();
+
+    expect(anchor?.style.width).toBe('262px');
+    expect(anchor?.style.left).toBe('50px');
+  });
+
+  it('shrinks to the viewport when the default width cannot fit', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(240);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
+    const button = document.createElement('button');
+    button.className = 'model-picker-btn';
+    container?.appendChild(button);
+    vi.spyOn(anchor!, 'offsetParent', 'get').mockReturnValue(container);
+    vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+      ...container!.getBoundingClientRect(),
+      left: 0,
+      right: 240,
+      bottom: 500,
+    });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      ...button.getBoundingClientRect(),
+      left: 200,
+      right: 230,
+      top: 450,
+    });
+    await flushMicrotasks();
+
+    expect(anchor?.style.width).toBe('224px');
+    expect(anchor?.style.left).toBe('8px');
+  });
+
+  it('limits its width and position to the input host', async () => {
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    const anchor = container?.querySelector<HTMLElement>('.model-picker-anchor');
+    const button = document.createElement('button');
+    button.className = 'model-picker-btn';
+    container?.appendChild(button);
+    vi.spyOn(anchor!, 'offsetParent', 'get').mockReturnValue(container);
+    vi.spyOn(container!, 'getBoundingClientRect').mockReturnValue({
+      ...container!.getBoundingClientRect(),
+      left: 100,
+      right: 350,
+      bottom: 500,
+    });
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+      ...button.getBoundingClientRect(),
+      left: 300,
+      right: 340,
+      top: 450,
+    });
+    await flushMicrotasks();
+
+    expect(anchor?.style.width).toBe('250px');
+    expect(anchor?.style.left).toBe('0px');
   });
 });
