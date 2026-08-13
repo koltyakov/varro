@@ -140,6 +140,7 @@ export interface AppState {
   hiddenProviders: string[];
   hiddenModels: string[];
   pinnedModels: string[];
+  modelDisplayNames: Record<string, string>;
   lastSeenSessions: Record<string, number>;
   completedSessionResponses: Record<string, number>;
   skippedPlanSessions: Record<string, number>;
@@ -326,6 +327,7 @@ export function createAppState(): AppStateInstance {
     hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
     hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
     pinnedModels: readStoredStringArray(STORAGE_KEYS.pinnedModels),
+    modelDisplayNames: readStoredStringRecord(STORAGE_KEYS.modelDisplayNames),
     lastSeenSessions: initialLastSeenSessions,
     completedSessionResponses: initialCompletedSessionResponses,
     skippedPlanSessions: initialSkippedPlanSessions,

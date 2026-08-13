@@ -183,6 +183,21 @@ export function modelVisibilityKey(providerID: string, modelID: string) {
   return `${providerID}:${modelID}`;
 }
 
+export function getModelDisplayName(providerID: string, modelID: string, fallbackName: string) {
+  return state.modelDisplayNames[modelVisibilityKey(providerID, modelID)] || fallbackName;
+}
+
+export function setModelDisplayName(providerID: string, modelID: string, name: string) {
+  const key = modelVisibilityKey(providerID, modelID);
+  const displayName = name.trim();
+  const next = { ...state.modelDisplayNames };
+  if (displayName) next[key] = displayName;
+  else delete next[key];
+
+  setState('modelDisplayNames', reconcile(next));
+  writeStored(STORAGE_KEYS.modelDisplayNames, Object.keys(next).length > 0 ? next : null);
+}
+
 export function isProviderVisible(providerID: string) {
   return !state.hiddenProviders.includes(providerID);
 }

@@ -48,6 +48,7 @@ async function flushMicrotasks(count = 2) {
 
 beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   resetDefaultAppState();
   resetProviderConnectionState();
   window.localStorage.removeItem(STORAGE_KEYS.modelPickerOpened);
@@ -66,12 +67,36 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   setShowSettings(false);
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   resetDefaultAppState();
   resetProviderConnectionState();
   vi.restoreAllMocks();
 });
 
 describe('ModelPicker', () => {
+  it('shows and searches a renamed model while selecting its original ID', async () => {
+    const onSelect = vi.fn();
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        'gpt-5': createModel('gpt-5', 'GPT-5'),
+      }),
+    ]);
+    setState('modelDisplayNames', { 'openai:gpt-5': 'Primary coder' });
+
+    cleanup = render(() => ModelPicker({ onSelect, onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.dropdown-name')?.textContent).toBe('Primary coder');
+    const search = container?.querySelector<HTMLInputElement>('[aria-label="Search models"]');
+    if (search) {
+      search.value = 'primary';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+    container?.querySelector<HTMLButtonElement>('.model-picker-item')?.click();
+
+    expect(onSelect).toHaveBeenCalledWith({ providerID: 'openai', modelID: 'gpt-5' });
+  });
+
   it('labels the GPT Fast lightning symbol on hover', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

@@ -4,6 +4,8 @@ import { asRecord } from '../../shared/type-utils';
 import {
   isModelPinned,
   isModelVisible,
+  getModelDisplayName,
+  setModelDisplayName,
   setModelPinned,
   setModelVisible,
   setProviderVisible,
@@ -42,6 +44,12 @@ type ModelContextMenuState = {
   providerID: string;
   modelID: string;
 };
+type ModelRenameState = {
+  providerID: string;
+  modelID: string;
+  originalName: string;
+  displayName: string;
+};
 type ModelRouteTag = {
   kind: 'agent' | 'small' | 'approve' | 'commit';
   text: string;
@@ -50,6 +58,7 @@ type ModelRouteTag = {
 };
 
 const MIN_RELOAD_INDICATOR_MS = 500;
+const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
@@ -64,6 +73,7 @@ export function ModelsPanel() {
   const [routing, setRouting] = createSignal<OpenCodeModelRouting>(createEmptyRouting());
   const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
+  const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
@@ -79,6 +89,7 @@ export function ModelsPanel() {
     loading: boolean;
   } | null>(null);
   let bodyRef: HTMLDivElement | undefined;
+  let renameInputRef: HTMLInputElement | undefined;
   let reloadIndicatorTimer: ReturnType<typeof setTimeout> | undefined;
 
   const workspaceStatusText = createMemo(() =>
@@ -120,7 +131,9 @@ export function ModelsPanel() {
           models: providerMatches
             ? models
             : models.filter((model) =>
-                [model.name, model.id].some((value) => value.toLocaleLowerCase().includes(search))
+                [getModelDisplayName(provider.id, model.id, model.name), model.name, model.id].some(
+                  (value) => value.toLocaleLowerCase().includes(search)
+                )
               ),
         };
       })
@@ -186,6 +199,44 @@ export function ModelsPanel() {
 
   function closeContextMenu() {
     setContextMenu(null);
+  }
+
+  function positionContextMenu(element: HTMLDivElement, x: number, y: number) {
+    queueMicrotask(() => {
+      const maximumLeft = Math.max(
+        CONTEXT_MENU_VIEWPORT_MARGIN,
+        window.innerWidth - element.offsetWidth - CONTEXT_MENU_VIEWPORT_MARGIN
+      );
+      const maximumTop = Math.max(
+        CONTEXT_MENU_VIEWPORT_MARGIN,
+        window.innerHeight - element.offsetHeight - CONTEXT_MENU_VIEWPORT_MARGIN
+      );
+      element.style.left = `${Math.min(Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, x), maximumLeft)}px`;
+      element.style.top = `${Math.min(Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, y), maximumTop)}px`;
+    });
+  }
+
+  function renameModel(providerID: string, modelID: string) {
+    const model = state.providers.find((provider) => provider.id === providerID)?.models[modelID];
+    if (!model) return;
+    setRenameDialog({
+      providerID,
+      modelID,
+      originalName: model.name,
+      displayName: getModelDisplayName(providerID, modelID, model.name),
+    });
+    closeContextMenu();
+  }
+
+  function saveModelName() {
+    const rename = renameDialog();
+    if (!rename) return;
+    setModelDisplayName(
+      rename.providerID,
+      rename.modelID,
+      renameInputRef?.value.trim() === rename.originalName ? '' : renameInputRef?.value || ''
+    );
+    setRenameDialog(null);
   }
 
   function reloadProviders() {
@@ -438,6 +489,7 @@ export function ModelsPanel() {
         {(menu) => (
           <Portal>
             <div
+              ref={(element) => positionContextMenu(element, menu.x, menu.y)}
               class="settings-context-menu"
               style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
               onPointerDown={(event) => event.stopPropagation()}
@@ -456,6 +508,25 @@ export function ModelsPanel() {
               >
                 {isModelPinned(menu.providerID, menu.modelID) ? 'Unpin' : 'Pin'} model
               </button>
+              <button
+                type="button"
+                class="settings-context-menu-item"
+                onClick={() => renameModel(menu.providerID, menu.modelID)}
+              >
+                Rename model
+              </button>
+              <Show when={state.modelDisplayNames[`${menu.providerID}:${menu.modelID}`]}>
+                <button
+                  type="button"
+                  class="settings-context-menu-item"
+                  onClick={() => {
+                    setModelDisplayName(menu.providerID, menu.modelID, '');
+                    closeContextMenu();
+                  }}
+                >
+                  Reset model name
+                </button>
+              </Show>
               <div class="settings-context-menu-separator" role="separator" />
               <button
                 type="button"
@@ -542,6 +613,91 @@ export function ModelsPanel() {
                   );
                 }}
               </For>
+            </div>
+          </Portal>
+        )}
+      </Show>
+      <Show when={renameDialog()}>
+        {(rename) => (
+          <Portal>
+            <div
+              class="provider-connect-overlay"
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.preventDefault();
+                setRenameDialog(null);
+              }}
+            >
+              <form
+                class="provider-connect-dialog settings-model-rename-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="settings-model-rename-title"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  saveModelName();
+                }}
+              >
+                <div class="provider-connect-header">
+                  <div>
+                    <div id="settings-model-rename-title" class="provider-connect-title">
+                      Rename model
+                    </div>
+                    <div class="provider-connect-subtitle">{rename().originalName}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="provider-connect-close"
+                    onClick={() => setRenameDialog(null)}
+                    aria-label="Close"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="provider-connect-body">
+                  <div class="provider-connect-form">
+                    <label class="provider-connect-field">
+                      Display name
+                      <input
+                        ref={(element) => {
+                          renameInputRef = element;
+                          queueMicrotask(() => element.select());
+                        }}
+                        class="provider-connect-input"
+                        value={rename().displayName}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') return;
+                          event.preventDefault();
+                          saveModelName();
+                        }}
+                        aria-label="Model display name"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <div class="settings-model-rename-hint">
+                      Leave blank to restore the original model name.
+                    </div>
+                    <div class="provider-connect-actions">
+                      <button
+                        type="button"
+                        class="provider-connect-secondary"
+                        onClick={() => setRenameDialog(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        class="provider-connect-primary"
+                        onClick={saveModelName}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </form>
             </div>
           </Portal>
         )}
@@ -699,8 +855,19 @@ function ProviderSection(props: {
                     />
                     <span class="settings-model-name-wrap">
                       <span class="settings-model-name">
-                        <FormattedModelName name={model.name} />
+                        <FormattedModelName
+                          name={getModelDisplayName(props.provider.id, model.id, model.name)}
+                        />
                       </span>
+                      <Show when={state.modelDisplayNames[`${props.provider.id}:${model.id}`]}>
+                        <span
+                          class="settings-model-renamed-marker"
+                          title={`Original name: ${model.name}`}
+                          aria-label={`Renamed model. Original name: ${model.name}`}
+                        >
+                          renamed
+                        </span>
+                      </Show>
                       <Show when={isModelPinned(props.provider.id, model.id)}>
                         <span
                           class="settings-model-pinned-marker"
@@ -747,24 +914,27 @@ function ProviderSection(props: {
                         </Show>
                       </span>
                       <span class="settings-model-badges">
-                          <Show when={supportsTools()}>
-                            <ModelCapabilityBadge capability="tools" label="Tools" />
-                          </Show>
-                          <Show when={supportsVariants()}>
-                            <ModelCapabilityBadge capability="variants" label="Variants / reasoning" />
-                          </Show>
-                          <Show when={supportsVision()}>
-                            <ModelCapabilityBadge capability="vision" label="Vision" />
-                          </Show>
-                          <Show when={supportsPdf()}>
-                            <ModelCapabilityBadge capability="pdf" label="PDF" />
-                          </Show>
-                          <Show when={supportsAudio()}>
-                            <ModelCapabilityBadge capability="audio" label="Audio" />
-                          </Show>
-                          <Show when={supportsVideo()}>
-                            <ModelCapabilityBadge capability="video" label="Video" />
-                          </Show>
+                        <Show when={supportsTools()}>
+                          <ModelCapabilityBadge capability="tools" label="Tools" />
+                        </Show>
+                        <Show when={supportsVariants()}>
+                          <ModelCapabilityBadge
+                            capability="variants"
+                            label="Variants / reasoning"
+                          />
+                        </Show>
+                        <Show when={supportsVision()}>
+                          <ModelCapabilityBadge capability="vision" label="Vision" />
+                        </Show>
+                        <Show when={supportsPdf()}>
+                          <ModelCapabilityBadge capability="pdf" label="PDF" />
+                        </Show>
+                        <Show when={supportsAudio()}>
+                          <ModelCapabilityBadge capability="audio" label="Audio" />
+                        </Show>
+                        <Show when={supportsVideo()}>
+                          <ModelCapabilityBadge capability="video" label="Video" />
+                        </Show>
                       </span>
                       <span class="settings-model-ctx">
                         <Show when={model.limit?.context}>
@@ -832,7 +1002,11 @@ function CapabilityIcon(props: { capability: ModelCapability }) {
       </Show>
       <Show when={props.capability === 'pdf'}>
         <g transform="translate(1.5 1.5) scale(1.4)">
-          <path d="M2.5 6.5V6H2V6.5H2.5ZM6.5 6.5V6H6V6.5H6.5ZM6.5 10.5H6V11H6.5V10.5ZM13.5 3.5H14V3.29289L13.8536 3.14645L13.5 3.5ZM10.5 0.5L10.8536 0.146447L10.7071 0H10.5V0.5ZM2.5 7H3.5V6H2.5V7ZM3 11V8.5H2V11H3ZM3 8.5V6.5H2V8.5H3ZM3.5 8H2.5V9H3.5V8ZM4 7.5C4 7.77614 3.77614 8 3.5 8V9C4.32843 9 5 8.32843 5 7.5H4ZM3.5 7C3.77614 7 4 7.22386 4 7.5H5C5 6.67157 4.32843 6 3.5 6V7ZM6 6.5V10.5H7V6.5H6ZM6.5 11H7.5V10H6.5V11ZM9 9.5V7.5H8V9.5H9ZM7.5 6H6.5V7H7.5V6ZM9 7.5C9 6.67157 8.32843 6 7.5 6V7C7.77614 7 8 7.22386 8 7.5H9ZM7.5 11C8.32843 11 9 10.3284 9 9.5H8C8 9.77614 7.77614 10 7.5 10V11ZM10 6V11H11V6H10ZM10.5 7H13V6H10.5V7ZM10.5 9H12V8H10.5V9ZM2 5V1.5H1V5H2ZM13 3.5V5H14V3.5H13ZM2.5 1H10.5V0H2.5V1ZM10.1464 0.853553L13.1464 3.85355L13.8536 3.14645L10.8536 0.146447L10.1464 0.853553ZM2 1.5C2 1.22386 2.22386 1 2.5 1V0C1.67157 0 1 0.671573 1 1.5H2ZM1 12V13.5H2V12H1ZM2.5 15H12.5V14H2.5V15ZM14 13.5V12H13V13.5H14ZM12.5 15C13.3284 15 14 14.3284 14 13.5H13C13 13.7761 12.7761 14 12.5 14V15ZM1 13.5C1 14.3284 1.67157 15 2.5 15V14C2.22386 14 2 13.7761 2 13.5H1Z" fill="currentColor" stroke="none" />
+          <path
+            d="M2.5 6.5V6H2V6.5H2.5ZM6.5 6.5V6H6V6.5H6.5ZM6.5 10.5H6V11H6.5V10.5ZM13.5 3.5H14V3.29289L13.8536 3.14645L13.5 3.5ZM10.5 0.5L10.8536 0.146447L10.7071 0H10.5V0.5ZM2.5 7H3.5V6H2.5V7ZM3 11V8.5H2V11H3ZM3 8.5V6.5H2V8.5H3ZM3.5 8H2.5V9H3.5V8ZM4 7.5C4 7.77614 3.77614 8 3.5 8V9C4.32843 9 5 8.32843 5 7.5H4ZM3.5 7C3.77614 7 4 7.22386 4 7.5H5C5 6.67157 4.32843 6 3.5 6V7ZM6 6.5V10.5H7V6.5H6ZM6.5 11H7.5V10H6.5V11ZM9 9.5V7.5H8V9.5H9ZM7.5 6H6.5V7H7.5V6ZM9 7.5C9 6.67157 8.32843 6 7.5 6V7C7.77614 7 8 7.22386 8 7.5H9ZM7.5 11C8.32843 11 9 10.3284 9 9.5H8C8 9.77614 7.77614 10 7.5 10V11ZM10 6V11H11V6H10ZM10.5 7H13V6H10.5V7ZM10.5 9H12V8H10.5V9ZM2 5V1.5H1V5H2ZM13 3.5V5H14V3.5H13ZM2.5 1H10.5V0H2.5V1ZM10.1464 0.853553L13.1464 3.85355L13.8536 3.14645L10.8536 0.146447L10.1464 0.853553ZM2 1.5C2 1.22386 2.22386 1 2.5 1V0C1.67157 0 1 0.671573 1 1.5H2ZM1 12V13.5H2V12H1ZM2.5 15H12.5V14H2.5V15ZM14 13.5V12H13V13.5H14ZM12.5 15C13.3284 15 14 14.3284 14 13.5H13C13 13.7761 12.7761 14 12.5 14V15ZM1 13.5C1 14.3284 1.67157 15 2.5 15V14C2.22386 14 2 13.7761 2 13.5H1Z"
+            fill="currentColor"
+            stroke="none"
+          />
         </g>
       </Show>
       <Show when={props.capability === 'audio'}>

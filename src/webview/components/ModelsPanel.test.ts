@@ -181,7 +181,9 @@ beforeEach(() => {
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   setState('pinnedModels', []);
+  setState('modelDisplayNames', {});
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
 });
@@ -206,7 +208,9 @@ afterEach(() => {
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
   setState('pinnedModels', []);
+  setState('modelDisplayNames', {});
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
   if (originalResizeObserver) {
@@ -785,9 +789,9 @@ describe('ModelsPanel', () => {
     expect(row?.querySelector('.model-default-label')?.textContent).toBe('(default)');
     expect(row?.querySelector('.model-expanded-meta')).toBeNull();
 
-    const rowWithoutDate = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
-      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
-    );
+    const rowWithoutDate = Array.from(
+      container?.querySelectorAll('.settings-model-row') ?? []
+    ).find((item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini');
     expect(rowWithoutDate?.querySelector('.settings-model-date-cell')).toBeInstanceOf(HTMLElement);
     expect(rowWithoutDate?.querySelector('.model-release-date')).toBeNull();
     expect(
@@ -830,9 +834,9 @@ describe('ModelsPanel', () => {
     expect(fullRow?.querySelector('.model-capability-tag-tools')?.getAttribute('title')).toBe(
       'Tools'
     );
-    expect(
-      fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')
-    ).toBe('Vision');
+    expect(fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')).toBe(
+      'Vision'
+    );
     expect(fullRow?.querySelectorAll('.settings-capability-icon svg')).toHaveLength(5);
     expect(fullRow?.querySelector('.settings-capability-universal')).toBeNull();
     expect(fullRow?.querySelector('.model-capability-tag-audio')).toBeInstanceOf(HTMLElement);
@@ -870,9 +874,9 @@ describe('ModelsPanel', () => {
         expect.stringContaining('settings-route-tag-agent'),
       ])
     );
-    expect(tags.every((tag) => tag.parentElement?.classList.contains('settings-model-routes'))).toBe(
-      true
-    );
+    expect(
+      tags.every((tag) => tag.parentElement?.classList.contains('settings-model-routes'))
+    ).toBe(true);
     expect(
       tags.every((tag) => tag.closest('.settings-model-name-wrap') instanceof HTMLElement)
     ).toBe(true);
@@ -936,6 +940,30 @@ describe('ModelsPanel', () => {
     expect(refreshRoutingStateMock).toHaveBeenCalled();
   });
 
+  it('keeps the model context menu inside the viewport', async () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(220);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(240);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(500);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(300);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector<HTMLElement>('.settings-model-row');
+    row?.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 490,
+        clientY: 290,
+      })
+    );
+    await Promise.resolve();
+
+    const menu = document.querySelector<HTMLElement>('.settings-context-menu');
+    expect(menu?.style.left).toBe('272px');
+    expect(menu?.style.top).toBe('52px');
+  });
+
   it('shows pinned models and pins or unpins them from the context menu', async () => {
     setState('pinnedModels', ['openai:gpt-5']);
     cleanup = render(() => ModelsPanel(), container!);
@@ -953,7 +981,8 @@ describe('ModelsPanel', () => {
     ).find((item) => item.textContent === 'Unpin model');
     expect(unpinButton).toBeTruthy();
     expect(menu.children[0]).toBe(unpinButton);
-    expect(menu.children[1]?.getAttribute('role')).toBe('separator');
+    expect(menu.children[1]?.textContent).toBe('Rename model');
+    expect(menu.children[2]?.getAttribute('role')).toBe('separator');
 
     unpinButton?.click();
     await Promise.resolve();
@@ -972,6 +1001,49 @@ describe('ModelsPanel', () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedModels)!)).toEqual([
       'openai:gpt-5',
     ]);
+  });
+
+  it('renames and resets a model display name without changing its ID', async () => {
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
+    ) as HTMLElement;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Rename model')?.click();
+    await Promise.resolve();
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const nameInput = dialog?.querySelector<HTMLInputElement>('[aria-label="Model display name"]');
+    expect(dialog?.textContent).toContain('GPT-5');
+    expect(nameInput?.value).toBe('GPT-5');
+    if (nameInput) {
+      nameInput.value = 'Primary coder';
+    }
+    findButton(dialog, 'Save')?.click();
+    await Promise.resolve();
+
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const renamedRow = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
+      (item) => item.querySelector('.settings-model-name')?.textContent === 'Primary coder'
+    ) as HTMLElement;
+    expect(renamedRow).toBeTruthy();
+    const renamedMarker = renamedRow.querySelector('.settings-model-renamed-marker');
+    expect(renamedMarker?.textContent).toBe('renamed');
+    expect(renamedMarker?.getAttribute('title')).toBe('Original name: GPT-5');
+    expect(renamedMarker?.getAttribute('aria-label')).toBe('Renamed model. Original name: GPT-5');
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.modelDisplayNames)!)).toEqual({
+      'openai:gpt-5': 'Primary coder',
+    });
+
+    renamedRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    findButton(document, 'Reset model name')?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.settings-model-name')?.textContent).toBe('GPT-5');
+    expect(container?.querySelector('.settings-model-renamed-marker')).toBeNull();
+    expect(window.localStorage.getItem(STORAGE_KEYS.modelDisplayNames)).toBeNull();
   });
 
   it('reverses assigned model actions and unsets the routing assignment', async () => {

@@ -1131,6 +1131,17 @@
   white-space: nowrap;
 }
 
+.settings-model-renamed-marker {
+  flex-shrink: 0;
+  margin-left: 5px;
+  padding: 1px 4px;
+  color: var(--color-vscode-muted);
+  font-size: 9px;
+  line-height: 1.2;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-muted) 42%, transparent);
+  border-radius: var(--radius-control);
+}
+
 .settings-model-pinned-marker {
   display: inline-flex;
   flex-shrink: 0;
@@ -1315,8 +1326,10 @@
   display: flex;
   min-width: 220px;
   max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
   border-radius: var(--radius-card);
   background: var(--color-vscode-widget-bg);
@@ -1352,4 +1365,14 @@
 .settings-context-menu-item:disabled {
   cursor: default;
   color: var(--color-vscode-muted);
+}
+
+.settings-model-rename-dialog {
+  width: min(400px, 100%);
+  height: auto;
+}
+
+.settings-model-rename-hint {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
 }

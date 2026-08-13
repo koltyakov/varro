@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import {
   getVisibleProviders,
+  getModelDisplayName,
   isModelPinned,
   setModelPinned,
   setShowSettings,
@@ -75,16 +76,19 @@ export function ModelPicker(props: {
     visibleProviders().map((provider) => ({
       provider,
       searchText: `${provider.name}\n${provider.id}`.toLocaleLowerCase(),
-      models: sortProviderModels(Object.values(provider.models)).map((model) => ({
-        item: {
-          providerID: provider.id,
-          modelID: model.id,
-          name: model.name,
-        },
-        provider,
-        model,
-        searchText: `${model.name}\n${model.id}`.toLocaleLowerCase(),
-      })),
+      models: sortProviderModels(Object.values(provider.models)).map((model) => {
+        const displayName = getModelDisplayName(provider.id, model.id, model.name);
+        return {
+          item: {
+            providerID: provider.id,
+            modelID: model.id,
+            name: displayName,
+          },
+          provider,
+          model,
+          searchText: `${displayName}\n${model.name}\n${model.id}`.toLocaleLowerCase(),
+        };
+      }),
     }))
   );
 
@@ -424,7 +428,7 @@ export function ModelPicker(props: {
                               >
                                 <span class="dropdown-name-wrap">
                                   <span class="dropdown-name">
-                                    <FormattedModelName name={model.name} />
+                                    <FormattedModelName name={entry.item.name} />
                                   </span>
                                   <Show when={pinned()}>
                                     <span class="model-picker-provider-name">{provider.name}</span>
@@ -450,7 +454,7 @@ export function ModelPicker(props: {
                                 class="model-picker-pin"
                                 classList={{ active: pinned() }}
                                 onClick={() => setModelPinned(provider.id, model.id, !pinned())}
-                                aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${model.name}`}
+                                aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${entry.item.name}`}
                                 title={`${pinned() ? 'Unpin' : 'Pin'} model`}
                               >
                                 <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -526,7 +530,9 @@ export function ModelPicker(props: {
             <dl>
               <div>
                 <dt>Model</dt>
-                <dd>{entry().model.name}</dd>
+                <dd>
+                  {getModelDisplayName(entry().provider.id, entry().model.id, entry().model.name)}
+                </dd>
               </div>
               <div>
                 <dt>Provider</dt>

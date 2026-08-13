@@ -51,6 +51,7 @@ import {
   requestMessageListScrollToBottom,
   getCurrentDocumentEnabled,
   getProviderLimit,
+  getModelDisplayName,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -798,7 +799,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         modelID: selected.modelID,
         variant: selected.variant || null,
         providerName: provider?.name || selected.providerID,
-        modelName: model?.name || selected.modelID,
+        modelName: model
+          ? getModelDisplayName(selected.providerID, selected.modelID, model.name)
+          : selected.modelID,
         contextLimit: model?.limit?.context || null,
       };
     }
@@ -812,7 +815,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         modelID: latestAuto.modelID,
         variant: latestAuto.variant || null,
         providerName: provider?.name || latestAuto.providerID,
-        modelName: model?.name || latestAuto.modelID,
+        modelName: model
+          ? getModelDisplayName(latestAuto.providerID, latestAuto.modelID, model.name)
+          : latestAuto.modelID,
         contextLimit: model?.limit?.context || null,
       };
     }
@@ -826,7 +831,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           modelID: model.id,
           variant: null,
           providerName: provider.name,
-          modelName: model.name,
+          modelName: getModelDisplayName(provider.id, model.id, model.name),
           contextLimit: model.limit?.context || null,
         };
       }
@@ -841,7 +846,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           modelID: firstModel.id,
           variant: null,
           providerName: firstProvider.name,
-          modelName: firstModel.name,
+          modelName: getModelDisplayName(firstProvider.id, firstModel.id, firstModel.name),
           contextLimit: firstModel.limit?.context || null,
         };
       }
