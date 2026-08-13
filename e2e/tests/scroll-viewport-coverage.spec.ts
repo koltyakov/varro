@@ -144,6 +144,88 @@ test.describe('viewport content coverage', () => {
     }
   });
 
+  test('keeps exact prefix height with expanding terminal-only and image-only rows', async ({
+    page,
+  }) => {
+    // Principle: remounting unusually tall content must preserve the same row-only prefix total.
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    const getAccountedHeight = () =>
+      list.evaluate((element) => {
+        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        return (
+          (element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect().height ??
+            0) +
+          rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
+          (element
+            .querySelector<HTMLElement>('.virtual-spacer-bottom')
+            ?.getBoundingClientRect().height ?? 0)
+        );
+      });
+    let previousHeight = -1;
+    await expect
+      .poll(async () => {
+        await waitForAnimationFrames(page, 2);
+        const height = await getAccountedHeight();
+        const stable = height === previousHeight;
+        previousHeight = height;
+        return stable;
+      })
+      .toBe(true);
+
+    type HeightSample = {
+      accountedHeight: number;
+      terminalRows: number;
+      imageRows: number;
+      renderedRows: number;
+    };
+    const ratios = [0, 0.2, 0.4, 0.6, 0.8, 1];
+    const sampleAt = async (ratio: number): Promise<HeightSample> => {
+      await list.evaluate((element, targetRatio) => {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+        element.scrollTop = (element.scrollHeight - element.clientHeight) * targetRatio;
+        element.dispatchEvent(new Event('scroll'));
+      }, ratio);
+      await waitForAnimationFrames(page, 4);
+
+      return list.evaluate((element) => {
+        const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        const topSpacer = element.querySelector<HTMLElement>('.virtual-spacer-top');
+        const bottomSpacer = element.querySelector<HTMLElement>('.virtual-spacer-bottom');
+        return {
+          accountedHeight:
+            (topSpacer?.getBoundingClientRect().height ?? 0) +
+            rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
+            (bottomSpacer?.getBoundingClientRect().height ?? 0),
+          terminalRows: rows.filter((row) =>
+            row.querySelector('.user-message-terminal-code-block')
+          ).length,
+          imageRows: rows.filter((row) => row.querySelector('.chat-image-preview-trigger')).length,
+          renderedRows: rows.length,
+        };
+      });
+    };
+
+    const hydrationSamples: HeightSample[] = [];
+    for (const ratio of ratios) hydrationSamples.push(await sampleAt(ratio));
+    const samples: HeightSample[] = [];
+    for (const ratio of ratios) samples.push(await sampleAt(ratio));
+
+    expect(hydrationSamples.some((sample) => sample.terminalRows > 0)).toBe(true);
+    expect(hydrationSamples.some((sample) => sample.imageRows > 0)).toBe(true);
+
+    const expectedHeight = samples[0]!.accountedHeight;
+    for (const sample of samples) {
+      expect(Math.abs(sample.accountedHeight - expectedHeight), JSON.stringify(samples)).toBeLessThan(
+        1
+      );
+      expect(sample.renderedRows).toBeLessThan(40);
+    }
+  });
+
   test('virtualized message blocks stay aligned to whole CSS pixels', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
     const track = page.locator('.interactive-list-track');

@@ -3699,16 +3699,42 @@ function createScenarioState(name: ScenarioName): ScenarioState {
 
     for (let index = 0; index < 120; index += 1) {
       const createdAt = BASE_TIME - (500 - index) * 1000;
+      const terminalOnly = index % 20 === 2;
+      const imageOnly = index % 20 === 7;
       const user = makeUserMessage(
         session.id,
         `message-heterogeneous-user-${index}`,
-        [
-          index % 9 === 0
-            ? `Investigate chat scroll jitter regression ${index}. Include browser reproduction details and acceptance criteria. ${'Keep the viewport stable while moving through earlier content. '.repeat(5)}`
-            : `Review scroll stability section ${index}.`,
-        ],
+        terminalOnly
+          ? [
+              `[Selection from terminal zsh]\n\`\`\`text\n${Array.from(
+                { length: 30 },
+                (_, line) => `virtualization verification line ${line + 1}`
+              ).join('\n')}\n\`\`\``,
+            ]
+          : imageOnly
+            ? []
+            : [
+                index % 9 === 0
+                  ? `Investigate chat scroll jitter regression ${index}. Include browser reproduction details and acceptance criteria. ${'Keep the viewport stable while moving through earlier content. '.repeat(5)}`
+                  : `Review scroll stability section ${index}.`,
+              ],
         createdAt
       );
+      if (imageOnly) {
+        user.parts.push({
+          id: `message-heterogeneous-user-${index}-image`,
+          sessionID: session.id,
+          messageID: user.info.id,
+          type: 'file',
+          mime: 'image/svg+xml',
+          filename: `virtualization-${index}.svg`,
+          url:
+            'data:image/svg+xml,' +
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="640"><rect width="320" height="640" fill="#3b82f6"/></svg>'
+            ),
+        });
+      }
       messages.push(user);
 
       const firstAssistant = makeCompletedAssistantMessageWithParts(

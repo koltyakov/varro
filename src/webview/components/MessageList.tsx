@@ -2830,7 +2830,7 @@ export function MessageList() {
       clearUpwardStickyHandoff();
       return false;
     }
-    if (sourceRect.bottom > containerRect.top) {
+    if (sourceRect.bottom >= containerRect.top) {
       handoff.sourceEntered = true;
       return true;
     }
@@ -3833,7 +3833,7 @@ export function MessageList() {
       confirmedManualUpwardMovement &&
       currentStickyPreview &&
       currentStickySource &&
-      currentStickySource.getBoundingClientRect().bottom > containerRef.getBoundingClientRect().top
+      currentStickySource.getBoundingClientRect().bottom >= containerRef.getBoundingClientRect().top
     ) {
       beginUpwardStickyHandoff(currentStickyPreview.id, true);
       scheduleUpwardStickyHandoffRelease();
