@@ -444,8 +444,10 @@ export function MessageList() {
   let previousStickyPreviewId: string | null = null;
   let previousStickyPreviewBounds: { top: number; bottom: number } | null = null;
   let upwardStickyHandoff: {
+    preview: StickyUserMessagePreview;
     messageId: string;
     releaseTop: number;
+    acceptsBoundaryEntry: boolean;
     sourceEntered: boolean;
     lastInputAt: number;
   } | null = null;
@@ -2777,22 +2779,30 @@ export function MessageList() {
     return row?.querySelector<HTMLElement>('.user-message-card') ?? row;
   }
 
-  function beginUpwardStickyHandoff(messageId: string, sourceEntered: boolean) {
+  function beginUpwardStickyHandoff(
+    preview: StickyUserMessagePreview,
+    sourceEntered: boolean,
+    acceptsBoundaryEntry = false
+  ) {
     const containerRect = containerRef?.getBoundingClientRect();
     const releaseTop = containerRect
       ? (getStickyUserMessageHandoffReleaseTop(containerRect) ??
         previousStickyPreviewBounds?.bottom ??
         0)
       : 0;
-    if (upwardStickyHandoff?.messageId === messageId) {
+    if (upwardStickyHandoff?.messageId === preview.id) {
+      upwardStickyHandoff.preview = preview;
       upwardStickyHandoff.releaseTop = Math.max(upwardStickyHandoff.releaseTop, releaseTop);
+      upwardStickyHandoff.acceptsBoundaryEntry ||= acceptsBoundaryEntry;
       upwardStickyHandoff.sourceEntered ||= sourceEntered;
       upwardStickyHandoff.lastInputAt = performance.now();
       return;
     }
     upwardStickyHandoff = {
-      messageId,
+      preview,
+      messageId: preview.id,
       releaseTop,
+      acceptsBoundaryEntry,
       sourceEntered,
       lastInputAt: performance.now(),
     };
@@ -3824,6 +3834,20 @@ export function MessageList() {
       });
     }
     scheduleStickyPreviewViewportState(top, currentViewportHeight);
+    const pendingStickyHandoff = upwardStickyHandoff;
+    const pendingStickySource = pendingStickyHandoff
+      ? getStickyUserMessageSourceElement(pendingStickyHandoff.messageId)
+      : null;
+    if (
+      pendingStickyHandoff &&
+      pendingStickySource &&
+      !pendingStickyHandoff.acceptsBoundaryEntry &&
+      pendingStickySource.getBoundingClientRect().bottom <= containerRef.getBoundingClientRect().top
+    ) {
+      clearUpwardStickyHandoff();
+      setStickyUserMessagePreview(pendingStickyHandoff.preview);
+      previousStickyPreviewId = pendingStickyHandoff.preview.id;
+    }
     const currentStickyPreview = untrack(stickyUserMessagePreview);
     const currentStickySource = currentStickyPreview
       ? getStickyUserMessageSourceElement(currentStickyPreview.id)
@@ -3833,9 +3857,13 @@ export function MessageList() {
       confirmedManualUpwardMovement &&
       currentStickyPreview &&
       currentStickySource &&
-      currentStickySource.getBoundingClientRect().bottom >= containerRef.getBoundingClientRect().top
+      (currentStickySource.getBoundingClientRect().bottom >
+        containerRef.getBoundingClientRect().top ||
+        ((!pendingStickyHandoff || pendingStickyHandoff.acceptsBoundaryEntry) &&
+          currentStickySource.getBoundingClientRect().bottom >=
+            containerRef.getBoundingClientRect().top))
     ) {
-      beginUpwardStickyHandoff(currentStickyPreview.id, true);
+      beginUpwardStickyHandoff(currentStickyPreview, true);
       scheduleUpwardStickyHandoffRelease();
       setStickyUserMessagePreview(null);
       previousStickyPreviewId = currentStickyPreview.id;
@@ -3980,9 +4008,13 @@ export function MessageList() {
       if (
         currentStickyPreview &&
         currentStickySource &&
-        currentStickySource.getBoundingClientRect().bottom - deltaY > getWheelContainerRect().top
+        (currentStickySource.getBoundingClientRect().bottom - deltaY >
+          getWheelContainerRect().top ||
+          (Math.abs(deltaY) < 1 &&
+            currentStickySource.getBoundingClientRect().bottom - deltaY >=
+              getWheelContainerRect().top - 0.5))
       ) {
-        beginUpwardStickyHandoff(currentStickyPreview.id, false);
+        beginUpwardStickyHandoff(currentStickyPreview, false, Math.abs(deltaY) < 1);
         setStickyUserMessagePreview(null);
         previousStickyPreviewId = currentStickyPreview.id;
       }

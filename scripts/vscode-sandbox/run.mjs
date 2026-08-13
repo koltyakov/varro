@@ -203,7 +203,12 @@ function runCode(executable, args, env) {
     // Integrated terminals can inherit this from VS Code itself. Leaving it
     // set makes the Electron application binary run as plain Node.
     delete launchEnvironment.ELECTRON_RUN_AS_NODE;
-    const child = spawn(executable, args, {
+    const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
+    const launchArgs =
+      process.platform === 'darwin'
+        ? ['-W', '-n', '-g', '-j', '-a', path.resolve(executable, '../../..'), '--args', ...args]
+        : args;
+    const child = spawn(launchExecutable, launchArgs, {
       cwd: projectRoot,
       env: launchEnvironment,
       stdio: ['ignore', 'pipe', 'pipe'],

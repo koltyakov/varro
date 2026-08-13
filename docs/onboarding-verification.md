@@ -13,7 +13,8 @@ npm run test:vscode-sandbox
 
 The runner builds Varro, launches each scenario in a separate VS Code window with isolated user
 data, extensions, workspace settings, and global state, and removes the sandbox afterward. It uses
-a fake OpenCode CLI/server and does not modify or stop the user's installed OpenCode CLI.
+a fake OpenCode CLI/server and does not modify or stop the user's installed OpenCode CLI. On macOS,
+the disposable instances launch hidden in the background so they do not steal keyboard focus.
 
 Run one or more scenarios by name:
 

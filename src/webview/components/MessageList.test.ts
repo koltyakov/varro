@@ -7354,6 +7354,13 @@ describe('MessageList sticky prompt preview', () => {
     // A projected crossing that does not move the source must restore the current sticky.
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
     expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+    list.dispatchEvent(new Event('scroll'));
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 2'
+    );
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
     vi.advanceTimersByTime(181);
     animationFrames.flush();
     await Promise.resolve();

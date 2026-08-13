@@ -46,23 +46,30 @@ await mkdir(extensions);
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
 
+const vscodeArgs = [
+  '--no-sandbox',
+  '--disable-gpu-sandbox',
+  '--password-store=basic',
+  '--use-mock-keychain',
+  '--disable-updates',
+  '--disable-workspace-trust',
+  '--skip-welcome',
+  '--skip-release-notes',
+  '--new-window',
+  `--user-data-dir=${userData}`,
+  `--extensions-dir=${extensions}`,
+  `--extensionDevelopmentPath=${projectRoot}`,
+  projectRoot,
+];
+const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
+const launchArgs =
+  process.platform === 'darwin'
+    ? ['-W', '-n', '-g', '-j', '-a', path.resolve(executable, '../../..'), '--args', ...vscodeArgs]
+    : vscodeArgs;
+
 const child = spawn(
-  executable,
-  [
-    '--no-sandbox',
-    '--disable-gpu-sandbox',
-    '--password-store=basic',
-    '--use-mock-keychain',
-    '--disable-updates',
-    '--disable-workspace-trust',
-    '--skip-welcome',
-    '--skip-release-notes',
-    '--new-window',
-    `--user-data-dir=${userData}`,
-    `--extensions-dir=${extensions}`,
-    `--extensionDevelopmentPath=${projectRoot}`,
-    projectRoot,
-  ],
+  launchExecutable,
+  launchArgs,
   {
     cwd: projectRoot,
     detached: true,
@@ -88,5 +95,7 @@ await new Promise((resolve, reject) => {
 });
 
 child.unref();
-process.stdout.write(`Launched persistent VS Code Extension Development Host (PID ${String(child.pid)})\n`);
+process.stdout.write('Launched persistent VS Code Extension Development Host');
+if (process.platform === 'darwin') process.stdout.write(' hidden in the background');
+process.stdout.write(` (launcher PID ${String(child.pid)})\n`);
 process.stdout.write(`Profile: ${profileRoot}\n`);

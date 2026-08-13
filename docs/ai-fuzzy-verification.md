@@ -83,9 +83,11 @@ what was omitted.
 
 1. Run `npm run ai:vscode` to build Varro and launch a persistent, isolated Extension Development
    Host. Use the printed profile path in the ledger. This avoids reusing a normal VS Code singleton and
-   uses a short temporary profile path that stays below the macOS IPC socket-path limit. Alternatively,
-   open this repository in VS Code and press `F5` to start **VS Code Extension Development** when the
-   current environment can reliably control the resulting window.
+   uses a short temporary profile path that stays below the macOS IPC socket-path limit. On macOS the
+   host starts hidden in the background so launch and setup do not steal focus; reveal it only when the
+   real-editor interactions are ready to begin. Alternatively, open this repository in VS Code and press
+   `F5` to start **VS Code Extension Development** when the current environment can reliably control the
+   resulting window.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
    unrelated sessions or settings.
 3. Open the Varro view and explicitly select GPT Luna. Record the exact provider/model shown by Varro.
