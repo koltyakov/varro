@@ -14,7 +14,7 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { sortProviderModels } from '../lib/model-ordering';
+import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { isRunningSessionStatus } from '../lib/session-event-reducer';
 import { openProviderLogout, openProviderSetup } from '../lib/provider-setup';
 import {
@@ -119,7 +119,8 @@ export function ModelsPanel() {
               ),
         };
       })
-      .filter((entry) => entry.models.length > 0);
+      .filter((entry) => entry.models.length > 0)
+      .toSorted((a, b) => compareProviders(a.provider, b.provider));
   });
 
   function updateScrollbarInset() {

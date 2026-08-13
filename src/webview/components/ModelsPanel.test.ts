@@ -926,6 +926,75 @@ describe('ModelsPanel', () => {
     );
     expect(container?.querySelector('.settings-model-row')).toBeNull();
   });
+
+  it('keeps provider priority order unchanged when providers are toggled', async () => {
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          openai: {
+            id: 'openai',
+            name: 'OpenAI model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        source: 'api',
+        models: {
+          alpha: {
+            id: 'alpha',
+            name: 'Alpha model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+      {
+        id: 'beta',
+        name: 'Beta',
+        source: 'api',
+        models: {
+          beta: {
+            id: 'beta',
+            name: 'Beta model',
+            capabilities: { toolcall: true },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    ]);
+    setState('hiddenProviders', ['alpha']);
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    const providerNames = () =>
+      Array.from(container?.querySelectorAll('.settings-provider-name') ?? []).map(
+        (item) => item.textContent
+      );
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+
+    const betaSection = Array.from(
+      container?.querySelectorAll<HTMLElement>('.settings-provider') ?? []
+    ).find((section) => section.querySelector('.settings-provider-name')?.textContent === 'Beta');
+    betaSection?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    await Promise.resolve();
+
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+
+    const alphaSection = Array.from(
+      container?.querySelectorAll<HTMLElement>('.settings-provider') ?? []
+    ).find((section) => section.querySelector('.settings-provider-name')?.textContent === 'Alpha');
+    alphaSection?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    await Promise.resolve();
+
+    expect(providerNames()).toEqual(['OpenAI', 'Alpha', 'Beta']);
+  });
 });
 
 function findButton(root: ParentNode | null | undefined, text: string) {

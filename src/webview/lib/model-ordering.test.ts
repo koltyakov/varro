@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Provider } from '../types';
-import { getSupersededModelIds, sortProviderModels } from './model-ordering';
+import { compareProviders, getSupersededModelIds, sortProviderModels } from './model-ordering';
 
 function createModel(
   id: string,
@@ -15,6 +15,30 @@ function createModel(
     ...overrides,
   } satisfies Provider['models'][string];
 }
+
+describe('compareProviders', () => {
+  it('prioritizes mainstream providers before alphabetical providers', () => {
+    const providers = [
+      { id: 'zeta', name: 'Zeta' },
+      { id: 'google', name: 'Google' },
+      { id: 'groq', name: 'Groq' },
+      { id: 'alpha', name: 'Alpha' },
+      { id: 'github-copilot', name: 'GitHub Copilot' },
+      { id: 'anthropic', name: 'Anthropic' },
+      { id: 'openai', name: 'OpenAI' },
+    ];
+
+    expect(providers.toSorted(compareProviders).map((provider) => provider.id)).toEqual([
+      'openai',
+      'anthropic',
+      'github-copilot',
+      'groq',
+      'google',
+      'alpha',
+      'zeta',
+    ]);
+  });
+});
 
 describe('sortProviderModels', () => {
   it('orders models by newest release without prioritizing the provider default', () => {

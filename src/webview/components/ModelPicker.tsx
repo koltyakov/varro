@@ -11,7 +11,7 @@ import {
   modelSupportsVariants,
   modelSupportsVision,
 } from '../lib/model-capabilities';
-import { sortProviderModels } from '../lib/model-ordering';
+import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
 
@@ -36,7 +36,9 @@ export function ModelPicker(props: {
   let anchorRef: HTMLDivElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
-  const visibleProviders = createMemo(() => getVisibleProviders(state.providers));
+  const visibleProviders = createMemo(() =>
+    getVisibleProviders(state.providers).toSorted(compareProviders)
+  );
   type VisibleProvider = ReturnType<typeof visibleProviders>[number];
   type FlatItem = {
     providerID: string;

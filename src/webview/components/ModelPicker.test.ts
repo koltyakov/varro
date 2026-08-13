@@ -128,6 +128,25 @@ describe('ModelPicker', () => {
     ).toEqual(['Newer', 'Older', 'Default']);
   });
 
+  it('prioritizes mainstream providers, then orders providers alphabetically', async () => {
+    setState('providers', [
+      createProvider('zulu', 'Zulu', { zulu: createModel('zulu', 'Zulu model') }),
+      createProvider('google', 'Google', { google: createModel('google', 'Google model') }),
+      createProvider('alpha', 'Alpha', { alpha: createModel('alpha', 'Alpha model') }),
+      createProvider('openai', 'OpenAI', { openai: createModel('openai', 'OpenAI model') }),
+      createProvider('beta', 'Beta', { beta: createModel('beta', 'Beta model') }),
+    ]);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    expect(
+      Array.from(container?.querySelectorAll('.dropdown-group-header') ?? []).map(
+        (item) => item.textContent
+      )
+    ).toEqual(['OpenAI', 'Google', 'Alpha', 'Beta', 'Zulu']);
+  });
+
   it('hides providers that require re-authentication', async () => {
     setState('providers', [
       createProvider('openai', 'OpenAI', {

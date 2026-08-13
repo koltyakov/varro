@@ -3,6 +3,22 @@ import type { Provider } from '../types';
 type ProviderModel = Provider['models'][string];
 
 const GPT_MODEL_TIER_ORDER = ['sol', 'terra', 'luna'] as const;
+const PROVIDER_PRIORITY = ['openai', 'anthropic', 'github-copilot', 'groq', 'google'] as const;
+
+export function compareProviders(
+  a: Pick<Provider, 'id' | 'name'>,
+  b: Pick<Provider, 'id' | 'name'>
+) {
+  const aPriority = PROVIDER_PRIORITY.indexOf(a.id as (typeof PROVIDER_PRIORITY)[number]);
+  const bPriority = PROVIDER_PRIORITY.indexOf(b.id as (typeof PROVIDER_PRIORITY)[number]);
+  const priorityOrder =
+    (aPriority < 0 ? PROVIDER_PRIORITY.length : aPriority) -
+    (bPriority < 0 ? PROVIDER_PRIORITY.length : bPriority);
+  if (priorityOrder !== 0) return priorityOrder;
+
+  const nameOrder = a.name.localeCompare(b.name);
+  return nameOrder !== 0 ? nameOrder : a.id.localeCompare(b.id);
+}
 
 function releaseTime(model: ProviderModel) {
   return modelReleaseTime(model) ?? 0;
