@@ -23,6 +23,7 @@ test('writes atomic launch metadata for the tracked process', async () => {
       extensionsDir: path.join(root, 'e'),
       workspace: process.cwd(),
       remoteDebuggingPort: 9222,
+      sidebarWidth: 486,
     });
     const saved = JSON.parse(await readFile(metadataPath, 'utf8'));
 
@@ -30,6 +31,7 @@ test('writes atomic launch metadata for the tracked process', async () => {
     assert.equal(saved.executable, process.execPath);
     assert.equal(saved.userDataDir, path.join(root, 'u'));
     assert.equal(saved.remoteDebuggingPort, 9222);
+    assert.equal(saved.sidebarWidth, 486);
     assert.match(saved.birthIdentity, new RegExp(`^${process.platform}:`));
     assert.deepEqual(saved, metadata);
   } finally {

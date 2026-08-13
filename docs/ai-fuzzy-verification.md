@@ -28,7 +28,7 @@ Varro has three relevant verification environments:
 | --- | --- | --- |
 | Vitest | State, protocol, and geometry logic under controlled timing | Real Chromium painting, VS Code webview sizing, or native input ordering |
 | Playwright harness | Webview DOM, animation frames, fixtures, and measurable geometry | Extension Host lifecycle or the exact VS Code container |
-| VS Code sandbox or Extension Development Host | Real editor chrome, webview container, native wheel/keyboard input, focus, reload, and live OpenCode streaming | Deterministic internal geometry unless separately instrumented |
+| VS Code sandbox or Extension Development Host | Real editor chrome, webview container, desktop mouse/wheel/keyboard event ordering, focus, reload, and live OpenCode streaming | Deterministic internal geometry unless separately instrumented |
 
 `npm run test:vscode-sandbox` currently covers disposable host startup and recovery. It does not
 inspect the webview DOM. Do not report it as a real-editor virtualization pass.
@@ -115,10 +115,13 @@ this order:
    as `longer than 103 chars` means the user-data path is too long; use the launcher rather than a long
    hand-written `--user-data-dir`. A regular VS Code window without the development-host title usually
    means the existing VS Code singleton consumed the request; use the launcher's isolated profile.
-3. Verify that the available automation mechanism can focus the VS Code process, inspect the Varro
-   view, and issue native click, wheel, keyboard, and resize gestures. Browser-only access is not VS
-   Code access.
-4. If the host launches but automation cannot control it, ask the user before ending the run:
+3. Verify that the available automation mechanism identifies the exact isolated VS Code process and
+   Varro webview, then can issue desktop mouse clicks, wheel events, keyboard events, scrollbar drags,
+   and resize events to that target. These are desktop input events, not touch gestures. They may be
+   delivered through OS desktop automation or Chromium/Electron input dispatch bound to the exact
+   tracked VS Code webview. Browser access to an unrelated preview page is not VS Code access.
+4. If the host launches but desktop mouse/keyboard event automation cannot control it, ask the user
+   before ending the run:
    **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
    like to enable/approve editor automation, perform the listed native actions while I record results,
    or stop and record the AI test as failed?"**
@@ -149,8 +152,17 @@ Record every chosen action before performing it. Use these action sets:
 | Content mutation | stream text, complete tool, expand/collapse disclosure, toggle Thinking, open/close diff |
 | Focus owner | transcript, composer, inline editor, diff, nested tool scroller, session list |
 
-Do not replace a native wheel, keyboard, click, resize, or scrollbar gesture with a DevTools
-`scrollTop` assignment. The ownership transition is part of the test.
+Throughout this playbook, `native` means an actual desktop-style browser/Electron input event delivered
+to the exact tracked VS Code webview: mouse click, mouse wheel, key event, pointer drag, or workbench
+resize. It does **not** mean literal hardware input, trackpad-only input, touch input, or a requirement to
+move the visible macOS/Windows cursor. CDP `Input.dispatchMouseEvent` and `Input.dispatchKeyEvent` are
+valid when they target the isolated Extension Development Host or its Varro iframe and produce the same
+event path as desktop mouse/keyboard control.
+
+Do not replace a wheel, keyboard, click, resize, or scrollbar input event with a DevTools evaluation
+that assigns `scrollTop`, calls `scrollTo()`, invokes `.click()`, or directly mutates layout/state. The
+ownership transition and browser event ordering are part of the test. DOM and CDP evaluation remain
+valid for inspection and geometry sampling.
 
 ## Transcript Recipes
 
@@ -295,7 +307,9 @@ Precondition: a prepared session with more than 200 messages. The target Extensi
 has just started, and this session has not been opened in that host run.
 
 1. Open the session and wait at the latest message without scrolling upward.
-2. Start recording, then use only physical wheel or trackpad steps between 32 and 96 pixels upward.
+2. Start recording, then use only desktop pixel-wheel events between 32 and 96 pixels upward. OS mouse
+   automation or CDP mouse-wheel dispatch to the exact Varro webview is valid; touch events and direct
+   scroll-position mutation are not.
 3. At each history boundary, keep one marked row under observation through loading and insertion.
 4. Continue through every boundary until the real first prompt and history-start state are visible.
 5. Scroll down one viewport, close the session, reopen it, and repeat the first boundary with the same
@@ -402,7 +416,7 @@ streaming, and the ownership invariants relevant to the changed component.
 Treat any of the following as a failure even if the final screen settles correctly:
 
 - A marked row visibly jumps without matching direct input.
-- Content reverses the direction of a wheel, keyboard, touch, or scrollbar gesture.
+- Content reverses the direction of a mouse-wheel, keyboard, pointer-drag, or scrollbar input.
 - A frame shows a blank viewport, overlapping rows, duplicate rows, or the wrong sticky prompt.
 - Sticky navigation lands on the wrong card, overlaps the next prompt, or resumes after destination
   interaction.

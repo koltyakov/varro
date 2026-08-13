@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   reserveLoopbackPort,
+  resizeVscodeSidebar,
   waitForVscodeProcess,
   writeVscodeLaunchMetadata,
 } from './vscode-launch-process.mjs';
@@ -49,6 +50,10 @@ const extensions = path.join(profileRoot, 'e');
 await mkdir(userData);
 await mkdir(extensions);
 const remoteDebuggingPort = await reserveLoopbackPort();
+const configuredSidebarWidth = Number(process.env.VARRO_AI_SIDEBAR_WIDTH ?? 486);
+if (!Number.isFinite(configuredSidebarWidth) || configuredSidebarWidth < 300) {
+  throw new Error('VARRO_AI_SIDEBAR_WIDTH must be a number of at least 300 CSS pixels');
+}
 
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
@@ -106,6 +111,7 @@ const codePid =
   process.platform === 'darwin'
     ? await waitForVscodeProcess(executable, userData)
     : child.pid;
+const sidebarWidth = await resizeVscodeSidebar(remoteDebuggingPort, configuredSidebarWidth);
 const metadataPath = path.join(profileRoot, 'launch.json');
 const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   pid: codePid,
@@ -115,6 +121,7 @@ const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   extensionsDir: extensions,
   workspace: projectRoot,
   remoteDebuggingPort,
+  sidebarWidth,
 });
 
 child.unref();
@@ -124,3 +131,4 @@ process.stdout.write(
 process.stdout.write(`Profile: ${profileRoot}\n`);
 process.stdout.write(`Launch metadata: ${metadataPath}\n`);
 process.stdout.write(`Remote debugging: http://127.0.0.1:${String(remoteDebuggingPort)}\n`);
+process.stdout.write(`Varro sidebar width: ${String(sidebarWidth)}px\n`);
