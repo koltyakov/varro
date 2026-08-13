@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ensureClipboardImageAttachmentSequence,
   ensureContextFileAttachmentSequence,
+  ensureNativePdfAttachmentSequence,
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
+  getNativePdfAttachmentSequence,
   removeClipboardImageAttachmentSequence,
   removeContextFileAttachmentSequence,
   resetAttachmentOrderState,
@@ -42,9 +44,10 @@ describe('attachment order state', () => {
         attachmentSequence: 9,
       },
     ]);
+    ensureNativePdfAttachmentSequence('pdf-a', 10);
 
-    expect(ensureContextFileAttachmentSequence('/repo/src/b.ts')).toBe(10);
-    expect(ensureClipboardImageAttachmentSequence('image-b')).toBe(11);
+    expect(ensureContextFileAttachmentSequence('/repo/src/b.ts')).toBe(11);
+    expect(ensureClipboardImageAttachmentSequence('image-b')).toBe(12);
   });
 
   it('removes individual context file and clipboard image sequences without rewinding order', () => {
@@ -62,11 +65,13 @@ describe('attachment order state', () => {
   it('resets maps and the next generated sequence', () => {
     ensureContextFileAttachmentSequence('/repo/src/a.ts');
     ensureClipboardImageAttachmentSequence('image-a');
+    ensureNativePdfAttachmentSequence('pdf-a');
 
     resetAttachmentOrderState();
 
     expect(getContextFileAttachmentSequence('/repo/src/a.ts')).toBeUndefined();
     expect(getClipboardImageAttachmentSequence('image-a')).toBeUndefined();
+    expect(getNativePdfAttachmentSequence('pdf-a')).toBeUndefined();
     expect(ensureClipboardImageAttachmentSequence('image-b')).toBe(1);
   });
 });

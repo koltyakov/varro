@@ -143,3 +143,13 @@ export function modelSupportsVision(
 
   return modelLooksVisionCapable(providerID, model);
 }
+
+export function modelSupportsPdf(
+  providerID: string | null,
+  modelID: string | null,
+  providers: Provider[]
+): boolean {
+  const input = getModel(providerID, modelID, providers)?.capabilities?.input;
+  if (Array.isArray(input)) return input.includes('pdf');
+  return asRecord(input)?.pdf === true;
+}

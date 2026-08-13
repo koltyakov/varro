@@ -12,6 +12,7 @@ import type {
   PermissionMode,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 
 function asStoredRecord(value: unknown): Record<string, unknown> | null {
@@ -242,12 +243,19 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
           (image): image is NonNullable<QueuedMessage['clipboardImages']>[number] => image !== null
         )
     : [];
+  const nativePdfs = Array.isArray(record.nativePdfs)
+    ? record.nativePdfs.filter(isNativePdfAttachment)
+    : [];
+  if (nativePdfs.reduce((total, pdf) => total + pdf.size, 0) > MAX_NATIVE_PDF_TOTAL_BYTES) {
+    nativePdfs.length = 0;
+  }
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
   const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
   if (
     record.text.trim().length === 0 &&
     droppedFiles.length === 0 &&
     clipboardImages.length === 0 &&
+    nativePdfs.length === 0 &&
     !terminalSelection &&
     !attachedDiagnostics
   ) {
@@ -262,6 +270,7 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     ...(record.paused === true ? { paused: true } : {}),
     droppedFiles,
     clipboardImages,
+    ...(nativePdfs.length > 0 ? { nativePdfs } : {}),
     terminalSelection,
     ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
   };
@@ -277,10 +286,13 @@ export function readStoredQueuedMessages(hostValue?: unknown): QueuedMessage[] {
     ids.add(message.id);
     messages.push(message);
   }
-  // Image data URLs stay in host persistence; browser persistence is synchronous and size-sensitive.
+  // Media data URLs stay in host persistence; browser persistence is synchronous and size-sensitive.
   writeStored(
     STORAGE_KEYS.queuedMessages,
-    messages.filter((message) => (message.clipboardImages?.length ?? 0) === 0)
+    messages.filter(
+      (message) =>
+        (message.clipboardImages?.length ?? 0) === 0 && (message.nativePdfs?.length ?? 0) === 0
+    )
   );
   return messages;
 }

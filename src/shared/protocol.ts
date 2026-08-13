@@ -1,5 +1,6 @@
 import type { OpenCodeInstallMethod } from './opencode-install';
 import type { ContextBreakdownSegment } from './context-breakdown';
+import type { NativePdfAttachment } from './native-pdf';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
@@ -519,6 +520,7 @@ export type QueuedMessageSnapshot = {
     contentKey?: string;
     attachmentSequence?: number;
   }>;
+  nativePdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
 };
@@ -569,6 +571,8 @@ export type ExtensionMessage =
   | { type: 'context/update'; payload: EditorContext }
   | { type: 'terminal-selection/update'; payload: { text: string; terminalName: string } | null }
   | { type: 'files/dropped'; payload: DroppedFile[] }
+  | { type: 'pdfs/picked'; payload: NativePdfAttachment[] }
+  | { type: 'pdfs/stored'; payload: { id: string; contextFile: DroppedFile } }
   | { type: 'files/removed'; payload: { path: string } }
   | {
       type: 'files/search-results';
@@ -618,6 +622,10 @@ export type WebviewMessage =
   | {
       type: 'files/drop-content';
       payload: { files: Array<{ name: string; content: string; size: number }> };
+    }
+  | {
+      type: 'pdfs/store';
+      payload: { id: string; name: string; content: string; size: number };
     }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }

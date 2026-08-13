@@ -7742,7 +7742,9 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(
-      container?.querySelector('.turn-navigation-marker[aria-current="step"]')?.getAttribute('title')
+      container
+        ?.querySelector('.turn-navigation-marker[aria-current="step"]')
+        ?.getAttribute('title')
     ).toContain('Turn 2:');
     expect(
       container?.querySelector('[data-msg-id="user-2"] .user-message-card')?.classList
@@ -7758,7 +7760,9 @@ describe('MessageList sticky prompt preview', () => {
     await Promise.resolve();
 
     expect(
-      container?.querySelector('.turn-navigation-marker[aria-current="step"]')?.getAttribute('title')
+      container
+        ?.querySelector('.turn-navigation-marker[aria-current="step"]')
+        ?.getAttribute('title')
     ).toContain('Turn 1:');
     animationFrames.restore();
   });

@@ -1,11 +1,12 @@
 import type { DroppedFile } from '../../shared/protocol';
-import type { ClipboardImage } from './app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
 
 export type ComposerSnapshot = {
   text: string;
   caret: number;
   files: DroppedFile[];
   images: ClipboardImage[];
+  pdfs?: NativePdfAttachment[];
 };
 
 export type ComposerHistoryAction = 'undo' | 'redo';
@@ -38,15 +39,21 @@ function getAttachmentSignature(snapshot: ComposerSnapshot): string {
     .map((file) => `${file.path}\u0001${JSON.stringify(file.lineRanges ?? null)}`)
     .join('\u0001');
   const imageSignature = snapshot.images.map((image) => image.id).join('\u0001');
-  return `${fileSignature}\u0001${imageSignature}`;
+  const pdfSignature = (snapshot.pdfs ?? []).map((pdf) => pdf.id).join('\u0001');
+  return `${fileSignature}\u0001${imageSignature}\u0001${pdfSignature}`;
 }
 
 function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
+  const pdfs = snapshot.pdfs?.map((pdf) => ({
+    ...pdf,
+    ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+  }));
   return {
     text: snapshot.text,
     caret: snapshot.caret,
     files: snapshot.files.map((file) => ({ ...file })),
     images: snapshot.images.map((image) => ({ ...image })),
+    ...(pdfs?.length ? { pdfs } : {}),
   };
 }
 

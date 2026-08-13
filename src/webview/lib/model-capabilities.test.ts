@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Provider } from '../types';
 import {
   modelSupportsReasoning,
+  modelSupportsPdf,
   modelSupportsTools,
   modelSupportsVariants,
   modelSupportsVision,
@@ -144,6 +145,30 @@ describe('model capability helpers', () => {
 
     expect(modelSupportsVision('openai', 'vision-list', providers)).toBe(true);
     expect(modelSupportsVision('openai', 'text-only-list', providers)).toBe(false);
+  });
+
+  it('strictly reads PDF support from capabilities.input', () => {
+    const providers: Provider[] = [
+      provider('openai', {
+        'pdf-model': {
+          id: 'pdf-model',
+          name: 'Ordinary Model',
+          capabilities: {
+            input: { text: true, audio: false, image: false, video: false, pdf: true },
+          },
+          cost: { input: 0, output: 0 },
+        },
+        'named-pdf': {
+          id: 'named-pdf',
+          name: 'PDF Vision Model',
+          capabilities: { vision: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(modelSupportsPdf('openai', 'pdf-model', providers)).toBe(true);
+    expect(modelSupportsPdf('openai', 'named-pdf', providers)).toBe(false);
   });
 
   it('detects variants while ignoring the none placeholder', () => {

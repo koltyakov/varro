@@ -1,4 +1,5 @@
 import type { ChatModelSelection, DroppedFile, EditorDiagnostic } from '../../shared/protocol';
+import type { NativePdfAttachment } from '../../shared/native-pdf';
 
 export type SelectedModel = ChatModelSelection;
 export type SessionSelectionOptions = { markSeen?: boolean; selectedModel?: SelectedModel };
@@ -16,9 +17,12 @@ export interface QueuedMessage {
   paused?: boolean;
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];
+  nativePdfs?: NativePdfAttachment[];
   terminalSelection?: { text: string; terminalName: string } | null;
   attachedDiagnostics?: AttachedDiagnostics | null;
 }
+
+export type { NativePdfAttachment };
 
 export interface AttachedDiagnostics {
   diagnostics: EditorDiagnostic[];

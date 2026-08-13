@@ -25,7 +25,9 @@ import {
   setSelectedModel,
   resolveSelectedModel,
   addClipboardImage,
+  addNativePdf,
   clearClipboardImages,
+  clearNativePdfs,
   MAX_CLIPBOARD_IMAGES,
   MAX_CLIPBOARD_IMAGE_SIZE,
   showModelPicker,
@@ -33,6 +35,7 @@ import {
   setPersistentShowSessionPicker as setShowSessionPicker,
   composerFocusKey,
   removeClipboardImage,
+  removeNativePdf,
   addContextFile,
   clearContextFiles,
   removeContextFile,
@@ -59,6 +62,8 @@ import {
   isSessionAwaitingInput,
   isSessionTreeStatusWorking,
   replaceClipboardImages,
+  replaceNativePdfs,
+  setNativePdfContextFile,
   stripClipboardImagePlaceholders,
   replaceContextFiles,
   connectionInitialized,
@@ -104,10 +109,11 @@ import {
 import { getVariantsForModel } from '../lib/model-variants';
 import { getContextWindow } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
-import { modelSupportsVision } from '../lib/model-capabilities';
+import { modelSupportsPdf, modelSupportsVision } from '../lib/model-capabilities';
 import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
+  getNativePdfAttachmentSequence,
 } from '../lib/attachment-order';
 import { getLeafPathName, isSamePath } from '../lib/path-display';
 import {
@@ -157,7 +163,9 @@ import {
   MAX_DROPPED_CONTENT_FILE_BYTES,
   MAX_DROPPED_CONTENT_TOTAL_BYTES,
 } from '../../shared/dropped-content-policy';
+import { MAX_NATIVE_PDF_TOTAL_BYTES, NATIVE_PDF_MIME, isPdfBytes } from '../../shared/native-pdf';
 import {
+  getSafeUsageLimitAction,
   getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
   shouldDisplayUsageLimitNotice,
@@ -239,6 +247,10 @@ function composerClipboardImages() {
   return state.clipboardImages;
 }
 
+function composerNativePdfs() {
+  return state.nativePdfs;
+}
+
 function composerSelection() {
   return state.editorContext.selection;
 }
@@ -268,6 +280,7 @@ function canEditQueuedMessage() {
     inputText().length === 0 &&
     state.droppedFiles.length === 0 &&
     state.clipboardImages.length === 0 &&
+    state.nativePdfs.length === 0 &&
     !state.terminalSelection &&
     !state.attachedDiagnostics
   );
@@ -293,6 +306,7 @@ function captureEditDraftBackup(): MessageEditContext & { text: string } {
     text: inputText(),
     files: state.droppedFiles.map((file) => ({ ...file })),
     images: state.clipboardImages.map((image) => ({ ...image })),
+    pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
     terminalSelection: state.terminalSelection ? { ...state.terminalSelection } : null,
   };
 }
@@ -321,6 +335,7 @@ function applyEditContext(context: MessageEditContext, mergeWholeFileIntoActiveC
     })
   );
   const droppedImages = replaceClipboardImages(context.images);
+  replaceNativePdfs(context.pdfs ?? []);
   setState(
     'terminalSelection',
     context.terminalSelection ? { ...context.terminalSelection } : null
@@ -494,6 +509,22 @@ export async function sendDroppedContent(droppedFiles: File[]) {
   }
 }
 
+function isPdfFile(file: File) {
+  return file.type === NATIVE_PDF_MIME || file.name.toLowerCase().endsWith('.pdf');
+}
+
+async function readPdfFile(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!isPdfBytes(bytes)) throw new Error('Invalid PDF header');
+  const dataUrl = await readFileAsDataUrl(file);
+  const encoded = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  if (!encoded) throw new Error('Failed to encode PDF');
+  return {
+    url: `data:${NATIVE_PDF_MIME};base64,${encoded}`,
+    size: bytes.byteLength,
+  };
+}
+
 function attachCurrentDiagnostics() {
   if (state.editorContext.diagnostics.length === 0) {
     showSessionActionFeedback('No issues found');
@@ -551,6 +582,53 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
   const composerHasActiveQuestion = () => !props.newSession && hasActiveQuestion();
   const composerHasActivePermission = () => !props.newSession && hasActivePermission();
+
+  async function attachNativePdfFiles(files: File[]) {
+    let remaining =
+      MAX_NATIVE_PDF_TOTAL_BYTES - state.nativePdfs.reduce((total, pdf) => total + pdf.size, 0);
+    let rejected = false;
+    for (const file of files) {
+      if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > remaining) {
+        rejected = true;
+        continue;
+      }
+      try {
+        const content = await readPdfFile(file);
+        const id = createAttachmentID();
+        const path = (file as File & { path?: string }).path;
+        const added = addNativePdf({
+          id,
+          url: content.url,
+          mime: NATIVE_PDF_MIME,
+          filename: file.name || 'document.pdf',
+          size: content.size,
+          ...(path
+            ? { contextFile: { path, relativePath: file.name || path, type: 'file' as const } }
+            : {}),
+        });
+        if (added) {
+          remaining -= content.size;
+          if (!path) {
+            postMessage({
+              type: 'pdfs/store',
+              payload: {
+                id,
+                name: file.name || 'document.pdf',
+                content: content.url.slice(content.url.indexOf(',') + 1),
+                size: content.size,
+              },
+            });
+          }
+        } else rejected = true;
+      } catch (err) {
+        logError('chat-input:readPdf', err);
+        rejected = true;
+      }
+    }
+    if (rejected) {
+      showSessionActionFeedback('PDFs must be valid and total 20 MiB or less', 'warning');
+    }
+  }
 
   createEffect(() => {
     const queuedEdit = queuedMessageEdit();
@@ -658,6 +736,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       caret: caretPosition(),
       files: state.droppedFiles.map((file) => ({ ...file })),
       images: state.clipboardImages.map((image) => ({ ...image })),
+      pdfs: state.nativePdfs.map((pdf) => ({ ...pdf })),
     };
   }
 
@@ -682,6 +761,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         setCaretPosition(snapshot.caret);
         replaceContextFiles(snapshot.files);
         replaceClipboardImages(snapshot.images);
+        replaceNativePdfs(snapshot.pdfs ?? []);
         setCompletionIndex(0);
         setSuppressCompletion(false);
       });
@@ -777,7 +857,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     };
   });
 
-  const hasMentions = () => visibleFiles().length > 0 || visibleClipboardImages().length > 0;
+  const hasMentions = () =>
+    visibleFiles().length > 0 ||
+    visibleClipboardImages().length > 0 ||
+    visibleNativePdfs().length > 0;
   const inlineChips = createMemo((): RichComposerChip[] => {
     const chips: RichComposerChip[] = [];
     const text = inputText();
@@ -850,6 +933,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         attachmentSequence:
           image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
       }))
+  );
+  const visibleNativePdfs = createMemo(() =>
+    composerNativePdfs().map((pdf) => ({
+      ...pdf,
+      attachmentSequence: pdf.attachmentSequence ?? getNativePdfAttachmentSequence(pdf.id),
+    }))
   );
 
   const [previewImageId, setPreviewImageId] = createSignal<string | null>(null);
@@ -1398,6 +1487,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       !sendableText.trim() &&
       state.droppedFiles.length === 0 &&
       !hasSendableImages &&
+      state.nativePdfs.length === 0 &&
       !state.terminalSelection &&
       !state.attachedDiagnostics
     )
@@ -1408,6 +1498,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const queuedAttachments = getQueuedAttachmentSnapshot({
       droppedFiles: state.droppedFiles,
       clipboardImages: state.clipboardImages,
+      nativePdfs: state.nativePdfs,
       terminalSelection: state.terminalSelection,
       attachedDiagnostics: state.attachedDiagnostics,
     });
@@ -1417,6 +1508,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const hasQueuedAttachments =
       queuedAttachments.droppedFiles?.length ||
       queuedAttachments.clipboardImages?.length ||
+      queuedAttachments.nativePdfs?.length ||
       queuedAttachments.terminalSelection ||
       queuedAttachments.attachedDiagnostics;
 
@@ -1522,6 +1614,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         ...(queuedMessagePaused ? { paused: true } : {}),
         droppedFiles: queuedAttachments.droppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
+        nativePdfs: queuedAttachments.nativePdfs,
         terminalSelection: queuedAttachments.terminalSelection,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics,
       };
@@ -1537,6 +1630,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setState('terminalSelection', null);
       setState('attachedDiagnostics', null);
       clearClipboardImages();
+      clearNativePdfs();
       resetPastedImageIndex();
       postMessage({ type: 'files/clear' });
       postMessage({ type: 'terminal-selection/clear' });
@@ -1609,6 +1703,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,
+          nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
           ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
         },
@@ -1737,6 +1832,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setState('terminalSelection', null);
       setState('attachedDiagnostics', null);
       clearClipboardImages();
+      clearNativePdfs();
       resetPastedImageIndex();
       setComposerValue('');
     });
@@ -1765,6 +1861,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         {
           files: queued.droppedFiles ?? [],
           images: queued.clipboardImages ?? [],
+          pdfs: queued.nativePdfs ?? [],
           terminalSelection: queued.terminalSelection ?? null,
         },
         queued.text
@@ -1874,18 +1971,30 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     // Snapshot File objects now - DataTransfer is invalidated after the drop
     // event returns, so FileReader fallback later wouldn't see them otherwise.
     const droppedFiles = Array.from(dataTransfer.files || []);
-    const preferFileContent = isRemoteExtensionHost() && droppedFiles.length > 0;
+    const pdfFiles = droppedFiles.filter(isPdfFile);
+    if (pdfFiles.length > 0) {
+      await attachNativePdfFiles(pdfFiles);
+    }
+    const remainingFiles = droppedFiles.filter((file) => !isPdfFile(file));
+    const preferFileContent = isRemoteExtensionHost() && remainingFiles.length > 0;
 
-    const paths = await collectDroppedPaths(dataTransfer, {
-      includeFilePaths: !preferFileContent,
-      preferFileContent,
-    });
+    const pdfPaths = new Set<string>();
+    for (const file of pdfFiles) {
+      const path = (file as File & { path?: string }).path;
+      if (path) pdfPaths.add(path);
+    }
+    const paths = (
+      await collectDroppedPaths(dataTransfer, {
+        includeFilePaths: !preferFileContent,
+        preferFileContent,
+      })
+    ).filter((path) => !pdfPaths.has(path));
     if (paths.length > 0) {
       postMessage({ type: 'files/drop', payload: { paths } });
       return;
     }
     if (preferFileContent) {
-      await sendDroppedContent(droppedFiles);
+      await sendDroppedContent(remainingFiles);
       return;
     }
 
@@ -1922,7 +2031,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     // Final fallback: no paths extractable (e.g. Finder drop on Electron 32+,
     // where File.path is stripped). Read the file bytes and ship the content.
-    await sendDroppedContent(droppedFiles);
+    await sendDroppedContent(remainingFiles);
   }
 
   function updatePasteTransactionOwners(
@@ -2078,6 +2187,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const imageItems = Array.from(clipboardData.items).filter(
       (item) => item.kind === 'file' && item.type.startsWith('image/')
     );
+    const pdfFiles = Array.from(clipboardData.items).flatMap((item) => {
+      if (item.kind !== 'file') return [];
+      const file = item.getAsFile();
+      return file && isPdfFile(file) ? [file] : [];
+    });
+    if (pdfFiles.length > 0) {
+      if (!pastedText) e.preventDefault();
+      void attachNativePdfFiles(pdfFiles);
+    }
     if (imageItems.length === 0) {
       for (const file of pastedContextFiles) addContextFile(file);
       if (pasteHandledAsContextOnly) {
@@ -2211,6 +2329,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   onMount(() => {
     const disposeBridge = onMessage((msg: ExtensionMessage) => {
+      if (msg.type === 'pdfs/picked') {
+        const rejected = msg.payload.filter((pdf) => !addNativePdf(pdf));
+        if (rejected.length > 0) {
+          showSessionActionFeedback('PDFs must total 20 MiB or less', 'warning');
+        }
+        return;
+      }
+      if (msg.type === 'pdfs/stored') {
+        setNativePdfContextFile(msg.payload.id, msg.payload.contextFile);
+        return;
+      }
       if (msg.type !== 'files/search-results') return;
       if (msg.payload.requestId !== latestFileSearchRequestId) return;
       if (msg.payload.query !== latestFileSearchQuery) return;
@@ -2427,6 +2556,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return modelSupportsVision(current.providerID, current.modelID, state.providers);
   }
 
+  function currentModelSupportsPdf() {
+    const current = currentModel();
+    if (!current.providerID || !current.modelID) return false;
+    return modelSupportsPdf(current.providerID, current.modelID, state.providers);
+  }
+
+  const hasPendingPdfFallback = () =>
+    !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
+
   function hasSendableClipboardImages() {
     return currentModelSupportsVision() && state.clipboardImages.length > 0;
   }
@@ -2443,10 +2581,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const canSend = () =>
     isAbortSlashCommand(inputText()) ||
     (!pendingWorkspacePath() &&
+      !hasPendingPdfFallback() &&
       (!hasPendingApproval() || !composerEditingMessage()) &&
       (getSendableInputText().trim().length > 0 ||
         state.droppedFiles.length > 0 ||
         hasSendableClipboardImages() ||
+        state.nativePdfs.length > 0 ||
         !!state.terminalSelection ||
         !!state.attachedDiagnostics));
   const isBusyWithoutInterruption = createMemo(
@@ -2465,7 +2605,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   const clipboardImagesDisabled = () =>
     composerClipboardImages().length > 0 && !currentModelSupportsVision();
-
   const currentSessionMessageEntries = createMemo(() =>
     getMessageEntriesForSession(state.messages, composerSessionId())
   );
@@ -2627,6 +2766,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const notice = visibleUsageLimit();
     return notice ? getUsageLimitPresentation(notice) : null;
   });
+  const activeUsageLimitAction = createMemo(() =>
+    getSafeUsageLimitAction(visibleUsageLimit()?.action)
+  );
   const activeRalphManagerSessionId = createMemo(() =>
     ralphStore.isRalphSession(composerSessionId())
       ? composerSessionId()
@@ -2974,7 +3116,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       <Show when={!hasExpandedDiffOverlay() && visibleUsageLimit()}>
         <UsageLimitBanner
           title={activeUsageLimitPresentation()!.title}
-          message={visibleUsageLimit()!.message}
+          message={visibleUsageLimit()!.action?.message.trim() || visibleUsageLimit()!.message}
           meta={describeUsageLimit(
             activeUsageLimitPresentation()!.summary,
             visibleUsageLimit()!.retryAt,
@@ -2982,6 +3124,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           )}
           primaryActionLabel="Continue"
           onPrimaryAction={() => void handleUsageLimitContinue()}
+          externalAction={activeUsageLimitAction()}
+          onExternalAction={(link) =>
+            postMessage({ type: 'vscode/open-external', payload: { url: link } })
+          }
           showStopRetrying={
             (isComposerBusy() ||
               visibleUsageLimit()!.source === 'status' ||
@@ -3079,6 +3225,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               }
               files={visibleFiles()}
               clipboardImages={visibleClipboardImages()}
+              nativePdfs={visibleNativePdfs()}
+              nativePdfsSupported={currentModelSupportsPdf()}
               clipboardImagesDisabled={clipboardImagesDisabled()}
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
@@ -3088,6 +3236,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 postMessage({ type: 'files/remove', payload: { path } });
               }}
               onRemoveClipboardImage={removeClipboardImage}
+              onRemoveNativePdf={removeNativePdf}
               onOpenFile={openContextFileInEditor}
               onPreviewImage={(image) => setPreviewImageId(image.id)}
             />
@@ -3568,7 +3717,7 @@ function describeUsageLimit(summary: string, retryAt: number | null, attempt: nu
 }
 
 function getPastedImageFilename(index: number) {
-  return index <= 1 ? 'Image' : `Image ${index}`;
+  return `Image ${index}`;
 }
 
 /**

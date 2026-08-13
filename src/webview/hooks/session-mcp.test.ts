@@ -72,7 +72,7 @@ describe('session MCP helpers', () => {
     expect(logError).toHaveBeenCalledWith('syncSessionMcps', new Error('connect failed'));
   });
 
-  it('authenticates selected MCPs that require OAuth', async () => {
+  it('preserves selected MCPs that require OAuth without authenticating implicitly', async () => {
     const connectMcp = vi.fn(async () => {});
     const authenticateMcp = vi.fn(async () => {});
 
@@ -90,7 +90,7 @@ describe('session MCP helpers', () => {
       'session-1'
     );
 
-    expect(authenticateMcp).toHaveBeenCalledWith('oauth-server');
+    expect(authenticateMcp).not.toHaveBeenCalled();
     expect(connectMcp).not.toHaveBeenCalled();
   });
 

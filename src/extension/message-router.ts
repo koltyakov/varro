@@ -51,6 +51,7 @@ export interface MessageRouterCallbacks {
   checkServerRestart(checkId: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
+  storePdf(payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload']): Promise<void>;
   removeContextFile(path: string): void;
   clearContextFiles(): void;
   notifyContextFilesChanged(): void;
@@ -142,6 +143,9 @@ export class MessageRouter {
           break;
         case 'files/drop-content':
           await this.handleFilesDropContentMessage(msg);
+          break;
+        case 'pdfs/store':
+          await this.callbacks.storePdf(msg.payload);
           break;
         case 'files/remove':
           this.handleFilesRemoveMessage(msg);

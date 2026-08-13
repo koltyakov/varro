@@ -34,6 +34,7 @@ describe('QueuedMessageStore', () => {
             size: 1,
           },
         ],
+        nativePdfs: [],
         terminalSelection: null,
       },
     ];
@@ -43,6 +44,34 @@ describe('QueuedMessageStore', () => {
 
     await store.update(messages);
     await store.dispose();
+
+    expect(new QueuedMessageStore(persistence).list()).toEqual(messages);
+  });
+
+  it('restores queued native PDF data through host persistence', async () => {
+    const { persistence } = createPersistence();
+    const messages = [
+      {
+        id: 'queue-pdf',
+        sessionId: 'session-1',
+        text: 'review',
+        droppedFiles: [],
+        clipboardImages: [],
+        nativePdfs: [
+          {
+            id: 'pdf-1',
+            url: 'data:application/pdf;base64,JVBERi0xCg==',
+            mime: 'application/pdf' as const,
+            filename: 'spec.pdf',
+            size: 7,
+          },
+        ],
+        terminalSelection: null,
+      },
+    ];
+
+    const store = new QueuedMessageStore(persistence);
+    await store.update(messages);
 
     expect(new QueuedMessageStore(persistence).list()).toEqual(messages);
   });
@@ -74,6 +103,7 @@ describe('QueuedMessageStore', () => {
         text: 'first',
         droppedFiles: [],
         clipboardImages: [],
+        nativePdfs: [],
         terminalSelection: null,
       },
     ];
@@ -84,6 +114,7 @@ describe('QueuedMessageStore', () => {
         text: 'latest',
         droppedFiles: [],
         clipboardImages: [],
+        nativePdfs: [],
         terminalSelection: null,
       },
     ];

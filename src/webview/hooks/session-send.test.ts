@@ -1,7 +1,7 @@
 import { createComputed, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
-import type { ClipboardImage } from '../lib/app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from '../lib/app-state-types';
 import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
 import type { SessionSendBody } from './session/session-send';
@@ -72,6 +72,7 @@ function createState(overrides?: {
   terminalSelection?: { text: string; terminalName: string } | null;
   droppedFiles?: DroppedFile[];
   clipboardImages?: ClipboardImage[];
+  nativePdfs?: NativePdfAttachment[];
   attachedDiagnostics?: {
     total: number;
     diagnostics: EditorContext['diagnostics'];
@@ -96,6 +97,7 @@ function createState(overrides?: {
     terminalSelection: null,
     droppedFiles: [],
     clipboardImages: [],
+    nativePdfs: [],
     attachedDiagnostics: null,
     ...overrides,
   };
@@ -320,6 +322,79 @@ describe('session-send helpers', () => {
     ]);
   });
 
+  it('sends PDFs in attachment order regardless of advertised PDF input', () => {
+    const pdf = {
+      id: 'pdf-1',
+      url: 'data:application/pdf;base64,JVBERi0xCg==',
+      mime: 'application/pdf' as const,
+      filename: 'spec.pdf',
+      size: 7,
+      attachmentSequence: 2,
+      contextFile: { path: '/repo/spec.pdf', relativePath: 'spec.pdf', type: 'file' as const },
+    };
+    const pdfModel = provider('openai', {
+      'pdf-model': {
+        id: 'pdf-model',
+        name: 'PDF Model',
+        capabilities: {
+          input: { text: true, audio: false, image: false, video: false, pdf: true },
+        },
+        cost: { input: 0, output: 0 },
+      },
+    });
+    const supported = buildSessionSendBody(
+      createState({
+        selectedModel: { providerID: 'openai', modelID: 'pdf-model' },
+        providers: [pdfModel],
+        providerDefaults: { openai: 'pdf-model' },
+        editorContext: createEditorContext({ workspacePath: null }),
+        nativePdfs: [pdf],
+        droppedFiles: [
+          { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file', attachmentSequence: 1 },
+        ],
+      }),
+      'session-1',
+      'Review',
+      () => false
+    );
+    expect(supported?.body.parts).toEqual([
+      { type: 'text', text: 'Review' },
+      { type: 'text', text: '/repo/a.ts' },
+      { type: 'file', mime: 'application/pdf', filename: 'spec.pdf', url: pdf.url },
+    ]);
+
+    const unsupported = buildSessionSendBody(
+      createState({
+        editorContext: createEditorContext({ workspacePath: null }),
+        nativePdfs: [pdf],
+      }),
+      'session-1',
+      'Review',
+      () => false
+    );
+    expect(unsupported?.body.parts).toEqual([
+      { type: 'text', text: 'Review' },
+      { type: 'text', text: '[Attached file: /repo/spec.pdf]' },
+    ]);
+
+    const supportedAgain = buildSessionSendBody(
+      createState({
+        selectedModel: { providerID: 'openai', modelID: 'pdf-model' },
+        providers: [pdfModel],
+        providerDefaults: { openai: 'pdf-model' },
+        editorContext: createEditorContext({ workspacePath: null }),
+        nativePdfs: [pdf],
+      }),
+      'session-1',
+      'Review',
+      () => false
+    );
+    expect(supportedAgain?.body.parts).toEqual([
+      { type: 'text', text: 'Review' },
+      { type: 'file', mime: 'application/pdf', filename: 'spec.pdf', url: pdf.url },
+    ]);
+  });
+
   it('strips clipboard placeholders and leaves reasoning at the OpenCode default', () => {
     const result = buildSessionSendBody(
       createState({
@@ -493,6 +568,7 @@ describe('session-send helpers', () => {
           attachmentSequence: undefined,
         },
       ],
+      nativePdfs: [],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
   });

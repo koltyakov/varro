@@ -22,6 +22,7 @@ describe('UsageLimitBanner', () => {
     const onPrimaryAction = vi.fn();
     const onStopRetrying = vi.fn();
     const onSwitchProvider = vi.fn();
+    const onExternalAction = vi.fn();
 
     cleanup = render(
       () =>
@@ -31,6 +32,11 @@ describe('UsageLimitBanner', () => {
           meta: '5 requests remaining',
           primaryActionLabel: 'Continue',
           onPrimaryAction,
+          externalAction: {
+            label: 'Manage billing',
+            link: 'https://example.com/billing',
+          },
+          onExternalAction,
           showStopRetrying: true,
           onStopRetrying,
           onSwitchProvider,
@@ -50,15 +56,20 @@ describe('UsageLimitBanner', () => {
     const stopRetryingButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent === 'Stop retrying'
     );
+    const externalActionButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Manage billing'
+    );
     const switchProviderButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent === 'Switch provider'
     );
 
     continueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    externalActionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     stopRetryingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     switchProviderButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(onPrimaryAction).toHaveBeenCalledOnce();
+    expect(onExternalAction).toHaveBeenCalledWith('https://example.com/billing');
     expect(onStopRetrying).toHaveBeenCalledOnce();
     expect(onSwitchProvider).toHaveBeenCalledOnce();
   });

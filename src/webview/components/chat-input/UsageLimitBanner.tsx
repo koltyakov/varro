@@ -6,6 +6,8 @@ export function UsageLimitBanner(props: {
   meta: string;
   primaryActionLabel: string;
   onPrimaryAction: () => void;
+  externalAction?: { label: string; link: string } | null;
+  onExternalAction?: (link: string) => void;
   showStopRetrying: boolean;
   onStopRetrying: () => void;
   onSwitchProvider: () => void;
@@ -21,6 +23,17 @@ export function UsageLimitBanner(props: {
         <button type="button" class="chat-usage-limit-action" onClick={props.onPrimaryAction}>
           {props.primaryActionLabel}
         </button>
+        <Show when={props.externalAction} keyed>
+          {(action) => (
+            <button
+              type="button"
+              class="chat-usage-limit-action"
+              onClick={() => props.onExternalAction?.(action.link)}
+            >
+              {action.label}
+            </button>
+          )}
+        </Show>
         <Show when={props.showStopRetrying}>
           <button
             type="button"

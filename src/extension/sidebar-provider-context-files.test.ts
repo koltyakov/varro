@@ -7,6 +7,7 @@ const vscodeMock = vi.hoisted(() => ({
   workspace: {
     fs: {
       stat: vi.fn(),
+      readFile: vi.fn(),
     },
     getWorkspaceFolder: vi.fn(),
   },
@@ -97,6 +98,37 @@ describe('SidebarProviderContextFiles', () => {
     expect(post).toHaveBeenCalledWith({ type: 'files/dropped', payload: droppedFiles });
     expect(service.getContextFiles()).toEqual(droppedFiles);
     expect(onContextFilesChanged).toHaveBeenCalledOnce();
+  });
+
+  it('posts valid PDFs selected through the file picker', async () => {
+    const { service, post } = createService();
+    const uri = { path: '/repo/spec.pdf', fsPath: '/repo/spec.pdf' };
+    const content = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x0a]);
+    vscodeMock.window.showOpenDialog.mockResolvedValue([uri]);
+    vscodeMock.workspace.fs.stat.mockResolvedValue({ type: 1, size: content.byteLength });
+    vscodeMock.workspace.fs.readFile.mockResolvedValue(content);
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+
+    await service.pickFiles(post);
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: 'pdfs/picked',
+      payload: [
+        expect.objectContaining({
+          url: 'data:application/pdf;base64,JVBERi0xCg==',
+          mime: 'application/pdf',
+          filename: 'spec.pdf',
+          size: content.byteLength,
+          contextFile: {
+            path: '/repo/spec.pdf',
+            relativePath: 'spec.pdf',
+            type: 'file',
+          },
+        }),
+      ],
+    });
+    expect(service.getContextFiles()).toEqual([]);
   });
 
   it('does not restore an async content drop after context is cleared', async () => {

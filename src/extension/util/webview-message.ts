@@ -16,6 +16,13 @@ import type {
 } from '../../shared/ralph';
 import { MAX_RALPH_ITERATIONS, normalizeRalphWorkspaceDirectory } from '../../shared/ralph';
 import { asRecord } from '../../shared/type-utils';
+import {
+  MAX_NATIVE_PDF_TOTAL_BYTES,
+  MAX_NATIVE_PDF_FILENAME_LENGTH,
+  NATIVE_PDF_MIME,
+  getPdfDataUrlSize,
+  isNativePdfAttachment,
+} from '../../shared/native-pdf';
 
 // The webview may only ask for commands Varro itself authored: the auth flows
 // plus the install and update commands the server-status recovery states offer.
@@ -100,6 +107,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'vscode/show-output': true,
   'files/drop': true,
   'files/drop-content': true,
+  'pdfs/store': true,
   'files/remove': true,
   'files/clear': true,
   'queued-messages/update': true,
@@ -154,17 +162,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
 
     case 'queued-messages/update': {
       const payload = asRecord(message?.payload);
-      const messages = sanitizeApiRequestBody(payload?.messages);
-      if (messages === INVALID_JSON_VALUE || !Array.isArray(messages) || messages.length > 1_000) {
+      const messages = sanitizeQueuedMessages(payload?.messages);
+      if (!messages) {
         return null;
       }
       return {
         type,
         payload: {
-          messages: messages as unknown as Extract<
-            WebviewMessage,
-            { type: 'queued-messages/update' }
-          >['payload']['messages'],
+          messages,
         },
       };
     }
@@ -303,6 +308,25 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: { files } };
     }
 
+    case 'pdfs/store': {
+      const payload = asRecord(message?.payload);
+      const id = getBoundedString(payload?.id, 512);
+      const name = getBoundedString(payload?.name, MAX_DROPPED_CONTENT_NAME_LENGTH);
+      const content = getBoundedString(payload?.content, MAX_DROPPED_CONTENT_BASE64_LENGTH, true);
+      const size = getSafeInteger(payload?.size);
+      if (
+        !id ||
+        !name ||
+        content === null ||
+        size === null ||
+        size > MAX_DROPPED_CONTENT_FILE_BYTES ||
+        getBase64DecodedSize(content) !== size
+      ) {
+        return null;
+      }
+      return { type, payload: { id, name, content, size } };
+    }
+
     case 'files/remove':
     case 'file/read': {
       const payload = asRecord(message?.payload);
@@ -390,7 +414,9 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH + MAX_QUERY_LENGTH);
       if (id === null || !method || !path || !isAllowedApiRequest(method, path)) return null;
       if (payload?.body === undefined) return { type, payload: { id, method, path } };
-      const body = sanitizeApiRequestBody(payload.body);
+      const body = /\/session\/[^/]+\/prompt_async(?:\?|$)/.test(path)
+        ? sanitizePromptBodyWithNativePdfs(payload.body)
+        : sanitizeApiRequestBody(payload.body);
       return body === INVALID_JSON_VALUE ? null : { type, payload: { id, method, path, body } };
     }
 
@@ -829,6 +855,84 @@ function sanitizeApiRequestBody(value: unknown): SanitizedJsonValue | typeof INV
   }
 }
 
+function sanitizeQueuedMessages(
+  value: unknown
+): Extract<WebviewMessage, { type: 'queued-messages/update' }>['payload']['messages'] | null {
+  if (!Array.isArray(value) || value.length > 1_000) return null;
+  const withoutPdfs: unknown[] = [];
+  const pdfsByIndex: Array<
+    Extract<
+      WebviewMessage,
+      { type: 'queued-messages/update' }
+    >['payload']['messages'][number]['nativePdfs']
+  > = [];
+  let queuedPdfBytes = 0;
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const nativePdfs = record.nativePdfs === undefined ? [] : record.nativePdfs;
+    if (!Array.isArray(nativePdfs)) return null;
+    const validPdfs = nativePdfs.filter(isNativePdfAttachment);
+    if (validPdfs.length !== nativePdfs.length) return null;
+    queuedPdfBytes += validPdfs.reduce((total, pdf) => total + pdf.size, 0);
+    if (queuedPdfBytes > MAX_NATIVE_PDF_TOTAL_BYTES) return null;
+    const copy = { ...record };
+    delete copy.nativePdfs;
+    withoutPdfs.push(copy);
+    pdfsByIndex.push(validPdfs);
+  }
+  const sanitized = sanitizeApiRequestBody(withoutPdfs);
+  if (sanitized === INVALID_JSON_VALUE || !Array.isArray(sanitized)) return null;
+  return sanitized.map((item, index) => ({
+    ...(item as unknown as Extract<
+      WebviewMessage,
+      { type: 'queued-messages/update' }
+    >['payload']['messages'][number]),
+    nativePdfs: pdfsByIndex[index]!,
+  }));
+}
+
+function sanitizePromptBodyWithNativePdfs(
+  value: unknown
+): SanitizedJsonValue | typeof INVALID_JSON_VALUE {
+  const body = asRecord(value);
+  if (!body || !Array.isArray(body.parts)) return sanitizeApiRequestBody(value);
+  let totalPdfBytes = 0;
+  const pdfUrls = new Map<number, string>();
+  const parts = body.parts.map((part, index) => {
+    const record = asRecord(part);
+    if (record?.type !== 'file' || record.mime !== NATIVE_PDF_MIME) return part;
+    const keys = Object.keys(record);
+    if (
+      keys.some((key) => !['type', 'mime', 'filename', 'url'].includes(key)) ||
+      typeof record.filename !== 'string' ||
+      record.filename.length === 0 ||
+      record.filename.length > MAX_NATIVE_PDF_FILENAME_LENGTH ||
+      typeof record.url !== 'string'
+    ) {
+      return INVALID_JSON_VALUE;
+    }
+    const size = getPdfDataUrlSize(record.url);
+    if (size === null) return INVALID_JSON_VALUE;
+    totalPdfBytes += size;
+    if (totalPdfBytes > MAX_NATIVE_PDF_TOTAL_BYTES) return INVALID_JSON_VALUE;
+    pdfUrls.set(index, record.url);
+    return { type: 'file', mime: NATIVE_PDF_MIME, filename: record.filename, url: '' };
+  });
+  if (parts.includes(INVALID_JSON_VALUE)) return INVALID_JSON_VALUE;
+  const sanitized = sanitizeApiRequestBody({ ...body, parts });
+  if (sanitized === INVALID_JSON_VALUE) return INVALID_JSON_VALUE;
+  const sanitizedBody = sanitized as { [key: string]: SanitizedJsonValue };
+  const sanitizedParts = sanitizedBody.parts;
+  if (!Array.isArray(sanitizedParts)) return INVALID_JSON_VALUE;
+  for (const [index, url] of pdfUrls) {
+    const part = sanitizedParts[index];
+    if (!part || Array.isArray(part) || typeof part !== 'object') return INVALID_JSON_VALUE;
+    part.url = url;
+  }
+  return sanitizedBody;
+}
+
 function sanitizeJsonValue(
   value: unknown,
   budget: StructuralBudget,
@@ -1050,6 +1154,7 @@ function matchRouteSegments(pattern: string[], segments: string[]): Record<strin
 const API_ROUTES: ApiRoute[] = [
   route('/global/health', methodsNoQuery('GET')),
   route('/global/config', methodsNoQuery('GET')),
+  route('/model/default', methodsNoQuery('GET')),
   route('/config/providers', methodsNoQuery('GET')),
   route('/provider', methodsNoQuery('GET')),
   route('/provider/auth', methodsNoQuery('GET')),
@@ -1116,6 +1221,9 @@ const API_ROUTES: ApiRoute[] = [
     ({ method, url, params }) =>
       method === 'POST' && noQuery(url) && (params.action === 'reply' || params.action === 'reject')
   ),
+  route('/mcp/:id/auth/authenticate', methodsNoQuery('POST')),
+  route('/mcp/:id/auth', methodsNoQuery('POST', 'DELETE')),
+  route('/mcp/:id/auth/callback', methodsNoQuery('POST')),
   route(
     '/mcp/:id/:action',
     ({ method, url, params }) =>
@@ -1123,7 +1231,6 @@ const API_ROUTES: ApiRoute[] = [
       noQuery(url) &&
       (params.action === 'connect' || params.action === 'disconnect')
   ),
-  route('/mcp/:id/auth/authenticate', methodsNoQuery('POST')),
   route(
     '/provider/:id/oauth/:action',
     ({ method, url, params }) =>

@@ -1,5 +1,5 @@
 import { For } from 'solid-js';
-import type { ClipboardImage } from '../../lib/app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from '../../lib/app-state-types';
 import type { DroppedFile } from '../../../shared/protocol';
 import { formatContextLineRanges } from '../../../shared/context-files';
 import { getDroppedFileLabel } from '../../lib/path-display';
@@ -10,7 +10,8 @@ type AttachmentStripItem =
   | { type: 'terminal-selection'; value: TerminalSelectionAttachment }
   | { type: 'diagnostics'; value: { count: number; total: number } }
   | { type: 'file'; value: DroppedFile }
-  | { type: 'clipboard-image'; value: ClipboardImage };
+  | { type: 'clipboard-image'; value: ClipboardImage }
+  | { type: 'native-pdf'; value: NativePdfAttachment };
 
 type ActiveContextAttachment = {
   filename: string;
@@ -29,12 +30,15 @@ export function AttachmentStrip(props: {
   diagnostics: { count: number; total: number } | null;
   files: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  nativePdfs: NativePdfAttachment[];
+  nativePdfsSupported: boolean;
   clipboardImagesDisabled: boolean;
   onToggleActiveContext: () => void;
   onClearTerminalSelection: () => void;
   onClearDiagnostics: () => void;
   onRemoveFile: (path: string) => void;
   onRemoveClipboardImage: (id: string) => void;
+  onRemoveNativePdf: (id: string) => void;
   onOpenFile?: (file: DroppedFile) => void;
   onPreviewImage?: (image: ClipboardImage) => void;
 }) {
@@ -49,6 +53,7 @@ export function AttachmentStrip(props: {
       ...(props.diagnostics ? [{ type: 'diagnostics' as const, value: props.diagnostics }] : []),
       ...props.files.map((file) => ({ type: 'file' as const, value: file })),
       ...props.clipboardImages.map((image) => ({ type: 'clipboard-image' as const, value: image })),
+      ...props.nativePdfs.map((pdf) => ({ type: 'native-pdf' as const, value: pdf })),
     ].toSorted((a, b) => getAttachmentSequence(a) - getAttachmentSequence(b));
 
   return (
@@ -110,18 +115,39 @@ export function AttachmentStrip(props: {
             );
           }
 
+          if (item.type === 'clipboard-image')
+            return (
+              <AttachmentChip
+                label={item.value.filename}
+                disabled={props.clipboardImagesDisabled}
+                icon="image"
+                title={
+                  props.clipboardImagesDisabled
+                    ? `${item.value.filename} · Current model doesn't support vision, so this image will not be sent`
+                    : item.value.filename
+                }
+                onClick={
+                  props.onPreviewImage ? () => props.onPreviewImage?.(item.value) : undefined
+                }
+                onRemove={() => props.onRemoveClipboardImage(item.value.id)}
+              />
+            );
           return (
             <AttachmentChip
               label={item.value.filename}
-              disabled={props.clipboardImagesDisabled}
-              icon="image"
+              detail={props.nativePdfsSupported ? 'PDF' : undefined}
+              icon={props.nativePdfsSupported ? undefined : 'file'}
               title={
-                props.clipboardImagesDisabled
-                  ? `${item.value.filename} · Current model doesn't support vision, so this image will not be sent`
-                  : item.value.filename
+                props.nativePdfsSupported
+                  ? item.value.filename
+                  : item.value.contextFile?.relativePath || item.value.filename
               }
-              onClick={props.onPreviewImage ? () => props.onPreviewImage?.(item.value) : undefined}
-              onRemove={() => props.onRemoveClipboardImage(item.value.id)}
+              onClick={
+                !props.nativePdfsSupported && item.value.contextFile && props.onOpenFile
+                  ? () => props.onOpenFile?.(item.value.contextFile!)
+                  : undefined
+              }
+              onRemove={() => props.onRemoveNativePdf(item.value.id)}
             />
           );
         }}
@@ -141,6 +167,8 @@ function getAttachmentSequence(item: AttachmentStripItem) {
     case 'file':
       return item.value.attachmentSequence ?? Number.MAX_SAFE_INTEGER;
     case 'clipboard-image':
+      return item.value.attachmentSequence ?? Number.MAX_SAFE_INTEGER;
+    case 'native-pdf':
       return item.value.attachmentSequence ?? Number.MAX_SAFE_INTEGER;
   }
 }

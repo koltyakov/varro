@@ -11,6 +11,7 @@ export type UsageLimitNotice = {
   sessionID?: string | null;
   providerID?: string | null;
   modelID?: string | null;
+  action?: NonNullable<Extract<SessionStatus, { type: 'retry' }>['action']>;
 };
 
 export type UsageLimitPresentation = {
@@ -21,12 +22,13 @@ export type UsageLimitPresentation = {
 const SILENT_SERVICE_RETRY_ATTEMPTS = 3;
 
 export function getUsageLimitPresentation(
-  notice: Pick<UsageLimitNotice, 'message' | 'unit'>
+  notice: Pick<UsageLimitNotice, 'message' | 'unit' | 'action'>
 ): UsageLimitPresentation {
+  const actionTitle = notice.action?.title.trim();
   const normalized = notice.message.toLowerCase();
   if (isServiceUnavailableMessage(notice.message)) {
     return {
-      title: 'Service temporarily unavailable',
+      title: actionTitle || 'Service temporarily unavailable',
       summary: 'service disruption',
     };
   }
@@ -38,15 +40,29 @@ export function getUsageLimitPresentation(
 
   if (isQuotaExhausted) {
     return {
-      title: 'Usage limit reached',
+      title: actionTitle || 'Usage limit reached',
       summary: `${getUsageLimitLabel(notice.unit).toLowerCase()} exhausted`,
     };
   }
 
   return {
-    title: 'Request throttled',
+    title: actionTitle || 'Request throttled',
     summary: 'request throttled',
   };
+}
+
+export function getSafeUsageLimitAction(
+  action: UsageLimitNotice['action']
+): { label: string; link: string } | null {
+  const label = action?.label.trim();
+  const link = action?.link?.trim();
+  if (!label || !link) return null;
+
+  try {
+    return new URL(link).protocol === 'https:' ? { label, link } : null;
+  } catch {
+    return null;
+  }
 }
 
 export function shouldDisplayUsageLimitNotice(
@@ -109,7 +125,7 @@ export function deriveUsageLimitNotice(params: {
       attempt: status.attempt,
     });
     if (statusNotice) {
-      return { ...statusNotice, source: 'status' };
+      return { ...statusNotice, source: 'status', action: status.action };
     }
   }
 

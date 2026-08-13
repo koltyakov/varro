@@ -35,6 +35,7 @@ function createCallbacks(): MessageRouterCallbacks {
     checkServerRestart: vi.fn(() => Promise.resolve()),
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
     handleDroppedContent: vi.fn(() => Promise.resolve()),
+    storePdf: vi.fn(() => Promise.resolve()),
     removeContextFile: vi.fn(),
     clearContextFiles: vi.fn(),
     notifyContextFilesChanged: vi.fn(),

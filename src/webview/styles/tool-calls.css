@@ -2520,6 +2520,10 @@ kbd {
   padding-bottom: 0px;
 }
 
+.user-message-card > .rendered-markdown > .chat-attachment-chip {
+  --attachment-chip-max-width: 100%;
+}
+
 .user-message-card > .rendered-markdown > .user-message-text-scroll + .chat-image-figure {
   margin-top: 10px;
 }
@@ -2643,6 +2647,24 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.message-attachment-chip .chip-label-with-extension,
+.message-attachments > .chat-attachment-chip .chip-label-with-extension {
+  display: flex;
+  text-overflow: clip;
+}
+
+.message-attachment-chip .chip-label-stem,
+.message-attachments > .chat-attachment-chip .chip-label-stem {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachment-chip .chip-label-extension,
+.message-attachments > .chat-attachment-chip .chip-label-extension {
+  flex-shrink: 0;
 }
 
 .message-attachment-chip .chip-detail,

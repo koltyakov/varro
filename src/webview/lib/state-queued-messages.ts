@@ -16,10 +16,11 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
   if (failedIds.length !== state.failedQueuedMessageIds.length) {
     setState('failedQueuedMessageIds', failedIds);
   }
-  // Data URLs can make a single queued image message tens of megabytes. Persist them through the
+  // Data URLs can make queued media messages tens of megabytes. Persist them through the
   // asynchronous extension bridge, but not synchronously in webview state and localStorage.
   const browserPersisted = messages.filter(
-    (message) => (message.clipboardImages?.length ?? 0) === 0
+    (message) =>
+      (message.clipboardImages?.length ?? 0) === 0 && (message.nativePdfs?.length ?? 0) === 0
   );
   writeStored(STORAGE_KEYS.queuedMessages, browserPersisted);
   const hostPersisted = messages.map(
@@ -31,6 +32,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       paused,
       droppedFiles = [],
       clipboardImages = [],
+      nativePdfs = [],
       terminalSelection = null,
       attachedDiagnostics,
     }) => ({
@@ -41,6 +43,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       ...(paused ? { paused: true } : {}),
       droppedFiles,
       clipboardImages,
+      ...(nativePdfs.length > 0 ? { nativePdfs } : {}),
       terminalSelection,
       ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
     })

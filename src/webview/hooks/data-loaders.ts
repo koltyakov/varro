@@ -125,7 +125,11 @@ export function createDataLoaderOperations(deps: {
   ): void;
   listCommands(): Promise<Command[] | null | undefined>;
   setCommands(commands: Command[]): void;
-  listProviders(): Promise<{ providers: Provider[]; default?: Record<string, string> }>;
+  listProviders(): Promise<{
+    providers: Provider[];
+    default?: Record<string, string>;
+    defaultModel?: SelectedModel | null;
+  }>;
   setProvidersLoaded(value: boolean): void;
   setProviders(
     providers: Provider[],
@@ -644,7 +648,11 @@ export async function loadCommandsWithDependencies(
 
 export async function loadProvidersWithDependencies(
   deps: {
-    listProviders(): Promise<{ providers: Provider[]; default?: Record<string, string> }>;
+    listProviders(): Promise<{
+      providers: Provider[];
+      default?: Record<string, string>;
+      defaultModel?: SelectedModel | null;
+    }>;
     setProvidersLoaded(value: boolean): void;
     setProviders(providers: Provider[], defaults?: Record<string, string>): void;
     setProviderDefaults(defaults: Record<string, string>): void;
@@ -695,6 +703,7 @@ export async function loadProvidersWithDependencies(
       selectedModel: sessionSelectedModel ?? currentSelectedModel,
       providers,
       providerDefaults,
+      defaultModel: res.defaultModel,
       allowHiddenSelectedModel: !!composerSessionId,
     });
     if (routingState.nextSelectedModel !== undefined) {

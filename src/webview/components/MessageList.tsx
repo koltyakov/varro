@@ -252,7 +252,7 @@ export function getActiveTurnMessageId(
   messages: readonly MessageEntry[],
   firstVisibleIndex: number | null,
   stickyTurnId: string | null,
-  fallbackTurnId: string | null,
+  fallbackTurnId: string | null
 ): string | null {
   if (firstVisibleIndex === null) return stickyTurnId ?? fallbackTurnId;
   const firstVisibleMessage = messages[firstVisibleIndex];
@@ -267,7 +267,7 @@ export function getActiveTurnMessageId(
 export function getActiveTurnNavigationMessageId(
   turns: readonly StickyUserMessagePreview[],
   viewportTurnId: string | null,
-  selectedTurnId: string | null,
+  selectedTurnId: string | null
 ): string | null {
   if (!selectedTurnId || !viewportTurnId) return selectedTurnId ?? viewportTurnId;
   const selectedIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
@@ -452,9 +452,9 @@ export function MessageList() {
   let upwardStickyHandoffReleaseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let stickyJumpSettleEpoch = 0;
   const [stickyNavigationInProgress, setStickyNavigationInProgress] = createSignal(false);
-  const [activeTurnNavigationTargetId, setActiveTurnNavigationTargetId] = createSignal<string | null>(
-    null,
-  );
+  const [activeTurnNavigationTargetId, setActiveTurnNavigationTargetId] = createSignal<
+    string | null
+  >(null);
   let pendingTurnNavigationAnimationMessageId: string | null = null;
   let turnNavigationAnimationEpoch = 0;
   let editRevealEpoch = 0;
@@ -5430,12 +5430,12 @@ export function MessageList() {
       visibleMessages,
       firstVisibleIndex,
       sticky?.id ?? null,
-      turnNavigationPreviews()[0]?.id ?? null,
+      turnNavigationPreviews()[0]?.id ?? null
     );
     return getActiveTurnNavigationMessageId(
       turnNavigationPreviews(),
       viewportTurnId,
-      navigationTargetId,
+      navigationTargetId
     );
   });
 
@@ -5530,7 +5530,9 @@ export function MessageList() {
   function animateTurnNavigationDestination(messageId: string) {
     if (pendingTurnNavigationAnimationMessageId !== messageId) return;
     pendingTurnNavigationAnimationMessageId = null;
-    const target = mountedMessageRows.get(messageId)?.querySelector<HTMLElement>('.user-message-card');
+    const target = mountedMessageRows
+      .get(messageId)
+      ?.querySelector<HTMLElement>('.user-message-card');
     if (!target) return;
     const animationEpoch = ++turnNavigationAnimationEpoch;
     target.classList.remove('turn-navigation-destination');
@@ -6145,9 +6147,7 @@ export function MessageList() {
         </div>
       </div>
       <Show
-        when={
-          turnNavigationPreviews().length > 1 && !editingMessage() && !hasExpandedDiffOverlay()
-        }
+        when={turnNavigationPreviews().length > 1 && !editingMessage() && !hasExpandedDiffOverlay()}
       >
         <TurnNavigationRail
           turns={turnNavigationPreviews()}

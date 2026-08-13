@@ -1,5 +1,10 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { getSelectedMcpsForSession, state } from '../lib/state';
+import { Portal } from 'solid-js/web';
+import type { McpStatus } from '../../shared/protocol';
+import { postMessage } from '../lib/bridge';
+import { client } from '../lib/client';
+import { trapModalFocus } from '../lib/modal-focus';
+import { getSelectedMcpsForSession, setMcpStatus, state } from '../lib/state';
 import { observePopupViewport, placeDropdownAnchor } from '../lib/popup-position';
 
 export function McpPicker(props: {
@@ -14,6 +19,10 @@ export function McpPicker(props: {
 
   const [query, setQuery] = createSignal('');
   const [focusIndex, setFocusIndex] = createSignal(0);
+  const [authServer, setAuthServer] = createSignal<{
+    name: string;
+    status: McpStatus;
+  } | null>(null);
   const normalizedQuery = () => query().trim().toLocaleLowerCase();
 
   const allItems = createMemo(() =>
@@ -49,6 +58,17 @@ export function McpPicker(props: {
     props.onChange([...next]);
   }
 
+  function activate(item: ReturnType<typeof allItems>[number]) {
+    if (item.status === 'needs_auth' || item.status === 'needs_client_registration') {
+      if (!selectedNames().has(item.name)) {
+        props.onChange([...selectedNames(), item.name]);
+      }
+      setAuthServer({ name: item.name, status: { status: item.status, error: item.error } });
+      return;
+    }
+    toggle(item.name);
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
     const items = filteredItems();
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -72,7 +92,7 @@ export function McpPicker(props: {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       const item = items[focusIndex()];
-      if (item) toggle(item.name);
+      if (item) activate(item);
       return;
     }
 
@@ -158,7 +178,7 @@ export function McpPicker(props: {
                   <button
                     class={`dropdown-item ${selectedNames().has(item.name) ? 'selected' : ''} ${focusIndex() === index() ? 'keyboard-focus' : ''}`}
                     aria-pressed={selectedNames().has(item.name)}
-                    onClick={() => toggle(item.name)}
+                    onClick={() => activate(item)}
                     onMouseEnter={() => setFocusIndex(index())}
                   >
                     <span class="dropdown-name-wrap">
@@ -190,6 +210,232 @@ export function McpPicker(props: {
           </Show>
         </div>
       </div>
+      <Show when={authServer()}>
+        {(server) => <McpAuthDialog server={server()} onClose={() => setAuthServer(null)} />}
+      </Show>
     </div>
+  );
+}
+
+function McpAuthDialog(props: {
+  server: { name: string; status: McpStatus };
+  onClose: () => void;
+}) {
+  const needsConfiguration = () => currentStatus().status === 'needs_client_registration';
+  const [authorizationUrl, setAuthorizationUrl] = createSignal('');
+  const [authorizationCode, setAuthorizationCode] = createSignal('');
+  const [currentStatus, setCurrentStatus] = createSignal<McpStatus>(props.server.status);
+  const [isSubmitting, setIsSubmitting] = createSignal(false);
+  const [errorMessage, setErrorMessage] = createSignal('');
+
+  onMount(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      props.onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    onCleanup(() => document.removeEventListener('keydown', onKeyDown));
+    if (!needsConfiguration()) void startAuth();
+  });
+
+  async function refreshStatus() {
+    const statuses = await client.mcp.status();
+    setMcpStatus(statuses);
+    const status = statuses[props.server.name];
+    if (status) setCurrentStatus(status);
+    return status;
+  }
+
+  async function startAuth() {
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      const authorization = await client.mcp.startAuth(props.server.name);
+      const url = new URL(authorization.authorizationUrl);
+      if (url.protocol !== 'https:') {
+        throw new Error(
+          'OpenCode returned an unsafe MCP authorization URL. Only HTTPS is allowed.'
+        );
+      }
+      setAuthorizationUrl(url.href);
+      postMessage({ type: 'vscode/open-external', payload: { url: url.href } });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitCode() {
+    const code = authorizationCode().trim();
+    if (!code) return;
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      setCurrentStatus(await client.mcp.completeAuth(props.server.name, code));
+      await refreshStatus();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function removeAndRestart() {
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      await client.mcp.removeAuth(props.server.name);
+      setAuthorizationCode('');
+      setAuthorizationUrl('');
+      await refreshStatus();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
+    await startAuth();
+  }
+
+  async function refreshConfigurationStatus() {
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      const status = await refreshStatus();
+      if (status?.status === 'needs_auth') {
+        setIsSubmitting(false);
+        await startAuth();
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Portal>
+      <div class="provider-connect-overlay">
+        <div
+          ref={(element) => onCleanup(trapModalFocus(element))}
+          class="provider-connect-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mcp-auth-title"
+        >
+          <div class="provider-connect-header">
+            <div>
+              <div id="mcp-auth-title" class="provider-connect-title">
+                {needsConfiguration() ? 'Configure MCP OAuth' : 'Authorize MCP server'}
+              </div>
+              <div class="provider-connect-subtitle">{props.server.name}</div>
+            </div>
+            <button
+              type="button"
+              class="provider-connect-close"
+              onClick={props.onClose}
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
+              </svg>
+            </button>
+          </div>
+          <div class="provider-connect-body">
+            <Show
+              when={!needsConfiguration()}
+              fallback={
+                <div class="provider-connect-form">
+                  <div class="provider-connect-intro">
+                    Add a client ID for this server in your OpenCode MCP configuration, then refresh
+                    its status. OpenCode cannot start OAuth until client registration is configured.
+                  </div>
+                  <Show when={props.server.status.error}>
+                    <div class="provider-connect-instructions">{props.server.status.error}</div>
+                  </Show>
+                  <div class="provider-connect-actions">
+                    <button
+                      type="button"
+                      class="provider-connect-primary"
+                      disabled={isSubmitting()}
+                      onClick={() => void refreshConfigurationStatus()}
+                    >
+                      {isSubmitting() ? 'Refreshing...' : 'Refresh status'}
+                    </button>
+                  </div>
+                </div>
+              }
+            >
+              <form
+                class="provider-connect-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitCode();
+                }}
+              >
+                <div class="provider-connect-oauth-handoff">
+                  <div>
+                    <div class="provider-connect-oauth-title">Continue in your browser</div>
+                    <div class="provider-connect-oauth-copy">
+                      Authorize the server, then paste the returned authorization code below.
+                    </div>
+                  </div>
+                </div>
+                <Show when={authorizationUrl()}>
+                  <button
+                    type="button"
+                    class="provider-connect-secondary"
+                    onClick={() =>
+                      postMessage({
+                        type: 'vscode/open-external',
+                        payload: { url: authorizationUrl() },
+                      })
+                    }
+                  >
+                    Reopen authorization page
+                  </button>
+                </Show>
+                <label class="provider-connect-field">
+                  Authorization code
+                  <input
+                    class="provider-connect-input"
+                    value={authorizationCode()}
+                    onInput={(event) => setAuthorizationCode(event.currentTarget.value)}
+                    autocomplete="off"
+                  />
+                </label>
+                <div class="provider-connect-intro" aria-live="polite">
+                  Status: {currentStatus().status.replaceAll('_', ' ')}
+                </div>
+                <div class="provider-connect-actions">
+                  <button
+                    type="button"
+                    class="provider-connect-danger"
+                    disabled={isSubmitting()}
+                    onClick={() => void removeAndRestart()}
+                  >
+                    Remove credentials and restart
+                  </button>
+                  <button
+                    type="submit"
+                    class="provider-connect-primary"
+                    disabled={isSubmitting() || !authorizationCode().trim()}
+                  >
+                    {isSubmitting() ? 'Working...' : 'Complete authorization'}
+                  </button>
+                </div>
+              </form>
+            </Show>
+            <Show when={errorMessage()}>
+              <div class="provider-connect-error" role="alert">
+                {errorMessage()}
+              </div>
+            </Show>
+          </div>
+        </div>
+      </div>
+    </Portal>
   );
 }

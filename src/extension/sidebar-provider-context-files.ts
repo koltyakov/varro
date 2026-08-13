@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
+import { Buffer } from 'buffer';
 import type { DroppedFile, ExtensionMessage } from '../shared/protocol';
 import { areContextFilesEqual, mergeContextFile } from '../shared/context-files';
+import {
+  MAX_NATIVE_PDF_TOTAL_BYTES,
+  NATIVE_PDF_MIME,
+  isPdfBytes,
+  type NativePdfAttachment,
+} from '../shared/native-pdf';
 import type { DroppedFilesService } from './dropped-files-service';
 import { getRelativePath } from './util/path';
 
@@ -71,27 +78,57 @@ export class SidebarProviderContextFiles {
     });
     if (!result || result.length === 0) return;
 
-    const files = await Promise.all(
-      result.map(async (uri) => {
-        try {
-          const stat = await vscode.workspace.fs.stat(uri);
-          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-          const relativePath = getRelativePath(uri, workspaceFolder);
-          return {
+    let pdfBytes = 0;
+    const files: Array<
+      { type: 'pdf'; value: NativePdfAttachment } | { type: 'context'; value: DroppedFile }
+    > = [];
+    for (const uri of result) {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        const relativePath = getRelativePath(uri, workspaceFolder);
+        if (
+          !(stat.type & vscode.FileType.Directory) &&
+          uri.path.toLowerCase().endsWith('.pdf') &&
+          stat.size > 0 &&
+          pdfBytes + stat.size <= MAX_NATIVE_PDF_TOTAL_BYTES
+        ) {
+          const content = await vscode.workspace.fs.readFile(uri);
+          if (!isPdfBytes(content) || content.byteLength !== stat.size) continue;
+          pdfBytes += content.byteLength;
+          files.push({
+            type: 'pdf',
+            value: {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              url: `data:${NATIVE_PDF_MIME};base64,${Buffer.from(content).toString('base64')}`,
+              mime: NATIVE_PDF_MIME,
+              filename: uri.path.split('/').pop() || 'document.pdf',
+              size: content.byteLength,
+              contextFile: {
+                path: uri.fsPath,
+                relativePath,
+                type: 'file',
+              },
+            },
+          });
+          continue;
+        }
+        files.push({
+          type: 'context',
+          value: {
             path: uri.fsPath,
             relativePath,
-            type:
-              stat.type & vscode.FileType.Directory ? ('directory' as const) : ('file' as const),
-          };
-        } catch {
-          return null;
-        }
-      })
-    );
+            type: stat.type & vscode.FileType.Directory ? 'directory' : 'file',
+          },
+        });
+      } catch {}
+    }
 
-    const valid = files.filter(
-      (f): f is { path: string; relativePath: string; type: 'file' | 'directory' } => f !== null
-    );
+    const valid = files.flatMap((item) => (item?.type === 'context' ? [item.value] : []));
+    const pdfs = files.flatMap((item) => (item?.type === 'pdf' ? [item.value] : []));
+    if (pdfs.length > 0 && clearGeneration === this.clearGeneration) {
+      post({ type: 'pdfs/picked', payload: pdfs });
+    }
     await this.applyPendingFiles(valid, clearGeneration, startedAt, post);
   }
 

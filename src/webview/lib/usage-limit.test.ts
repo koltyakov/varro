@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createUsageLimitProviderLimit,
   deriveUsageLimitNotice,
+  getSafeUsageLimitAction,
   getUsageLimitPresentation,
   isUsageLimitNoticeVisibleForModel,
   parseUsageLimitNotice,
@@ -41,6 +42,61 @@ describe('usage limit helpers', () => {
       unit: 'requests',
     });
     expect(notice?.retryAt).not.toBeNull();
+  });
+
+  it('preserves a structured retry action without replacing retry metadata', () => {
+    const action = {
+      reason: 'billing',
+      provider: 'openai',
+      title: 'Add credits to continue',
+      message: 'Your OpenAI balance is empty.',
+      label: 'Manage billing',
+      link: 'https://platform.openai.com/settings/billing',
+    };
+    const notice = deriveUsageLimitNotice({
+      sessionID: 'session-1',
+      status: {
+        type: 'retry',
+        attempt: 4,
+        message: '429 rate limit reached',
+        action,
+        next: 30,
+      },
+      messages: [],
+    });
+
+    expect(notice).toMatchObject({
+      message: '429 rate limit reached',
+      attempt: 4,
+      action,
+    });
+    expect(notice?.retryAt).not.toBeNull();
+    expect(notice && getUsageLimitPresentation(notice).title).toBe('Add credits to continue');
+  });
+
+  it('accepts only labeled HTTPS retry actions', () => {
+    const action = {
+      reason: 'billing',
+      provider: 'openai',
+      title: 'Add credits',
+      message: 'Your balance is empty.',
+      label: 'Manage billing',
+    };
+
+    expect(
+      getSafeUsageLimitAction({
+        ...action,
+        link: 'https://platform.openai.com/settings/billing',
+      })
+    ).toEqual({
+      label: 'Manage billing',
+      link: 'https://platform.openai.com/settings/billing',
+    });
+    expect(getSafeUsageLimitAction({ ...action, link: 'http://example.com' })).toBeNull();
+    expect(getSafeUsageLimitAction({ ...action, link: 'javascript:alert(1)' })).toBeNull();
+    expect(
+      getSafeUsageLimitAction({ ...action, label: ' ', link: 'https://example.com' })
+    ).toBeNull();
   });
 
   it('drops stale retry-part notices once a newer assistant message resumes without an error', () => {

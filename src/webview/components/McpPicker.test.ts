@@ -4,6 +4,26 @@ import { McpPicker } from './McpPicker';
 import { resetDefaultAppState, setState } from '../lib/state';
 import type { McpStatus } from '../../shared/protocol';
 
+const mocks = vi.hoisted(() => ({
+  postMessage: vi.fn(),
+  startAuth: vi.fn(),
+  completeAuth: vi.fn(),
+  removeAuth: vi.fn(),
+  status: vi.fn(),
+}));
+
+vi.mock('../lib/bridge', () => ({ postMessage: mocks.postMessage }));
+vi.mock('../lib/client', () => ({
+  client: {
+    mcp: {
+      startAuth: mocks.startAuth,
+      completeAuth: mocks.completeAuth,
+      removeAuth: mocks.removeAuth,
+      status: mocks.status,
+    },
+  },
+}));
+
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
@@ -24,6 +44,18 @@ beforeEach(() => {
   document.body.appendChild(container);
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  mocks.startAuth.mockReset();
+  mocks.completeAuth.mockReset();
+  mocks.removeAuth.mockReset();
+  mocks.status.mockReset();
+  mocks.postMessage.mockReset();
+  mocks.startAuth.mockResolvedValue({
+    authorizationUrl: 'https://mcp.example.com/authorize',
+    oauthState: 'state-1',
+  });
+  mocks.completeAuth.mockResolvedValue({ status: 'connected' });
+  mocks.removeAuth.mockResolvedValue({ success: true });
+  mocks.status.mockResolvedValue({ oauth: { status: 'connected' } });
 });
 
 afterEach(() => {
@@ -259,5 +291,121 @@ describe('McpPicker', () => {
     browserBridge?.click();
 
     expect(onChange).toHaveBeenCalledWith(['alpha', 'browser-bridge']);
+  });
+
+  it('selects needs_auth MCPs and completes the explicit OAuth lifecycle', async () => {
+    const onChange = vi.fn();
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange,
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+    await flushMicrotasks();
+
+    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledWith('oauth'));
+
+    expect(onChange).toHaveBeenCalledWith(['oauth']);
+    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-labelledby')).toBe(
+      'mcp-auth-title'
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://mcp.example.com/authorize' },
+    });
+
+    const input = document.querySelector<HTMLInputElement>('.provider-connect-input');
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    input!.value = 'oauth-code';
+    input!.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector<HTMLFormElement>('.provider-connect-form')?.requestSubmit();
+
+    await vi.waitFor(() => expect(mocks.completeAuth).toHaveBeenCalledWith('oauth', 'oauth-code'));
+    expect(mocks.status).toHaveBeenCalled();
+  });
+
+  it('rejects unsafe authorization URLs without opening them', async () => {
+    mocks.startAuth.mockResolvedValue({
+      authorizationUrl: 'http://mcp.example.com/authorize',
+      oauthState: 'state-1',
+    });
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('Only HTTPS')
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('shows configuration guidance without starting auth for client registration', async () => {
+    const onChange = vi.fn();
+    setMcpStatuses({
+      registered: {
+        status: 'needs_client_registration',
+        error: 'Set clientId in opencode.json.',
+      },
+    });
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange,
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+
+    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    await flushMicrotasks();
+
+    expect(onChange).toHaveBeenCalledWith(['registered']);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Add a client ID for this server'
+    );
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Set clientId in opencode.json.'
+    );
+    expect(mocks.startAuth).not.toHaveBeenCalled();
+  });
+
+  it('removes credentials and starts a fresh authorization flow', async () => {
+    setMcpStatuses({ oauth: { status: 'needs_auth' } });
+    cleanup = render(
+      () =>
+        McpPicker({
+          sessionId: 'session-1',
+          onChange: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      container!
+    );
+    container?.querySelector<HTMLButtonElement>('.dropdown-item')?.click();
+    await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(1));
+
+    const removeButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.includes('Remove credentials')
+    );
+    removeButton?.click();
+
+    await vi.waitFor(() => expect(mocks.removeAuth).toHaveBeenCalledWith('oauth'));
+    await vi.waitFor(() => expect(mocks.startAuth).toHaveBeenCalledTimes(2));
+    expect(mocks.status).toHaveBeenCalled();
   });
 });

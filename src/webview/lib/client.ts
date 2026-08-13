@@ -40,6 +40,7 @@ import type {
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
 export type SessionListPage = { items: Session[]; hasMore: boolean };
+export type McpAuthStart = { authorizationUrl: string; oauthState: string };
 
 export const client = {
   async health(): Promise<HealthResponse> {
@@ -218,12 +219,19 @@ export const client = {
     async providers(): Promise<{
       providers: Provider[];
       default: Record<string, string>;
+      defaultModel: ChatModelSelection | null | undefined;
     }> {
       const path = '/config/providers';
-      const response = requireRecord(await apiCall('GET', path), path);
+      const [providerResponse, defaultModel] = await Promise.all([
+        apiCall('GET', path),
+        // This endpoint is optional and unsupported servers may return their HTML shell.
+        apiCall('GET', '/model/default').then(parseDefaultModel).catch(() => undefined),
+      ]);
+      const response = requireRecord(providerResponse, path);
       return {
         providers: requireArray<Provider>(response.providers, path),
         default: requireRecord(response.default, path) as Record<string, string>,
+        defaultModel,
       };
     },
     async providerLimit(providerID: string, modelID?: string | null): Promise<ProviderLimitStatus> {
@@ -410,6 +418,26 @@ export const client = {
     async authenticate(name: string): Promise<unknown> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/authenticate`);
     },
+    async startAuth(name: string): Promise<McpAuthStart> {
+      const path = `/mcp/${encodeURIComponent(name)}/auth`;
+      const response = requireRecord(await apiCall('POST', path), path);
+      if (
+        typeof response.authorizationUrl !== 'string' ||
+        typeof response.oauthState !== 'string'
+      ) {
+        throw malformedResponse(path, 'an MCP OAuth authorization response');
+      }
+      return {
+        authorizationUrl: response.authorizationUrl,
+        oauthState: response.oauthState,
+      };
+    },
+    async completeAuth(name: string, code: string): Promise<McpStatus> {
+      return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/callback`, { code });
+    },
+    async removeAuth(name: string): Promise<{ success: true }> {
+      return apiCall('DELETE', `/mcp/${encodeURIComponent(name)}/auth`);
+    },
   },
 
   file: {
@@ -469,6 +497,16 @@ function requireRecord(value: unknown, path: string): Record<string, unknown> {
 
 function malformedResponse(path: string, expected: string): Error {
   return new Error(`Malformed response from ${path}: expected ${expected}`);
+}
+
+function parseDefaultModel(value: unknown): ChatModelSelection | null | undefined {
+  if (value === undefined || value === null) return value;
+  const model = requireRecord(value, '/model/default');
+  const modelID = typeof model.modelID === 'string' ? model.modelID : model.id;
+  if (typeof model.providerID !== 'string' || typeof modelID !== 'string') {
+    throw malformedResponse('/model/default', 'a model selection or null');
+  }
+  return { providerID: model.providerID, modelID };
 }
 
 let fileStatusCache: {

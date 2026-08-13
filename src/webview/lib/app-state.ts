@@ -17,6 +17,7 @@ import type {
 import type {
   AttachedDiagnostics,
   ClipboardImage,
+  NativePdfAttachment,
   ModelVariantSelections,
   QueuedMessage,
   SelectedModel,
@@ -95,6 +96,7 @@ export interface AppState {
   draftCurrentDocumentEnabled: boolean | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  nativePdfs: NativePdfAttachment[];
   sessions: Session[];
   sessionsLoadError: string | null;
   sessionsHasMore: boolean;
@@ -282,6 +284,7 @@ export function createAppState(): AppStateInstance {
     draftCurrentDocumentEnabled: null,
     droppedFiles: initialDroppedFiles,
     clipboardImages: [],
+    nativePdfs: [],
     sessions: [],
     sessionsLoadError: null,
     sessionsHasMore: false,

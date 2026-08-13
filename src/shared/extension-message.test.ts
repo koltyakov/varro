@@ -366,6 +366,44 @@ describe('parseExtensionMessage', () => {
     });
   });
 
+  it('parses valid picked PDFs and rejects malformed payloads', () => {
+    const pdf = {
+      id: 'pdf-1',
+      url: 'data:application/pdf;base64,JVBERi0xCg==',
+      mime: 'application/pdf',
+      filename: 'spec.pdf',
+      size: 7,
+    };
+
+    expect(parseExtensionMessage({ type: 'pdfs/picked', payload: [pdf] })).toEqual({
+      type: 'pdfs/picked',
+      payload: [pdf],
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'pdfs/picked',
+        payload: [{ ...pdf, url: 'data:application/pdf;base64,bm90IGEgcGRm' }],
+      })
+    ).toBeNull();
+    expect(parseExtensionMessage({ type: 'pdfs/picked', payload: {} })).toBeNull();
+
+    expect(
+      parseExtensionMessage({
+        type: 'pdfs/stored',
+        payload: {
+          id: 'pdf-1',
+          contextFile: { path: '/tmp/spec.pdf', relativePath: 'spec.pdf', type: 'file' },
+        },
+      })
+    ).toEqual({
+      type: 'pdfs/stored',
+      payload: {
+        id: 'pdf-1',
+        contextFile: { path: '/tmp/spec.pdf', relativePath: 'spec.pdf', type: 'file' },
+      },
+    });
+  });
+
   it('parses files/removed with a path and rejects malformed payloads', () => {
     expect(
       parseExtensionMessage({ type: 'files/removed', payload: { path: '/repo/src/app.ts' } })

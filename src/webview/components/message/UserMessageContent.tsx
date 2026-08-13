@@ -19,10 +19,12 @@ import {
   mergeContextFile,
   parseSelectionReference,
 } from '../../../shared/context-files';
+import { AttachmentLabel } from '../AttachmentLabel';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
 import { MessagePart } from '../MessagePart';
+import { getPdfDataUrlSize } from '../../../shared/native-pdf';
 import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
 
@@ -53,7 +55,7 @@ type IndexedMessageAttachment = {
 
 type InlineRenderableAttachment =
   | { type: 'message-attachment'; attachment: MessageAttachment }
-  | { type: 'image-file'; part: FilePart; index: number };
+  | { type: 'image-file'; part: FilePart; index: number; marker?: string; label?: string };
 
 type InlineTextSegment =
   | { type: 'text'; content: string }
@@ -243,6 +245,17 @@ function parseUserMessageAttachmentLine(
     }
   }
 
+  if (line.startsWith('[Attached file:')) {
+    const match = line.match(/^\[Attached file: (.+?)\]$/);
+    if (match) {
+      return {
+        type: 'file-reference',
+        path: match[1]!,
+        isDirectory: false,
+      };
+    }
+  }
+
   // Inline @file mentions belong to the prompt body, even when the line ends
   // with a slash-style path like "test @e2e/tests/review.spec.ts".
   if (hasEmbeddedMentionReference(line)) {
@@ -278,6 +291,7 @@ export function getUserMessageEditText(parts: Part[]): string {
     if (
       trimmed.startsWith('[Working directory:') ||
       trimmed.startsWith('[Active file:') ||
+      trimmed.startsWith('[Attached file:') ||
       trimmed.startsWith('[Selection from ')
     ) {
       continue;
@@ -315,6 +329,15 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
       filename: part.filename || `image-${index + 1}`,
       size: 0,
     }));
+  const pdfs = parsed.fileParts
+    .filter((part) => part.mime === 'application/pdf')
+    .map((part, index) => ({
+      id: part.id || `edited-pdf-${index + 1}`,
+      url: part.url,
+      mime: 'application/pdf' as const,
+      filename: part.filename || `document-${index + 1}.pdf`,
+      size: getPdfDataUrlSize(part.url) ?? 0,
+    }));
   const terminalAttachment = parsed.attachments.find(
     (attachment) => attachment.type === 'terminal-selection' && attachment.text
   );
@@ -322,6 +345,7 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   return {
     files,
     images,
+    ...(pdfs.length > 0 ? { pdfs } : {}),
     terminalSelection:
       terminalAttachment?.type === 'terminal-selection' && terminalAttachment.text
         ? { terminalName: terminalAttachment.terminalName, text: terminalAttachment.text }
@@ -334,7 +358,10 @@ export function hasUserMessageEditableContent(parts: Part[]): boolean {
 
   const context = getUserMessageEditContext(parts);
   return (
-    context.files.length > 0 || context.images.length > 0 || context.terminalSelection !== null
+    context.files.length > 0 ||
+    context.images.length > 0 ||
+    (context.pdfs?.length ?? 0) > 0 ||
+    context.terminalSelection !== null
   );
 }
 
@@ -609,6 +636,9 @@ function InlineAttachmentText(props: {
           return (
             <InlineImageAttachmentChip
               part={imageAttachment.part}
+              index={imageAttachment.index}
+              marker={imageAttachment.marker}
+              label={imageAttachment.label}
               onClick={() => props.onOpenImagePreview(imageAttachment.index)}
             />
           );
@@ -788,7 +818,24 @@ function buildInlineTextSegments(
   for (const [index, part] of imageParts.entries()) {
     const marker = getInlineImageMarker(part);
     if (!marker) continue;
-    attachmentByMarker.set(marker, { type: 'image-file', part, index });
+    attachmentByMarker.set(marker, {
+      type: 'image-file',
+      part,
+      index,
+      marker,
+      label: getInlineImageMarkerLabel(marker),
+    });
+  }
+
+  const firstImage = imageParts[0];
+  if (firstImage && !attachmentByMarker.has('[Image]')) {
+    attachmentByMarker.set('[Image]', {
+      type: 'image-file',
+      part: firstImage,
+      index: 0,
+      marker: '[Image]',
+      label: 'Image 1',
+    });
   }
 
   const markers = Array.from(attachmentByMarker.keys())
@@ -844,7 +891,13 @@ function escapeRegex(value: string) {
 }
 
 function getInlineImageMarker(part: FilePart): string | null {
+  const sourceMarker = part.source?.text.value;
+  if (sourceMarker && getInlineImageMarkerLabel(sourceMarker)) return sourceMarker;
   return part.filename ? `[${part.filename}]` : null;
+}
+
+function getInlineImageMarkerLabel(marker: string): string | undefined {
+  return marker.match(/^\[(Image(?: \d+)?)\]$/)?.[1];
 }
 
 function getInlineImageLabel(part: FilePart): string {
@@ -883,10 +936,20 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
   );
 }
 
-function InlineImageAttachmentChip(props: { part: FilePart; onClick: () => void }) {
-  const label = () => getInlineImageLabel(props.part);
+function InlineImageAttachmentChip(props: {
+  part: FilePart;
+  index: number;
+  marker?: string;
+  label?: string;
+  onClick: () => void;
+}) {
+  const label = () =>
+    props.label ??
+    (props.index === 0 && props.part.filename === 'Image'
+      ? 'Image 1'
+      : getInlineImageLabel(props.part));
   const title = () => `${label()}${props.part.mime ? ` · ${props.part.mime}` : ''}`;
-  const copyMarker = () => getInlineImageMarker(props.part) ?? label();
+  const copyMarker = () => props.marker ?? getInlineImageMarker(props.part) ?? label();
 
   return (
     <button
@@ -1024,7 +1087,10 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
           onClick={handleClick}
         >
           {iconSvg()}
-          <span class="chip-label">{getAttachmentLabel(attachment())}</span>
+          <AttachmentLabel
+            label={getAttachmentLabel(attachment())}
+            preserveExtension={!isFolder() && !isTerminal()}
+          />
           {detail()}
         </button>
       }
@@ -1035,7 +1101,10 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
         title={getAttachmentTitle(attachment())}
       >
         {iconSvg()}
-        <span class="chip-label">{getAttachmentLabel(attachment())}</span>
+        <AttachmentLabel
+          label={getAttachmentLabel(attachment())}
+          preserveExtension={!isFolder() && !isTerminal()}
+        />
         {detail()}
       </span>
     </Show>

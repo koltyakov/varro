@@ -1,5 +1,5 @@
 import { produce } from 'solid-js/store';
-import type { ClipboardImage } from './app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
 import type { DroppedFile } from '../../shared/protocol';
 import { mergeContextFile } from '../../shared/context-files';
 import { inputText, setInputText, setNextPastedImageIndex, setState, state } from './app-state';
@@ -12,7 +12,12 @@ import {
   removeContextFileAttachmentSequence,
   seedClipboardImageAttachmentSequences,
   seedContextFileAttachmentSequences,
+  clearNativePdfAttachmentSequences,
+  ensureNativePdfAttachmentSequence,
+  removeNativePdfAttachmentSequence,
+  seedNativePdfAttachmentSequences,
 } from './attachment-order';
+import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../../shared/native-pdf';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 import { readStoredBooleanRecord } from './state-stored-values';
 
@@ -273,4 +278,65 @@ function replaceClipboardImagePlaceholder(filename: string) {
 
 export function resetPastedImageIndex() {
   setNextPastedImageIndex(1);
+}
+
+export function replaceNativePdfs(pdfs: NativePdfAttachment[]): NativePdfAttachment[] {
+  const accepted: NativePdfAttachment[] = [];
+  let totalSize = 0;
+  for (const pdf of pdfs) {
+    if (totalSize + pdf.size > MAX_NATIVE_PDF_TOTAL_BYTES) continue;
+    totalSize += pdf.size;
+    accepted.push({
+      ...pdf,
+      ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+    });
+  }
+  clearNativePdfAttachmentSequences();
+  seedNativePdfAttachmentSequences(accepted);
+  setState('nativePdfs', accepted);
+  return pdfs.filter((pdf) => !accepted.some((item) => item.id === pdf.id));
+}
+
+export function addNativePdf(pdf: NativePdfAttachment) {
+  if (
+    state.nativePdfs.some((item) => item.id === pdf.id || item.url === pdf.url) ||
+    state.nativePdfs.reduce((total, item) => total + item.size, 0) + pdf.size >
+      MAX_NATIVE_PDF_TOTAL_BYTES
+  ) {
+    return false;
+  }
+  const attachmentSequence = ensureNativePdfAttachmentSequence(pdf.id, pdf.attachmentSequence);
+  setState('nativePdfs', (pdfs) => [
+    ...pdfs,
+    {
+      ...pdf,
+      ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+      attachmentSequence,
+    },
+  ]);
+  return true;
+}
+
+export function addNativePdfs(pdfs: NativePdfAttachment[]) {
+  return pdfs.filter((pdf) => !addNativePdf(pdf));
+}
+
+export function setNativePdfContextFile(id: string, contextFile: DroppedFile) {
+  setState('nativePdfs', (pdfs) =>
+    pdfs.map((pdf) =>
+      pdf.id === id
+        ? { ...pdf, contextFile: { ...contextFile, type: 'file' as const } }
+        : pdf
+    )
+  );
+}
+
+export function removeNativePdf(id: string) {
+  removeNativePdfAttachmentSequence(id);
+  setState('nativePdfs', (pdfs) => pdfs.filter((pdf) => pdf.id !== id));
+}
+
+export function clearNativePdfs() {
+  clearNativePdfAttachmentSequences();
+  setState('nativePdfs', []);
 }

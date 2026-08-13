@@ -69,12 +69,15 @@ function renderAttachmentStrip(props: Partial<AttachmentStripProps> = {}) {
     diagnostics: null,
     files: [],
     clipboardImages: [],
+    nativePdfs: [],
+    nativePdfsSupported: true,
     clipboardImagesDisabled: false,
     onToggleActiveContext: vi.fn(),
     onClearTerminalSelection: vi.fn(),
     onClearDiagnostics: vi.fn(),
     onRemoveFile: vi.fn(),
     onRemoveClipboardImage: vi.fn(),
+    onRemoveNativePdf: vi.fn(),
     ...props,
   };
 
@@ -285,5 +288,42 @@ describe('AttachmentStrip', () => {
       'diagram.png',
       'src',
     ]);
+  });
+
+  it('switches PDF chips between native and normal file presentation', () => {
+    const onOpenFile = vi.fn();
+    renderAttachmentStrip({
+      files: [createDroppedFile({ attachmentSequence: 2 })],
+      nativePdfs: [
+        {
+          id: 'pdf-1',
+          url: 'data:application/pdf;base64,JVBERi0xCg==',
+          mime: 'application/pdf',
+          filename: 'spec.pdf',
+          size: 7,
+          attachmentSequence: 1,
+          contextFile: { path: '/workspace/spec.pdf', relativePath: 'spec.pdf', type: 'file' },
+        },
+      ],
+      nativePdfsSupported: false,
+      onOpenFile,
+    });
+
+    expect(getChips().map((chip) => chip.getAttribute('data-label'))).toEqual([
+      'spec.pdf',
+      'example.ts',
+    ]);
+    expect(getChip('spec.pdf')?.getAttribute('data-disabled')).toBe('false');
+    expect(getChip('spec.pdf')?.getAttribute('data-title')).toBe('spec.pdf');
+    expect(getChip('spec.pdf')?.getAttribute('data-detail')).toBe('');
+    expect(getChip('spec.pdf')?.getAttribute('data-icon')).toBe('file');
+    getChip('spec.pdf')
+      ?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')
+      ?.click();
+    expect(onOpenFile).toHaveBeenCalledWith({
+      path: '/workspace/spec.pdf',
+      relativePath: 'spec.pdf',
+      type: 'file',
+    });
   });
 });

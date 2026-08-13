@@ -46,6 +46,7 @@ export interface SidebarProviderActionDeps {
   handleDroppedContent(
     files: Array<{ name: string; content: string; size: number }>
   ): Promise<void>;
+  storePdf: MessageRouterCallbacks['storePdf'];
   removeContextFile(path: string): void;
   clearContextFiles(): void;
   pickFiles(): Promise<void>;
@@ -129,6 +130,7 @@ export function createSidebarProviderActions(
     checkServerRestart,
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
     handleDroppedContent: (files) => deps.handleDroppedContent(files),
+    storePdf: (payload) => deps.storePdf(payload),
     removeContextFile: (path) => deps.removeContextFile(path),
     clearContextFiles: () => deps.clearContextFiles(),
     notifyContextFilesChanged: () => deps.contextFilesState.notifyContextFilesChanged(),

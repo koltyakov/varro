@@ -11,6 +11,7 @@ import {
   type ServerStatus,
   type WebviewThemeKind,
 } from './protocol';
+import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
 import { asRecord } from './type-utils';
 
 const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
@@ -22,6 +23,8 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'context/update',
   'terminal-selection/update',
   'files/dropped',
+  'pdfs/picked',
+  'pdfs/stored',
   'files/removed',
   'files/search-results',
   'config/update',
@@ -120,6 +123,20 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       if (!Array.isArray(record.payload)) return null;
       const payload = record.payload.filter(isDroppedFile);
       return payload.length === record.payload.length ? { type, payload } : null;
+    }
+
+    case 'pdfs/picked': {
+      if (!Array.isArray(record.payload) || !record.payload.every(isNativePdfAttachment)) {
+        return null;
+      }
+      const totalSize = record.payload.reduce((total, pdf) => total + pdf.size, 0);
+      return totalSize <= MAX_NATIVE_PDF_TOTAL_BYTES ? { type, payload: record.payload } : null;
+    }
+
+    case 'pdfs/stored': {
+      const payload = asRecord(record.payload);
+      if (typeof payload?.id !== 'string' || !isDroppedFile(payload.contextFile)) return null;
+      return { type, payload: { id: payload.id, contextFile: payload.contextFile } };
     }
 
     case 'files/removed': {

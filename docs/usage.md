@@ -58,6 +58,7 @@ Varro can include more than the text in the composer.
 - Explicitly attached files or folders
 - Explicit line ranges attached from the editor selection command
 - Pasted image attachments when the selected model supports vision
+- Native PDF attachments when the selected model advertises PDF input support
 
 The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
 
@@ -74,11 +75,11 @@ Use any of these flows to add more context.
 - Select terminal text and choose `Varro: Add to Context` from the terminal context menu, or press `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Drag files or folders into the composer.
 - Use the composer attachment flow from `/attach`.
-- Paste an image into the composer.
+- Paste an image or PDF into the composer.
 - Type `@path/to/file` to search workspace files.
 - Type `@agent-name` to mention an available agent.
 
-Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. In environments where dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. A PDF remains visible but is not sent when the selected model does not advertise PDF input support. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
 
 ## Composer Behavior
 
@@ -180,6 +181,7 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Pick the provider/model from the model picker.
 - Choose a reasoning variant when the selected model exposes variants.
 - Open the MCP picker to connect or disconnect session MCPs.
+- MCP servers that require OAuth open an authorization flow with code entry and saved-credential recovery. Servers that require a pre-registered OAuth client show configuration guidance instead of starting an unsupported flow.
 - Open the model picker footer to hide or show providers and individual models.
 - Use the add and remove actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
 - In the model settings view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
@@ -428,7 +430,7 @@ There are also deprecated debug-only settings used for development and recovery 
 ## Troubleshooting
 
 - OpenCode CLI missing: install it with `npm install -g opencode-ai`.
-- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.16` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
+- OpenCode CLI incompatible: `1.16.0` is the runtime floor. `1.18.18` is this release's tested and automatic-update ceiling, not a hard runtime maximum. Newer installed servers are allowed to run, but Varro warns about untested versions and does not offer or automatically install above-ceiling updates by default.
 - CLI not on `PATH`: set `varro.server.command` to the executable path.
 - OpenCode already running on another port: update `varro.server.port` and optionally disable `varro.server.autoStart`.
 - No models available: connect a provider from the Models view, run `/connect`, or run `opencode auth login`, then reload providers or reopen Varro.

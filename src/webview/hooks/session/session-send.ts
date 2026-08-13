@@ -18,6 +18,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import type {
   AttachedDiagnostics,
   ClipboardImage,
+  NativePdfAttachment,
   ModelVariantSelections,
   QueuedMessage,
   SelectedModel,
@@ -27,8 +28,9 @@ import { getPromptTextForClipboardImages } from '../../lib/clipboard-images';
 import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
+  getNativePdfAttachmentSequence,
 } from '../../lib/attachment-order';
-import { modelSupportsVision } from '../../lib/model-capabilities';
+import { modelSupportsPdf, modelSupportsVision } from '../../lib/model-capabilities';
 import { getVariantsForModel } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
@@ -56,6 +58,7 @@ type ComposerState = {
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  nativePdfs?: NativePdfAttachment[];
   attachedDiagnostics?: AttachedDiagnostics | null;
 };
 
@@ -79,7 +82,7 @@ type SendFlowOptions = { noReply?: boolean; delivery?: 'steer' | 'queue' };
 
 export type QueuedAttachmentSnapshot = Pick<
   QueuedMessage,
-  'droppedFiles' | 'clipboardImages' | 'terminalSelection' | 'attachedDiagnostics'
+  'droppedFiles' | 'clipboardImages' | 'nativePdfs' | 'terminalSelection' | 'attachedDiagnostics'
 >;
 
 type SessionSendOptions = SendFlowOptions & {
@@ -97,11 +100,13 @@ type CapturedComposerAttachments = {
   snapshot: {
     droppedFiles: DroppedFile[];
     clipboardImages: ClipboardImage[];
+    nativePdfs: NativePdfAttachment[];
     terminalSelection: { text: string; terminalName: string } | null;
     attachedDiagnostics?: AttachedDiagnostics | null;
   };
   droppedFileIdentities: Map<string, DroppedFile>;
   clipboardImageIdentities: Map<string, ClipboardImage>;
+  nativePdfIdentities: Map<string, NativePdfAttachment>;
   terminalSelectionIdentity: { text: string; terminalName: string } | null;
   attachedDiagnosticsIdentity: AttachedDiagnostics | null;
 };
@@ -109,6 +114,7 @@ type CapturedComposerAttachments = {
 type ClearedComposerAttachments = {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  nativePdfs: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics: AttachedDiagnostics | null;
 };
@@ -169,7 +175,9 @@ export function buildSessionSendBody(
     composerState.clipboardImages,
     includeClipboardImages
   );
-
+  const includeNativePdfs = effectiveModel
+    ? modelSupportsPdf(effectiveModel.providerID, effectiveModel.modelID, composerState.providers)
+    : false;
   const parts: SessionSendBody['parts'] = [];
   if (promptText.trim()) parts.push({ type: 'text', text: promptText });
 
@@ -261,6 +269,11 @@ export function buildSessionSendBody(
       sequence: image.attachmentSequence ?? Number.MAX_SAFE_INTEGER,
       image,
     })),
+    ...(composerState.nativePdfs ?? []).map((pdf) => ({
+      kind: 'pdf' as const,
+      sequence: pdf.attachmentSequence ?? Number.MAX_SAFE_INTEGER,
+      pdf,
+    })),
   ].toSorted((a, b) => a.sequence - b.sequence);
 
   for (const attachment of orderedAttachments) {
@@ -276,6 +289,22 @@ export function buildSessionSendBody(
       continue;
     }
 
+    if (attachment.kind === 'pdf') {
+      if (includeNativePdfs) {
+        parts.push({
+          type: 'file',
+          mime: 'application/pdf',
+          filename: attachment.pdf.filename,
+          url: attachment.pdf.url,
+        });
+      } else if (attachment.pdf.contextFile) {
+        parts.push({
+          type: 'text',
+          text: `[Attached file: ${getAttachmentReference(attachment.pdf.contextFile, workspacePath)}]`,
+        });
+      }
+      continue;
+    }
     if (!includeClipboardImages) continue;
     parts.push({
       type: 'file',
@@ -323,6 +352,7 @@ export function buildSessionSendBody(
 export function getQueuedAttachmentSnapshot(composerState: {
   droppedFiles: DroppedFile[];
   clipboardImages: ClipboardImage[];
+  nativePdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics?: AttachedDiagnostics | null;
 }): QueuedAttachmentSnapshot {
@@ -345,6 +375,10 @@ export function getQueuedAttachmentSnapshot(composerState: {
       size: image.size,
       ...(image.contentKey ? { contentKey: image.contentKey } : {}),
       attachmentSequence: image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
+    })),
+    nativePdfs: (composerState.nativePdfs ?? []).map((pdf) => ({
+      ...pdf,
+      attachmentSequence: pdf.attachmentSequence ?? getNativePdfAttachmentSequence(pdf.id),
     })),
     terminalSelection: composerState.terminalSelection
       ? {
@@ -370,18 +404,21 @@ function captureComposerAttachments(
 ): CapturedComposerAttachments {
   const liveDroppedFiles = [...appStore.state.droppedFiles];
   const liveClipboardImages = [...appStore.state.clipboardImages];
+  const liveNativePdfs = [...appStore.state.nativePdfs];
   const liveTerminalSelection = appStore.state.terminalSelection;
   const liveAttachedDiagnostics = appStore.state.attachedDiagnostics;
   const source = queuedAttachments
     ? {
         droppedFiles: queuedAttachments.droppedFiles ?? [],
         clipboardImages: queuedAttachments.clipboardImages ?? [],
+        nativePdfs: queuedAttachments.nativePdfs ?? [],
         terminalSelection: queuedAttachments.terminalSelection ?? null,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics ?? null,
       }
     : {
         droppedFiles: liveDroppedFiles,
         clipboardImages: liveClipboardImages,
+        nativePdfs: liveNativePdfs,
         terminalSelection: liveTerminalSelection,
         attachedDiagnostics: liveAttachedDiagnostics,
       };
@@ -389,6 +426,7 @@ function captureComposerAttachments(
   const snapshot = {
     droppedFiles: queuedSnapshot.droppedFiles ?? [],
     clipboardImages: queuedSnapshot.clipboardImages ?? [],
+    nativePdfs: queuedSnapshot.nativePdfs ?? [],
     terminalSelection: queuedSnapshot.terminalSelection ?? null,
     ...(queuedSnapshot.attachedDiagnostics
       ? { attachedDiagnostics: queuedSnapshot.attachedDiagnostics }
@@ -408,11 +446,17 @@ function captureComposerAttachments(
     );
     if (live) clipboardImageIdentities.set(sent.id, live);
   }
+  const nativePdfIdentities = new Map<string, NativePdfAttachment>();
+  for (const sent of snapshot.nativePdfs) {
+    const live = liveNativePdfs.find((pdf) => pdf.id === sent.id && areNativePdfsEqual(pdf, sent));
+    if (live) nativePdfIdentities.set(sent.id, live);
+  }
 
   return {
     snapshot,
     droppedFileIdentities,
     clipboardImageIdentities,
+    nativePdfIdentities,
     terminalSelectionIdentity:
       snapshot.terminalSelection &&
       liveTerminalSelection &&
@@ -434,6 +478,7 @@ function clearCapturedComposerAttachments(
   const cleared: ClearedComposerAttachments = {
     droppedFiles: [],
     clipboardImages: [],
+    nativePdfs: [],
     terminalSelection: null,
     attachedDiagnostics: null,
   };
@@ -461,6 +506,19 @@ function clearCapturedComposerAttachments(
     }
     cleared.clipboardImages.push(sent);
     composerStore.removeSentClipboardImage(current.id);
+  }
+
+  for (const sent of captured.snapshot.nativePdfs) {
+    const current = appStore.state.nativePdfs.find((pdf) => pdf.id === sent.id);
+    if (
+      !current ||
+      current !== captured.nativePdfIdentities.get(sent.id) ||
+      !areNativePdfsEqual(current, sent)
+    ) {
+      continue;
+    }
+    cleared.nativePdfs.push(sent);
+    composerStore.removeNativePdf(current.id);
   }
 
   const currentTerminalSelection = appStore.state.terminalSelection;
@@ -518,6 +576,11 @@ function restoreClearedComposerAttachments(cleared: ClearedComposerAttachments) 
       composerStore.addClipboardImage({ ...image });
     }
   }
+  for (const pdf of cleared.nativePdfs) {
+    if (!appStore.state.nativePdfs.some((current) => current.id === pdf.id)) {
+      composerStore.addNativePdf({ ...pdf });
+    }
+  }
   if (cleared.terminalSelection && !appStore.state.terminalSelection) {
     composerStore.setTerminalSelection({ ...cleared.terminalSelection });
   }
@@ -561,6 +624,20 @@ function areClipboardImagesEqual(left: ClipboardImage, right: ClipboardImage) {
     left.contentKey === right.contentKey &&
     (left.attachmentSequence ?? getClipboardImageAttachmentSequence(left.id)) ===
       (right.attachmentSequence ?? getClipboardImageAttachmentSequence(right.id))
+  );
+}
+
+function areNativePdfsEqual(left: NativePdfAttachment, right: NativePdfAttachment) {
+  return (
+    left.id === right.id &&
+    left.url === right.url &&
+    left.mime === right.mime &&
+    left.filename === right.filename &&
+    left.size === right.size &&
+    left.contextFile?.path === right.contextFile?.path &&
+    left.contextFile?.relativePath === right.contextFile?.relativePath &&
+    (left.attachmentSequence ?? getNativePdfAttachmentSequence(left.id)) ===
+      (right.attachmentSequence ?? getNativePdfAttachmentSequence(right.id))
   );
 }
 

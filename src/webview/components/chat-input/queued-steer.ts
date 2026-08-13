@@ -67,6 +67,7 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,
+          nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
           ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
         },

@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { AttachmentLabel } from '../AttachmentLabel';
 import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
 import { WarningIcon } from '../WarningIcon';
@@ -72,7 +73,10 @@ export function AttachmentChip(props: {
       >
         <DocumentIcon class="chip-icon" width="12" height="12" />
       </Show>
-      <span class="chip-label">{props.label}</span>
+      <AttachmentLabel
+        label={props.label}
+        preserveExtension={props.icon !== 'folder' && props.icon !== 'terminal'}
+      />
       <Show when={props.detail}>
         <span class="chip-detail">{props.detail}</span>
       </Show>

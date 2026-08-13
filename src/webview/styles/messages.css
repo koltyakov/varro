@@ -203,8 +203,9 @@
       var(--color-vscode-request-bubble) 82%,
       var(--color-vscode-accent) 18%
     );
-    box-shadow: var(--chat-shadow-card), inset 0 0 0 2px
-      color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
+    box-shadow:
+      var(--chat-shadow-card),
+      inset 0 0 0 2px color-mix(in srgb, var(--color-vscode-accent) 55%, transparent);
   }
 
   45% {
@@ -214,14 +215,17 @@
       var(--color-vscode-request-bubble) 92%,
       var(--color-vscode-accent) 8%
     );
-    box-shadow: var(--chat-shadow-card), inset 0 0 0 1px
-      color-mix(in srgb, var(--color-vscode-accent) 28%, transparent);
+    box-shadow:
+      var(--chat-shadow-card),
+      inset 0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 28%, transparent);
   }
 
   100% {
     border-color: color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
     background: var(--color-vscode-request-bubble);
-    box-shadow: var(--chat-shadow-card), inset 0 0 0 1px transparent;
+    box-shadow:
+      var(--chat-shadow-card),
+      inset 0 0 0 1px transparent;
   }
 }
 

@@ -133,6 +133,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/connect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/authenticate')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth')).toBe(true);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/callback')).toBe(true);
+    expect(isAllowedApiRequest('DELETE', '/mcp/browser-bridge/auth')).toBe(true);
     expect(isAllowedApiRequest('GET', '/provider/auth')).toBe(true);
     expect(isAllowedApiRequest('GET', '/provider')).toBe(true);
     expect(isAllowedApiRequest('PUT', '/auth/openai')).toBe(true);
@@ -143,6 +146,18 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('GET', '/experimental/workspace/status')).toBe(true);
     expect(isAllowedApiRequest('POST', '/experimental/workspace/warp')).toBe(true);
     expect(isAllowedApiRequest('GET', '/global/config')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/model/default')).toBe(true);
+  });
+
+  it('allows only the exact MCP OAuth lifecycle methods without query parameters', () => {
+    expect(isAllowedApiRequest('GET', '/mcp/browser-bridge/auth')).toBe(false);
+    expect(isAllowedApiRequest('DELETE', '/mcp/browser-bridge/auth/callback')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth?directory=/repo')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/callback?code=secret')).toBe(
+      false
+    );
+    expect(isAllowedApiRequest('DELETE', '/mcp/browser-bridge/auth?force=true')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/extra')).toBe(false);
   });
 
   it('rejects invalid session page limits', () => {
@@ -182,6 +197,9 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('POST', '/session/abc/share?directory=')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/session/abc/share?extra=1')).toBe(false);
     expect(isAllowedApiRequest('DELETE', '/config/providers')).toBe(false);
+    expect(isAllowedApiRequest('POST', '/model/default')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/model/default?directory=%2Frepo')).toBe(false);
+    expect(isAllowedApiRequest('GET', '/model/default/extra')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/diff?messageID=1&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?limit=5&extra=1')).toBe(false);
     expect(isAllowedApiRequest('GET', '/session/abc/message?before=cursor-2')).toBe(false);
@@ -399,6 +417,65 @@ describe('webview message validation', () => {
       expect(parsed.payload.body).not.toBe(body);
       expect(Object.hasOwn(parsed.payload.body as object, 'variant')).toBe(false);
     }
+  });
+
+  it('accepts only structurally valid native PDF prompt and queue payloads', () => {
+    const pdf = {
+      id: 'pdf-1',
+      url: 'data:application/pdf;base64,JVBERi0xCg==',
+      mime: 'application/pdf',
+      filename: 'spec.pdf',
+      size: 7,
+    };
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 1,
+          method: 'POST',
+          path: '/session/session-1/prompt_async',
+          body: { parts: [{ type: 'file', mime: pdf.mime, filename: pdf.filename, url: pdf.url }] },
+        },
+      })
+    ).not.toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'queued-messages/update',
+        payload: {
+          messages: [
+            {
+              id: 'queue-1',
+              sessionId: 'session-1',
+              text: '',
+              droppedFiles: [],
+              clipboardImages: [],
+              nativePdfs: [pdf],
+              terminalSelection: null,
+            },
+          ],
+        },
+      })
+    ).not.toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: {
+          id: 2,
+          method: 'POST',
+          path: '/session/session-1/prompt_async',
+          body: {
+            parts: [
+              {
+                type: 'file',
+                mime: 'application/pdf',
+                filename: 'fake.pdf',
+                url: 'data:application/pdf;base64,bm90IGEgcGRm',
+              },
+            ],
+          },
+        },
+      })
+    ).toBeNull();
   });
 
   it('rejects unsafe or structurally excessive API request bodies', () => {

@@ -338,6 +338,7 @@ describe('WebviewSession', () => {
         text: 'continue after restart',
         droppedFiles: [],
         clipboardImages: [],
+        nativePdfs: [],
         terminalSelection: null,
       },
     ];

@@ -1,10 +1,11 @@
 import type { DroppedFile } from '../../shared/protocol';
-import type { ClipboardImage } from './app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
 
 let nextAttachmentSequence = 1;
 
 const contextFileAttachmentSequences = new Map<string, number>();
 const clipboardImageAttachmentSequences = new Map<string, number>();
+const nativePdfAttachmentSequences = new Map<string, number>();
 
 function reserveAttachmentSequence(sequence?: number) {
   if (typeof sequence === 'number' && Number.isFinite(sequence)) {
@@ -71,8 +72,33 @@ export function clearClipboardImageAttachmentSequences() {
   clipboardImageAttachmentSequences.clear();
 }
 
+export function seedNativePdfAttachmentSequences(pdfs: readonly NativePdfAttachment[]) {
+  for (const pdf of pdfs) ensureNativePdfAttachmentSequence(pdf.id, pdf.attachmentSequence);
+}
+
+export function getNativePdfAttachmentSequence(id: string) {
+  return nativePdfAttachmentSequences.get(id);
+}
+
+export function ensureNativePdfAttachmentSequence(id: string, sequence?: number) {
+  const existing = nativePdfAttachmentSequences.get(id);
+  if (existing !== undefined) return existing;
+  const next = reserveAttachmentSequence(sequence);
+  nativePdfAttachmentSequences.set(id, next);
+  return next;
+}
+
+export function removeNativePdfAttachmentSequence(id: string) {
+  nativePdfAttachmentSequences.delete(id);
+}
+
+export function clearNativePdfAttachmentSequences() {
+  nativePdfAttachmentSequences.clear();
+}
+
 export function resetAttachmentOrderState() {
   nextAttachmentSequence = 1;
   clearContextFileAttachmentSequences();
   clearClipboardImageAttachmentSequences();
+  clearNativePdfAttachmentSequences();
 }

@@ -2131,6 +2131,21 @@
   min-width: 0;
 }
 
+.chat-attachment-chip .chip-label-with-extension {
+  display: flex;
+  text-overflow: clip;
+}
+
+.chat-attachment-chip .chip-label-stem {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip .chip-label-extension {
+  flex-shrink: 0;
+}
+
 .chat-attachment-chip .chip-detail {
   color: var(--color-vscode-muted);
   font-size: 10px;

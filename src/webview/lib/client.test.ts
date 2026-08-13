@@ -104,8 +104,15 @@ describe('client', () => {
       if (path === '/global/health') return Promise.resolve({ healthy: true, version: '1.0.0' });
       if (path === '/session/status') return Promise.resolve({});
       if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      if (path === '/model/default') return Promise.resolve(null);
       if (path === '/provider') return Promise.resolve({ all: [], default: {}, connected: [] });
       if (path === '/provider/auth') return Promise.resolve({});
+      if (path === '/mcp/browser%20server/auth') {
+        return Promise.resolve({
+          authorizationUrl: 'https://mcp.example.com/authorize',
+          oauthState: 'state-1',
+        });
+      }
       return Promise.resolve([]);
     });
 
@@ -168,6 +175,9 @@ describe('client', () => {
     await client.config.disconnectProvider('openai');
     await client.config.workspaceStatus();
     await client.mcp.authenticate('browser server');
+    await client.mcp.startAuth('browser server');
+    await client.mcp.completeAuth('browser server', 'oauth-code');
+    await client.mcp.removeAuth('browser server');
     await client.agent.list();
     await client.question.list();
     await client.permission.list();
@@ -239,6 +249,7 @@ describe('client', () => {
         },
       ],
       ['GET', '/config/providers'],
+      ['GET', '/model/default'],
       ['GET', '/provider'],
       ['GET', '/provider/auth'],
       ['POST', '/provider/openai/oauth/authorize', { method: 0 }],
@@ -252,6 +263,9 @@ describe('client', () => {
       ['DELETE', '/auth/openai'],
       ['GET', '/experimental/workspace/status'],
       ['POST', '/mcp/browser%20server/auth/authenticate'],
+      ['POST', '/mcp/browser%20server/auth'],
+      ['POST', '/mcp/browser%20server/auth/callback', { code: 'oauth-code' }],
+      ['DELETE', '/mcp/browser%20server/auth'],
       ['GET', '/agent'],
       ['GET', '/question'],
       ['GET', '/permission'],
@@ -289,6 +303,7 @@ describe('client', () => {
 
     for (const request of requests) {
       bridgeMocks.apiCall.mockResolvedValueOnce(null);
+      if (request.path === '/config/providers') bridgeMocks.apiCall.mockResolvedValueOnce(null);
       await expect(request.load()).rejects.toThrow(request.path);
     }
   });
@@ -301,6 +316,59 @@ describe('client', () => {
     bridgeMocks.apiCall.mockResolvedValue(response);
 
     await expect(client.config.providers()).rejects.toThrow('/config/providers');
+  });
+
+  it('loads the exact server default model with provider metadata', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') {
+        return Promise.resolve({ providers: [], default: { openai: 'gpt-provider' } });
+      }
+      return Promise.resolve({ providerID: 'anthropic', modelID: 'claude-current' });
+    });
+
+    await expect(client.config.providers()).resolves.toEqual({
+      providers: [],
+      default: { openai: 'gpt-provider' },
+      defaultModel: { providerID: 'anthropic', modelID: 'claude-current' },
+    });
+    expect(bridgeMocks.apiCall.mock.calls).toEqual([
+      ['GET', '/config/providers'],
+      ['GET', '/model/default'],
+    ]);
+  });
+
+  it('preserves explicit null and falls back when the optional default endpoint is unavailable', async () => {
+    const { client } = await loadClient();
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      return Promise.resolve(null);
+    });
+    await expect(client.config.providers()).resolves.toMatchObject({ defaultModel: null });
+
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      return Promise.reject(new Error('404 Not Found'));
+    });
+    await expect(client.config.providers()).resolves.toMatchObject({ defaultModel: undefined });
+
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') return Promise.resolve({ providers: [], default: {} });
+      return Promise.reject(new Error('500 Server Error'));
+    });
+    await expect(client.config.providers()).resolves.toMatchObject({ defaultModel: undefined });
+
+    bridgeMocks.apiCall.mockImplementation((_method: string, path: string) => {
+      if (path === '/config/providers') {
+        return Promise.resolve({ providers: [{ id: 'openai', models: {} }], default: {} });
+      }
+      return Promise.resolve('<!doctype html><title>OpenCode</title>');
+    });
+    await expect(client.config.providers()).resolves.toEqual({
+      providers: [{ id: 'openai', models: {} }],
+      default: {},
+      defaultModel: undefined,
+    });
   });
 
   it.each([

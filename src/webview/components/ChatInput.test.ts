@@ -168,6 +168,7 @@ afterEach(() => {
   setState('sessionPermissionModes', {});
   setState('sessionAutoPermissionActivity', {});
   setState('clipboardImages', []);
+  setState('nativePdfs', []);
   resetPastedImageIndex();
   setState('droppedFiles', []);
   setState('terminalSelection', null);
@@ -464,6 +465,44 @@ function availableProviderLimit(
 }
 
 describe('ChatInput', () => {
+  it('attaches PDFs picked by the extension', async () => {
+    setupModelState();
+    cleanup = render(() => ChatInput(), container!);
+    const pdf = {
+      id: 'pdf-1',
+      url: 'data:application/pdf;base64,JVBERi0xCg==',
+      mime: 'application/pdf' as const,
+      filename: 'spec.pdf',
+      size: 7,
+      contextFile: { path: '/repo/spec.pdf', relativePath: 'spec.pdf', type: 'file' as const },
+    };
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'pdfs/picked', payload: [pdf] },
+      })
+    );
+    await Promise.resolve();
+
+    expect(state.nativePdfs).toMatchObject([pdf]);
+    expect(container?.textContent).toContain('spec.pdf');
+    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).not.toContain('PDF');
+
+    setState('providers', 0, 'models', 'pdf-model', {
+      id: 'pdf-model',
+      name: 'PDF Model',
+      capabilities: {
+        input: { text: true, audio: false, image: false, video: false, pdf: true },
+      },
+      cost: { input: 0, output: 0 },
+    });
+    setState('selectedModel', { providerID: 'openai', modelID: 'pdf-model' });
+    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).toContain('PDF');
+
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
+    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).not.toContain('PDF');
+  });
+
   it('hides pre-input status blocks while a diff overlay is expanded', () => {
     setState('todos', [
       { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'medium' },
@@ -1462,6 +1501,7 @@ describe('ChatInput', () => {
           },
         ],
         clipboardImages: [],
+        nativePdfs: [],
         terminalSelection: null,
       },
     });
@@ -2929,6 +2969,7 @@ describe('ChatInput', () => {
       queuedAttachments: {
         droppedFiles: [],
         clipboardImages: [],
+        nativePdfs: [],
         terminalSelection: null,
       },
       preserveComposer: true,
@@ -3815,9 +3856,9 @@ describe('ChatInput', () => {
       fileReader.resolve('mixed.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(inputText()).toBe('Pasted description [Image 1] ');
       expect(inputText().match(/Pasted description/g)).toHaveLength(1);
-      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image']);
+      expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image 1']);
     } finally {
       fileReader.restore();
     }
@@ -3896,12 +3937,12 @@ describe('ChatInput', () => {
         }
         await flushAsyncWork();
 
-        expect(inputText()).toBe('[Image] ');
+        expect(inputText()).toBe('[Image 1] ');
         expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/README.md' })]);
         expect(state.clipboardImages).toEqual([
           expect.objectContaining({
             url: 'data:image/png;base64,mention.png',
-            filename: 'Image',
+            filename: 'Image 1',
           }),
         ]);
       } finally {
@@ -3934,7 +3975,7 @@ describe('ChatInput', () => {
       fileReader.resolve('context.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Inspect this [Image] ');
+      expect(inputText()).toBe('Inspect this [Image 1] ');
       expect(state.droppedFiles).toEqual([
         expect.objectContaining({
           path: '/repo/src/app.ts',
@@ -3989,16 +4030,16 @@ describe('ChatInput', () => {
           await flushAsyncWork();
         }
 
-        expect(inputText()).toBe('First [Image] Second [Image 2] ');
+        expect(inputText()).toBe('First [Image 1] Second [Image 2] ');
         expect(
           state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
         ).toEqual([
-          { filename: 'Image', url: 'data:image/png;base64,first-mixed.png' },
+          { filename: 'Image 1', url: 'data:image/png;base64,first-mixed.png' },
           { filename: 'Image 2', url: 'data:image/png;base64,second-mixed.png' },
         ]);
 
         pressKey(editor, { key: 'z', metaKey: true });
-        expect(inputText()).toBe('First [Image] ');
+        expect(inputText()).toBe('First [Image 1] ');
         expect(state.clipboardImages).toEqual([
           expect.objectContaining({ url: 'data:image/png;base64,first-mixed.png' }),
         ]);
@@ -4030,7 +4071,7 @@ describe('ChatInput', () => {
       fileReader.resolve('undo-mixed.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(inputText()).toBe('Pasted description [Image 1] ');
       expect(state.clipboardImages).toHaveLength(1);
 
       pressKey(editor, { key: 'z', metaKey: true });
@@ -4038,7 +4079,7 @@ describe('ChatInput', () => {
       expect(state.clipboardImages).toEqual([]);
 
       pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
-      expect(inputText()).toBe('Pasted description [Image] ');
+      expect(inputText()).toBe('Pasted description [Image 1] ');
       expect(state.clipboardImages).toHaveLength(1);
     } finally {
       fileReader.restore();
@@ -4318,7 +4359,7 @@ describe('ChatInput', () => {
 
       expect(state.clipboardImages).toHaveLength(MAX_CLIPBOARD_IMAGES);
       expect(state.clipboardImages.map((image) => image.filename)).toEqual([
-        'Image',
+        'Image 1',
         'Image 2',
         'Image 3',
         'Image 4',
@@ -4364,11 +4405,11 @@ describe('ChatInput', () => {
       fileReader.resolve('first.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Review this [Image] [Image 2] ');
+      expect(inputText()).toBe('Review this [Image 1] [Image 2] ');
       expect(
         state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
       ).toEqual([
-        { filename: 'Image', url: 'data:image/png;base64,first.png' },
+        { filename: 'Image 1', url: 'data:image/png;base64,first.png' },
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
       expect(nextPastedImageIndex()).toBe(3);
@@ -4847,6 +4888,96 @@ describe('ChatInput', () => {
     expect(sendMessageMock).toHaveBeenCalledWith('Continue', { noReply: false });
     expect(state.sessionUsageLimits['session-1']).toBeUndefined();
     expect(container?.textContent).not.toContain('Usage limit reached');
+  });
+
+  it('renders and opens a safe structured retry action through the extension bridge', () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 rate limit reached',
+        unit: 'requests',
+        retryAt: Date.now() + 30_000,
+        attempt: 4,
+        sessionID: 'session-1',
+        providerID: 'openai',
+        modelID: 'gpt-4o',
+        action: {
+          reason: 'billing',
+          provider: 'openai',
+          title: 'Add credits to continue',
+          message: 'Your OpenAI balance is empty.',
+          label: 'Manage billing',
+          link: 'https://platform.openai.com/settings/billing',
+        },
+      },
+    });
+    const sent: WebviewMessage[] = [];
+    const bridgeWindow = window as unknown as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+
+    try {
+      cleanup = render(() => ChatInput(), container!);
+
+      expect(container?.textContent).toContain('Add credits to continue');
+      expect(container?.textContent).toContain('Your OpenAI balance is empty.');
+      expect(container?.textContent).toContain('request throttled · retry in');
+      expect(container?.textContent).toContain('attempt #4');
+
+      const actionButton = Array.from(
+        container!.querySelectorAll<HTMLButtonElement>('button')
+      ).find((button) => button.textContent === 'Manage billing');
+      actionButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(sent).toContainEqual({
+        type: 'vscode/open-external',
+        payload: { url: 'https://platform.openai.com/settings/billing' },
+      });
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
+  it('does not render a structured retry action with a non-HTTPS link', () => {
+    setupModelState();
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('sessionUsageLimits', {
+      'session-1': {
+        source: 'status',
+        statusCode: 429,
+        message: '429 rate limit reached',
+        unit: 'requests',
+        retryAt: null,
+        attempt: 4,
+        sessionID: 'session-1',
+        action: {
+          reason: 'billing',
+          provider: 'openai',
+          title: 'Add credits to continue',
+          message: 'Your balance is empty.',
+          label: 'Manage billing',
+          link: 'http://example.com/billing',
+        },
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.textContent).toContain('Add credits to continue');
+    expect(container?.textContent).toContain('Your balance is empty.');
+    expect(
+      Array.from(container!.querySelectorAll('button')).some(
+        (button) => button.textContent === 'Manage billing'
+      )
+    ).toBe(false);
   });
 
   it('restores reasoning selections per model instead of carrying them across models', async () => {

@@ -4721,6 +4721,10 @@ async function handleApiRequest(
     };
   }
 
+  if (method === 'GET' && path === '/model/default') {
+    return { providerID: DEFAULT_PROVIDER_ID, modelID: DEFAULT_MODEL_ID };
+  }
+
   if (method === 'GET' && path === '/mcp') {
     return state.mcpStatus;
   }

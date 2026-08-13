@@ -106,6 +106,7 @@ export function reconcileLoadedProviders(args: {
   selectedModel: SelectedModel | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  defaultModel?: SelectedModel | null;
   allowHiddenSelectedModel?: boolean;
 }) {
   const effectiveModel = resolveSelectedModel(
@@ -130,16 +131,19 @@ export function reconcileLoadedProviders(args: {
   }
 
   if (!args.selectedModel && args.providers.length > 0) {
-    const firstProvider = args.providers[0]!;
-    const defaultModelID = args.providerDefaults[firstProvider.id];
-    const modelID = defaultModelID || Object.keys(firstProvider.models)[0];
-    if (modelID) {
+    const fallback =
+      args.defaultModel === undefined
+        ? (() => {
+            const firstProvider = args.providers[0]!;
+            const modelID =
+              args.providerDefaults[firstProvider.id] || Object.keys(firstProvider.models)[0];
+            return modelID ? { providerID: firstProvider.id, modelID } : null;
+          })()
+        : resolveSelectedModel(args.defaultModel, args.providers, args.providerDefaults);
+    if (fallback) {
       return {
         effectiveModel,
-        nextSelectedModel: {
-          providerID: firstProvider.id,
-          modelID,
-        } satisfies SelectedModel,
+        nextSelectedModel: fallback,
       };
     }
   }

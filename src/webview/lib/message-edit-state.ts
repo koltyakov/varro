@@ -1,10 +1,11 @@
 import { createSignal } from 'solid-js';
 import type { ChatModelSelection, DroppedFile } from '../../shared/protocol';
-import type { ClipboardImage } from './app-state-types';
+import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
 
 export type MessageEditContext = {
   files: DroppedFile[];
   images: ClipboardImage[];
+  pdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
 };
 

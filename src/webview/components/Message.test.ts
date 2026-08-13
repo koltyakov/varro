@@ -610,6 +610,54 @@ describe('Message user prompt rendering', () => {
     );
   });
 
+  it('renders the legacy Image placeholder as the Image 1 pill', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-legacy-inline-image'),
+          parts: [
+            textPart('text-1', 'Review [Image]'),
+            imageFilePart('image-1', 'Image 1'),
+          ],
+        }),
+      container!
+    );
+
+    const imageChip = container?.querySelector('.user-message-text .inline-chip');
+    expect(imageChip?.textContent?.trim()).toBe('Image 1');
+    expect(imageChip?.getAttribute('data-copy-marker')).toBe('[Image]');
+  });
+
+  it('renders OpenCode CLI image source markers as numbered pills', () => {
+    const firstImage = imageFilePart('image-1', 'clipboard');
+    firstImage.source = {
+      text: { value: '[Image 1]', start: 0, end: 9 },
+      type: 'file',
+      path: 'clipboard',
+    };
+    const secondImage = imageFilePart('image-2', 'clipboard');
+    secondImage.source = {
+      text: { value: '[Image 2]', start: 10, end: 19 },
+      type: 'file',
+      path: 'clipboard',
+    };
+
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-cli-inline-images'),
+          parts: [textPart('text-1', '[Image 1] [Image 2] Review these'), firstImage, secondImage],
+        }),
+      container!
+    );
+
+    const imageChips = container?.querySelectorAll('.user-message-text .inline-chip');
+    expect(Array.from(imageChips ?? []).map((chip) => chip.textContent?.trim())).toEqual([
+      'Image 1',
+      'Image 2',
+    ]);
+  });
+
   it('opens the matching image preview from an inline image chip and syncs the carousel', () => {
     cleanup = render(
       () =>
@@ -885,6 +933,34 @@ describe('parseUserMessageContent', () => {
     expect(container?.querySelector('.user-message-text')?.textContent).toBe(
       'Test\n\n/Users/andrew/Downloads/ПД Оккервиль ЛСТ Квартплата 5397.pdf'
     );
+  });
+
+  it('extracts explicit attached files from merged user text', () => {
+    const parsed = parseUserMessageContent([
+      textPart('text-1', 'Summarize this document\n[Attached file: /repo/spec.pdf]'),
+    ]);
+
+    expect(parsed.messageTexts).toEqual(['Summarize this document']);
+    expect(parsed.attachments).toEqual([
+      { type: 'file-reference', path: '/repo/spec.pdf', isDirectory: false },
+    ]);
+
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-attached-pdf-fallback'),
+          parts: [
+            textPart('text-attached-pdf', 'Summarize this document\n[Attached file: /repo/spec.pdf]'),
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.message-attachments')?.textContent).toContain('spec.pdf');
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      'Summarize this document'
+    );
+    expect(container?.textContent).not.toContain('[Attached file:');
   });
 
   it('keeps inline mentions in message text while hiding duplicated attachment refs', () => {

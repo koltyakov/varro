@@ -293,6 +293,45 @@ describe('data loaders', () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it('applies the exact server default instead of provider-scoped defaults', async () => {
+    const setSelectedModel = vi.fn();
+    const models = {
+      'gpt-provider': {
+        id: 'gpt-provider',
+        name: 'GPT Provider',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+      'gpt-server': {
+        id: 'gpt-server',
+        name: 'GPT Server',
+        capabilities: { toolcall: true },
+        cost: { input: 0, output: 0 },
+      },
+    };
+
+    await loadProvidersWithDependencies(
+      {
+        listProviders: async () => ({
+          providers: [provider('openai', models)],
+          default: { openai: 'gpt-provider' },
+          defaultModel: { providerID: 'openai', modelID: 'gpt-server' },
+        }),
+        setProvidersLoaded: vi.fn(),
+        setProviders: vi.fn(),
+        setProviderDefaults: vi.fn(),
+        getSelectedModel: () => null,
+        setSelectedModel,
+      },
+      vi.fn()
+    );
+
+    expect(setSelectedModel).toHaveBeenCalledWith({
+      providerID: 'openai',
+      modelID: 'gpt-server',
+    });
+  });
+
   it('keeps a hidden selected model while an existing session is active', async () => {
     const setSelectedModel = vi.fn();
     setState('hiddenModels', ['openai:gpt-5']);

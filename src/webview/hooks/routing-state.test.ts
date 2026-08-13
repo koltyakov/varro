@@ -135,10 +135,71 @@ describe('routing-state helpers', () => {
         selectedModel: null,
         providers,
         providerDefaults: { openai: 'gpt-4o' },
+        defaultModel: { providerID: 'openai', modelID: 'gpt-5' },
       })
     ).toEqual({
       effectiveModel: null,
-      nextSelectedModel: { providerID: 'openai', modelID: 'gpt-4o' },
+      nextSelectedModel: { providerID: 'openai', modelID: 'gpt-5' },
+    });
+  });
+
+  it('uses provider defaults only when the exact default endpoint is unsupported', () => {
+    const providers = [
+      provider('openai', {
+        'gpt-provider': {
+          id: 'gpt-provider',
+          name: 'GPT Provider',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: null,
+        providers,
+        providerDefaults: { openai: 'gpt-provider' },
+        defaultModel: null,
+      }).nextSelectedModel
+    ).toBeUndefined();
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: null,
+        providers,
+        providerDefaults: { openai: 'gpt-provider' },
+      }).nextSelectedModel
+    ).toEqual({ providerID: 'openai', modelID: 'gpt-provider' });
+  });
+
+  it('keeps a valid selected model over the exact server default', () => {
+    const providers = [
+      provider('openai', {
+        selected: {
+          id: 'selected',
+          name: 'Selected',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+        server: {
+          id: 'server',
+          name: 'Server',
+          capabilities: { toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(
+      reconcileLoadedProviders({
+        selectedModel: { providerID: 'openai', modelID: 'selected' },
+        providers,
+        providerDefaults: {},
+        defaultModel: { providerID: 'openai', modelID: 'server' },
+      })
+    ).toEqual({
+      effectiveModel: { providerID: 'openai', modelID: 'selected' },
+      nextSelectedModel: undefined,
     });
   });
 

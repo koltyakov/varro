@@ -283,6 +283,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         handleReadyMessage: () => this.handleReadyMessage(),
         handleDroppedPaths: (paths) => this.handleDroppedPaths(paths),
         handleDroppedContent: (files) => this.handleDroppedContent(files),
+        storePdf: (payload) => this.storePdf(payload),
         removeContextFile: (path) => this.removeContextFile(path),
         clearContextFiles: () => this.clearContextFiles(),
         pickFiles: () => this.pickFiles(),
@@ -460,6 +461,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async handleDroppedPaths(paths: string[]) {
     await this.contextFilesState.handleDroppedPaths(paths, (message) => this.post(message));
+  }
+
+  private async storePdf(payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload']) {
+    const [contextFile] = await this.droppedFilesService.fromContent([
+      { name: payload.name, content: payload.content, size: payload.size },
+    ]);
+    if (contextFile) {
+      this.post({ type: 'pdfs/stored', payload: { id: payload.id, contextFile } });
+    }
   }
 
   private removeContextFile(path: string) {
