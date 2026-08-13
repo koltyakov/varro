@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { writeVscodeLaunchMetadata } from '../vscode-launch-process.mjs';
+
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '../..');
 const suitePath = path.join(scriptDirectory, 'suite.cjs');
@@ -197,18 +199,13 @@ function getScenarioEnvironment(scenario, root) {
   return { VARRO_SANDBOX_FAKE_MODE: 'healthy', VARRO_SANDBOX_FAKE_VERSION: '1.18.15' };
 }
 
-function runCode(executable, args, env) {
+function runCode(executable, args, env, launchDetails) {
   return new Promise((resolve, reject) => {
     const launchEnvironment = { ...env };
     // Integrated terminals can inherit this from VS Code itself. Leaving it
     // set makes the Electron application binary run as plain Node.
     delete launchEnvironment.ELECTRON_RUN_AS_NODE;
-    const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
-    const launchArgs =
-      process.platform === 'darwin'
-        ? ['-W', '-n', '-g', '-j', '-a', path.resolve(executable, '../../..'), '--args', ...args]
-        : args;
-    const child = spawn(launchExecutable, launchArgs, {
+    const child = spawn(executable, args, {
       cwd: projectRoot,
       env: launchEnvironment,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -221,6 +218,17 @@ function runCode(executable, args, env) {
     child.stdout.on('data', appendOutput);
     child.stderr.on('data', appendOutput);
     child.once('error', reject);
+    void writeVscodeLaunchMetadata(launchDetails.metadataPath, {
+      pid: child.pid,
+      executable,
+      profileRoot: launchDetails.profileRoot,
+      userDataDir: launchDetails.userDataDir,
+      extensionsDir: launchDetails.extensionsDir,
+      workspace: launchDetails.workspace,
+    }).catch((error) => {
+      child.kill();
+      reject(error);
+    });
     child.once('exit', (code, signal) => {
       if (code === 0) {
         resolve();
@@ -313,6 +321,13 @@ async function runScenario(scenario, vscodeExecutable) {
         VARRO_SANDBOX_PID_FILE: pidFile,
         VARRO_SANDBOX_PORT: String(port),
         VARRO_SANDBOX_SCENARIO: scenario,
+      },
+      {
+        metadataPath: path.join(root, 'launch.json'),
+        profileRoot: root,
+        userDataDir: userData,
+        extensionsDir: extensions,
+        workspace,
       }
     );
     process.stdout.write(`VS Code sandbox scenario passed: ${scenario}\n`);

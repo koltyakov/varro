@@ -4,6 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  reserveLoopbackPort,
+  waitForVscodeProcess,
+  writeVscodeLaunchMetadata,
+} from './vscode-launch-process.mjs';
+
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function resolveVscodeExecutable() {
@@ -42,6 +48,7 @@ const userData = path.join(profileRoot, 'u');
 const extensions = path.join(profileRoot, 'e');
 await mkdir(userData);
 await mkdir(extensions);
+const remoteDebuggingPort = await reserveLoopbackPort();
 
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
@@ -56,6 +63,8 @@ const vscodeArgs = [
   '--skip-welcome',
   '--skip-release-notes',
   '--new-window',
+  '--remote-debugging-address=127.0.0.1',
+  `--remote-debugging-port=${String(remoteDebuggingPort)}`,
   `--user-data-dir=${userData}`,
   `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${projectRoot}`,
@@ -64,19 +73,14 @@ const vscodeArgs = [
 const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
 const launchArgs =
   process.platform === 'darwin'
-    ? ['-W', '-n', '-g', '-j', '-a', path.resolve(executable, '../../..'), '--args', ...vscodeArgs]
+    ? ['-n', '-a', path.resolve(executable, '../../..'), '--args', ...vscodeArgs]
     : vscodeArgs;
-
-const child = spawn(
-  launchExecutable,
-  launchArgs,
-  {
-    cwd: projectRoot,
-    detached: true,
-    env: environment,
-    stdio: 'ignore',
-  }
-);
+const child = spawn(launchExecutable, launchArgs, {
+  cwd: projectRoot,
+  detached: true,
+  env: environment,
+  stdio: 'ignore',
+});
 
 await new Promise((resolve, reject) => {
   const timer = setTimeout(resolve, 2_000);
@@ -86,6 +90,10 @@ await new Promise((resolve, reject) => {
   });
   child.once('exit', (code, signal) => {
     clearTimeout(timer);
+    if (process.platform === 'darwin' && code === 0) {
+      resolve();
+      return;
+    }
     reject(
       new Error(
         `VS Code exited during startup (${signal ? `signal ${signal}` : `code ${String(code)}`})`
@@ -94,8 +102,25 @@ await new Promise((resolve, reject) => {
   });
 });
 
+const codePid =
+  process.platform === 'darwin'
+    ? await waitForVscodeProcess(executable, userData)
+    : child.pid;
+const metadataPath = path.join(profileRoot, 'launch.json');
+const metadata = await writeVscodeLaunchMetadata(metadataPath, {
+  pid: codePid,
+  executable,
+  profileRoot,
+  userDataDir: userData,
+  extensionsDir: extensions,
+  workspace: projectRoot,
+  remoteDebuggingPort,
+});
+
 child.unref();
-process.stdout.write('Launched persistent VS Code Extension Development Host');
-if (process.platform === 'darwin') process.stdout.write(' hidden in the background');
-process.stdout.write(` (launcher PID ${String(child.pid)})\n`);
+process.stdout.write(
+  `Launched persistent VS Code Extension Development Host (Code PID ${String(metadata.pid)})\n`
+);
 process.stdout.write(`Profile: ${profileRoot}\n`);
+process.stdout.write(`Launch metadata: ${metadataPath}\n`);
+process.stdout.write(`Remote debugging: http://127.0.0.1:${String(remoteDebuggingPort)}\n`);
