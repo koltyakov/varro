@@ -130,6 +130,7 @@ export function AttachmentStrip(props: {
                   props.onPreviewImage ? () => props.onPreviewImage?.(item.value) : undefined
                 }
                 onRemove={() => props.onRemoveClipboardImage(item.value.id)}
+                previewImage={{ url: item.value.url, alt: item.value.filename }}
               />
             );
           return (

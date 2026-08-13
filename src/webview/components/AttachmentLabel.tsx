@@ -1,4 +1,8 @@
-export function AttachmentLabel(props: { label: string; preserveExtension?: boolean }) {
+export function AttachmentLabel(props: {
+  label: string;
+  preserveExtension?: boolean;
+  ref?: (element: HTMLSpanElement) => void;
+}) {
   const extensionIndex = () => {
     if (!props.preserveExtension) return -1;
     const index = props.label.lastIndexOf('.');
@@ -6,7 +10,10 @@ export function AttachmentLabel(props: { label: string; preserveExtension?: bool
   };
 
   return (
-    <span class={`chip-label${extensionIndex() >= 0 ? ' chip-label-with-extension' : ''}`}>
+    <span
+      ref={props.ref}
+      class={`chip-label${extensionIndex() >= 0 ? ' chip-label-with-extension' : ''}`}
+    >
       {extensionIndex() >= 0 ? (
         <>
           <span class="chip-label-stem">{props.label.slice(0, extensionIndex())}</span>

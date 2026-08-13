@@ -1,5 +1,13 @@
 # AI Fuzzy Verification In VS Code
 
+> [!IMPORTANT]
+> An AI test run passes only when the requested scenarios run in a real, interactable VS Code
+> Extension Development Host. If VS Code cannot be launched or controlled, GPT Luna cannot be used,
+> required sessions cannot be prepared, or any real-editor scenario cannot reach its precondition, the
+> **overall AI test result is `FAIL`**. Automated preflight results may still be reported as supporting
+> evidence, but they cannot make the AI test pass. Put this overall result at the top of the run ledger
+> and final report.
+
 This playbook verifies Varro in a real VS Code Extension Development Host using AI-generated
 transcripts and replayable, seed-driven interaction sequences. It targets timing, layout, and visual
 failures that deterministic browser fixtures or Extension Host API tests can miss.
@@ -47,7 +55,8 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
    VS Code version, viewport/layout, seed, and artifact paths.
 
 If credentials, a GUI, or Luna are unavailable, continue with every feasible automated check and mark
-only the affected real-editor scenarios `BLOCKED`. Never turn a blocked visual check into a pass.
+the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn a
+blocked visual check into a pass or describe an automated-only run as a successful AI test.
 
 ## Automated Preflight
 
@@ -72,7 +81,11 @@ what was omitted.
 
 ## Real Editor Setup
 
-1. Open this repository in VS Code and press `F5` to start **VS Code Extension Development**.
+1. Run `npm run ai:vscode` to build Varro and launch a persistent, isolated Extension Development
+   Host. Use the printed profile path in the ledger. This avoids reusing a normal VS Code singleton and
+   uses a short temporary profile path that stays below the macOS IPC socket-path limit. Alternatively,
+   open this repository in VS Code and press `F5` to start **VS Code Extension Development** when the
+   current environment can reliably control the resulting window.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
    unrelated sessions or settings.
 3. Open the Varro view and explicitly select GPT Luna. Record the exact provider/model shown by Varro.
@@ -89,6 +102,33 @@ The existing F5 host can preserve extension state. For cold-load checks, close t
 Development Host, start it again, and do not warm the target session by opening or scrolling it first.
 For onboarding isolation, use `npm run test:vscode-sandbox`; that runner exits after host assertions and
 is not the interactive geometry environment.
+
+### When VS Code Is Blocked
+
+Do not stop after noticing that no Extension Development Host is already running. Attempt recovery in
+this order:
+
+1. Run `npm run ai:vscode` and verify that a window titled `[Extension Development Host]` appears.
+2. If launch fails, inspect the command output and running processes. On macOS, an IPC socket error such
+   as `longer than 103 chars` means the user-data path is too long; use the launcher rather than a long
+   hand-written `--user-data-dir`. A regular VS Code window without the development-host title usually
+   means the existing VS Code singleton consumed the request; use the launcher's isolated profile.
+3. Verify that the available automation mechanism can focus the VS Code process, inspect the Varro
+   view, and issue native click, wheel, keyboard, and resize gestures. Browser-only access is not VS
+   Code access.
+4. If the host launches but automation cannot control it, ask the user before ending the run:
+   **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
+   like to enable/approve editor automation, perform the listed native actions while I record results,
+   or stop and record the AI test as failed?"**
+5. If credentials, GPT Luna, required prepared history, screen recording, or another precondition needs
+   user action, ask one concrete question describing the missing prerequisite and the available choices.
+6. If the user stops, declines, or the problem remains unresolved, mark affected scenarios `BLOCKED`
+   and the overall AI test `FAIL`. Preserve diagnostics and the recovery attempts in the ledger.
+
+`npm run test:vscode-sandbox -- healthy-first-run` is not a fallback for these steps. It launches a
+real disposable Extension Host, performs host-side assertions through `--extensionTestsPath`, and exits
+by design. A passing sandbox proves startup and recovery only; it does not provide the persistent,
+interactable window needed by AI scenarios.
 
 ## Reproducible Fuzzing
 
@@ -381,6 +421,8 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 ```md
 # Varro AI Fuzzy Run
 
+- Overall result: PASS | FAIL
+- Overall result reason:
 - Date:
 - Tester/agent:
 - Commit:
@@ -426,6 +468,8 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 
 Do not write `PASS` without evidence that the scenario reached its precondition. Record unavailable
 attachments, insufficient history, missing controls, credentials, or model access as explicit blocks.
+The overall result is `PASS` only when every scenario required by the request ran in the real Extension
+Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the overall result `FAIL`.
 
 ## Turning A Fuzzy Failure Into A Regression
 
@@ -458,7 +502,7 @@ Likely deterministic homes include:
 
 ## Reporting
 
-Lead with failures ordered by severity. Include the exact marker, seed, dimensions, minimal action
+Lead with the overall `PASS` or `FAIL`, then failures ordered by severity. Include the exact marker, seed, dimensions, minimal action
 prefix, reproduction rate, and artifact path. Then list passed and blocked scenarios and every command
 run. State clearly whether verification happened in Playwright, the host-only sandbox, a real
 Extension Development Host, or more than one environment.

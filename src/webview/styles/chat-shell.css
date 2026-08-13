@@ -674,6 +674,17 @@ input:focus-visible {
   box-shadow: var(--chat-shadow-card);
 }
 
+.user-message-card.user-message-card-wrapperless {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.user-message-card.user-message-card-wrapperless.user-message-card-editable:hover {
+  border-color: transparent;
+}
+
 .user-message-card-editable {
   cursor: pointer;
 }

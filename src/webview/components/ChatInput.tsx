@@ -894,6 +894,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           label: image.filename,
           icon: 'image',
           disabled: !currentModelSupportsVision(),
+          previewImage: { url: image.url, alt: image.filename },
           textMarker: marker,
         });
       }

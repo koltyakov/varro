@@ -11,6 +11,7 @@ type MockAttachmentChipProps = {
   icon?: 'file' | 'folder' | 'image' | 'terminal';
   onClick?: () => void;
   onRemove?: () => void;
+  previewImage?: { url: string; alt: string };
   title?: string;
 };
 
@@ -23,6 +24,7 @@ vi.mock('./AttachmentChip', () => ({
       data-disabled={props.disabled ? 'true' : 'false'}
       data-icon={props.icon ?? 'file'}
       data-label={props.label}
+      data-preview-url={props.previewImage?.url ?? ''}
       data-title={props.title ?? ''}
     >
       <button class="attachment-chip-mock-click" onClick={() => props.onClick?.()}>
@@ -229,6 +231,7 @@ describe('AttachmentStrip', () => {
 
     const enabledImageChip = getChip('diagram.png');
     expect(enabledImageChip?.getAttribute('data-disabled')).toBe('false');
+    expect(enabledImageChip?.getAttribute('data-preview-url')).toBe('blob:image-1');
     expect(enabledImageChip?.getAttribute('data-title')).toBe('diagram.png');
   });
 
@@ -317,9 +320,7 @@ describe('AttachmentStrip', () => {
     expect(getChip('spec.pdf')?.getAttribute('data-title')).toBe('spec.pdf');
     expect(getChip('spec.pdf')?.getAttribute('data-detail')).toBe('');
     expect(getChip('spec.pdf')?.getAttribute('data-icon')).toBe('file');
-    getChip('spec.pdf')
-      ?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')
-      ?.click();
+    getChip('spec.pdf')?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')?.click();
     expect(onOpenFile).toHaveBeenCalledWith({
       path: '/workspace/spec.pdf',
       relativePath: 'spec.pdf',

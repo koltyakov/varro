@@ -225,7 +225,9 @@ export const client = {
       const [providerResponse, defaultModel] = await Promise.all([
         apiCall('GET', path),
         // This endpoint is optional and unsupported servers may return their HTML shell.
-        apiCall('GET', '/model/default').then(parseDefaultModel).catch(() => undefined),
+        apiCall('GET', '/model/default')
+          .then(parseDefaultModel)
+          .catch(() => undefined),
       ]);
       const response = requireRecord(providerResponse, path);
       return {

@@ -353,15 +353,39 @@ export function Message(props: {
     return `assistant-turn-content${props.highlightFinalAnswer ? ' assistant-turn-content-highlighted' : ''}${props.highlightPlanningAnswer ? ' assistant-turn-content-planning' : ''}`;
   };
   const isWrapperlessAssistant = () => assistantContainerVariant() === 'plain';
+  const parsedUserContent = createMemo(() =>
+    isUser() ? parseUserMessageContent(normalizedParts()) : null
+  );
   const hasUserContent = createMemo(() => {
-    if (!isUser()) return false;
-    const parsed = parseUserMessageContent(normalizedParts());
+    const parsed = parsedUserContent();
+    if (!parsed) return false;
     return (
       parsed.messageTexts.some((text) => text.trim().length > 0) ||
       parsed.attachments.length > 0 ||
       parsed.fileParts.length > 0
     );
   });
+  const isStandaloneTerminalMessage = createMemo(() => {
+    const parsed = parsedUserContent();
+    if (!parsed || parsed.messageTexts.length !== 0 || parsed.fileParts.length !== 0) return false;
+    const attachment = parsed.attachments[0];
+    return (
+      parsed.attachments.length === 1 &&
+      attachment?.type === 'terminal-selection' &&
+      Boolean(attachment.text)
+    );
+  });
+  const isImageOnlyMessage = createMemo(() => {
+    const parsed = parsedUserContent();
+    if (!parsed) return false;
+    return (
+      parsed.messageTexts.length === 0 &&
+      parsed.attachments.length === 0 &&
+      parsed.fileParts.length > 0 &&
+      parsed.fileParts.every((part) => part.mime.startsWith('image/'))
+    );
+  });
+  const isWrapperlessUserMessage = () => isStandaloneTerminalMessage() || isImageOnlyMessage();
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
   const canEditUserMessage = () =>
     isUser() &&
@@ -402,7 +426,9 @@ export function Message(props: {
         >
           <div
             class={`value chat-turn-content ${
-              isUser() ? 'chat-turn-card user-message-card' : assistantContainerClass()
+              isUser()
+                ? `chat-turn-card user-message-card${isWrapperlessUserMessage() ? ' user-message-card-wrapperless' : ''}`
+                : assistantContainerClass()
             } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
             onClick={handleUserCardClick}
             title={

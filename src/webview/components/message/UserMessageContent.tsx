@@ -406,8 +406,22 @@ export function UserMessageContent(props: { parts: Part[] }) {
   const inlineAttachmentIds = createMemo(() =>
     getInlineAttachmentIds(parsed().messageTexts, indexedAttachments())
   );
+  const standaloneTerminalAttachment = createMemo(() => {
+    if (
+      parsed().messageTexts.length !== 0 ||
+      parsed().fileParts.length !== 0 ||
+      parsed().attachments.length !== 1
+    ) {
+      return null;
+    }
+    const attachment = parsed().attachments[0];
+    return attachment?.type === 'terminal-selection' && attachment.text ? attachment : null;
+  });
   const visibleAttachments = createMemo(() =>
-    indexedAttachments().filter(({ id }) => !inlineAttachmentIds().has(id))
+    indexedAttachments().filter(
+      ({ id, attachment }) =>
+        !inlineAttachmentIds().has(id) && attachment !== standaloneTerminalAttachment()
+    )
   );
 
   const imageParts = createMemo(() =>
@@ -524,6 +538,9 @@ export function UserMessageContent(props: { parts: Part[] }) {
         </div>
       </Show>
       <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
+      <Show when={standaloneTerminalAttachment()}>
+        {(attachment) => <TerminalMessageCodeBlock attachment={attachment()} />}
+      </Show>
       <Show when={parsed().messageTexts.length > 0}>
         <div
           class="user-message-text-scroll"
@@ -608,6 +625,22 @@ function UserMessageCodeBlock(props: { content: string; language?: string }) {
       text: props.content,
       lang: props.language,
       className: 'user-message-code-block',
+      showCopyButton: false,
+    })
+  );
+  return <div innerHTML={html()} />;
+}
+
+function TerminalMessageCodeBlock(props: {
+  attachment: Extract<MessageAttachment, { type: 'terminal-selection' }>;
+}) {
+  const html = createMemo(() =>
+    renderCodeBlockHtml({
+      text: props.attachment.text ?? '',
+      lang: 'text',
+      headerLabel: props.attachment.terminalName,
+      headerDetail: getTerminalLineCountLabel(props.attachment.text) ?? undefined,
+      className: 'user-message-code-block user-message-terminal-code-block',
       showCopyButton: false,
     })
   );
@@ -929,9 +962,6 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
       >
         <img src={props.part.url} alt={displayName()} class="chat-image-img" />
       </button>
-      <figcaption class="chat-image-caption">
-        {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>
-      </figcaption>
     </figure>
   );
 }

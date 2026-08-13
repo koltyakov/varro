@@ -324,9 +324,7 @@ export function addNativePdfs(pdfs: NativePdfAttachment[]) {
 export function setNativePdfContextFile(id: string, contextFile: DroppedFile) {
   setState('nativePdfs', (pdfs) =>
     pdfs.map((pdf) =>
-      pdf.id === id
-        ? { ...pdf, contextFile: { ...contextFile, type: 'file' as const } }
-        : pdf
+      pdf.id === id ? { ...pdf, contextFile: { ...contextFile, type: 'file' as const } } : pdf
     )
   );
 }

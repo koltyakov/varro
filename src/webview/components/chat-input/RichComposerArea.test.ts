@@ -21,6 +21,7 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  document.querySelector('.chat-attachment-image-preview')?.remove();
 });
 
 async function flushAsyncWork(count = 3) {
@@ -344,6 +345,37 @@ describe('RichComposerArea', () => {
     await flushAsyncWork();
 
     expect(extractText(editor)).toBe('[Image]ab');
+  });
+
+  it('previews an inline pasted image above the input frame', async () => {
+    const chip: RichComposerChip = {
+      id: 'img:1',
+      type: 'image',
+      label: 'Image 1',
+      icon: 'image',
+      previewImage: { url: 'blob:image-1', alt: 'Image 1' },
+      textMarker: '[Image 1]',
+    };
+    container!.className = 'chat-input-shell';
+    const frame = document.createElement('div');
+    frame.className = 'chat-input-container';
+    container!.appendChild(frame);
+    const originalContainer = container;
+    container = frame;
+    renderComposer({ value: '[Image 1]', cursorOffset: 0, chips: [chip] });
+    container = originalContainer;
+    await flushAsyncWork();
+
+    originalContainer!.getBoundingClientRect = () =>
+      ({ left: 10, right: 510, width: 500 }) as DOMRect;
+    frame.getBoundingClientRect = () => ({ top: 380 }) as DOMRect;
+    const inlineChip = frame.querySelector<HTMLElement>('.inline-chip')!;
+    inlineChip.getBoundingClientRect = () => ({ left: 30, right: 100, width: 70 }) as DOMRect;
+    inlineChip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+    const preview = document.querySelector<HTMLElement>('.chat-attachment-image-preview');
+    expect(preview?.querySelector('img')?.getAttribute('src')).toBe('blob:image-1');
+    expect(preview?.style.bottom).toBe(`${window.innerHeight - 380 + 22}px`);
   });
 
   it('uses the chip title for hover text when provided', async () => {

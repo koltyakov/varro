@@ -489,10 +489,11 @@ describe('Message user prompt rendering', () => {
     expect(children[2]?.classList.contains('user-message-text-scroll')).toBe(true);
     expect(children[2]?.textContent).toContain('Please review this.');
     expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
-    expect(children[3]?.textContent).toContain('diagram.png');
+    expect(children[3]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(children[3]?.querySelector('.chat-image-caption')).toBeNull();
   });
 
-  it('opens a terminal selection in a read-only editor tab', () => {
+  it('expands a terminal-only message with its terminal name and line count', () => {
     const send = vi.fn();
     (window as unknown as Record<string, unknown>).__sendToExtension = send;
     cleanup = render(
@@ -509,22 +510,16 @@ describe('Message user prompt rendering', () => {
       container!
     );
 
-    const terminalChip = container?.querySelector<HTMLButtonElement>(
-      '.message-attachment-chip-clickable'
+    const terminalBlock = container?.querySelector('.user-message-terminal-code-block');
+    expect(terminalBlock).toBeInstanceOf(HTMLDivElement);
+    expect(terminalBlock?.querySelector('.code-block-lang')?.textContent).toBe('zsh');
+    expect(terminalBlock?.querySelector('.code-block-detail')?.textContent).toBe('2 lines');
+    expect(terminalBlock?.querySelector('code')?.textContent).toBe('npm test\nfailed output');
+    expect(container?.querySelector('.message-attachment-chip')).toBeNull();
+    expect(container?.querySelector('.user-message-card')?.classList).toContain(
+      'user-message-card-wrapperless'
     );
-    expect(terminalChip).toBeInstanceOf(HTMLButtonElement);
-    expect(terminalChip?.querySelector('.chip-detail')?.textContent).toBe('2 lines');
-
-    terminalChip?.click();
-
-    expect(send).toHaveBeenCalledWith({
-      type: 'vscode/open-text',
-      payload: {
-        content: 'npm test\nfailed output',
-        title: 'zsh terminal selection',
-        language: 'shellscript',
-      },
-    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('renders inline file mentions as chips inside the user bubble text', () => {
@@ -615,10 +610,7 @@ describe('Message user prompt rendering', () => {
       () =>
         Message({
           info: userMessage('message-legacy-inline-image'),
-          parts: [
-            textPart('text-1', 'Review [Image]'),
-            imageFilePart('image-1', 'Image 1'),
-          ],
+          parts: [textPart('text-1', 'Review [Image]'), imageFilePart('image-1', 'Image 1')],
         }),
       container!
     );
@@ -950,7 +942,10 @@ describe('parseUserMessageContent', () => {
         Message({
           info: userMessage('message-attached-pdf-fallback'),
           parts: [
-            textPart('text-attached-pdf', 'Summarize this document\n[Attached file: /repo/spec.pdf]'),
+            textPart(
+              'text-attached-pdf',
+              'Summarize this document\n[Attached file: /repo/spec.pdf]'
+            ),
           ],
         }),
       container!
@@ -1268,6 +1263,7 @@ describe('Message user editing', () => {
     window.getSelection()?.removeAllRanges();
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+    expect(card?.classList.contains('user-message-card-wrapperless')).toBe(true);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 

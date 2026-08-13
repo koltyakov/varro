@@ -1,4 +1,5 @@
-import { Show, createEffect, onMount, onCleanup } from 'solid-js';
+import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
 type ComposerClipboardEvent = ClipboardEvent & {
@@ -18,6 +19,7 @@ export type RichComposerChip = {
   detail?: string;
   icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent';
   disabled?: boolean;
+  previewImage?: { url: string; alt: string };
   textMarker: string;
 };
 
@@ -55,6 +57,10 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
+  const [preview, setPreview] = createSignal<{
+    image: { url: string; alt: string };
+    style: Record<string, string>;
+  } | null>(null);
 
   onMount(() => {
     if (editorEl) {
@@ -102,6 +108,7 @@ export function RichComposerArea(props: {
     span.dataset.chipId = chip.id;
     span.dataset.chipType = chip.type;
     span.dataset.chipMarker = chip.textMarker;
+    if (chip.previewImage) span.dataset.previewImage = 'true';
     span.setAttribute('title', chip.title || chip.label);
 
     const iconSvg = getChipIconSvg(chip.icon);
@@ -287,6 +294,45 @@ export function RichComposerArea(props: {
     e.preventDefault();
   }
 
+  function showImagePreview(target: EventTarget | null) {
+    const chipElement = (target as HTMLElement | null)?.closest?.<HTMLElement>(
+      '.inline-chip[data-preview-image]'
+    );
+    if (!chipElement?.dataset.chipId) return;
+    const chip = props.chips.find((item) => item.id === chipElement.dataset.chipId);
+    if (!chip?.previewImage) return;
+
+    const chipRect = chipElement.getBoundingClientRect();
+    const frameRect =
+      editorEl?.closest<HTMLElement>('.chat-input-container')?.getBoundingClientRect() ??
+      editorEl?.getBoundingClientRect();
+    const chatRect = editorEl?.closest<HTMLElement>('.chat-input-shell')?.getBoundingClientRect();
+    if (!frameRect) return;
+
+    const edgeGap = 10;
+    const anchorGap = 22;
+    const chatLeft = Math.max(chatRect?.left ?? 0, edgeGap);
+    const chatRight = Math.min(chatRect?.right ?? window.innerWidth, window.innerWidth - edgeGap);
+    const maxWidth = Math.max(120, (chatRect?.width ?? window.innerWidth) * 0.8);
+    const constrainedWidth = Math.min(maxWidth, chatRight - chatLeft);
+    const chipCenter = chipRect.left + chipRect.width / 2;
+    const center = Math.min(
+      Math.max(chipCenter, chatLeft + constrainedWidth / 2),
+      chatRight - constrainedWidth / 2
+    );
+
+    setPreview({
+      image: chip.previewImage,
+      style: {
+        left: `${center}px`,
+        bottom: `${window.innerHeight - frameRect.top + anchorGap}px`,
+        '--attachment-preview-max-width': `${constrainedWidth}px`,
+        '--attachment-preview-max-height': `${Math.max(80, Math.min(300, frameRect.top - anchorGap - edgeGap))}px`,
+        '--attachment-preview-tail-offset': `${chipCenter - center}px`,
+      },
+    });
+  }
+
   onMount(() => {
     const handleSelectionChange = () => {
       if (!editorEl || document.activeElement !== editorEl) return;
@@ -324,6 +370,16 @@ export function RichComposerArea(props: {
         onKeyDown={(e) => props.onKeyDown(e)}
         onPaste={handlePaste}
         onCopy={handleCopy}
+        onMouseOver={(event) => showImagePreview(event.target)}
+        onMouseOut={(event) => {
+          const sourceChip = (event.target as HTMLElement).closest?.('[data-preview-image]');
+          const relatedChip =
+            event.relatedTarget instanceof HTMLElement
+              ? event.relatedTarget.closest('[data-preview-image]')
+              : null;
+          if (sourceChip === relatedChip) return;
+          setPreview(null);
+        }}
         onFocus={() => props.onFocus()}
         onBlur={() => props.onBlur()}
         onClick={(e) => {
@@ -343,6 +399,16 @@ export function RichComposerArea(props: {
         }}
         spellcheck={false}
       />
+
+      <Portal>
+        <Show when={preview()}>
+          {(current) => (
+            <div class="chat-attachment-image-preview" style={current().style}>
+              <img src={current().image.url} alt={current().image.alt} />
+            </div>
+          )}
+        </Show>
+      </Portal>
 
       <Show when={props.isFocused && props.showCompletionMenu}>
         <CompletionMenu

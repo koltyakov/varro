@@ -2105,6 +2105,10 @@ kbd {
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 72%, transparent);
 }
 
+.user-message-card-wrapperless .chat-image-figure {
+  border-color: color-mix(in srgb, var(--color-vscode-border) 62%, transparent);
+}
+
 .chat-image-figure .chat-image-img {
   width: 100%;
   height: 100%;
@@ -2143,8 +2147,33 @@ kbd {
   outline-offset: 2px;
 }
 
+.chat-image-preview-trigger:hover,
+.chat-image-preview-trigger:focus-visible {
+  background-color: var(--color-vscode-widget-bg);
+  background-image:
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) 25%,
+      transparent 25%,
+      transparent 75%,
+      color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) 75%
+    ),
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) 25%,
+      transparent 25%,
+      transparent 75%,
+      color-mix(in srgb, var(--color-vscode-fg) 8%, transparent) 75%
+    );
+  background-position:
+    0 0,
+    8px 8px;
+  background-size: 16px 16px;
+}
+
 .message-image-carousel-preview-trigger {
   width: 100%;
+  max-width: none;
 }
 
 .chat-image-figure .chat-image-caption {
@@ -2305,10 +2334,14 @@ kbd {
 
 .message-image-carousel-figure {
   margin: 0;
-  padding: 10px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
+  overflow: hidden;
 }
 
 .message-image-carousel-figure .chat-image-img {
@@ -2323,6 +2356,7 @@ kbd {
   justify-content: space-between;
   gap: 10px;
   margin-top: 0;
+  padding: 6px 10px;
 }
 
 .message-image-carousel-caption {
@@ -2351,20 +2385,27 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 40%, transparent);
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 88%, transparent);
-  color: var(--color-vscode-fg);
+  color: var(--color-vscode-fg-muted);
   cursor: pointer;
   flex-shrink: 0;
 }
 
+.message-image-carousel-nav svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.72;
+}
+
 .message-image-carousel-nav:hover {
   background: var(--color-vscode-surface-hover);
-  border-color: var(--color-vscode-border-strong);
+  border-color: color-mix(in srgb, var(--color-vscode-border) 58%, transparent);
+  color: var(--color-vscode-fg);
 }
 
 .message-image-carousel-nav:focus-visible,
@@ -2383,8 +2424,8 @@ kbd {
 
 @media (max-width: 640px) {
   .message-image-carousel-nav {
-    width: 26px;
-    height: 26px;
+    width: 20px;
+    height: 20px;
   }
 
   .chat-image-preview-overlay-scroll {
@@ -2520,6 +2561,11 @@ kbd {
   padding-bottom: 0px;
 }
 
+.user-message-content-has-image > .chat-image-figure:not(.message-image-carousel-figure) {
+  padding: 0;
+  overflow: hidden;
+}
+
 .user-message-card > .rendered-markdown > .chat-attachment-chip {
   --attachment-chip-max-width: 100%;
 }
@@ -2530,6 +2576,36 @@ kbd {
 
 .user-message-card > .rendered-markdown > .user-message-text-scroll + .message-image-carousel {
   margin-top: 12px;
+}
+
+.user-message-card:not(.user-message-card-wrapperless)
+  > .rendered-markdown.user-message-content-has-image
+  > :is(.chat-image-figure, .message-image-carousel) {
+  width: calc(100% + 30px);
+  margin-right: -15px !important;
+  margin-bottom: -12px !important;
+  margin-left: -15px !important;
+}
+
+.user-message-card:not(.user-message-card-wrapperless)
+  > .rendered-markdown.user-message-content-has-image
+  > :is(.chat-image-figure, .message-image-carousel)
+  .chat-image-figure,
+.user-message-card:not(.user-message-card-wrapperless)
+  > .rendered-markdown.user-message-content-has-image
+  > .chat-image-figure {
+  border-radius: 0 0 var(--chat-radius-card) var(--chat-radius-card);
+}
+
+.user-message-card:not(.user-message-card-wrapperless)
+  > .rendered-markdown.user-message-content-has-image
+  > .message-image-carousel
+  .message-image-carousel-frame,
+.user-message-card:not(.user-message-card-wrapperless)
+  > .rendered-markdown.user-message-content-has-image
+  > .message-image-carousel
+  .message-image-carousel-figure {
+  margin: 0 !important;
 }
 
 .interactive-session
@@ -2552,6 +2628,32 @@ kbd {
 
 .user-message-code-block {
   margin: 0;
+}
+
+.interactive-result-code-block.user-message-terminal-code-block
+  .code-block-header
+  .code-block-lang {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.interactive-result-code-block.user-message-terminal-code-block
+  .code-block-header
+  .code-block-detail {
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.interactive-result-code-block.user-message-terminal-code-block {
+  border-color: color-mix(in srgb, var(--color-vscode-border) 62%, transparent);
 }
 
 .user-message-text-scroll > .user-message-code-block:not(:last-child) {

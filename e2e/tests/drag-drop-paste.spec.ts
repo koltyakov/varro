@@ -165,7 +165,7 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
         return !!body.parts?.some(
           (part) =>
             part.type === 'file' &&
-            part.filename === 'Image' &&
+            part.filename === 'Image 1' &&
             part.mime === 'image/png' &&
             typeof part.url === 'string' &&
             part.url.startsWith('data:image/png;base64,')

@@ -164,6 +164,8 @@ let markdownCacheBytes = 0;
 interface CodeBlockHtmlParams {
   text: string;
   lang?: string;
+  headerLabel?: string;
+  headerDetail?: string;
   className?: string;
   copyText?: string;
   showCopyButton?: boolean;
@@ -308,6 +310,8 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
       disableHighlighting ? 'plain' : codeHighlighterVersion(),
       className || '',
       lang || '',
+      params.headerLabel || '',
+      params.headerDetail || '',
       showCopyButton ? 'copy' : 'nocopy',
       disableHighlighting ? 'plain' : 'highlight',
       params.text,
@@ -320,12 +324,20 @@ export function renderCodeBlockHtml(params: CodeBlockHtmlParams): string {
   const highlighted = disableHighlighting
     ? escapeHtml(params.text)
     : renderHighlightedCodeHtml(params.text, lang, disableCache);
-  const langLabel = lang ? `<span class="code-block-lang">${escapeHtml(lang)}</span>` : '';
+  const headerLabel = params.headerLabel ?? lang;
+  const langLabel = headerLabel
+    ? `<span class="code-block-lang">${escapeHtml(headerLabel)}</span>`
+    : '';
+  const headerDetail = params.headerDetail
+    ? `<span class="code-block-detail">${escapeHtml(params.headerDetail)}</span>`
+    : '';
   const copyBtn = showCopyButton
     ? `<button type="button" class="code-block-copy-btn" data-copy data-copy-text="${encodeCopyPayload(copyText)}" aria-label="Copy code" title="Copy code">${copySvg}</button>`
     : '';
   const header =
-    langLabel || copyBtn ? `<div class="code-block-header">${langLabel}${copyBtn}</div>` : '';
+    langLabel || headerDetail || copyBtn
+      ? `<div class="code-block-header">${langLabel}${headerDetail}${copyBtn}</div>`
+      : '';
   const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
   const classAttr = ['interactive-result-code-block', className].filter(Boolean).join(' ');
   const html = `<div class="${classAttr}"${langAttr}>${header}<pre class="code-block"><code class="hljs">${highlighted}</code></pre></div>`;

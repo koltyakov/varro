@@ -1514,6 +1514,12 @@ body.vscode-light
   min-width: 0;
 }
 
+.interactive-result-code-block .code-block-header .code-block-detail {
+  margin-left: auto;
+  color: var(--color-vscode-fg-muted);
+  font-size: 10px;
+}
+
 .interactive-result-code-block .code-block-copy-btn {
   display: inline-flex;
   align-items: center;

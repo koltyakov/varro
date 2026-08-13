@@ -486,7 +486,9 @@ describe('ChatInput', () => {
 
     expect(state.nativePdfs).toMatchObject([pdf]);
     expect(container?.textContent).toContain('spec.pdf');
-    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).not.toContain('PDF');
+    const pdfChip = container?.querySelector('.chat-attachment-chip');
+    expect(pdfChip).toBeInstanceOf(HTMLElement);
+    expect(pdfChip?.textContent).not.toContain('PDF');
 
     setState('providers', 0, 'models', 'pdf-model', {
       id: 'pdf-model',
@@ -497,10 +499,10 @@ describe('ChatInput', () => {
       cost: { input: 0, output: 0 },
     });
     setState('selectedModel', { providerID: 'openai', modelID: 'pdf-model' });
-    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).toContain('PDF');
+    expect(pdfChip?.textContent).toContain('PDF');
 
     setState('selectedModel', { providerID: 'openai', modelID: 'gpt-4o' });
-    expect(container?.querySelector('[title="spec.pdf"]')?.textContent).not.toContain('PDF');
+    expect(pdfChip?.textContent).not.toContain('PDF');
   });
 
   it('hides pre-input status blocks while a diff overlay is expanded', () => {
