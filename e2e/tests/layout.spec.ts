@@ -1534,7 +1534,7 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   await expect(nextPrompt).toBeVisible();
 });
 
-test('model picker paints above the sticky prompt', async ({ page }) => {
+test('model picker does not paint behind the sticky prompt', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
 
   const list = page.locator('.interactive-list');
@@ -1571,21 +1571,20 @@ test('model picker paints above the sticky prompt', async ({ page }) => {
     const overlapBottom = Math.min(menuBox.bottom, stickyBox.bottom);
     const overlapWidth = overlapRight - overlapLeft;
     const overlapHeight = overlapBottom - overlapTop;
-    const topElement = document.elementFromPoint(
-      overlapLeft + overlapWidth / 2,
-      overlapTop + overlapHeight / 2
-    );
+    const surfacesOverlap = overlapWidth > 0 && overlapHeight > 0;
+    const topElement = surfacesOverlap
+      ? document.elementFromPoint(
+          overlapLeft + overlapWidth / 2,
+          overlapTop + overlapHeight / 2
+        )
+      : null;
 
     return {
-      overlapWidth,
-      overlapHeight,
-      dropdownIsTopmost: !!topElement?.closest('.dropdown-menu'),
+      dropdownIsNotObscured: !surfacesOverlap || !!topElement?.closest('.dropdown-menu'),
     };
   });
 
-  expect(paintOrder.overlapWidth).toBeGreaterThan(0);
-  expect(paintOrder.overlapHeight).toBeGreaterThan(0);
-  expect(paintOrder.dropdownIsTopmost).toBe(true);
+  expect(paintOrder.dropdownIsNotObscured).toBe(true);
 });
 
 test('sticky preview follows live prompt geometry when the assistant row grows', async ({

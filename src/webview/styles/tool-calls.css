@@ -222,7 +222,7 @@
 .chat-thinking-box .thinking-content .thinking-item {
   padding: 10px 12px 12px;
   position: relative;
-  font-size: 12.5px;
+  font-size: 11.5px;
   line-height: 1.65;
   color: var(--color-vscode-fg-soft);
 }

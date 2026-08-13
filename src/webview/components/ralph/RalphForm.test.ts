@@ -18,6 +18,7 @@ type RalphFormStateMock = {
   selectedAgent: string | null;
   providers: Provider[];
   providerDefaults: Record<string, string>;
+  pinnedModels: string[];
   allAgents: Agent[];
   messages: MessageEntry[];
   queuedMessages: Array<{ sessionId: string }>;
@@ -32,6 +33,7 @@ const stateMock = vi.hoisted((): RalphFormStateMock => ({
   selectedAgent: null,
   providers: [],
   providerDefaults: {},
+  pinnedModels: [],
   allAgents: [],
   messages: [],
   queuedMessages: [],
@@ -65,9 +67,15 @@ vi.mock('../../lib/client', () => ({
 
 vi.mock('../../lib/state', () => ({
   desktopSessionPaneSide: () => stateMock.desktopSessionPaneSide,
+  getModelDisplayName: vi.fn(
+    (_providerID: string, _modelID: string, fallbackName: string) => fallbackName
+  ),
   getStoredVariantForModel: vi.fn(() => undefined),
   getVisibleProviders: vi.fn((providers: Provider[]) => providers),
+  isModelPinned: vi.fn(() => false),
   isSessionAwaitingInput: vi.fn(() => false),
+  setModelPinned: vi.fn(),
+  setShowSettings: vi.fn(),
   state: stateMock,
 }));
 
@@ -113,6 +121,7 @@ beforeEach(() => {
   stateMock.selectedAgent = null;
   stateMock.providers = [];
   stateMock.providerDefaults = {};
+  stateMock.pinnedModels = [];
   stateMock.allAgents = [];
   stateMock.messages = [];
   stateMock.queuedMessages = [];

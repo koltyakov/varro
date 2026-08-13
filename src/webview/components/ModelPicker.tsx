@@ -8,7 +8,7 @@ import {
   state,
 } from '../lib/state';
 import { formatVariantLabel as formatThinkingLabel, formatContextLimit } from '../lib/format';
-import { observePopupViewport } from '../lib/popup-position';
+import { observePopupViewport, placeTriggerDropdownAnchor } from '../lib/popup-position';
 import { modelSupportsVariants } from '../lib/model-capabilities';
 import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
@@ -238,9 +238,19 @@ export function ModelPicker(props: {
       anchorRef.style.width = `${menuWidth}px`;
       anchorRef.style.left = `${Math.round(viewportLeft - hostBox.left)}px`;
       anchorRef.style.right = 'auto';
-      anchorRef.style.bottom = `${Math.round(hostBox.bottom - buttonBox.top + gap)}px`;
       anchorRef.style.paddingBottom = '0px';
-      const menuHeight = Math.max(0, Math.min(360, buttonBox.top - 8));
+      const editBanner = anchorRef
+        .closest('.interactive-input-part')
+        ?.querySelector<HTMLElement>('.composer-edit-banner');
+      const availableHeight = placeTriggerDropdownAnchor(
+        anchorRef,
+        menuRef,
+        button,
+        gap,
+        viewportMargin,
+        editBanner
+      );
+      const menuHeight = Math.min(360, availableHeight);
       const searchHeight =
         menuRef.querySelector<HTMLElement>('.model-picker-search')?.offsetHeight ?? 0;
       const footerHeight =

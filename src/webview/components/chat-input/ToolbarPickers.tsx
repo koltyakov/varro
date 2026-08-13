@@ -242,7 +242,10 @@ export function AgentPicker(props: {
       const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
       const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
       const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
-      const naturalWidth = Math.min(288, popupEl.scrollWidth || popupEl.getBoundingClientRect().width);
+      const naturalWidth = Math.min(
+        288,
+        popupEl.scrollWidth || popupEl.getBoundingClientRect().width
+      );
       const maximumWidth = Math.min(naturalWidth, boundaryWidth);
       const triggerLeft = Math.max(boundaryLeft, triggerBox.left);
       const availableRightWidth = boundaryRight - triggerLeft;

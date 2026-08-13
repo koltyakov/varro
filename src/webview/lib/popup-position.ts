@@ -20,6 +20,44 @@ function getPopupTopBound(el: HTMLElement, margin: number): number {
 }
 
 /**
+ * Position a dropdown around a trigger inside a larger positioned host.
+ * Upward placement can clear an element stacked above the host, such as the
+ * inline edit banner. If that placement is clipped, prefer the trigger's
+ * lower side when it has more usable room.
+ */
+export function placeTriggerDropdownAnchor(
+  anchorEl: HTMLElement,
+  menuEl: HTMLElement,
+  triggerEl: HTMLElement,
+  gap: number,
+  margin = 8,
+  liftAboveEl?: HTMLElement | null
+): number {
+  const host = anchorEl.offsetParent;
+  if (!(host instanceof HTMLElement)) return 0;
+
+  const hostRect = host.getBoundingClientRect();
+  const triggerRect = triggerEl.getBoundingClientRect();
+  const aboveEdge = liftAboveEl?.getBoundingClientRect().top ?? triggerRect.top;
+  const topBound = getPopupTopBound(menuEl, margin);
+  const bottomBound = window.innerHeight - margin;
+  const spaceAbove = Math.max(0, aboveEdge - gap - topBound);
+  const spaceBelow = Math.max(0, bottomBound - triggerRect.bottom - gap);
+
+  anchorEl.style.top = 'auto';
+  anchorEl.style.bottom = `${Math.round(hostRect.bottom - aboveEdge + gap)}px`;
+  menuEl.style.maxHeight = '';
+
+  if (menuEl.getBoundingClientRect().top < topBound && spaceBelow > spaceAbove) {
+    anchorEl.style.bottom = 'auto';
+    anchorEl.style.top = `${Math.round(triggerRect.bottom - hostRect.top + gap)}px`;
+    return spaceBelow;
+  }
+
+  return spaceAbove;
+}
+
+/**
  * Adjust an absolutely positioned popup so it stays within the viewport.
  *
  * Resets any prior inline shifts before measuring, then applies horizontal

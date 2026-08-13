@@ -185,7 +185,9 @@ describe('model capability helpers', () => {
         map: {
           id: 'map',
           name: 'Map',
-          capabilities: { input: { text: true, audio: true, image: false, video: false, pdf: false } },
+          capabilities: {
+            input: { text: true, audio: true, image: false, video: false, pdf: false },
+          },
           cost: { input: 0, output: 0 },
         },
       }),

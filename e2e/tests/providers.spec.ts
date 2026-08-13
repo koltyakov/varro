@@ -65,8 +65,8 @@ test('opens manage models from the picker and filters the settings catalog', asy
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
   await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
-  await expect(page.getByText('Manage Models', { exact: true })).toBeVisible();
-  await page.getByText('Manage Models', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Manage models', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Manage models', exact: true }).click();
 
   await expect(page.getByText('Models', { exact: true })).toBeVisible();
   const filter = page.getByLabel('Filter providers or models');

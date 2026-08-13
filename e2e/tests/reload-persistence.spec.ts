@@ -11,7 +11,7 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
   await expect(page.getByTitle('Select agent')).toContainText('Plan');
 
   await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
-  await page.getByRole('button', { name: 'GLM 5.1' }).click();
+  await page.getByRole('button', { name: 'GLM 5.1', exact: true }).click();
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
   await expect(page.getByTitle('Thinking level')).toContainText('Default');
 

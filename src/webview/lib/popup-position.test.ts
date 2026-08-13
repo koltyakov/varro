@@ -5,6 +5,7 @@ import {
   flipPopupDownIfNeeded,
   observePopupViewport,
   placeDropdownAnchor,
+  placeTriggerDropdownAnchor,
 } from './popup-position';
 
 const originalInnerWidth = window.innerWidth;
@@ -115,6 +116,54 @@ describe('popup-position', () => {
     expect(anchor.style.bottom).toBe('auto');
     expect(anchor.style.paddingTop).toBe('10px');
     expect(anchor.style.paddingBottom).toBe('0px');
+  });
+
+  it('flips a trigger dropdown below when an edit banner leaves no room above', () => {
+    window.innerHeight = 600;
+
+    const host = document.createElement('div');
+    mockRect(host, { top: 100, bottom: 220 });
+
+    const banner = document.createElement('div');
+    mockRect(banner, { top: 60, bottom: 84 });
+
+    const trigger = document.createElement('button');
+    mockRect(trigger, { top: 184, bottom: 208 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: -80, bottom: 54 });
+
+    const availableHeight = placeTriggerDropdownAnchor(anchor, menu, trigger, 6, 8, banner);
+
+    expect(anchor.style.top).toBe('114px');
+    expect(anchor.style.bottom).toBe('auto');
+    expect(availableHeight).toBe(378);
+  });
+
+  it('keeps a trigger dropdown above the edit banner when it fits', () => {
+    window.innerHeight = 600;
+
+    const host = document.createElement('div');
+    mockRect(host, { top: 400, bottom: 520 });
+
+    const banner = document.createElement('div');
+    mockRect(banner, { top: 360, bottom: 384 });
+
+    const trigger = document.createElement('button');
+    mockRect(trigger, { top: 484, bottom: 508 });
+
+    const anchor = document.createElement('div');
+    const menu = document.createElement('div');
+    mockOffsetParent(anchor, host);
+    mockRect(menu, { top: 180, bottom: 354 });
+
+    const availableHeight = placeTriggerDropdownAnchor(anchor, menu, trigger, 6, 8, banner);
+
+    expect(anchor.style.top).toBe('auto');
+    expect(anchor.style.bottom).toBe('166px');
+    expect(availableHeight).toBe(346);
   });
 
   it('keeps upward popups in place when they are not clipped', () => {
