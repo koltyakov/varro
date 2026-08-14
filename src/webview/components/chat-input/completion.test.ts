@@ -168,6 +168,15 @@ describe('getActiveCompletion', () => {
     });
   });
 
+  it('opens session completions for a bare ampersand', () => {
+    expect(getActiveCompletion('run both commands &', 19)).toEqual({
+      type: 'session',
+      query: '',
+      start: 18,
+      end: 19,
+    });
+  });
+
   it('rejects cursor positions outside the input bounds', () => {
     expect(getActiveCompletion('abc', -1)).toBeNull();
     expect(getActiveCompletion('abc', 4)).toBeNull();

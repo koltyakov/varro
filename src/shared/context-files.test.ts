@@ -182,6 +182,11 @@ describe('context file helpers', () => {
     expect(parseSelectionReference('[Selection from src/a.ts lines ]')).toBeNull();
     expect(parseSelectionReference('Selection from src/a.ts lines 3-4]')).toBeNull();
     expect(parseSelectionReference('[Selection from src/a.ts lines two-4]')).toBeNull();
+    expect(parseSelectionReference('[Selection from src/a.ts lines 3-4, bad]')).toBeNull();
+    expect(parseSelectionReference('[Selection from src/a.ts lines 0]')).toBeNull();
+    expect(
+      parseSelectionReference('[Selection from src/a.ts lines 999999999999999999999999999]')
+    ).toBeNull();
     expect(parseSelectionReference('[Selection from terminal zsh lines 3-4]')).toBeNull();
   });
 

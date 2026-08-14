@@ -146,20 +146,25 @@ export function parseSelectionReference(text: string) {
   const match = text.match(/^\[Selection from (.+?) lines (.+)\]$/);
   if (!match || match[1]!.startsWith('terminal ')) return null;
 
-  const lineRanges = normalizeContextLineRanges(
-    match[2]!
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const rangeMatch = part.match(/^(\d+)(?:-(\d+))?$/);
-        if (!rangeMatch) return null;
-        const startLine = parseInt(rangeMatch[1]!, 10);
-        const endLine = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : startLine;
-        return { startLine, endLine };
-      })
-      .filter((range): range is ContextLineRange => range !== null)
-  );
+  const parts = match[2]!.split(',').map((part) => part.trim());
+  if (parts.some((part) => !part)) return null;
+  const parsedRanges: ContextLineRange[] = [];
+  for (const part of parts) {
+    const rangeMatch = part.match(/^(\d+)(?:-(\d+))?$/);
+    if (!rangeMatch) return null;
+    const startLine = Number(rangeMatch[1]);
+    const endLine = rangeMatch[2] ? Number(rangeMatch[2]) : startLine;
+    if (
+      !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(endLine) ||
+      startLine < 1 ||
+      endLine < 1
+    ) {
+      return null;
+    }
+    parsedRanges.push({ startLine, endLine });
+  }
+  const lineRanges = normalizeContextLineRanges(parsedRanges);
 
   if (lineRanges.length === 0) return null;
   return { path: match[1], lineRanges };

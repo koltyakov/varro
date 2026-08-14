@@ -15,7 +15,7 @@ Varro builds on OpenCode instead of replacing it. Your local OpenCode configurat
 ## Why Varro
 
 - **Built for the whole agent loop.** Prompts, streaming output, reasoning, tool activity, permissions, questions, todos, plans, and changed files stay in one readable flow.
-- **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, and `@` mentions can be added explicitly.
+- **Project context without busywork.** The active file and selection can follow the conversation automatically, while Explorer items, terminal output, files, folders, images, PDFs, `@` mentions, and `&` session references can be added explicitly.
 - **Parallel work that stays understandable.** Workspace sessions clearly identify running, attention-needed, failed, completed, and plan-ready work. Notifications and the status bar keep background sessions visible.
 - **OpenCode controls at the point of work.** Agents, models, reasoning variants, permission modes, provider connections, and per-session MCP connections are available inside the workbench.
 - **Commit messages where you commit.** Generate a repository-aware message from staged changes in VS Code, without leaving Source Control or handing commit control to the model.
@@ -39,9 +39,10 @@ When the sidebar is hidden, Varro can notify you when a plan is ready, a top-lev
 - Files, folders, line ranges, and terminal output can be added with `Varro: Add to Context` or `Cmd+Shift+K` / `Ctrl+Shift+K`.
 - Files and folders can be dragged into the composer, and images can be pasted directly.
 - Typing `@` searches workspace files and available agents.
+- Typing `&` searches recent root sessions and inserts a navigable session reference.
 - While a session is running, you can queue a follow-up, steer the current run, or stop and replace the prompt.
-- Composer undo and redo include file and image attachment changes.
-- Unsent composer text is restored after webview or window reloads.
+- Composer undo and redo include file, image, and PDF attachment changes.
+- Unsent composer text and explicit file or folder attachments are restored after webview or window reloads.
 
 ## Usage And Limits
 
@@ -53,7 +54,7 @@ Provider-limit status is shown when OpenCode metadata or a supported provider en
 
 ## Models And MCPs
 
-The model picker loads providers and models from OpenCode. It shows known capabilities such as tool support, reasoning variants, vision support, and context-window size. Providers and individual models can be hidden from the picker without changing the underlying OpenCode configuration.
+The model picker loads providers and models from OpenCode. It shows known capabilities such as tool support, reasoning variants, vision and PDF support, and context-window size. Providers and individual models can be hidden from the picker, frequently used models can be pinned, and models can have local display names without changing their OpenCode IDs or configuration.
 
 The Models view can connect and disconnect provider credentials through OpenCode using available API-key or OAuth methods. If a provider rejects an expired or revoked credential, Varro offers targeted reauthentication from the failed response and the Models view. Terminal-based OpenCode setup remains available as a fallback.
 
@@ -75,6 +76,7 @@ Generation never includes unstaged changes, stages files, or commits automatical
 - Open a completed plan as a Markdown document or continue it in an implementation session
 - Run plan-driven Ralph loops with iteration, verification, repair, pause, and resume controls; Ralph runs use `Full access`
 - Use built-in and custom slash commands such as `/review`, `/compact`, `/export`, `/stats`, `/skills`, `/diagnostics`, `/fork`, and `/ralph`
+- Navigate conversation turns from the transcript rail and open rendered Mermaid diagrams in an expanded preview
 - Reconnect to resumable sessions after a VS Code reload
 
 ## Quick Start

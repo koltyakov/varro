@@ -733,6 +733,56 @@ describe('SidebarProvider provider refresh', () => {
     await provider.dispose();
   });
 
+  it('preserves a newer file change while a managed restart is in flight', async () => {
+    vi.useFakeTimers();
+    let content = 'initial';
+    let resolveFirstRestart!: (url: string) => void;
+    providerFileSystem.stat.mockImplementation(async () => ({
+      ino: 1,
+      isFile: () => true,
+      mtimeMs: 1,
+      size: content.length,
+    }));
+    providerFileSystem.readFile.mockImplementation(async () => Buffer.from(content));
+    const server = createServer({
+      restart: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<string>((resolve) => {
+              resolveFirstRestart = resolve;
+            })
+        )
+        .mockResolvedValue('http://127.0.0.1:4096'),
+      request: vi.fn(async (_method: string, path: string) =>
+        path === '/session/status' ? {} : []
+      ),
+      readServerInfo: vi.fn(async () => ({ managedProcess: true })),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    const access = provider as unknown as ProviderRefreshAccess;
+    access.startProviderFileObservation();
+    await vi.advanceTimersByTimeAsync(0);
+    const configWatcher = vscodeMock.workspace.createFileSystemWatcher.mock.results[0]?.value as
+      | { onDidChange: ReturnType<typeof vi.fn> }
+      | undefined;
+
+    content = 'first';
+    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.restart).toHaveBeenCalledOnce();
+
+    content = 'second';
+    configWatcher?.onDidChange.mock.calls[0]?.[0]();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.restart).toHaveBeenCalledOnce();
+
+    resolveFirstRestart('http://127.0.0.1:4096');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.restart).toHaveBeenCalledTimes(2);
+    await provider.dispose();
+  });
+
   it('does not continue toward a restart after disposal during an ownership check', async () => {
     let resolveOwnership!: (value: { managedProcess: boolean }) => void;
     const ownership = new Promise<{ managedProcess: boolean }>((resolve) => {

@@ -4888,10 +4888,18 @@ describe('MessageList empty state', () => {
     cleanup = render(() => MessageList(), container!);
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
-    expect(container?.querySelector('.chat-empty-logo')).toBeInstanceOf(HTMLImageElement);
+    const logo = container?.querySelector<HTMLImageElement>('.chat-empty-logo');
+    expect(logo).toBeInstanceOf(HTMLImageElement);
+    expect(logo?.width).toBe(256);
+    expect(logo?.height).toBe(256);
     const hints = container?.querySelectorAll('.chat-empty-hint');
-    expect(hints?.length).toBe(3);
-    expect(container?.querySelector('.chat-empty-hints')?.textContent).toContain('add files');
+    expect(hints).toHaveLength(4);
+    expect([...hints!].map((hint) => hint.textContent)).toEqual([
+      '@ add files and agents',
+      '/ run commands',
+      '& link sessions',
+      'ShiftEnter new line',
+    ]);
   });
 
   it('omits the logo image when no logo URI is available but keeps the hints', () => {
@@ -4912,7 +4920,7 @@ describe('MessageList empty state', () => {
 
     expect(container?.querySelector('.chat-empty-state')).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('.chat-empty-logo')).toBeNull();
-    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(3);
+    expect(container?.querySelectorAll('.chat-empty-hint')).toHaveLength(4);
   });
 
   it('does not show the starter logo while switching to an existing chat with no loaded messages yet', () => {

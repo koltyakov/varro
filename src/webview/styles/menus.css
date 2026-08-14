@@ -130,7 +130,7 @@
 }
 
 .model-capability-tag-vision {
-  color: color-mix(in srgb, var(--color-vscode-muted) 84%, var(--color-vscode-accent));
+  color: color-mix(in srgb, var(--vscode-charts-green, #73c991) 58%, var(--color-vscode-fg));
 }
 
 .model-capability-tag-pdf {
@@ -138,11 +138,11 @@
 }
 
 .model-capability-tag-audio {
-  color: color-mix(in srgb, var(--color-vscode-muted) 84%, var(--vscode-charts-purple, #b180d7));
+  color: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 58%, var(--color-vscode-fg));
 }
 
 .model-capability-tag-video {
-  color: color-mix(in srgb, var(--color-vscode-muted) 84%, var(--vscode-charts-blue, #75beff));
+  color: color-mix(in srgb, var(--vscode-charts-blue, #75beff) 58%, var(--color-vscode-fg));
 }
 
 .mcp-status-tag.status-connected {

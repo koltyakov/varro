@@ -6036,6 +6036,8 @@ export function MessageList() {
                         <img
                           class="chat-empty-logo"
                           src={state.emptyStateLogoUri}
+                          width="256"
+                          height="256"
                           alt=""
                           aria-hidden="true"
                           draggable="false"
@@ -6047,6 +6049,9 @@ export function MessageList() {
                         </span>
                         <span class="chat-empty-hint">
                           <kbd>/</kbd> run commands
+                        </span>
+                        <span class="chat-empty-hint">
+                          <kbd>&amp;</kbd> link sessions
                         </span>
                         <span class="chat-empty-hint">
                           <kbd>Shift</kbd>

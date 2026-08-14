@@ -445,6 +445,7 @@ describe('MessagePart', () => {
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
     expect(trigger?.getAttribute('aria-label')).toBe('Open image preview: images/chart.png');
+    expect(trigger?.hasAttribute('title')).toBe(false);
 
     trigger?.click();
 

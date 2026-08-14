@@ -205,6 +205,7 @@ It also exposes the Varro extension-host API namespace, `/varro/*`:
 - `GET /varro/workspace-file/pick`
 - `GET /varro/workspace-path/resolve`
 - `POST /varro/permission/judge`
+- `GET /varro/permission/judge/model`
 - `GET /varro/session/:sessionID/diff-summary`
 - `POST /varro/session/:sessionID/pin`
 - `POST /varro/session/:sessionID/rename-if-untitled`
@@ -236,6 +237,8 @@ Drag and drop also has a fallback path for environments that do not expose local
 - Generate a commit message from staged changes
 - Add Explorer files, editor selections, or terminal selections to context
 
+The selection-oriented `varro.chat.explainSelection`, `varro.chat.reviewSelection`, and `varro.chat.improveSelection` handlers are registered for programmatic use but are not contributed to the Command Palette or editor menus.
+
 ## Webview Responsibilities
 
 ### State And Connection
@@ -245,13 +248,13 @@ Drag and drop also has a fallback path for environments that do not expose local
 - Sessions and active session
 - Messages, tool parts, todos, diffs, permissions, and questions
 - Selected model, agent, reasoning variant, and MCP set
-- Dropped files, pasted images, and terminal selection
-- Workspace-scoped permission mode preferences and model visibility preferences
+- Dropped files, pasted images, native PDFs, terminal selection, and attached diagnostics
+- Workspace-scoped permission mode preferences plus model visibility, pin, and local display-name preferences
 - Current-document context toggles and skipped plan-session markers
 - Pending attention session IDs and interrupted session IDs from the extension host
 - Queued messages and the unsent composer text draft
 
-Browser preferences and drafts use `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Queued-message snapshots are stored separately in extension-host workspace state so attachment data survives webview and window reloads.
+Browser preferences, composer text, and explicit file or folder draft attachments use `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Queued-message snapshots are stored separately in extension-host workspace state so file, image, PDF, terminal, and diagnostic attachment data survives webview and window reloads.
 
 `src/webview/hooks/useOpenCode.ts` is the stable public API. Runtime composition lives in `src/webview/hooks/runtime/open-code-runtime-instance.ts`, with focused operations and effects under `src/webview/hooks/session/`.
 
@@ -289,8 +292,8 @@ When sending a prompt, the webview builds message parts in roughly this order:
 2. `[Working directory: ...]`
 3. Active file or active selection reference, when current-document context is enabled for the session
 4. Terminal selection block
-5. Explicitly attached files and folders
-6. Clipboard images for vision-capable models
+5. Explicitly attached diagnostics
+6. Explicit files and folders, clipboard images, and native PDFs in their attachment order, subject to model capabilities; unsupported path-backed PDFs use text references
 
 ## Session Behavior
 
@@ -418,6 +421,7 @@ docs/
 | `npm run test` | Run the Vitest suite |
 | `npm run test:e2e` | Run the Playwright webview E2E suite |
 | `npm run test:vscode-sandbox` | Run onboarding scenarios in disposable VS Code Extension Hosts |
+| `npm run ai:vscode` | Build and launch the persistent Extension Development Host used by the [AI/fuzzy verification guide](ai-fuzzy-verification.md) |
 | `npm run test:coverage` | Run tests with coverage output |
 | `npm run test:compatibility` | Test the declared OpenCode compatibility range with Docker |
 | `npm run compatibility:discover` | Probe selected published OpenCode versions with Docker |

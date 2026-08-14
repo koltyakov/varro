@@ -716,7 +716,6 @@ function UserImageCarousel(props: {
                   type="button"
                   class="chat-image-preview-trigger message-image-carousel-preview-trigger"
                   aria-label={`Open image preview: ${currentDisplayName()}`}
-                  title="Open image preview"
                   onClick={() => props.onOpenPreview(props.activeIndex)}
                 >
                   <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
@@ -1018,7 +1017,6 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
         type="button"
         class="chat-image-preview-trigger"
         aria-label={`Open image preview: ${displayName()}`}
-        title="Open image preview"
         onClick={props.onOpenPreview}
       >
         <img src={props.part.url} alt={displayName()} class="chat-image-img" />

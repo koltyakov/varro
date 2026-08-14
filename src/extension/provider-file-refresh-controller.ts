@@ -66,6 +66,7 @@ export class ProviderFileRefreshController {
   private authRevalidationPending = false;
   private pendingStatusPosted = false;
   private invalidationInFlight = false;
+  private pendingRevision = 0;
   private unmanagedServerSynchronized = false;
   private disposed = false;
   private readonly handleServerStatus = (status: ServerStatus) => {
@@ -89,6 +90,7 @@ export class ProviderFileRefreshController {
     );
     if (isPersistedPendingState(pendingState)) {
       this.pendingScope = pendingState.version === 1 ? 'global' : pendingState.scope;
+      this.pendingRevision = 1;
       this.authRevalidationPending = pendingState.revalidateAuth;
       this.pendingAuthOnlyInvalidation =
         pendingState.version === 3
@@ -333,7 +335,12 @@ export class ProviderFileRefreshController {
     managedProcessConfirmed = false
   ) {
     const pendingScope = this.pendingScope;
-    if (this.disposed || generation !== this.refreshGeneration || !pendingScope) {
+    if (
+      this.disposed ||
+      generation !== this.refreshGeneration ||
+      !pendingScope ||
+      this.invalidationInFlight
+    ) {
       return;
     }
     if (this.dependencies.server.status.state === 'starting') {
@@ -387,6 +394,7 @@ export class ProviderFileRefreshController {
       return;
     }
 
+    const pendingRevision = this.pendingRevision;
     this.invalidationInFlight = true;
     try {
       if (pendingScope === 'workspace') {
@@ -397,16 +405,14 @@ export class ProviderFileRefreshController {
         await this.dependencies.server.request('POST', '/global/dispose');
         this.unmanagedServerSynchronized = true;
       }
-      // The invalidation happened, so the pending flag must clear even when the
-      // generation moved on (e.g. the webview toggled watching while the server
-      // was refreshing); a signature change during the refresh is still caught
-      // by the next activation's signature comparison.
-      this.pendingScope = null;
-      this.pendingAuthOnlyInvalidation = false;
-      await this.clearPersistedPendingState();
-      if (!this.disposed && this.pendingStatusPosted) {
-        this.pendingStatusPosted = false;
-        this.dependencies.postPendingStatus(false);
+      if (pendingRevision === this.pendingRevision) {
+        this.pendingScope = null;
+        this.pendingAuthOnlyInvalidation = false;
+        await this.clearPersistedPendingState();
+        if (!this.disposed && this.pendingStatusPosted) {
+          this.pendingStatusPosted = false;
+          this.dependencies.postPendingStatus(false);
+        }
       }
       if (this.disposed || generation !== this.refreshGeneration) return;
       const revalidateAuth = this.authRevalidationPending;
@@ -421,6 +427,9 @@ export class ProviderFileRefreshController {
       this.scheduleRestartRetry(generation, retryCount, true, managedProcessConfirmed);
     } finally {
       this.invalidationInFlight = false;
+      if (!this.disposed && this.pendingScope) {
+        void this.maybeRestart(this.refreshGeneration, 0);
+      }
     }
   }
 
@@ -493,6 +502,7 @@ export class ProviderFileRefreshController {
   }
 
   private async markRefreshPending(scope: PendingRefreshScope) {
+    this.pendingRevision += 1;
     if (!this.pendingScope || scope === 'global') {
       this.pendingScope = scope;
     }

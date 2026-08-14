@@ -2006,6 +2006,7 @@ describe('Message assistant final answer rendering', () => {
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
+    expect(trigger?.hasAttribute('title')).toBe(false);
 
     trigger?.click();
 
@@ -2045,6 +2046,7 @@ describe('Message assistant final answer rendering', () => {
     const trigger = container?.querySelector<HTMLButtonElement>(
       '.message-image-carousel-preview-trigger'
     );
+    expect(trigger?.hasAttribute('title')).toBe(false);
     trigger?.click();
 
     const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');

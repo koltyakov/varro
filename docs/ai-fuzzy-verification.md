@@ -95,8 +95,9 @@ what was omitted.
    CSS pixels high. Record window size, zoom, sidebar side, panel visibility, theme, and font scaling.
 5. Use a new Varro session titled `VFZ <seed>` unless the scenario requires reopening a prepared long
    session.
-6. Start a screen recording before `AI-01`. Take a screenshot immediately when a suspected failure
-   occurs and again after settling.
+6. Observe the complete run directly in the tracked Extension Development Host. Record the scenario,
+   step, marker, and preceding actions immediately when a suspected failure occurs and again after
+   settling. Screenshots are optional supporting evidence, not pass preconditions.
 7. Keep DevTools closed for the first pass because docking changes webview dimensions. Use it only for
    diagnosis or metric capture, and record that the run became instrumented.
 
@@ -125,8 +126,8 @@ this order:
    **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
    like to enable/approve editor automation, perform the listed native actions while I record results,
    or stop and record the AI test as failed?"**
-5. If credentials, GPT Luna, required prepared history, screen recording, or another precondition needs
-   user action, ask one concrete question describing the missing prerequisite and the available choices.
+5. If credentials, GPT Luna, required prepared history, or another precondition needs user action, ask
+   one concrete question describing the missing prerequisite and the available choices.
 6. If the user stops, declines, or the problem remains unresolved, mark affected scenarios `BLOCKED`
    and the overall AI test `FAIL`. Preserve diagnostics and the recovery attempts in the ledger.
 
@@ -307,9 +308,9 @@ Precondition: a prepared session with more than 200 messages. The target Extensi
 has just started, and this session has not been opened in that host run.
 
 1. Open the session and wait at the latest message without scrolling upward.
-2. Start recording, then use only desktop pixel-wheel events between 32 and 96 pixels upward. OS mouse
-   automation or CDP mouse-wheel dispatch to the exact Varro webview is valid; touch events and direct
-   scroll-position mutation are not.
+2. Begin direct observation, then use only desktop pixel-wheel events between 32 and 96 pixels upward.
+   OS mouse automation or CDP mouse-wheel dispatch to the exact Varro webview is valid; touch events and
+   direct scroll-position mutation are not.
 3. At each history boundary, keep one marked row under observation through loading and insertion.
 4. Continue through every boundary until the real first prompt and history-start state are visible.
 5. Scroll down one viewport, close the session, reopen it, and repeat the first boundary with the same
@@ -427,8 +428,8 @@ Treat any of the following as a failure even if the final screen settles correct
 - The webview freezes for more than two seconds during ordinary input, excluding a known model or
   network wait that leaves the UI responsive.
 
-A visual suspicion is not yet a root cause. Preserve the video timestamp, marker, preceding actions,
-and layout. Then replay before editing production code.
+A visual suspicion is not yet a root cause. Preserve the observation time, marker, preceding actions,
+and layout. Capture a screenshot when available, then replay before editing production code.
 
 ## Run Ledger
 
@@ -451,7 +452,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Window and webview dimensions:
 - Zoom, theme, sidebar side, panel state:
 - Session title/ID and prepared turn count:
-- Screen recording:
+- Observation method and optional screenshots:
 
 ## Preflight
 
@@ -473,7 +474,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Actual:
 - Minimal replay actions:
 - Reproduction rate:
-- Screenshot/video timestamp:
+- Observation time and optional screenshot path:
 - Related deterministic test:
 - Suspected owner, not assumed root cause:
 
@@ -500,7 +501,7 @@ Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the
 6. Prove the new deterministic test fails against unchanged production code for the same reason.
 7. Fix the invalid state or ownership handoff, rerun the deterministic regression, then rerun the
    original real-editor seed end to end.
-8. Link the ledger and deterministic test in the final report. Do not commit ignored recordings or
+8. Link the ledger and deterministic test in the final report. Do not commit ignored captures or
    credentials.
 
 Likely deterministic homes include:

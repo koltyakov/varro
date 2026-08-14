@@ -1856,6 +1856,29 @@ describe('ChatInput', () => {
     }
   );
 
+  it('sends a prompt ending in a bare ampersand on Enter', async () => {
+    setState('sessions', [session('session-auth', 2_000, { title: 'Investigate authentication' })]);
+    setInputText('Run both commands &');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 'Run both commands &'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: '&', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledWith('Run both commands &', { noReply: false });
+  });
+
   it('resolves pasted session markers to titled links', async () => {
     const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
     vi.mocked(client.session.get).mockResolvedValue(result);

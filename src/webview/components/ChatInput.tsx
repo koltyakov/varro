@@ -1455,7 +1455,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      if (showingCompletions) {
+      const completion = activeCompletion();
+      const shouldSendBareSessionCompletion =
+        completion?.type === 'session' && completion.query.length === 0;
+      if (showingCompletions && !shouldSendBareSessionCompletion) {
         e.preventDefault();
         void applyActiveCompletion(true);
         return;

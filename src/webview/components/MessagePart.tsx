@@ -367,7 +367,6 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
             type="button"
             class="chat-image-preview-trigger"
             aria-label={`Open image preview: ${displayName()}`}
-            title="Open image preview"
             onClick={openPreview}
           >
             <img src={props.part.url} alt={displayName()} class="chat-image-img" />

@@ -78,8 +78,9 @@ Use any of these flows to add more context.
 - Paste an image or PDF into the composer.
 - Type `@path/to/file` to search workspace files.
 - Type `@agent-name` to mention an available agent.
+- Type `&` to search recent root sessions and insert a stable `session:<id>` reference. Session references in the composer and rendered responses open the referenced session.
 
-Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. A PDF remains visible but is not sent when the selected model does not advertise PDF input support. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. When the selected model does not advertise PDF input support, a picked or dropped PDF with an available file path is sent as a file reference instead of native PDF data. A pasted PDF without an available path remains visible but is not sent. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
 
 ## Composer Behavior
 
@@ -89,12 +90,12 @@ Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. 
 - While a session is running, `Ctrl+Enter` or `Cmd+Enter` sends a steering message with `noReply` enabled.
 - While a session is running, the send menu also exposes `Add to Queue`, `Steer with Message`, and `Stop and Send`.
 - `ArrowUp` and `ArrowDown` can step through previous user prompts when the composer is empty.
-- `Cmd+Z` / `Ctrl+Z` undoes the last composer edit, including pasted text and attachment changes (context files and pasted images). `Cmd+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y` redoes it.
+- `Cmd+Z` / `Ctrl+Z` undoes the last composer edit, including pasted text and file, image, or PDF attachment changes. `Cmd+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y` redoes it.
 - `Escape` closes any open composer popup or cancels message editing; otherwise, it returns to the session list without stopping a running session.
-- `Tab` accepts the highlighted slash-command or mention completion.
+- `Tab` accepts the highlighted slash-command, mention, or session completion.
 - Slash commands are available directly in the composer.
 
-Unsent composer text is restored after webview or window reloads. This draft persistence covers text only; file, image, terminal, and diagnostic attachments are persisted when they are queued, not as part of an ordinary unsent draft.
+Unsent composer text and explicit file or folder attachments are restored after webview or window reloads. Images, PDFs, terminal selections, and diagnostic attachments are persisted when they are queued, not as part of an ordinary unsent draft.
 
 ### Queued Messages
 
@@ -103,7 +104,7 @@ Queued messages belong to the session where they were created and dispatch from 
 - Drag the handle, or focus it and press `ArrowUp` or `ArrowDown`, to reorder messages within the same session.
 - Pause or resume an individual message. `Option`/`Alt`-click applies the same action to every queued message for that session.
 - Send a queued message immediately as a steering message, retry a failed send, edit it when the composer is clear, or remove it.
-- Text, selected agent, files, diagnostics, terminal selections, and pasted images are persisted in VS Code workspace state across window and webview reloads. Image data stays in extension-host persistence instead of synchronous webview storage.
+- Text, selected agent, files, diagnostics, terminal selections, pasted images, and native PDFs are persisted in VS Code workspace state across window and webview reloads. Binary attachment data stays in extension-host persistence instead of synchronous webview storage.
 - Successfully dispatched and explicitly removed messages leave the queue. Failed messages remain available for retry.
 
 Current built-in slash commands include:
@@ -151,6 +152,7 @@ Sessions are filtered to the current workspace directory. The default list is sp
 - Stop the active run with `Varro: Abort Session`.
 - Use `/export` to open the current session as JSON in the editor.
 - Changed-file rows open the selected session's before/after snapshot in VS Code's native diff editor when OpenCode provides both sides, with the working-tree Git diff as a fallback.
+- Use the conversation-turn rail beside the transcript to jump between user prompts. If the target turn is outside the loaded message window, Varro loads older history before navigating to it.
 
 Opening a session fetches the newest 200 messages. Scrolling to the top automatically prepends the next 200-message page while preserving the visible position. If an earlier page fails to load, the history boundary changes into a `Retry` action.
 
@@ -183,6 +185,7 @@ Varro loads agents, models, and MCP tools from your local OpenCode configuration
 - Open the MCP picker to connect or disconnect session MCPs.
 - MCP servers that require OAuth open an authorization flow with code entry and saved-credential recovery. Servers that require a pre-registered OAuth client show configuration guidance instead of starting an unsupported flow.
 - Open the model picker footer to hide or show providers and individual models.
+- Pin frequently used models to a dedicated group in the picker, or assign a local display name from the Models view. These preferences do not change the OpenCode provider/model ID.
 - Use the add and remove actions in the Models view to connect or disconnect provider credentials. Option/Alt-click either action to use OpenCode's terminal manager instead.
 - In the model settings view, right-click a model to assign it to project `small_model`, an available sub-agent, commit-message generation, or the auto-approve judge. Project and agent assignments update the project OpenCode configuration after checking for unsaved or concurrent changes. Commit-message and auto-approve assignments update their VS Code user settings instead.
 
@@ -371,12 +374,16 @@ Varro renders OpenCode output as structured UI instead of plain text only.
 - Complete inline file-edit previews when `varro.chat.showInlineFileChanges` is enabled; filenames in the previews open the corresponding file
 - Session summaries with changed-file counts and line additions/deletions
 - Context compaction markers when OpenCode summarizes a session
+- Mermaid diagrams from completed `mermaid` code fences, with source fallback, copy, and expanded-preview controls
+- Navigable `session:<id>` references in assistant output
 - Usage-limit banners when a run is retrying against provider limits
 - A transport banner when the OpenCode event stream is reconnecting and live updates may lag temporarily
 - A slow-request banner when an OpenCode request has been waiting for more than 15 seconds
 - A jump-to-latest button when you scroll away from the bottom of the chat; clicking it returns to the newest message and re-enables auto-follow
 
 Hold `Alt` or `Option` while viewing a sufficiently long final answer to reveal its read-mode action. Read mode opens the rendered answer in a focused dialog; close it with `Escape`, the close button, or a click outside the content.
+
+Editable user messages expose an edit action. Sending the replacement removes that user message and the later conversation history before resending, but it does not restore files changed in the workspace. Use session `/undo` or `/revert` when you need OpenCode's revert workflow instead.
 
 ## VS Code Commands And Keybindings
 

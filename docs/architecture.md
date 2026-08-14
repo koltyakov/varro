@@ -113,6 +113,7 @@ It also exposes the Varro extension-host API namespace, `/varro/*`.
 - `GET /varro/workspace-file/pick`
 - `GET /varro/workspace-path/resolve`
 - `POST /varro/permission/judge`
+- `GET /varro/permission/judge/model`
 - `GET /varro/session/:sessionID/diff-summary`
 - `POST /varro/session/:sessionID/pin`
 - `POST /varro/session/:sessionID/rename-if-untitled`
@@ -203,15 +204,17 @@ It stores:
 - selected agent/model/variant
 - selected MCPs per session
 - hidden providers and models
+- pinned models and local model display names
 - provider authentication methods and reconnect state
 - permission modes
 - current-document context toggles
+- explicit files, pasted images, native PDFs, terminal selections, and attached diagnostics
 - failed-session and usage-limit state
 - skipped plan-session markers
 - queued follow-up messages
 - the unsent composer text draft
 
-Browser preferences and drafts are persisted through `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. The authoritative queued-message snapshot, including attachment data, is stored separately in extension-host workspace state.
+Browser preferences, composer text, and explicit file or folder draft attachments are persisted through `BrowserPersistence`, which reads VS Code webview state first and mirrors values to `localStorage`. Pinned models and display names are local UI preferences and do not modify OpenCode model IDs. The authoritative queued-message snapshot, including image, PDF, terminal, diagnostic, and file attachment data, is stored separately in extension-host workspace state.
 
 Ralph loop state is owned by the extension host (`src/extension/ralph-host.ts`, persisted in the workspace Memento). `src/webview/lib/stores/ralph-store.ts` is a render mirror fed by `ralph/state` broadcasts, with optimistic local updates for immediate dashboard feedback.
 
@@ -242,7 +245,9 @@ Key components:
 - `src/webview/components/ChatInput.tsx`: composer, slash commands, attachments, model/agent/MCP pickers, queueing, send modes, and the `/ralph` launcher
 - `src/webview/components/MessageList.tsx`: chat transcript and loading state
 - `src/webview/components/message-list/MessageRows.tsx` and `VirtualizedContent.tsx`: row rendering and virtualization
+- `src/webview/components/message-list/MessageListChrome.tsx`: sticky prompt chrome and conversation-turn navigation
 - `src/webview/components/Message.tsx` and `MessagePart.tsx`: assistant/user message and tool-part rendering
+- `src/webview/components/MarkdownRenderer.tsx`: sanitized Markdown, file and session links, syntax highlighting, and Mermaid rendering
 - `src/webview/components/PermissionPrompt.tsx`: inline approval UI
 - `src/webview/components/ToolCall.tsx`, `src/webview/lib/assistant-activity.ts`, and
   `src/webview/components/message-list/assistant-dialog.ts`: tool-state presentation, activity
@@ -317,8 +322,8 @@ Typical part sequence:
 2. working directory marker
 3. active file or active selection marker, if current-document context is enabled for the session
 4. terminal selection block
-5. explicit context files and folders
-6. pasted image files when the model supports vision
+5. explicitly attached diagnostics
+6. explicit context files and folders, pasted images, and native PDFs in attachment order; unsupported path-backed PDFs become text references, images require vision support, and native PDFs require PDF support
 
 This is where Varro turns live VS Code context into OpenCode-compatible prompt parts.
 
@@ -330,7 +335,7 @@ This is where Varro turns live VS Code context into OpenCode-compatible prompt p
 - `/varro/plan/open` normalizes a plan response, saves it into the local OpenCode plans directory, and opens the file in VS Code.
 - `/varro/opencode-config` and `/varro/opencode-config/model-routing` read and update Varro-managed OpenCode model routing.
 - `/varro/workspace-file`, `/varro/workspace-file/pick`, and `/varro/workspace-path/resolve` provide workspace-scoped file selection and path resolution.
-- `/varro/permission/judge` evaluates eligible automatic permission decisions in the extension host.
+- `/varro/permission/judge` evaluates eligible automatic permission decisions in the extension host, while `/varro/permission/judge/model` reports the model Varro resolves for that judge.
 - `/varro/session/:sessionID/*` handles diff summaries, pinning, conditional renaming, and deletion.
 - `/varro/session-trash` and its child paths expose the recycle-bin workflow managed by the extension host.
 
