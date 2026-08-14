@@ -289,6 +289,22 @@ describe('getCompletionSelection', () => {
     ).toEqual({ type: 'set-slash', value: '/init' });
   });
 
+  it('invokes an exact slash completion without a second confirmation', () => {
+    expect(
+      getCompletionSelection(
+        { type: 'slash', query: 'init', start: 0, end: 5 },
+        {
+          key: 'slash:init',
+          type: 'slash',
+          name: 'init',
+          aliases: [],
+          description: 'Analyze the project and create AGENTS.md',
+          action: () => {},
+        }
+      )
+    ).toEqual({ type: 'run-slash', value: '/init' });
+  });
+
   it('keeps selecting /skills as a composer text update', () => {
     expect(
       getCompletionSelection(

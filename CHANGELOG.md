@@ -5,16 +5,16 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 ## 0.24.x - August 2026
 
 - Streamlined assistant activity with compact summaries, clearer loading progress, expandable details, collapsed thinking blocks, and turn navigation markers.
-- Added Mermaid diagrams, session references, native PDF attachments, composer context breakdowns, and richer attachment and user-message previews.
-- Redesigned model discovery with provider prioritization, pinned models, custom display names, and improved picker positioning.
+- Added Mermaid diagrams, session references, native PDF attachments, composer context breakdowns, richer attachment and user-message previews, and automatic vision delegation for image-aware prompts.
+- Redesigned model discovery with provider prioritization, pinned models, custom display names, and responsive picker details and positioning.
 - Added session cost details and helper-model assignments for commit messages and automatic permission decisions.
-- Deferred provider and authentication refreshes until active work finishes, with visible pending status.
+- Deferred provider and authentication refreshes until active work finishes, with visible pending status and preserved provider changes across managed restarts.
 - Added in-workbench provider and MCP connection management with API-key and OAuth flows, terminal fallbacks, and targeted recovery from expired credentials.
 - Improved permissions with sequential progress, responsive actions, reliable tool matching and
   child-session inheritance, OpenCode-managed defaults, clearer request summaries, safer Git-backed
   local decisions, and preserved rejected commands in stopped turns.
 - Made message edits immediate and recoverable, and strengthened scrolling, history loading, sticky navigation, row sizing, and viewport preservation.
-- Improved session switching and deletion, first-run navigation, model discovery, markdown readability, and image-paste feedback.
+- Improved session switching and deletion, first-run navigation, exact slash-command completion, model discovery, markdown readability, and image-paste feedback.
 
 ## 0.23.x - July-August 2026
 

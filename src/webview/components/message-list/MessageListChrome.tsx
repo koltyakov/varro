@@ -89,7 +89,7 @@ export function StickyUserMessagePreviewCard(props: {
 
   return (
     <div class="latest-user-message-sticky-wrap" aria-hidden="true">
-      <div class="latest-user-message-sticky-overlay" data-msg-id={props.preview.id}>
+      <div class="latest-user-message-sticky-overlay" data-sticky-msg-id={props.preview.id}>
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
           <Show when={props.promptNumber}>

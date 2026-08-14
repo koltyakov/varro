@@ -130,8 +130,12 @@ export function getCompletionSelection(
     if (item.name === SKILLS_COMMAND_NAME) {
       return { type: 'set-slash', value: `/${SKILLS_COMMAND_NAME} ` };
     }
+    const normalizedQuery = completion.query.trim().toLowerCase();
+    const selectsExactCommand =
+      normalizedQuery === item.name.toLowerCase() ||
+      item.aliases.some((alias) => normalizedQuery === alias.toLowerCase());
     return {
-      type: confirm ? 'run-slash' : 'set-slash',
+      type: confirm || selectsExactCommand ? 'run-slash' : 'set-slash',
       value: `/${item.name}`,
     };
   }

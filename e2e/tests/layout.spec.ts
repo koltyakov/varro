@@ -2128,7 +2128,7 @@ test('sticky collision handoff does not blink across user message render variant
       );
 
       const initialOverlay = document.querySelector<HTMLElement>(
-        `.latest-user-message-sticky-overlay[data-msg-id="${targetId}"]`
+        `.latest-user-message-sticky-overlay[data-sticky-msg-id="${targetId}"]`
       );
       if (!initialOverlay) return { error: 'sticky missing' };
 
@@ -2148,7 +2148,7 @@ test('sticky collision handoff does not blink across user message render variant
         const currentSource = document.querySelector<HTMLElement>(selector);
         if (!currentSource) return { error: 'source unmounted' };
         const overlay = document.querySelector<HTMLElement>(
-          `.latest-user-message-sticky-overlay[data-msg-id="${targetId}"]`
+          `.latest-user-message-sticky-overlay[data-sticky-msg-id="${targetId}"]`
         );
         const sourceRect = currentSource.getBoundingClientRect();
         const isVisible = !!overlay;
