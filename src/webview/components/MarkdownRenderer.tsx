@@ -572,6 +572,7 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
 }
 
 function prependLinkIcon(anchor: HTMLAnchorElement, icon: SVGSVGElement) {
+  anchor.setAttribute('aria-label', anchor.textContent ?? '');
   const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
   let firstText = walker.nextNode();
   while (firstText instanceof Text && firstText.data.length === 0) firstText = walker.nextNode();

@@ -45,6 +45,7 @@ function assertInertWithSafeAnchor(root: ParentNode) {
 
   const anchor = root.querySelector<HTMLAnchorElement>('a');
   expect(anchor?.textContent).toBe('Safe docs');
+  expect(anchor?.getAttribute('aria-label')).toBe('Safe docs');
   expect(anchor?.getAttribute('href')).toBe('https://example.test/docs');
   expect(anchor?.getAttribute('data-external')).toBe('true');
 }

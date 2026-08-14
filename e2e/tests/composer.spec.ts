@@ -71,7 +71,7 @@ test('keeps URL boundaries editable in the composer', async ({ page }) => {
   await expect(url).toHaveText('https://iconoir.com');
   await expect(composer).toBeFocused();
 
-  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
   await page.keyboard.type('plain follow-up');
 
@@ -130,7 +130,7 @@ test('undoes deleted decorated composer text without duplication', async ({ page
     });
   await composer.press('Backspace');
   await expect(composer.locator('.composer-session-reference')).toHaveCount(1);
-  await composer.press('Meta+z');
+  await composer.press('ControlOrMeta+z');
 
   await expect(composer.locator('.composer-session-reference')).toHaveCount(2);
   await expect(composer.locator('.composer-external-link')).toHaveCount(1);
@@ -144,10 +144,10 @@ test('undoes select-all deletion without duplicating plain text', async ({ page 
   const composer = page.locator('.rich-composer').first();
   await composer.click();
   await page.keyboard.type('123');
-  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
   await expect(composer).toHaveText('');
-  await page.keyboard.press('Meta+z');
+  await page.keyboard.press('ControlOrMeta+z');
 
   await expect(composer).toHaveText('123');
   await expect
