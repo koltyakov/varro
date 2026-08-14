@@ -323,6 +323,12 @@
   width: 285px;
 }
 
+.model-picker-anchor.details-on-top {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
 .model-picker-search {
   padding: 0;
   background: var(--color-vscode-surface-raised);
@@ -590,7 +596,10 @@ body.vscode-high-contrast-light .model-picker-item.selected {
 }
 
 @media (max-width: 700px) {
-  .model-picker-details {
-    display: none;
+  .model-picker-details.top {
+    position: static;
+    order: -1;
+    left: auto;
+    width: 100%;
   }
 }

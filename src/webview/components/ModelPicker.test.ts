@@ -59,6 +59,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup?.();
   cleanup = undefined;
   container?.remove();
@@ -155,6 +156,42 @@ describe('ModelPicker', () => {
 
     row?.dispatchEvent(new MouseEvent('mouseleave'));
     expect(container?.querySelector('.model-picker-details')).toBeNull();
+  });
+
+  it('shows model details above the picker on narrow screens', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
+    setState('providers', [
+      createProvider('openai', 'OpenAI', {
+        detailed: createModel('detailed', 'GPT-5 Detailed', {
+          limit: { context: 400_000, output: 32_000 },
+          capabilities: { toolcall: true, reasoning: true, input: ['text', 'image'] },
+        }),
+      }),
+    ]);
+
+    cleanup = render(() => ModelPicker({ onSelect: vi.fn(), onClose: vi.fn() }), container!);
+    await flushMicrotasks();
+
+    container
+      ?.querySelector<HTMLElement>('.model-picker-row')
+      ?.dispatchEvent(new MouseEvent('mouseenter'));
+    await flushMicrotasks();
+
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
+    vi.advanceTimersByTime(2_999);
+    expect(container?.querySelector('.model-picker-details')).toBeNull();
+    vi.advanceTimersByTime(1);
+    await flushMicrotasks();
+
+    const anchor = container?.querySelector('.model-picker-anchor');
+    const details = container?.querySelector('.model-picker-details');
+    expect(anchor?.classList).toContain('details-on-top');
+    expect(details?.classList).toContain('top');
+    expect(details?.textContent).toContain('OpenAI');
+    expect(details?.compareDocumentPosition(container!.querySelector('.model-picker-menu')!)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING
+    );
   });
 
   it('orders models by release date without prioritizing the provider default', async () => {

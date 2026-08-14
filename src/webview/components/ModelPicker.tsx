@@ -21,6 +21,8 @@ interface ModelSelection {
 }
 
 const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage models" button when opening the model picker
+const STACKED_DETAILS_MAX_WIDTH = 700;
+const STACKED_DETAILS_HOVER_DELAY_MS = 3_000;
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
@@ -35,7 +37,10 @@ export function ModelPicker(props: {
   let anchorRef: HTMLDivElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let listRef: HTMLDivElement | undefined;
+  let detailsRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
+  let repositionPopup: (() => void) | undefined;
+  let detailsHoverTimer: ReturnType<typeof setTimeout> | undefined;
   const visibleProviders = createMemo(() =>
     getVisibleProviders(state.providers).toSorted(compareProviders)
   );
@@ -64,7 +69,7 @@ export function ModelPicker(props: {
     provider: VisibleProvider;
     model: VisibleProvider['models'][string];
   } | null>(null);
-  const [showDetails, setShowDetails] = createSignal(false);
+  const [detailsPlacement, setDetailsPlacement] = createSignal<'right' | 'top' | null>(null);
   const [scrollMetrics, setScrollMetrics] = createSignal({
     clientHeight: 0,
     scrollHeight: 0,
@@ -250,7 +255,8 @@ export function ModelPicker(props: {
         viewportMargin,
         editBanner
       );
-      const menuHeight = Math.min(360, availableHeight);
+      const detailsHeight = detailsPlacement() === 'top' ? (detailsRef?.offsetHeight ?? 0) + 7 : 0;
+      const menuHeight = Math.min(360, Math.max(0, availableHeight - detailsHeight));
       const searchHeight =
         menuRef.querySelector<HTMLElement>('.model-picker-search')?.offsetHeight ?? 0;
       const footerHeight =
@@ -259,6 +265,7 @@ export function ModelPicker(props: {
       if (listRef)
         listRef.style.maxHeight = `${Math.max(0, menuHeight - searchHeight - footerHeight)}px`;
     };
+    repositionPopup = reposition;
 
     searchInputRef?.focus();
 
@@ -268,6 +275,8 @@ export function ModelPicker(props: {
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollMetrics);
     if (listRef) listObserver?.observe(listRef);
     onCleanup(() => {
+      clearTimeout(detailsHoverTimer);
+      repositionPopup = undefined;
       stopObservingViewport();
       listObserver?.disconnect();
     });
@@ -307,7 +316,7 @@ export function ModelPicker(props: {
       ref={(el) => {
         anchorRef = el;
       }}
-      class="dropdown-anchor model-picker-anchor absolute z-50"
+      class={`dropdown-anchor model-picker-anchor absolute z-50 ${detailsPlacement() === 'top' ? 'details-on-top' : ''}`}
       onClick={props.onClose}
       style={{ bottom: '100%' }}
     >
@@ -406,6 +415,7 @@ export function ModelPicker(props: {
                             <div
                               class={`model-picker-row ${pinned() ? 'pinned' : ''}`}
                               onMouseEnter={(event) => {
+                                clearTimeout(detailsHoverTimer);
                                 setFocusIndex(myIndex());
                                 setHoveredEntry({ provider, model });
                                 if (!anchorRef || !menuRef) return;
@@ -420,13 +430,26 @@ export function ModelPicker(props: {
                                     )
                                   )
                                 );
-                                setShowDetails(
-                                  menuRef.getBoundingClientRect().right + 235 <= window.innerWidth
-                                );
+                                if (window.innerWidth <= STACKED_DETAILS_MAX_WIDTH) {
+                                  setDetailsPlacement(null);
+                                  detailsHoverTimer = setTimeout(() => {
+                                    setDetailsPlacement('top');
+                                    queueMicrotask(() => repositionPopup?.());
+                                  }, STACKED_DETAILS_HOVER_DELAY_MS);
+                                } else {
+                                  setDetailsPlacement(
+                                    menuRef.getBoundingClientRect().right + 235 <= window.innerWidth
+                                      ? 'right'
+                                      : null
+                                  );
+                                  queueMicrotask(() => repositionPopup?.());
+                                }
                               }}
                               onMouseLeave={() => {
+                                clearTimeout(detailsHoverTimer);
                                 setHoveredEntry(null);
-                                setShowDetails(false);
+                                setDetailsPlacement(null);
+                                queueMicrotask(() => repositionPopup?.());
                               }}
                             >
                               <button
@@ -534,9 +557,14 @@ export function ModelPicker(props: {
           </div>
         </Show>
       </div>
-      <Show when={showDetails() ? hoveredEntry() : null}>
+      <Show when={detailsPlacement() ? hoveredEntry() : null}>
         {(entry) => (
-          <div class="model-picker-details" style={{ top: `${detailsTop()}px` }} aria-live="polite">
+          <div
+            ref={(element) => (detailsRef = element)}
+            class={`model-picker-details ${detailsPlacement()}`}
+            style={detailsPlacement() === 'right' ? { top: `${detailsTop()}px` } : undefined}
+            aria-live="polite"
+          >
             <dl>
               <div>
                 <dt>Model</dt>
