@@ -1152,6 +1152,7 @@ function ExternalLink(props: { href: string }) {
 }
 
 function SessionReferenceLink(props: { reference: SessionReference }) {
+  const firstWord = props.reference.title.match(/^\S+/)?.[0] ?? '';
   const openSession = (event: MouseEvent) => {
     event.preventDefault();
     void selectSession(props.reference.id);
@@ -1168,9 +1169,9 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     >
       <span class="link-leading-content">
         <SessionReferenceIcon />
-        {props.reference.title.slice(0, 1)}
+        {firstWord}
       </span>
-      {props.reference.title.slice(1)}
+      {props.reference.title.slice(firstWord.length)}
     </a>
   );
 }

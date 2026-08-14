@@ -643,6 +643,7 @@ describe('Message user prompt rendering', () => {
     expect(link?.getAttribute('href')).toBe('#session/ses_found123');
     expect(link?.dataset.copyMarker).toBe('session:ses_found123');
     expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(link?.querySelector('.link-leading-content')?.textContent).toBe('Permission');
     expect(container?.textContent).toContain('session:ses_missing456');
 
     link?.click();

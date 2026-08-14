@@ -644,11 +644,11 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       }
       const label = document.createElement('span');
       label.textContent = segment.reference.title;
-      const firstCharacter = Array.from(segment.reference.title)[0] ?? '';
+      const firstWord = segment.reference.title.match(/^\S+/)?.[0] ?? '';
       const leadingContent = document.createElement('span');
       leadingContent.className = 'link-leading-content';
-      leadingContent.append(icon, firstCharacter);
-      label.textContent = segment.reference.title.slice(firstCharacter.length);
+      leadingContent.append(icon, firstWord);
+      label.textContent = segment.reference.title.slice(firstWord.length);
       anchor.append(leadingContent, label);
       replacement.append(anchor);
     }
