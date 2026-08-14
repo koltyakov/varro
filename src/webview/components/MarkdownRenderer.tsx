@@ -563,12 +563,34 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
     anchor.setAttribute('href', href);
     anchor.setAttribute('data-external', 'true');
     anchor.classList.add('external-link');
-    anchor.prepend(createExternalLinkIconElement());
+    prependLinkIcon(anchor, createExternalLinkIconElement());
     return;
   }
 
   anchor.removeAttribute('href');
   anchor.removeAttribute('data-external');
+}
+
+function prependLinkIcon(anchor: HTMLAnchorElement, icon: SVGSVGElement) {
+  const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+  let firstText = walker.nextNode();
+  while (firstText instanceof Text && firstText.data.length === 0) firstText = walker.nextNode();
+  if (!(firstText instanceof Text)) {
+    anchor.prepend(icon);
+    return;
+  }
+
+  const firstCharacter = Array.from(firstText.data)[0];
+  if (!firstCharacter) {
+    anchor.prepend(icon);
+    return;
+  }
+
+  firstText.data = firstText.data.slice(firstCharacter.length);
+  const leadingContent = document.createElement('span');
+  leadingContent.className = 'link-leading-content';
+  leadingContent.append(icon, firstCharacter);
+  anchor.prepend(leadingContent);
 }
 
 function linkifySessionReferences(fragment: DocumentFragment) {
@@ -622,7 +644,12 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       }
       const label = document.createElement('span');
       label.textContent = segment.reference.title;
-      anchor.append(icon, label);
+      const firstCharacter = Array.from(segment.reference.title)[0] ?? '';
+      const leadingContent = document.createElement('span');
+      leadingContent.className = 'link-leading-content';
+      leadingContent.append(icon, firstCharacter);
+      label.textContent = segment.reference.title.slice(firstCharacter.length);
+      anchor.append(leadingContent, label);
       replacement.append(anchor);
     }
     node.replaceWith(replacement);

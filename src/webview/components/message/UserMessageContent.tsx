@@ -1142,8 +1142,11 @@ function ExternalLink(props: { href: string }) {
       title={`Open ${props.href}`}
       onClick={openExternal}
     >
-      <ExternalLinkIcon />
-      {props.href}
+      <span class="link-leading-content">
+        <ExternalLinkIcon />
+        {props.href.slice(0, 1)}
+      </span>
+      {props.href.slice(1)}
     </a>
   );
 }
@@ -1163,8 +1166,11 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
       title={`Open session ${props.reference.id}`}
       onClick={openSession}
     >
-      <SessionReferenceIcon />
-      <span>{props.reference.title}</span>
+      <span class="link-leading-content">
+        <SessionReferenceIcon />
+        {props.reference.title.slice(0, 1)}
+      </span>
+      {props.reference.title.slice(1)}
     </a>
   );
 }

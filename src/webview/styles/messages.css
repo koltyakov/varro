@@ -1381,6 +1381,12 @@ body.vscode-light
 
 .rendered-markdown a.external-link {
   overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.link-leading-content {
+  display: inline-block;
+  white-space: nowrap;
 }
 
 .external-link-icon {
@@ -1389,12 +1395,7 @@ body.vscode-light
   height: 16px;
   margin-right: 3px;
   vertical-align: -3px;
-  color: currentColor;
-}
-
-.rendered-markdown .external-link-icon,
-.rendered-markdown .session-reference-icon {
-  opacity: 0.58;
+  color: var(--color-vscode-muted);
 }
 
 .rendered-markdown a.file-path-link,
@@ -1412,6 +1413,8 @@ body.vscode-light
 
 .rendered-markdown a.session-reference-link {
   display: inline;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .session-reference-icon {
@@ -1420,6 +1423,7 @@ body.vscode-light
   height: 12px;
   margin-right: 3px;
   vertical-align: -2px;
+  color: var(--color-vscode-muted);
 }
 
 .rendered-markdown img {

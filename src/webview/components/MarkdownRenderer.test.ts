@@ -267,7 +267,10 @@ describe('MarkdownRenderer', () => {
 
     expect(docsLink?.getAttribute('data-external')).toBe('true');
     expect(docsLink?.classList).toContain('external-link');
-    expect(docsLink?.firstElementChild?.classList).toContain('external-link-icon');
+    expect(docsLink?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(docsLink?.firstElementChild?.firstElementChild?.classList).toContain(
+      'external-link-icon'
+    );
     expect(docsLink?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
     expect(badLink?.hasAttribute('href')).toBe(false);
     expect(badLink?.querySelector('.external-link-icon')).toBeNull();
@@ -296,7 +299,8 @@ describe('MarkdownRenderer', () => {
     expect(link?.hasAttribute('onclick')).toBe(false);
     expect(link?.hasAttribute('style')).toBe(false);
     expect(link?.getAttribute('data-external')).toBe('true');
-    expect(link?.firstElementChild?.classList).toContain('external-link-icon');
+    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(link?.firstElementChild?.firstElementChild?.classList).toContain('external-link-icon');
     expect(path?.hasAttribute('onload')).toBe(false);
   });
 

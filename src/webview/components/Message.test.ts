@@ -669,7 +669,8 @@ describe('Message user prompt rendering', () => {
     const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
     expect(link?.getAttribute('href')).toBe('https://example.test/docs?q=(one)');
     expect(link?.getAttribute('data-external')).toBe('true');
-    expect(link?.firstElementChild?.classList).toContain('external-link-icon');
+    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(link?.firstElementChild?.firstElementChild?.classList).toContain('external-link-icon');
     expect(link?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
     expect(container?.querySelectorAll('a.external-link')).toHaveLength(1);
     expect(container?.querySelector('.user-message-text')?.textContent).toContain(
