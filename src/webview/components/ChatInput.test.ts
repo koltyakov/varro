@@ -1122,10 +1122,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.context-popup-breakdown-title')?.textContent).toBe(
       'Context Breakdown'
     );
-    expect(
-      container?.querySelector<HTMLInputElement>('.context-breakdown-nested input')?.checked
-    ).toBe(false);
-    expect(container?.querySelector('.context-breakdown-nested')?.textContent).toBe('nested');
+    expect(container?.querySelector('.context-breakdown-nested')).toBeNull();
     expect(container?.querySelector('.context-breakdown-item')?.textContent).toBe('Other100.0%');
   });
 
@@ -1351,8 +1348,7 @@ describe('ChatInput', () => {
     expect(client.varro.session.diffSummary).toHaveBeenCalledWith('session-1');
 
     const nested = container?.querySelector<HTMLInputElement>('.context-breakdown-nested input');
-    nested?.click();
-    await Promise.resolve();
+    expect(nested?.checked).toBe(true);
 
     expect(
       [...(container?.querySelectorAll('.context-breakdown-item') || [])].map(
