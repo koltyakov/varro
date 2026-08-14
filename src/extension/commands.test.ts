@@ -564,6 +564,54 @@ describe('sidebar navigation commands', () => {
 
     expect(sidebar.generateCommitMessage).toHaveBeenCalledWith(sourceControl);
   });
+
+  it.each([
+    [
+      'varro.chat.explainSelection',
+      'Explain the selected code clearly, including its purpose, control flow, important assumptions, and any non-obvious behavior.',
+    ],
+    [
+      'varro.chat.reviewSelection',
+      'Review the selected code for correctness, regressions, security, maintainability, and missing tests. Lead with concrete findings ordered by severity.',
+    ],
+    [
+      'varro.chat.improveSelection',
+      'Improve the selected code. Preserve its intended behavior unless a change is needed to fix a concrete problem, and verify the result.',
+    ],
+  ])('starts a focused session for %s', async (command, prompt) => {
+    const { sidebar } = register();
+    vscodeMock.workspace.workspaceFolders = undefined;
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue(undefined);
+    vscodeMock.window.activeTextEditor = editorWithSelection('/repo/a.ts', 2, 4) as never;
+
+    await runCommand(command);
+
+    expect(vscodeMock.commands.executeCommand).toHaveBeenCalledWith(
+      'workbench.view.extension.varro'
+    );
+    expect(sidebar.postCommand).toHaveBeenCalledWith('new-session', { prefill: prompt });
+    expect(sidebar.postDroppedFiles).toHaveBeenCalledWith([
+      {
+        path: '/repo/a.ts',
+        relativePath: 'a.ts',
+        type: 'file',
+        lineRanges: [{ startLine: 3, endLine: 5 }],
+      },
+    ]);
+    expect(sidebar.requestInputFocus).toHaveBeenCalledOnce();
+  });
+
+  it('warns instead of opening a selection action without a saved selection', async () => {
+    const { sidebar } = register();
+    vscodeMock.window.activeTextEditor = undefined;
+
+    await runCommand('varro.chat.explainSelection');
+
+    expect(vscodeMock.window.showWarningMessage).toHaveBeenCalledWith(
+      'Varro: Select text in a saved workspace file first.'
+    );
+    expect(sidebar.postCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe('context reveal completion', () => {

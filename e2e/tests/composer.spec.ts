@@ -55,6 +55,115 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   );
 });
 
+test('keeps URL boundaries editable in the composer', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('https://iconoir.com');
+  const url = composer.locator('.composer-external-link');
+  await expect(url).toHaveText('https://iconoir.com');
+
+  await url.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(" what's this");
+
+  await expect(composer).toHaveText("https://iconoir.com what's this");
+  await expect(url).toHaveText('https://iconoir.com');
+  await expect(composer).toBeFocused();
+
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('plain follow-up');
+
+  await expect(composer).toHaveText('plain follow-up');
+  await expect(composer.locator('.composer-external-link')).toHaveCount(0);
+  await expect(composer).toBeFocused();
+});
+
+test('replaces a selected session reference when pasting', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('before session:session-search-beta after');
+  const reference = composer.locator('.composer-session-reference');
+  await expect(reference).toHaveText('Beta rollout notes');
+
+  await reference.locator('.inline-chip-label').evaluate((label) => {
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await composer.evaluate((editor) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', 'replacement');
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+    );
+  });
+
+  await expect(composer).toHaveText('before replacement after');
+  await expect(composer.locator('.composer-session-reference')).toHaveCount(0);
+});
+
+test('undoes deleted decorated composer text without duplication', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=session-search');
+
+  const composer = page.locator('.rich-composer').first();
+  const original =
+    'session:session-search-beta session:session-search-beta\nhttps://iconoir.com';
+  await composer.fill(original);
+  await expect(composer.locator('.composer-session-reference')).toHaveCount(2);
+  await expect(composer.locator('.composer-external-link')).toHaveCount(1);
+
+  await composer
+    .locator('.composer-session-reference')
+    .first()
+    .locator('.inline-chip-label')
+    .evaluate((label) => {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+  await composer.press('Backspace');
+  await expect(composer.locator('.composer-session-reference')).toHaveCount(1);
+  await composer.press('Meta+z');
+
+  await expect(composer.locator('.composer-session-reference')).toHaveCount(2);
+  await expect(composer.locator('.composer-external-link')).toHaveCount(1);
+  await expect(composer).toContainText('Beta rollout notes Beta rollout notes');
+  await expect(composer).toContainText('https://iconoir.com');
+});
+
+test('undoes select-all deletion without duplicating plain text', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.click();
+  await page.keyboard.type('123');
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Backspace');
+  await expect(composer).toHaveText('');
+  await page.keyboard.press('Meta+z');
+
+  await expect(composer).toHaveText('123');
+  await expect
+    .poll(() =>
+      composer.evaluate((editor) => {
+        const selection = window.getSelection();
+        if (!selection?.anchorNode) return -1;
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.setEnd(selection.anchorNode, selection.anchorOffset);
+        return range.toString().length;
+      })
+    )
+    .toBe(3);
+});
+
 test('ellipsizes the composer placeholder at narrow widths', async ({ page }) => {
   await page.setViewportSize({ width: 220, height: 320 });
   await page.goto('/e2e/harness/index.html?scenario=blank');

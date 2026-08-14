@@ -186,6 +186,8 @@ export function registerCommands(
       }
     }),
 
+    ...registerSelectionPromptCommands(sidebar, revealSidebar),
+
     vscode.commands.registerCommand(
       'varro.chat.addToContext',
       async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
@@ -233,6 +235,48 @@ export function registerCommands(
         }
       }
     )
+  );
+}
+
+const SELECTION_PROMPT_COMMANDS = [
+  {
+    id: 'varro.chat.explainSelection',
+    prompt:
+      'Explain the selected code clearly, including its purpose, control flow, important assumptions, and any non-obvious behavior.',
+  },
+  {
+    id: 'varro.chat.reviewSelection',
+    prompt:
+      'Review the selected code for correctness, regressions, security, maintainability, and missing tests. Lead with concrete findings ordered by severity.',
+  },
+  {
+    id: 'varro.chat.improveSelection',
+    prompt:
+      'Improve the selected code. Preserve its intended behavior unless a change is needed to fix a concrete problem, and verify the result.',
+  },
+] as const;
+
+function registerSelectionPromptCommands(
+  sidebar: SidebarProvider,
+  revealSidebar: () => PromiseLike<unknown>
+) {
+  return SELECTION_PROMPT_COMMANDS.map(({ id, prompt }) =>
+    vscode.commands.registerCommand(id, async () => {
+      try {
+        const selectionTarget = await getEditorSelectionTarget();
+        if (!selectionTarget) {
+          vscode.window.showWarningMessage('Varro: Select text in a saved workspace file first.');
+          return;
+        }
+
+        await revealSidebar();
+        sidebar.postCommand('new-session', { prefill: prompt });
+        sidebar.postDroppedFiles([selectionTarget]);
+        sidebar.requestInputFocus();
+      } catch (err) {
+        logger.error(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })
   );
 }
 

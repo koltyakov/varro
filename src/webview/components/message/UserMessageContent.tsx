@@ -27,6 +27,8 @@ import { MessagePart } from '../MessagePart';
 import { getPdfDataUrlSize } from '../../../shared/native-pdf';
 import { DocumentIcon } from '../DocumentIcon';
 import { FolderIcon } from '../FolderIcon';
+import { ExternalLinkIcon } from '../ExternalLinkIcon';
+import { isSafeExternalHref, splitExternalLinkText } from '../../lib/external-link';
 
 export type MessageAttachment =
   | {
@@ -60,7 +62,8 @@ type InlineRenderableAttachment =
 type InlineTextSegment =
   | { type: 'text'; content: string }
   | { type: 'attachment'; attachment: InlineRenderableAttachment }
-  | { type: 'session'; reference: SessionReference };
+  | { type: 'session'; reference: SessionReference }
+  | { type: 'external-link'; href: string };
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 function bindUserMessageOverflowFade(element: HTMLElement, trackText: () => string[]) {
@@ -664,6 +667,9 @@ function InlineAttachmentText(props: {
         if (segment.type === 'session') {
           return <SessionReferenceLink reference={segment.reference} />;
         }
+        if (segment.type === 'external-link') {
+          return <ExternalLink href={segment.href} />;
+        }
         if (segment.attachment.type === 'image-file') {
           const imageAttachment = segment.attachment;
           return (
@@ -776,6 +782,7 @@ function isStandaloneFileReference(text: string): boolean {
   if (trimmed.startsWith('[')) return false;
   if (trimmed.includes('\n')) return false;
   if (trimmed.length <= 1 || trimmed.length > 300) return false;
+  if (/(?:^|\s)[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return false;
   if (/\[\d+\/\d+\]/.test(trimmed)) return false;
   if (/["'{}[\],<>|]/.test(trimmed) || trimmed.includes('>')) return false;
 
@@ -891,12 +898,39 @@ function buildInlineTextSegments(
   const segments: InlineTextSegment[] = [];
   for (const segment of attachmentSegments) {
     if (segment.type === 'text') {
-      segments.push(...splitSessionReferenceText(segment.content));
+      for (const sessionSegment of splitSessionReferenceText(segment.content)) {
+        if (sessionSegment.type === 'session') {
+          segments.push(sessionSegment);
+        } else {
+          segments.push(...splitExternalLinkText(sessionSegment.content));
+        }
+      }
     } else {
       segments.push(segment);
     }
   }
   return segments;
+}
+
+function ExternalLink(props: { href: string }) {
+  const openExternal = (event: MouseEvent) => {
+    event.preventDefault();
+    if (!isSafeExternalHref(props.href)) return;
+    postMessage({ type: 'vscode/open-external', payload: { url: props.href } });
+  };
+
+  return (
+    <a
+      class="external-link"
+      href={props.href}
+      data-external="true"
+      title={`Open ${props.href}`}
+      onClick={openExternal}
+    >
+      <ExternalLinkIcon />
+      {props.href}
+    </a>
+  );
 }
 
 function SessionReferenceLink(props: { reference: SessionReference }) {
@@ -909,13 +943,40 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     <a
       class="session-reference-link"
       href={props.reference.href}
-      data-copy-marker={props.reference.id}
+      data-copy-marker={props.reference.marker}
       data-session-id={props.reference.id}
       title={`Open session ${props.reference.id}`}
       onClick={openSession}
     >
-      {props.reference.title}
+      <SessionReferenceIcon />
+      <span>{props.reference.title}</span>
     </a>
+  );
+}
+
+function SessionReferenceIcon() {
+  return (
+    <svg class="session-reference-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 12L17 12"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M7 8L13 8"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z"
+        stroke="currentColor"
+        stroke-width="1.6"
+      />
+    </svg>
   );
 }
 

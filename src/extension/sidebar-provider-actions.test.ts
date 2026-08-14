@@ -118,6 +118,7 @@ function createActionFixture() {
     setProviderWatchActive: vi.fn(),
     setActiveChatModel: vi.fn(),
     revealPermission: vi.fn(),
+    setMermaidPreviewOpen: vi.fn(),
     refreshProviders: vi.fn(() => Promise.resolve()),
     providerReauthenticated: vi.fn(() => Promise.resolve()),
     postContext: vi.fn(),

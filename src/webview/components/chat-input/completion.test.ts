@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Agent } from '../../types';
+import type { Agent, Session } from '../../types';
 import {
   getActiveCompletion,
   getCompletionSelection,
@@ -7,6 +7,9 @@ import {
   getLeadingSlashCommand,
   getMentionCompletionItems,
   getMentionInsertionTrailingSpace,
+  getSessionCompletionItems,
+  getSessionReferenceIds,
+  normalizeSessionLookupQuery,
   shouldPadInlineInsertion,
   shouldRequestMentionFileSearch,
 } from './completion';
@@ -156,9 +159,59 @@ describe('getActiveCompletion', () => {
     expect(getActiveCompletion('review test', 11)).toBeNull();
   });
 
+  it('detects session completions for the active token', () => {
+    expect(getActiveCompletion('compare &auth', 13)).toEqual({
+      type: 'session',
+      query: 'auth',
+      start: 8,
+      end: 13,
+    });
+  });
+
   it('rejects cursor positions outside the input bounds', () => {
     expect(getActiveCompletion('abc', -1)).toBeNull();
     expect(getActiveCompletion('abc', 4)).toBeNull();
+  });
+});
+
+describe('getSessionCompletionItems', () => {
+  const session: Session = {
+    id: 'ses_auth',
+    projectID: 'project-1',
+    directory: '/workspace',
+    title: 'Investigate authentication',
+    version: '1.0.0',
+    time: { created: 1, updated: 2 },
+  };
+
+  it('shows plain session titles and inserts stable session references', () => {
+    expect(getSessionCompletionItems([session])).toEqual([
+      expect.objectContaining({
+        key: 'session:ses_auth',
+        type: 'session',
+        label: 'Investigate authentication',
+        detail: '',
+        value: 'session:ses_auth ',
+        session,
+      }),
+    ]);
+  });
+});
+
+describe('normalizeSessionLookupQuery', () => {
+  it('accepts raw, singular, and plural session ID references', () => {
+    expect(normalizeSessionLookupQuery('SES_AUTH')).toBe('ses_auth');
+    expect(normalizeSessionLookupQuery('session:SES_AUTH')).toBe('ses_auth');
+    expect(normalizeSessionLookupQuery('sessions:SES_AUTH')).toBe('ses_auth');
+  });
+});
+
+describe('getSessionReferenceIds', () => {
+  it('extracts canonical session markers from composer text', () => {
+    expect(getSessionReferenceIds('Compare session:ses_first with session:ses-second.')).toEqual([
+      'ses_first',
+      'ses-second',
+    ]);
   });
 });
 
@@ -266,7 +319,31 @@ describe('getCompletionSelection', () => {
         },
         true
       )
-    ).toEqual({ type: 'apply-mention', value: '@README.md ', file });
+    ).toEqual({ type: 'apply-mention', value: '@README.md ', file, session: undefined });
+  });
+
+  it('returns session selections without file metadata', () => {
+    const session: Session = {
+      id: 'ses_auth',
+      projectID: 'project-1',
+      directory: '/workspace',
+      title: 'Investigate authentication',
+      version: '1.0.0',
+      time: { created: 1, updated: 2 },
+    };
+
+    expect(
+      getCompletionSelection(
+        { type: 'session', query: 'auth', start: 0, end: 5 },
+        getSessionCompletionItems([session])[0],
+        true
+      )
+    ).toEqual({
+      type: 'apply-mention',
+      value: 'session:ses_auth ',
+      file: undefined,
+      session,
+    });
   });
 });
 

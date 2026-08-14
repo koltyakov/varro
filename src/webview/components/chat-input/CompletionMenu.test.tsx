@@ -46,6 +46,22 @@ const directoryItem: CompletionItem = {
   },
 };
 
+const sessionItem: CompletionItem = {
+  key: 'session-auth',
+  type: 'session',
+  label: 'Investigate authentication',
+  detail: '',
+  value: 'session:ses_auth ',
+  session: {
+    id: 'ses_auth',
+    projectID: 'project-1',
+    directory: '/workspace',
+    title: 'Investigate authentication',
+    version: '1.0.0',
+    time: { created: 1, updated: 2 },
+  },
+};
+
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
@@ -244,5 +260,29 @@ describe('CompletionMenu', () => {
     expect(paths).toHaveLength(2);
     expect(paths[0]?.getAttribute('stroke')).toBe('currentColor');
     expect(paths[0]?.getAttribute('stroke-width')).toBe('1.6');
+  });
+
+  it('renders a session icon for session completions', () => {
+    const now = 1_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const recentSessionItem: CompletionItem = {
+      ...sessionItem,
+      session: {
+        ...sessionItem.session,
+        time: { ...sessionItem.session.time, updated: now - 5 * 60_000 },
+      },
+    };
+    cleanup = render(
+      () => <CompletionMenu items={[recentSessionItem]} selectedIndex={0} onSelect={vi.fn()} />,
+      container!
+    );
+
+    const icon = container?.querySelector('.composer-completion-icon svg');
+    const age = container?.querySelector('.composer-completion-age');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(icon?.getAttribute('width')).toBe('16');
+    expect(icon?.getAttribute('height')).toBe('16');
+    expect(icon?.querySelectorAll('path')).toHaveLength(3);
+    expect(age?.textContent).toBe('5m');
   });
 });

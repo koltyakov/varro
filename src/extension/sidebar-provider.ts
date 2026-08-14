@@ -78,6 +78,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly configDisposable: vscode.Disposable;
   private readonly windowStateDisposable: vscode.Disposable;
   private sessionReconcileTimer: ReturnType<typeof setInterval> | null = null;
+  private mermaidPreviewMaximized = false;
+  private mermaidPreviewLayoutQueue: Promise<void> = Promise.resolve();
   private readonly contextProvider: ContextProvider;
 
   get view() {
@@ -293,6 +295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         runInTerminal: (command, title) => this.runInTerminal(command, title),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
         updateQueuedMessages: ({ messages }) => this.queuedMessages.update(messages),
+        setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
       })
     );
 
@@ -397,6 +400,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async dispose() {
     this.providerFileRefresh.beginDispose();
+    await this.setMermaidPreviewOpen(false);
     if (this.sessionReconcileTimer) {
       clearInterval(this.sessionReconcileTimer);
       this.sessionReconcileTimer = null;
@@ -416,6 +420,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private setProviderWatchActive(active: boolean) {
     this.providerFileRefresh.setActive(active);
+  }
+
+  private async setMermaidPreviewOpen(open: boolean) {
+    const operation = this.mermaidPreviewLayoutQueue.then(async () => {
+      if (this.mermaidPreviewMaximized === open) return;
+      await vscode.commands.executeCommand('workbench.action.toggleMaximizedAuxiliaryBar');
+      this.mermaidPreviewMaximized = open;
+    });
+    this.mermaidPreviewLayoutQueue = operation.catch(() => undefined);
+    await operation;
   }
 
   private async refreshProviderState(generation?: number, requireSignatureChange = false) {

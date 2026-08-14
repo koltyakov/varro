@@ -1,5 +1,6 @@
 import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { splitExternalLinkText } from '../../lib/external-link';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
 type ComposerClipboardEvent = ClipboardEvent & {
@@ -13,11 +14,11 @@ const CARET_SPACER = '\u200B';
 
 export type RichComposerChip = {
   id: string;
-  type: 'mention-file' | 'mention-agent' | 'image';
+  type: 'mention-file' | 'mention-agent' | 'mention-session' | 'external-link' | 'image';
   label: string;
   title?: string;
   detail?: string;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent' | 'session' | 'external-link';
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
@@ -47,9 +48,9 @@ export function RichComposerArea(props: {
   onPasteInsertion?: (e: ClipboardEvent, insertion: RichComposerPasteInsertion | null) => void;
   onFocus: () => void;
   onBlur: () => void;
-  onClick: (cursorOffset: number) => void;
-  onKeyUp: (cursorOffset: number) => void;
-  onSelect: (cursorOffset: number) => void;
+  onClick: (cursorOffset: number, selectionEnd: number) => void;
+  onKeyUp: (cursorOffset: number, selectionEnd: number) => void;
+  onSelect: (cursorOffset: number, selectionEnd: number) => void;
   onSelectCompletion: (item: CompletionItem) => void;
   onChipClick?: (chipId: string) => void;
   onRemoveChip?: (chipId: string) => void;
@@ -57,6 +58,7 @@ export function RichComposerArea(props: {
 }) {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
+  let historyHandledByKeydown = false;
   const [preview, setPreview] = createSignal<{
     image: { url: string; alt: string };
     style: Record<string, string>;
@@ -93,7 +95,9 @@ export function RichComposerArea(props: {
       const chip = chips.get(part);
       if (chip) {
         frag.appendChild(createChipElement(chip));
-        frag.appendChild(document.createTextNode(CARET_SPACER));
+        if (chip.type !== 'external-link') {
+          frag.appendChild(document.createTextNode(CARET_SPACER));
+        }
       } else {
         appendTextWithLineBreaks(frag, part);
       }
@@ -103,26 +107,42 @@ export function RichComposerArea(props: {
 
   function createChipElement(chip: RichComposerChip): HTMLSpanElement {
     const span = document.createElement('span');
-    span.className = `inline-chip${chip.disabled ? ' disabled' : ''}`;
-    span.contentEditable = 'false';
-    span.dataset.chipId = chip.id;
+    const isInlineReference = chip.type === 'mention-session' || chip.type === 'external-link';
+    span.className = isInlineReference
+      ? chip.type === 'mention-session'
+        ? 'composer-session-reference'
+        : 'composer-external-link'
+      : `inline-chip${chip.disabled ? ' disabled' : ''}`;
+    if (chip.type !== 'external-link' && chip.type !== 'mention-session') {
+      span.contentEditable = 'false';
+    }
+    if (chip.type !== 'external-link') {
+      span.dataset.chipMarker = chip.textMarker;
+    }
+    if (!isInlineReference) span.dataset.chipId = chip.id;
     span.dataset.chipType = chip.type;
-    span.dataset.chipMarker = chip.textMarker;
     if (chip.previewImage) span.dataset.previewImage = 'true';
     span.setAttribute('title', chip.title || chip.label);
 
-    const iconSvg = getChipIconSvg(chip.icon);
-    if (iconSvg) {
+    const icon = chip.type === 'external-link' ? null : getChipIcon(chip.icon);
+    if (icon) {
       const iconWrapper = document.createElement('span');
       iconWrapper.className = 'inline-chip-icon-wrap';
-      iconWrapper.innerHTML = iconSvg;
+      if (chip.type === 'external-link' || chip.type === 'mention-session') {
+        iconWrapper.contentEditable = 'false';
+      }
+      iconWrapper.innerHTML = icon;
       span.appendChild(iconWrapper);
     }
 
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'inline-chip-label';
-    labelSpan.textContent = chip.label;
-    span.appendChild(labelSpan);
+    if (chip.type === 'external-link') {
+      span.textContent = chip.label;
+    } else {
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'inline-chip-label';
+      labelSpan.textContent = chip.label;
+      span.appendChild(labelSpan);
+    }
 
     if (chip.detail) {
       const detailSpan = document.createElement('span');
@@ -132,6 +152,128 @@ export function RichComposerArea(props: {
     }
 
     return span;
+  }
+
+  function removeAtomicReference(event: KeyboardEvent) {
+    if (
+      (event.key !== 'Backspace' && event.key !== 'Delete') ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.isComposing
+    ) {
+      return false;
+    }
+
+    const selection = getSelectionOffsets();
+    if (!selection || selection.start !== selection.end) return false;
+
+    if (removeSessionReferenceAtSelection()) {
+      event.preventDefault();
+      return true;
+    }
+
+    for (const chip of props.chips) {
+      if (chip.type !== 'mention-session') continue;
+      let markerStart = props.value.indexOf(chip.textMarker);
+      while (markerStart !== -1) {
+        const markerEnd = markerStart + chip.textMarker.length;
+        const shouldRemove =
+          (event.key === 'Backspace' && selection.start === markerEnd) ||
+          (event.key === 'Delete' && selection.start === markerStart);
+        if (shouldRemove) {
+          event.preventDefault();
+          props.onInput(
+            `${props.value.slice(0, markerStart)}${props.value.slice(markerEnd)}`,
+            markerStart
+          );
+          props.onRemoveChip?.(chip.id);
+          return true;
+        }
+        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
+      }
+    }
+    return false;
+  }
+
+  function getSessionReferenceAtSelection(): HTMLElement | null {
+    const range = getSelectionRange();
+    if (!range || !range.collapsed) return null;
+
+    const container =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as Element)
+        : range.startContainer.parentElement;
+    const reference = container?.closest<HTMLElement>('.composer-session-reference') ?? null;
+    return reference && editorEl?.contains(reference) ? reference : null;
+  }
+
+  function removeSessionReferenceAtSelection(insertedText = ''): boolean {
+    const reference = getSessionReferenceAtSelection();
+    const marker = reference?.dataset.chipMarker;
+    if (!reference || !marker || !editorEl) return false;
+
+    const prefixRange = document.createRange();
+    prefixRange.selectNodeContents(editorEl);
+    prefixRange.setEndBefore(reference);
+    const markerStart = extractRangeTextLength(prefixRange);
+    props.onInput(
+      `${props.value.slice(0, markerStart)}${insertedText}${props.value.slice(markerStart + marker.length)}`,
+      markerStart + insertedText.length
+    );
+    const chip = props.chips.find(
+      (item) => item.type === 'mention-session' && item.textMarker === marker
+    );
+    if (chip) props.onRemoveChip?.(chip.id);
+    return true;
+  }
+
+  function replaceSelectionContainingSession(insertedText = ''): boolean {
+    const selection = getSelectionOffsets();
+    if (!selection || selection.start === selection.end) return false;
+
+    const selectedSessionIds = new Set<string>();
+    for (const chip of props.chips) {
+      if (chip.type !== 'mention-session') continue;
+      let markerStart = props.value.indexOf(chip.textMarker);
+      while (markerStart !== -1) {
+        const markerEnd = markerStart + chip.textMarker.length;
+        if (markerStart < selection.end && markerEnd > selection.start) {
+          selectedSessionIds.add(chip.id);
+          break;
+        }
+        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
+      }
+    }
+    if (selectedSessionIds.size === 0) return false;
+
+    props.onInput(
+      `${props.value.slice(0, selection.start)}${insertedText}${props.value.slice(selection.end)}`,
+      selection.start + insertedText.length
+    );
+    for (const id of selectedSessionIds) props.onRemoveChip?.(id);
+    return true;
+  }
+
+  function insertSpaceAfterExternalLink(): boolean {
+    const range = getSelectionRange();
+    if (!range || !range.collapsed) return false;
+    const container =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as Element)
+        : range.startContainer.parentElement;
+    const reference = container?.closest<HTMLElement>('.composer-external-link') ?? null;
+    if (!reference || !editorEl?.contains(reference)) return false;
+
+    const localRange = document.createRange();
+    localRange.selectNodeContents(reference);
+    localRange.setEnd(range.startContainer, range.startOffset);
+    if (extractRangeTextLength(localRange) !== extractText(reference).length) return false;
+
+    const offset = getCursorOffset();
+    props.onInput(`${props.value.slice(0, offset)} ${props.value.slice(offset)}`, offset + 1);
+    return true;
   }
 
   function getCursorOffset(): number {
@@ -151,10 +293,29 @@ export function RichComposerArea(props: {
     postRange.selectNodeContents(editorEl);
     postRange.setEnd(range.endContainer, range.endOffset);
 
-    return {
-      start: extractRangeTextLength(preRange),
-      end: extractRangeTextLength(postRange),
-    };
+    let start = extractRangeTextLength(preRange);
+    let end = extractRangeTextLength(postRange);
+    if (!range.collapsed) {
+      const startBoundary = getSessionReferenceBoundary(range.startContainer);
+      const endBoundary = getSessionReferenceBoundary(range.endContainer);
+      if (startBoundary) start = startBoundary.start;
+      if (endBoundary) end = endBoundary.end;
+    }
+    return { start, end };
+  }
+
+  function getSessionReferenceBoundary(node: Node): { start: number; end: number } | null {
+    if (!editorEl) return null;
+    const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    const reference = element?.closest<HTMLElement>('.composer-session-reference') ?? null;
+    const marker = reference?.dataset.chipMarker;
+    if (!reference || !marker || !editorEl.contains(reference)) return null;
+
+    const prefixRange = document.createRange();
+    prefixRange.selectNodeContents(editorEl);
+    prefixRange.setEndBefore(reference);
+    const start = extractRangeTextLength(prefixRange);
+    return { start, end: start + marker.length };
   }
 
   function getSelectionRange(): Range | null {
@@ -195,18 +356,37 @@ export function RichComposerArea(props: {
   }
 
   let lastSyncedValue = '';
+  let lastSyncedChips = '';
 
   createEffect(() => {
     const text = props.value;
     const requestedCursor = props.cursorOffset;
-    void props.chips;
+    const chips = JSON.stringify(
+      props.chips
+        .filter((chip) => chip.type !== 'external-link')
+        .map((chip) => [
+          chip.id,
+          chip.label,
+          chip.title,
+          chip.detail,
+          chip.icon,
+          chip.disabled,
+          chip.textMarker,
+        ])
+    );
     if (!editorEl) return;
 
     const textChanged = text !== lastSyncedValue;
-    const domNeedsResync = needsResync(editorEl, text);
+    const chipsChanged = chips !== lastSyncedChips;
     const isFocused = props.isFocused || document.activeElement === editorEl;
+    const textNeedsResync = needsResync(editorEl, text);
+    const externalLinksOutOfSync = externalLinksNeedResync(editorEl, text, props.chips);
+    const preserveEditedExternalLinks =
+      isFocused && editorEl.querySelector('.composer-external-link') !== null;
+    const domNeedsResync =
+      textNeedsResync || (externalLinksOutOfSync && !preserveEditedExternalLinks);
 
-    if (!textChanged && !domNeedsResync) {
+    if (!textChanged && !chipsChanged && !domNeedsResync) {
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
       }
@@ -214,6 +394,7 @@ export function RichComposerArea(props: {
     }
 
     lastSyncedValue = text;
+    lastSyncedChips = chips;
     const cursorOff =
       textChanged && requestedCursor != null
         ? requestedCursor
@@ -230,19 +411,31 @@ export function RichComposerArea(props: {
     }
   });
 
-  function handleInput() {
+  function handleInput(event?: InputEvent) {
     if (isComposing) return;
     if (!editorEl) return;
+    if (event?.inputType === 'historyUndo' || event?.inputType === 'historyRedo') {
+      const frag = buildDom(props.value, getChipMap());
+      editorEl.textContent = '';
+      editorEl.appendChild(frag);
+      lastSyncedValue = props.value;
+      syncEmptyState();
+      setCursorOffset(Math.min(props.cursorOffset ?? props.value.length, props.value.length));
+      return;
+    }
     syncEmptyState();
+    const offset = getCursorOffset();
+    normalizeEditableExternalLinks(editorEl);
+    setCursorOffset(offset);
     const text = extractText(editorEl);
     const previousValue = props.value;
     const previousChips = props.chips.slice();
     lastSyncedValue = text;
-    const offset = getCursorOffset();
     props.onInput(text, offset);
 
     if (!props.onRemoveChip) return;
     for (const chip of previousChips) {
+      if (chip.type === 'external-link') continue;
       if (!previousValue.includes(chip.textMarker)) continue;
       if (text.includes(chip.textMarker)) continue;
       props.onRemoveChip(chip.id);
@@ -336,7 +529,8 @@ export function RichComposerArea(props: {
   onMount(() => {
     const handleSelectionChange = () => {
       if (!editorEl || document.activeElement !== editorEl) return;
-      props.onSelect(getCursorOffset());
+      const selection = getSelectionOffsets();
+      if (selection) props.onSelect(selection.start, selection.end);
     };
     document.addEventListener('selectionchange', handleSelectionChange);
     onCleanup(() => document.removeEventListener('selectionchange', handleSelectionChange));
@@ -364,10 +558,58 @@ export function RichComposerArea(props: {
           // menu / Edit menu undo) to the composer history instead.
           if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
             e.preventDefault();
-            props.onHistory?.(e.inputType === 'historyUndo' ? 'undo' : 'redo');
+            if (historyHandledByKeydown) {
+              historyHandledByKeydown = false;
+            } else {
+              props.onHistory?.(e.inputType === 'historyUndo' ? 'undo' : 'redo');
+            }
+            return;
+          }
+
+          if (e.inputType.startsWith('delete')) {
+            if (replaceSelectionContainingSession() || removeSessionReferenceAtSelection()) {
+              e.preventDefault();
+            }
+            return;
+          }
+
+          if (
+            e.inputType === 'insertText' ||
+            e.inputType === 'insertCompositionText' ||
+            e.inputType === 'insertReplacementText'
+          ) {
+            if (e.data === ' ' && insertSpaceAfterExternalLink()) {
+              e.preventDefault();
+              return;
+            }
+            if (
+              replaceSelectionContainingSession(e.data ?? '') ||
+              removeSessionReferenceAtSelection(e.data ?? '')
+            ) {
+              e.preventDefault();
+            }
+            return;
+          }
+
+          if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+            if (
+              replaceSelectionContainingSession('\n') ||
+              removeSessionReferenceAtSelection('\n')
+            ) {
+              e.preventDefault();
+            }
           }
         }}
-        onKeyDown={(e) => props.onKeyDown(e)}
+        onKeyDown={(e) => {
+          if (!removeAtomicReference(e)) {
+            props.onKeyDown(e);
+            const key = e.key.toLowerCase();
+            historyHandledByKeydown =
+              e.defaultPrevented &&
+              ((key === 'z' && (e.metaKey || e.ctrlKey)) ||
+                (key === 'y' && e.ctrlKey && !e.metaKey));
+          }
+        }}
         onPaste={handlePaste}
         onCopy={handleCopy}
         onMouseOver={(event) => showImagePreview(event.target)}
@@ -387,9 +629,14 @@ export function RichComposerArea(props: {
           if (chipEl instanceof HTMLElement && chipEl.dataset.chipId) {
             props.onChipClick?.(chipEl.dataset.chipId);
           }
-          props.onClick(getCursorOffset());
+          const selection = getSelectionOffsets();
+          if (selection) props.onClick(selection.start, selection.end);
         }}
-        onKeyUp={() => props.onKeyUp(getCursorOffset())}
+        onKeyUp={() => {
+          historyHandledByKeydown = false;
+          const selection = getSelectionOffsets();
+          if (selection) props.onKeyUp(selection.start, selection.end);
+        }}
         onCompositionStart={() => {
           isComposing = true;
         }}
@@ -455,12 +702,14 @@ export function extractText(el: HTMLElement): string {
   return result;
 }
 
-function getChipIconSvg(icon?: string): string {
+function getChipIcon(icon?: string): string {
   if (icon === 'image')
     return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/></svg>';
   if (icon === 'folder') return FOLDER_ICON_SVG;
   if (icon === 'agent')
     return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M8 1a3 3 0 00-3 3v1H4a2 2 0 00-2 2v6a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-1V4a3 3 0 00-3-3zm1 4V4a1 1 0 10-2 0v1h2zM6 9a1 1 0 11-2 0 1 1 0 012 0zm5 1a1 1 0 100-2 1 1 0 000 2z"/></svg>';
+  if (icon === 'session')
+    return '<svg class="inline-chip-icon" viewBox="0 0 24 24" fill="none" width="11" height="11"><path d="M7 12L17 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 8L13 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z" stroke="currentColor" stroke-width="1.6"/></svg>';
   if (icon === 'terminal')
     return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z"/></svg>';
   return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M3.5 2A1.5 1.5 0 002 3.5v9A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0012.5 2h-9zM4 4h8v1H4V4zm0 2.5h8v1H4v-1zm0 2.5h5v1H4V9z"/></svg>';
@@ -506,9 +755,9 @@ export function findNodeAtOffset(
         }
         remaining -= markerLen;
       } else {
-        const result = findNodeAtOffset(child, remaining);
-        if (result) return result;
-        remaining -= getNodeTextLength(child);
+        const childLength = getNodeTextLength(child);
+        if (remaining <= childLength) return findNodeAtOffset(child, remaining);
+        remaining -= childLength;
       }
     }
   }
@@ -556,4 +805,60 @@ function getNodeTextLength(node: Node): number {
 
 function needsResync(el: HTMLElement, text: string): boolean {
   return extractText(el) !== text;
+}
+
+function externalLinksNeedResync(
+  editor: HTMLElement,
+  text: string,
+  chips: RichComposerChip[]
+): boolean {
+  const externalLinks = new Map(
+    chips
+      .filter((chip) => chip.type === 'external-link')
+      .map((chip) => [chip.textMarker, chip] as const)
+  );
+  const actualMarkers = Array.from(
+    editor.querySelectorAll<HTMLElement>('.composer-external-link'),
+    (element) => element.textContent ?? ''
+  );
+  if (externalLinks.size === 0) return actualMarkers.length > 0;
+
+  const sortedMarkers = Array.from(externalLinks.keys()).toSorted((a, b) => b.length - a.length);
+  const pattern = new RegExp(
+    `(${sortedMarkers.map((marker) => escapeRegex(marker)).join('|')})`,
+    'g'
+  );
+  const expectedMarkers = text.split(pattern).filter((part) => externalLinks.has(part));
+  return (
+    actualMarkers.length !== expectedMarkers.length ||
+    actualMarkers.some((marker, index) => marker !== expectedMarkers[index])
+  );
+}
+
+function normalizeEditableExternalLinks(editor: HTMLElement) {
+  for (const element of Array.from(
+    editor.querySelectorAll<HTMLElement>('.composer-external-link')
+  )) {
+    const content = element.textContent ?? '';
+    const segments = splitExternalLinkText(content);
+    const linkIndex = segments.findIndex((segment) => segment.type === 'external-link');
+    if (linkIndex === -1) {
+      element.replaceWith(document.createTextNode(content));
+      continue;
+    }
+
+    const link = segments[linkIndex]!;
+    if (link.type !== 'external-link') continue;
+    const prefix = segments
+      .slice(0, linkIndex)
+      .map((segment) => (segment.type === 'text' ? segment.content : segment.href))
+      .join('');
+    const linkStart = content.indexOf(link.href, prefix.length);
+    const suffix = content.slice(linkStart + link.href.length);
+    if (!prefix && !suffix) continue;
+
+    if (prefix) element.before(document.createTextNode(prefix));
+    element.textContent = link.href;
+    if (suffix) element.after(document.createTextNode(suffix));
+  }
 }

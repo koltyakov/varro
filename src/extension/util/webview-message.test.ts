@@ -535,6 +535,13 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'vscode/show-output' })).toEqual({
       type: 'vscode/show-output',
     });
+
+    expect(
+      parseWebviewMessage({ type: 'vscode/mermaid-preview', payload: { open: true } })
+    ).toEqual({ type: 'vscode/mermaid-preview', payload: { open: true } });
+    expect(
+      parseWebviewMessage({ type: 'vscode/mermaid-preview', payload: { open: 'yes' } })
+    ).toBeNull();
   });
 
   it('accepts embedded provider reauthentication completion', () => {

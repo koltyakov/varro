@@ -54,6 +54,7 @@ export interface SidebarProviderActionDeps {
   runInTerminal(command: string, title?: string): void | Promise<void>;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
+  setMermaidPreviewOpen: MessageRouterCallbacks['setMermaidPreviewOpen'];
 }
 
 export function createSidebarProviderActions(
@@ -88,6 +89,7 @@ export function createSidebarProviderActions(
       deps.webviewSession.setFocus(focused);
     },
     revealPermission: (permissionId) => deps.revealPermission(permissionId),
+    setMermaidPreviewOpen: (open) => deps.setMermaidPreviewOpen(open),
     setProviderWatchActive: (active) => {
       deps.setProviderWatchActive(active);
     },

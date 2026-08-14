@@ -9944,6 +9944,129 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('anchors width reflow to the visible row instead of a stale mounted row', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const rowHeights = Array.from({ length: 50 }, () => 100);
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        if (this.dataset.msgId?.startsWith('assistant-')) {
+          const index = Number(this.dataset.msgId.replace('assistant-', ''));
+          return new DOMRect(0, rowTop(index) - scrollTopValue, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    // Remember row 19 while it intersects the viewport, then let geometry move before the
+    // ResizeObserver width batch. It remains mounted in overscan but row 20 is now first visible.
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 1975;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    scrollTopValue = 2010;
+
+    const staleRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
+    const visibleRow = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    const rowObserver = observers.find(
+      (observer) => observer.targets.has(staleRow) && observer.targets.has(visibleRow)
+    );
+    expect(staleRow.getBoundingClientRect().bottom).toBe(-10);
+    expect(visibleRow.getBoundingClientRect().top).toBe(-10);
+    expect(rowObserver).toBeDefined();
+
+    rowHeights[19] = 165;
+    rowObserver!.callback(
+      [
+        {
+          target: staleRow,
+          borderBoxSize: [{ blockSize: 165, inlineSize: 360 }],
+        } as unknown as ResizeObserverEntry,
+        {
+          target: visibleRow,
+          borderBoxSize: [{ blockSize: 100, inlineSize: 360 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(visibleRow.getBoundingClientRect().top).toBe(-10);
+    animationFrames.restore();
+  });
+
   it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{

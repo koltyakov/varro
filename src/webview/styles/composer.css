@@ -533,6 +533,14 @@
   max-width: 14ch;
 }
 
+.composer-completion-item.completion-session .composer-completion-age {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: color-mix(in srgb, var(--color-vscode-muted) 68%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .toolbar-picker {
   display: flex;
   align-items: center;

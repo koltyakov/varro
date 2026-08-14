@@ -87,6 +87,281 @@ describe('RichComposerArea', () => {
     expect(editor?.getAttribute('aria-placeholder')).toBe('Compose');
   });
 
+  it('renders session references as non-clickable inline links', () => {
+    const onChipClick = vi.fn();
+    renderComposer({
+      value: 'session:ses_auth',
+      cursorOffset: 'session:ses_auth'.length,
+      chips: [
+        {
+          id: 'session:ses_auth',
+          type: 'mention-session',
+          label: 'Authentication work',
+          icon: 'session',
+          textMarker: 'session:ses_auth',
+        },
+      ],
+      onChipClick,
+    });
+
+    const reference = container?.querySelector<HTMLElement>('.composer-session-reference');
+    expect(reference?.textContent).toBe('Authentication work');
+    expect(reference?.querySelector('.inline-chip-icon')).not.toBeNull();
+    expect(reference?.dataset.chipId).toBeUndefined();
+    expect(reference?.getAttribute('contenteditable')).toBeNull();
+
+    reference?.click();
+    expect(onChipClick).not.toHaveBeenCalled();
+  });
+
+  it('replaces a session reference when typing anywhere in its title', () => {
+    const onInput = vi.fn();
+    const marker = 'session:ses_auth';
+    renderComposer({
+      value: `before ${marker} after`,
+      cursorOffset: `before ${marker}`.length,
+      chips: [
+        {
+          id: marker,
+          type: 'mention-session',
+          label: 'Authentication work',
+          icon: 'session',
+          textMarker: marker,
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const label = container?.querySelector<HTMLElement>(
+      '.composer-session-reference .inline-chip-label'
+    );
+    if (!editor || !label?.firstChild) throw new Error('Expected session reference label');
+    setCollapsedSelection(label.firstChild, 7);
+
+    const event = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: 'X',
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith('before X after', 'before X'.length);
+  });
+
+  it('deletes a selected session title through the underlying marker', () => {
+    const onInput = vi.fn();
+    const marker = 'session:ses_auth';
+    renderComposer({
+      value: `before ${marker} after`,
+      cursorOffset: `before ${marker}`.length,
+      chips: [
+        {
+          id: marker,
+          type: 'mention-session',
+          label: 'Authentication work',
+          icon: 'session',
+          textMarker: marker,
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const label = container?.querySelector<HTMLElement>(
+      '.composer-session-reference .inline-chip-label'
+    );
+    if (!editor || !label) throw new Error('Expected session reference label');
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    editor.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'deleteContentBackward',
+      })
+    );
+
+    expect(onInput).toHaveBeenCalledWith('before  after', 'before '.length);
+  });
+
+  it.each(['Backspace', 'Delete'])(
+    'removes a session reference with %s inside its title',
+    (key) => {
+      const onInput = vi.fn();
+      const marker = 'session:ses_auth';
+      renderComposer({
+        value: `before ${marker} after`,
+        cursorOffset: `before ${marker}`.length,
+        chips: [
+          {
+            id: marker,
+            type: 'mention-session',
+            label: 'Authentication work',
+            icon: 'session',
+            textMarker: marker,
+          },
+        ],
+        onInput,
+      });
+
+      const editor = container?.querySelector<HTMLElement>('.rich-composer');
+      const label = container?.querySelector<HTMLElement>(
+        '.composer-session-reference .inline-chip-label'
+      );
+      if (!editor || !label?.firstChild) throw new Error('Expected session reference label');
+      setCollapsedSelection(label.firstChild, 7);
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+      expect(onInput).toHaveBeenCalledWith('before  after', 'before '.length);
+    }
+  );
+
+  it('renders external URLs as editable inline text', () => {
+    const onInput = vi.fn();
+    renderComposer({
+      value: 'See https://iconoir.com',
+      cursorOffset: 'See https://iconoir.com'.length,
+      chips: [
+        {
+          id: 'external-link:https://iconoir.com',
+          type: 'external-link',
+          label: 'https://iconoir.com',
+          icon: 'external-link',
+          textMarker: 'https://iconoir.com',
+        },
+      ],
+      onInput,
+    });
+
+    const reference = container?.querySelector<HTMLElement>('.composer-external-link');
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    expect(reference?.textContent).toBe('https://iconoir.com');
+    expect(container?.querySelector('.composer-external-link-icon')).toBeNull();
+    expect(reference?.dataset.chipMarker).toBeUndefined();
+    expect(reference?.getAttribute('contenteditable')).toBeNull();
+    expect(extractText(editor)).toBe('See https://iconoir.com');
+
+    if (!reference?.firstChild) throw new Error('Expected external link text');
+    reference.firstChild.textContent = 'https://iconoir.dev';
+    setCollapsedSelection(reference.firstChild, 'https://iconoir.dev'.length);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    expect(onInput).toHaveBeenCalledWith(
+      'See https://iconoir.dev',
+      'See https://iconoir.dev'.length
+    );
+  });
+
+  it('moves text typed after a URL into plain composer text', () => {
+    const onInput = vi.fn();
+    renderComposer({
+      value: 'https://iconoir.com',
+      cursorOffset: 'https://iconoir.com'.length,
+      chips: [
+        {
+          id: 'external-link:https://iconoir.com',
+          type: 'external-link',
+          label: 'https://iconoir.com',
+          icon: 'external-link',
+          textMarker: 'https://iconoir.com',
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const reference = container?.querySelector<HTMLElement>('.composer-external-link');
+    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    editor.focus();
+    reference.firstChild.textContent = "https://iconoir.com what's this";
+    setCollapsedSelection(reference.firstChild, "https://iconoir.com what's this".length);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    expect(reference.textContent).toBe('https://iconoir.com');
+    expect(reference.nextSibling?.textContent).toBe(" what's this");
+    expect(onInput).toHaveBeenCalledWith(
+      "https://iconoir.com what's this",
+      "https://iconoir.com what's this".length
+    );
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it('inserts a typed space after a URL as plain composer text', () => {
+    const onInput = vi.fn();
+    renderComposer({
+      value: 'https://iconoir.com',
+      cursorOffset: 'https://iconoir.com'.length,
+      chips: [
+        {
+          id: 'external-link:https://iconoir.com',
+          type: 'external-link',
+          label: 'https://iconoir.com',
+          icon: 'external-link',
+          textMarker: 'https://iconoir.com',
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const reference = container?.querySelector<HTMLElement>('.composer-external-link');
+    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    editor.focus();
+    setCollapsedSelection(reference.firstChild, 'https://iconoir.com'.length);
+    const event = new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: ' ',
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith('https://iconoir.com ', 'https://iconoir.com '.length);
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it.each([
+    { key: 'Backspace', cursor: 'before session:ses_auth'.length },
+    { key: 'Delete', cursor: 'before '.length },
+  ])('deletes a whole session reference with $key', ({ key, cursor }) => {
+    const onInput = vi.fn();
+    const onRemoveChip = vi.fn();
+    const value = 'before session:ses_auth after';
+    renderComposer({
+      value,
+      cursorOffset: cursor,
+      chips: [
+        {
+          id: 'session:ses_auth',
+          type: 'mention-session',
+          label: 'Authentication work',
+          icon: 'session',
+          textMarker: 'session:ses_auth',
+        },
+      ],
+      onInput,
+      onRemoveChip,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const target = findNodeAtOffset(editor, cursor);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+
+    expect(onInput).toHaveBeenCalledWith('before  after', 'before '.length);
+    expect(onRemoveChip).toHaveBeenCalledWith('session:ses_auth');
+  });
+
   it('maps chip-end offsets onto the invisible caret spacer after the chip', () => {
     const editor = document.createElement('div');
     const chip = document.createElement('span');
@@ -118,6 +393,20 @@ describe('RichComposerArea', () => {
     });
   });
 
+  it('maps offsets beyond a nested editable span onto following text', () => {
+    const editor = document.createElement('div');
+    const link = document.createElement('span');
+    const linkText = document.createTextNode('link');
+    const trailingText = document.createTextNode(' next');
+    link.appendChild(linkText);
+    editor.append(link, trailingText);
+
+    expect(findNodeAtOffset(editor, 'link '.length)).toEqual({
+      node: trailingText,
+      offset: 1,
+    });
+  });
+
   it('inserts plain text paste through onInput', () => {
     const onInput = vi.fn();
     const onPasteInsertion = vi.fn();
@@ -142,6 +431,44 @@ describe('RichComposerArea', () => {
       text: 'pasted text',
       value: 'pasted text',
     });
+  });
+
+  it('replaces a selection spanning a session reference when pasting', () => {
+    const onInput = vi.fn();
+    const marker = 'session:ses_auth';
+    renderComposer({
+      value: `before ${marker} after`,
+      cursorOffset: `before ${marker} after`.length,
+      chips: [
+        {
+          id: marker,
+          type: 'mention-session',
+          label: 'Authentication work',
+          icon: 'session',
+          textMarker: marker,
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const label = container?.querySelector<HTMLElement>(
+      '.composer-session-reference .inline-chip-label'
+    );
+    if (!editor || !label?.firstChild) throw new Error('Expected session reference');
+    const range = document.createRange();
+    range.selectNodeContents(label.firstChild);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/plain' ? 'replacement' : '') },
+    });
+    editor.dispatchEvent(event);
+
+    expect(onInput).toHaveBeenCalledWith('before replacement after', 'before replacement'.length);
   });
 
   it('reports no insertion when paste handling prevents the paste', () => {
@@ -183,6 +510,21 @@ describe('RichComposerArea', () => {
     editor.dispatchEvent(new Event('input', { bubbles: true }));
 
     expect(onInput).toHaveBeenCalledWith('updated draft', 13);
+  });
+
+  it('discards a native undo mutation after controlled history restoration', () => {
+    const onInput = vi.fn();
+    renderComposer({ value: '123', cursorOffset: 3, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    editor.textContent = '123123';
+    editor.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'historyUndo', data: null })
+    );
+
+    expect(editor.textContent).toBe('123');
+    expect(onInput).not.toHaveBeenCalled();
   });
 
   it('copies the underlying chip markers instead of visible labels', () => {

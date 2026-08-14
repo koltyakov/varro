@@ -5,9 +5,12 @@ import DOMPurify from 'dompurify';
 import {
   __parseMarkdownForTests,
   __resetMarkdownCachesForTests,
+  getMermaidThemeConfigForTests,
   MarkdownRenderer,
   renderCodeBlockHtml,
   renderHighlightedCodeHtml,
+  renderMermaidWithColdRetryForTests,
+  resetMermaidDiagramsForThemeForTests,
   splitStreamingMarkdownContent,
 } from './MarkdownRenderer';
 import { setState } from '../lib/state';
@@ -48,6 +51,8 @@ function assertInertWithSafeAnchor(root: ParentNode) {
 
 beforeEach(() => {
   __resetMarkdownCachesForTests();
+  document.body.className = '';
+  document.body.removeAttribute('style');
   container = document.createElement('div');
   document.body.appendChild(container);
   delete window.__sendToExtension;
@@ -72,6 +77,161 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it('retries a valid Mermaid diagram after a cold render failure', async () => {
+    const mermaid = {
+      initialize: vi.fn(),
+      parse: vi.fn(() => Promise.resolve({ diagramType: 'flowchart' })),
+      render: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('cold layout failure'))
+        .mockResolvedValueOnce({ svg: '<svg></svg>' }),
+    };
+
+    await expect(
+      renderMermaidWithColdRetryForTests(mermaid as never, 'flowchart TD\n  A --> B', {
+        theme: 'base',
+      })
+    ).resolves.toEqual({ svg: '<svg></svg>' });
+
+    expect(mermaid.render).toHaveBeenCalledTimes(2);
+    expect(mermaid.parse).toHaveBeenCalledOnce();
+  });
+
+  it('does not retry Mermaid source that fails validation', async () => {
+    const firstError = new Error('parse failure');
+    const mermaid = {
+      initialize: vi.fn(),
+      parse: vi.fn(() => Promise.reject(new Error('invalid syntax'))),
+      render: vi.fn(() => Promise.reject(firstError)),
+    };
+
+    await expect(
+      renderMermaidWithColdRetryForTests(mermaid as never, 'flowchart TD\n  A -->|', {
+        theme: 'base',
+      })
+    ).rejects.toBe(firstError);
+
+    expect(mermaid.render).toHaveBeenCalledOnce();
+  });
+
+  it('uses readable VS Code colors for dark Mermaid diagrams', () => {
+    document.body.className = 'vscode-dark';
+    document.body.style.setProperty('--vscode-editor-background', '#202020');
+    document.body.style.setProperty('--vscode-editor-foreground', '#eeeeee');
+    document.body.style.setProperty('--vscode-input-background', '#303030');
+    document.body.style.setProperty('--vscode-widget-border', '#777777');
+    document.body.style.setProperty('--vscode-focusBorder', '#55aaff');
+
+    const config = getMermaidThemeConfigForTests();
+
+    expect(config.darkMode).toBe(true);
+    expect(config.htmlLabels).toBe(false);
+    expect(config.themeVariables).toMatchObject({
+      background: '#202020',
+      primaryColor: 'rgb(59, 59, 59)',
+      primaryTextColor: '#eeeeee',
+      lineColor: 'rgb(193, 193, 193)',
+      actorLineColor: 'rgb(193, 193, 193)',
+      signalTextColor: '#eeeeee',
+      activationBorderColor: '#55aaff',
+    });
+  });
+
+  it('uses restrained neutral fills for light Mermaid diagrams', () => {
+    document.body.className = 'vscode-light';
+    document.body.style.setProperty('--vscode-editor-background', '#ffffff');
+    document.body.style.setProperty('--vscode-editor-foreground', '#202020');
+    document.body.style.setProperty('--vscode-input-background', '#ffffff');
+    document.body.style.setProperty('--vscode-widget-border', '#b0b0b0');
+    document.body.style.setProperty('--vscode-focusBorder', '#0066b8');
+
+    const config = getMermaidThemeConfigForTests();
+
+    expect(config.darkMode).toBe(false);
+    expect(config.themeVariables).toMatchObject({
+      background: '#ffffff',
+      primaryColor: 'rgb(242, 242, 242)',
+      secondaryColor: 'rgb(233, 233, 233)',
+      tertiaryColor: 'rgb(248, 248, 248)',
+      primaryTextColor: '#202020',
+      lineColor: 'rgb(103, 103, 103)',
+      actorBkg: 'rgb(242, 242, 242)',
+      edgeLabelBackground: '#ffffff',
+      activationBorderColor: '#0066b8',
+    });
+  });
+
+  it('invalidates completed Mermaid SVGs when the theme changes', () => {
+    const root = document.createElement('div');
+    root.innerHTML = `
+      <div class="mermaid-diagram" data-mermaid-source="graph%20TD" data-mermaid-hydrated="complete">
+        <div class="mermaid-diagram-toolbar"></div>
+        <div class="mermaid-diagram-output"><svg></svg></div>
+        <div hidden class="mermaid-diagram-fallback"></div>
+      </div>
+    `;
+    const diagram = root.querySelector<HTMLElement>('.mermaid-diagram')!;
+
+    resetMermaidDiagramsForThemeForTests(root);
+
+    expect(diagram.dataset.mermaidHydrated).toBeUndefined();
+    expect(diagram.querySelector('.mermaid-diagram-output')).toBeNull();
+    expect(diagram.querySelector('.mermaid-diagram-toolbar')).toBeNull();
+    expect(diagram.querySelector('.mermaid-diagram-status')?.textContent).toContain(
+      'Rendering diagram...'
+    );
+    expect(diagram.querySelector('.mermaid-diagram-fallback')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('emits a Mermaid hydration target only for Mermaid code fences', () => {
+    const mermaidHtml = __parseMarkdownForTests('```mermaid\ngraph TD\n  A --> B\n```', {
+      cacheByContent: false,
+    });
+    const regularHtml = __parseMarkdownForTests('```ts\nconst value = 1;\n```', {
+      cacheByContent: false,
+    });
+
+    expect(mermaidHtml).toContain('class="mermaid-diagram"');
+    expect(mermaidHtml).toContain('data-mermaid-source=');
+    const parsed = document.createElement('div');
+    parsed.innerHTML = mermaidHtml;
+    expect(parsed.querySelector('.mermaid-diagram-fallback')?.hasAttribute('hidden')).toBe(true);
+    expect(mermaidHtml).toContain('graph TD');
+    expect(regularHtml).not.toContain('data-mermaid-source');
+  });
+
+  it('keeps an incomplete streaming Mermaid fence as a placeholder', () => {
+    const html = __parseMarkdownForTests('```mermaid\nflowchart TD\n  A -->|', {
+      cacheByContent: false,
+      disableCodeHighlighting: true,
+    });
+
+    expect(html).toContain('mermaid-diagram-pending');
+    expect(html).toContain('Rendering diagram...');
+    expect(html).not.toContain('data-mermaid-source');
+    expect(html).not.toContain('flowchart TD');
+  });
+
+  it('hydrates completed Mermaid fences when lightweight rendering disables highlighting', () => {
+    const html = __parseMarkdownForTests('```mermaid\nflowchart TD\n  A --> B\n```', {
+      cacheByContent: false,
+      disableCodeHighlighting: true,
+      allowMermaidHydration: true,
+    });
+
+    expect(html).toContain('data-mermaid-source=');
+    expect(html).not.toContain('mermaid-diagram-pending');
+  });
+
+  it('renders copy and expand controls after Mermaid hydration markup is mounted', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div class="mermaid-diagram-toolbar"><button data-mermaid-copy></button><button data-mermaid-expand></button></div>';
+
+    expect(root.querySelector('button[data-mermaid-copy]')).toBeInstanceOf(HTMLButtonElement);
+    expect(root.querySelector('button[data-mermaid-expand]')).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it('splits streaming markdown at the last safe paragraph boundary', () => {
     expect(splitStreamingMarkdownContent('First paragraph\n\nSecond paragraph')).toEqual({
       stableContent: 'First paragraph',
@@ -106,7 +266,11 @@ describe('MarkdownRenderer', () => {
     const badLink = links.find((link) => link.textContent === 'Bad');
 
     expect(docsLink?.getAttribute('data-external')).toBe('true');
+    expect(docsLink?.classList).toContain('external-link');
+    expect(docsLink?.firstElementChild?.classList).toContain('external-link-icon');
+    expect(docsLink?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
     expect(badLink?.hasAttribute('href')).toBe(false);
+    expect(badLink?.querySelector('.external-link-icon')).toBeNull();
 
     docsLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -132,6 +296,7 @@ describe('MarkdownRenderer', () => {
     expect(link?.hasAttribute('onclick')).toBe(false);
     expect(link?.hasAttribute('style')).toBe(false);
     expect(link?.getAttribute('data-external')).toBe('true');
+    expect(link?.firstElementChild?.classList).toContain('external-link-icon');
     expect(path?.hasAttribute('onload')).toBe(false);
   });
 
@@ -243,7 +408,8 @@ describe('MarkdownRenderer', () => {
     cleanup = render(
       () =>
         MarkdownRenderer({
-          content: 'Session ses_found123 and ses_missing456. `ses_found123`',
+          content:
+            'Session session:ses_found123 and session:ses_missing456. `session:ses_found123`',
           cacheByContent: true,
         }),
       container!
@@ -253,7 +419,8 @@ describe('MarkdownRenderer', () => {
     expect(link?.textContent).toBe('Permission request states');
     expect(link?.getAttribute('href')).toBe('#session/ses_found123');
     expect(link?.dataset.sessionId).toBe('ses_found123');
-    expect(container?.textContent).toContain('ses_missing456');
+    expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(container?.textContent).toContain('session:ses_missing456');
     expect(container?.querySelector('code a')).toBeNull();
 
     link?.click();
@@ -317,8 +484,10 @@ describe('MarkdownRenderer', () => {
     const insecure = links.find((link) => link.textContent === 'Insecure');
     expect(secure?.getAttribute('data-external')).toBe('true');
     expect(secure?.getAttribute('href')).toBe('https://example.test/docs');
+    expect(secure?.querySelector('.external-link-icon')).toBeInstanceOf(SVGSVGElement);
     expect(insecure?.hasAttribute('data-external')).toBe(false);
     expect(insecure?.hasAttribute('href')).toBe(false);
+    expect(insecure?.querySelector('.external-link-icon')).toBeNull();
 
     insecure?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(send).not.toHaveBeenCalled();

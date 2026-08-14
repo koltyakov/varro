@@ -31,6 +31,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openFolder: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
+    setMermaidPreviewOpen: vi.fn(),
     restartServer: vi.fn(() => Promise.resolve()),
     checkServerRestart: vi.fn(() => Promise.resolve()),
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
@@ -54,6 +55,15 @@ function createCallbacks(): MessageRouterCallbacks {
 }
 
 describe('MessageRouter', () => {
+  it('dispatches Mermaid preview layout state', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'vscode/mermaid-preview', payload: { open: true } });
+
+    expect(cb.setMermaidPreviewOpen).toHaveBeenCalledWith(true);
+  });
+
   it('dispatches ready', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

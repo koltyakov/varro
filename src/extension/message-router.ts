@@ -47,6 +47,7 @@ export interface MessageRouterCallbacks {
   openFolder(): Promise<void>;
   openSettings(query?: string): Promise<void>;
   showOutput(): void;
+  setMermaidPreviewOpen(open: boolean): void | Promise<void>;
   restartServer(force: boolean): Promise<void>;
   checkServerRestart(checkId: number): Promise<void>;
   handleDroppedPaths(paths: string[]): Promise<void>;
@@ -131,6 +132,9 @@ export class MessageRouter {
           break;
         case 'vscode/show-output':
           this.callbacks.showOutput();
+          break;
+        case 'vscode/mermaid-preview':
+          await this.callbacks.setMermaidPreviewOpen(msg.payload.open);
           break;
         case 'server/restart':
           await this.callbacks.restartServer(msg.payload?.force === true);

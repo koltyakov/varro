@@ -616,6 +616,7 @@ export type WebviewMessage =
   | { type: 'vscode/open-folder' }
   | { type: 'vscode/open-settings'; payload: { query?: string } }
   | { type: 'vscode/show-output' }
+  | { type: 'vscode/mermaid-preview'; payload: { open: boolean } }
   | { type: 'server/restart'; payload?: { force: true } }
   | { type: 'server/restart/check'; payload: { checkId: number } }
   | { type: 'files/drop'; payload: { paths: string[] } }

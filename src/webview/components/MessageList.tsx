@@ -948,11 +948,15 @@ export function MessageList() {
 
   function beginWidthResize(options?: { fontChanged?: boolean }) {
     if (!widthResizeAnchor && !autoScroll()) {
+      const virtualAnchor =
+        containerRef && shouldVirtualize()
+          ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
+          : null;
       const rememberedAnchor =
         lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
           ? lastDetachedVisibleAnchor
           : null;
-      widthResizeAnchor = rememberedAnchor ?? captureMountedVisibleScrollAnchor();
+      widthResizeAnchor = virtualAnchor ?? rememberedAnchor ?? captureMountedVisibleScrollAnchor();
     }
     widthResizeActive = true;
     widthResizeIncludesFontChange ||= !!options?.fontChanged;

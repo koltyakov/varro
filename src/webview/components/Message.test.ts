@@ -559,7 +559,7 @@ describe('Message user prompt rendering', () => {
       () =>
         Message({
           info: userMessage('message-session-reference'),
-          parts: [textPart('text-1', 'Session ses_found123 and ses_missing456')],
+          parts: [textPart('text-1', 'Session session:ses_found123 and session:ses_missing456')],
         }),
       container!
     );
@@ -567,11 +567,81 @@ describe('Message user prompt rendering', () => {
     const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
     expect(link?.textContent).toBe('Permission request states');
     expect(link?.getAttribute('href')).toBe('#session/ses_found123');
-    expect(link?.dataset.copyMarker).toBe('ses_found123');
-    expect(container?.textContent).toContain('ses_missing456');
+    expect(link?.dataset.copyMarker).toBe('session:ses_found123');
+    expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(container?.textContent).toContain('session:ses_missing456');
 
     link?.click();
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+  });
+
+  it('renders HTTPS URLs as icon-prefixed external links in user messages', () => {
+    const send = vi.fn();
+    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-external-link'),
+          parts: [
+            textPart(
+              'text-1',
+              'See https://example.test/docs?q=(one), but not http://example.test/insecure.'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
+    expect(link?.getAttribute('href')).toBe('https://example.test/docs?q=(one)');
+    expect(link?.getAttribute('data-external')).toBe('true');
+    expect(link?.firstElementChild?.classList).toContain('external-link-icon');
+    expect(link?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
+    expect(container?.querySelectorAll('a.external-link')).toHaveLength(1);
+    expect(container?.querySelector('.user-message-text')?.textContent).toContain(
+      '(one), but not http://example.test/insecure.'
+    );
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://example.test/docs?q=(one)' },
+    });
+  });
+
+  it('keeps one-line prose ending in a URL as message text', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-trailing-external-link'),
+          parts: [textPart('text-1', 'Test message https://iconoir.com')],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      'Test message https://iconoir.com'
+    );
+    const links = container?.querySelectorAll<HTMLAnchorElement>('a.external-link');
+    expect(links).toHaveLength(1);
+    expect(links?.[0]?.getAttribute('href')).toBe('https://iconoir.com');
+  });
+
+  it('does not linkify URLs inside user message code fences', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-code-link'),
+          parts: [textPart('text-1', '```text\nhttps://example.test/docs\n```')],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
+      'https://example.test/docs\n'
+    );
+    expect(container?.querySelector('a.external-link')).toBeNull();
   });
 
   it('renders inline image placeholders as chips inside the user bubble text', () => {

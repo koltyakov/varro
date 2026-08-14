@@ -56,6 +56,29 @@ describe('writeClipboard', () => {
     expect(result).toBe(true);
   });
 
+  it('keeps the fallback input inside an active modal', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+    });
+    const modal = document.createElement('div');
+    modal.setAttribute('aria-modal', 'true');
+    const button = document.createElement('button');
+    modal.appendChild(button);
+    document.body.appendChild(modal);
+    button.focus();
+    (document.execCommand as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      expect(modal.querySelector('textarea')?.parentElement).toBe(modal);
+      return true;
+    });
+
+    const result = await writeClipboard('modal fallback');
+
+    expect(result).toBe(true);
+    expect(modal.querySelector('textarea')).toBeNull();
+    modal.remove();
+  });
+
   it('returns false when both methods fail', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: () => Promise.reject(new Error('denied')) },

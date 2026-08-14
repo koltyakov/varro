@@ -117,11 +117,14 @@ import {
   getNativePdfAttachmentSequence,
 } from '../lib/attachment-order';
 import { getLeafPathName, isSamePath } from '../lib/path-display';
+import { splitExternalLinkText } from '../lib/external-link';
+import type { Session } from '../types';
 import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
 } from '../../shared/context-files';
+import { normalizeSessionTitle } from '../../shared/session-title';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
 import {
   createComposerHistory,
@@ -199,6 +202,9 @@ import {
   getLeadingSlashCommand,
   getMentionCompletionItems,
   getMentionInsertionTrailingSpace,
+  getSessionCompletionItems,
+  getSessionReferenceIds,
+  normalizeSessionLookupQuery,
   shouldPadInlineInsertion,
   shouldRequestMentionFileSearch,
 } from './chat-input/completion';
@@ -691,6 +697,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
+  const [sessionSearchResults, setSessionSearchResults] = createSignal<Session[]>([]);
+  const [sessionReferences, setSessionReferences] = createSignal<Record<string, Session>>({});
   const [showFileSearchHint, setShowFileSearchHint] = createSignal(false);
   const [suppressCompletion, setSuppressCompletion] = createSignal(false);
   const [toolbarCompactMode, setToolbarCompactMode] = createSignal<ToolbarCompactMode>('full');
@@ -698,6 +706,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let latestFileSearchRequestId = 0;
   let latestFileSearchQuery = '';
   let fileSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionSearchAbortController: AbortController | undefined;
+  const pendingSessionReferenceIds = new Set<string>();
   const toolbarFitter = createToolbarFitter({
     getToolbar: () => toolbarRef,
     getLeftGroup: () => toolbarLeftRef,
@@ -866,6 +877,39 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     visibleFiles().length > 0 ||
     visibleClipboardImages().length > 0 ||
     visibleNativePdfs().length > 0;
+
+  function rememberSessionReference(session: Session) {
+    setSessionReferences((current) =>
+      current[session.id] === session ? current : { ...current, [session.id]: session }
+    );
+  }
+
+  createEffect(() => {
+    const ids = getSessionReferenceIds(inputText());
+    const references = sessionReferences();
+    const workspacePath = state.editorContext.workspacePath;
+    for (const id of ids) {
+      if (references[id]) continue;
+      const loaded = state.sessions.find((session) => session.id === id);
+      if (loaded) {
+        rememberSessionReference(loaded);
+        continue;
+      }
+      if (pendingSessionReferenceIds.has(id)) continue;
+      pendingSessionReferenceIds.add(id);
+      void client.session
+        .get(id)
+        .then((session) => {
+          if (session.parentID || session.time.archived) return;
+          if (workspacePath && !isSamePath(session.directory, workspacePath)) return;
+          if (!getSessionReferenceIds(inputText()).includes(id)) return;
+          rememberSessionReference(session);
+        })
+        .catch(() => {})
+        .finally(() => pendingSessionReferenceIds.delete(id));
+    }
+  });
+
   const inlineChips = createMemo((): RichComposerChip[] => {
     const chips: RichComposerChip[] = [];
     const text = inputText();
@@ -916,6 +960,37 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           textMarker: marker,
         });
       }
+    }
+
+    for (const session of Object.values(sessionReferences())) {
+      const marker = `session:${session.id}`;
+      if (text.includes(marker)) {
+        const title = normalizeSessionTitle(session.title) || 'Untitled';
+        chips.push({
+          id: `session:${session.id}`,
+          type: 'mention-session',
+          label: title,
+          title,
+          icon: 'session',
+          textMarker: marker,
+        });
+      }
+    }
+
+    const externalLinks = new Set(
+      splitExternalLinkText(text)
+        .filter((segment) => segment.type === 'external-link')
+        .map((segment) => segment.href)
+    );
+    for (const href of externalLinks) {
+      chips.push({
+        id: `external-link:${href}`,
+        type: 'external-link',
+        label: href,
+        title: href,
+        icon: 'external-link',
+        textMarker: href,
+      });
     }
 
     return chips;
@@ -1115,6 +1190,78 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }, 120);
   });
 
+  createEffect(() => {
+    const completion = activeCompletion();
+    sessionSearchAbortController?.abort();
+    sessionSearchAbortController = undefined;
+    if (sessionSearchTimer) {
+      clearTimeout(sessionSearchTimer);
+      sessionSearchTimer = null;
+    }
+    if (completion?.type !== 'session') {
+      setSessionSearchResults([]);
+      return;
+    }
+
+    const query = normalizeSessionLookupQuery(completion.query);
+    const exactSessionId =
+      /^sessions?:/i.test(completion.query.trim()) || /^ses_[a-z0-9]+$/i.test(query) ? query : null;
+    const currentSessionId = composerSessionId();
+    const workspacePath = state.editorContext.workspacePath;
+    const localResults = state.sessions.filter((session) => {
+      if (session.id === currentSessionId || session.parentID) return false;
+      if (!query) return true;
+      return (
+        session.id.toLowerCase().includes(query) || session.title.toLowerCase().includes(query)
+      );
+    });
+    setSessionSearchResults(localResults.slice(0, 30));
+
+    sessionSearchTimer = setTimeout(
+      () => {
+        sessionSearchTimer = null;
+        const controller = new AbortController();
+        sessionSearchAbortController = controller;
+        const listRequest = client.session
+          .list({
+            limit: 30,
+            ...(query ? { search: query } : {}),
+            roots: true,
+            signal: controller.signal,
+          })
+          .catch(() => null);
+        const exactRequest = exactSessionId
+          ? client.session.get(exactSessionId).catch(() => null)
+          : Promise.resolve(null);
+        void Promise.all([listRequest, exactRequest]).then(([page, exactSession]) => {
+          if (controller.signal.aborted) return;
+          const sessions = page ? [...(Array.isArray(page) ? page : page.items)] : [];
+          if (
+            exactSession &&
+            !exactSession.parentID &&
+            !exactSession.time.archived &&
+            (!workspacePath || isSamePath(exactSession.directory, workspacePath))
+          ) {
+            sessions.unshift(exactSession);
+          }
+          const seen = new Set<string>();
+          const results = sessions.filter((session) => {
+            if (session.id === currentSessionId || seen.has(session.id)) return false;
+            seen.add(session.id);
+            return true;
+          });
+          if (results.length > 0 || page) setSessionSearchResults(results.slice(0, 30));
+        });
+      },
+      query ? 120 : 0
+    );
+  });
+
+  onCleanup(() => {
+    if (sessionSearchTimer) clearTimeout(sessionSearchTimer);
+    sessionSearchAbortController?.abort();
+  });
+
   const mentionCompletions = createMemo(() => {
     const completion = activeCompletion();
     if (completion?.type !== 'mention') return [];
@@ -1124,6 +1271,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       source: mentionCompletionSource(),
       meta: { showFileSearchHint: showFileSearchHint() },
     });
+  });
+
+  const sessionCompletions = createMemo(() => {
+    if (activeCompletion()?.type !== 'session') return [];
+    return getSessionCompletionItems(sessionSearchResults());
   });
 
   const slashCompletions = createMemo(() => {
@@ -1172,12 +1324,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const composerCompletions = createMemo(() => {
     const completion = activeCompletion();
     if (!completion) return [];
-    return completion.type === 'slash' ? slashCompletions() : mentionCompletions();
+    if (completion.type === 'slash') return slashCompletions();
+    return completion.type === 'session' ? sessionCompletions() : mentionCompletions();
   });
 
   const completionHeader = createMemo(() => {
-    if (showFileSearchHint()) return 'Type to search workspace files';
     const completion = activeCompletion();
+    if (completion?.type === 'session') return undefined;
+    if (showFileSearchHint()) return 'Type to search workspace files';
     if (
       completion?.type === 'slash' &&
       completion.query.toLowerCase().startsWith(`${SKILLS_COMMAND_NAME} `)
@@ -1192,12 +1346,17 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const completion = activeCompletion();
     if (!completion) return false;
     return (
-      composerCompletions().length > 0 || (completion.type === 'mention' && showFileSearchHint())
+      composerCompletions().length > 0 ||
+      (completion.type === 'mention' && showFileSearchHint()) ||
+      completion.type === 'session'
     );
   };
 
   const showMentionCompletionMenu = createMemo(
-    () => isFocused() && activeCompletion()?.type === 'mention' && showCompletionMenu()
+    () =>
+      isFocused() &&
+      (activeCompletion()?.type === 'mention' || activeCompletion()?.type === 'session') &&
+      showCompletionMenu()
   );
 
   const showFloatingInputPopover = createMemo(
@@ -1390,12 +1549,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (completionSelection.file) addContextFile(completionSelection.file);
-    if (completion?.type !== 'mention') return;
-    applyMentionValue(completion, completionSelection.value);
+    if (completionSelection.session) rememberSessionReference(completionSelection.session);
+    if (completion?.type !== 'mention' && completion?.type !== 'session') return;
+    applyCompletionValue(completion, completionSelection.value);
   }
 
-  function applyMentionValue(
-    completion: Extract<ReturnType<typeof getActiveCompletion>, { type: 'mention' }>,
+  function applyCompletionValue(
+    completion: Extract<ReturnType<typeof getActiveCompletion>, { type: 'mention' | 'session' }>,
     value: string
   ) {
     const text = inputText();
@@ -1407,6 +1567,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       setCaretPosition(nextCursor);
       setCompletionIndex(0);
       setFileSearchResults([]);
+      setSessionSearchResults([]);
     });
     latestFileSearchQuery = '';
 
@@ -3285,8 +3446,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               setIsFocused(true);
             }}
             onBlur={() => setIsFocused(false)}
-            onClick={(cursorOffset) => {
-              setCaretPosition(cursorOffset);
+            onClick={(cursorOffset, selectionEnd) => {
+              if (cursorOffset === selectionEnd) setCaretPosition(cursorOffset);
               setShowAgentPicker(false);
               setShowModelPicker(false);
               setShowMcpPicker(false);
@@ -3294,8 +3455,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               setShowPermissionModePicker(false);
               setShowBusyMenu(false);
             }}
-            onKeyUp={(cursorOffset) => setCaretPosition(cursorOffset)}
-            onSelect={(cursorOffset) => setCaretPosition(cursorOffset)}
+            onKeyUp={(cursorOffset, selectionEnd) => {
+              if (cursorOffset === selectionEnd) setCaretPosition(cursorOffset);
+            }}
+            onSelect={(cursorOffset, selectionEnd) => {
+              if (cursorOffset === selectionEnd) setCaretPosition(cursorOffset);
+            }}
             onRemoveChip={(chipId) => {
               if (chipId.startsWith('file:')) {
                 const path = chipId.slice(5);
@@ -3334,8 +3499,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               }
 
               if (completionSelection.file) addContextFile(completionSelection.file);
-              if (completion?.type !== 'mention') return;
-              applyMentionValue(completion, completionSelection.value);
+              if (completionSelection.session)
+                rememberSessionReference(completionSelection.session);
+              if (completion?.type !== 'mention' && completion?.type !== 'session') return;
+              applyCompletionValue(completion, completionSelection.value);
             }}
           />
 

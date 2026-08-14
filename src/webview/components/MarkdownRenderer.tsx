@@ -1,6 +1,8 @@
-import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
+import { Show, createSignal, createEffect, onMount, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { postMessage } from '../lib/bridge';
 import {
@@ -9,11 +11,15 @@ import {
   loadCodeHighlighter,
   resolveCodeLanguage,
 } from '../lib/code-highlighter';
-import { state } from '../lib/state';
+import { state, theme } from '../lib/state';
 import { formatDisplayPath, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
 import { selectSession } from '../hooks/useOpenCode';
+import { trapModalFocus } from '../lib/modal-focus';
+import { mixRgb, parseThemeColor } from '../lib/theme';
+import { isSafeExternalHref } from '../lib/external-link';
+import { createExternalLinkIconElement } from './ExternalLinkIcon';
 
 interface MarkdownProps {
   content: string;
@@ -25,6 +31,7 @@ type ParseMarkdownOptions = {
   cacheByContent: boolean;
   disablePathLinkify?: boolean;
   disableCodeHighlighting?: boolean;
+  allowMermaidHydration?: boolean;
 };
 
 type StreamingMarkdownSegments = {
@@ -54,11 +61,13 @@ type MarkdownRenderSegments = StreamingMarkdownSegments & {
 type MarkdownHydrationFlags = {
   tables: boolean;
   copyButtons: boolean;
+  mermaid: boolean;
 };
 
 type RenderMarkdownContext = {
   disableCodeHighlighting: boolean;
   disableCache: boolean;
+  allowMermaidHydration: boolean;
 };
 
 type MarkdownStringCache = Map<string, MarkdownCacheEntry>;
@@ -83,6 +92,10 @@ const copySvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4h1V2.5a.5.5 0 01.5-.5h8a.5.5 0 01.5.5v8a.5.5 0 01-.5.5H12v1h1.5a1.5 1.5 0 001.5-1.5v-8A1.5 1.5 0 0013.5 1h-8A1.5 1.5 0 004 2.5V4zm-2 1.5A1.5 1.5 0 013.5 4h8A1.5 1.5 0 0113 5.5v8a1.5 1.5 0 01-1.5 1.5h-8A1.5 1.5 0 012 13.5v-8zM3.5 5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h8a.5.5 0 00.5-.5v-8a.5.5 0 00-.5-.5h-8z"/></svg>';
 const checkSvg =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
+const expandSvg =
+  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const closeSvg =
+  '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke-linecap="round"/></svg>';
 
 const renderer = new marked.Renderer();
 let renderMarkdownContext: RenderMarkdownContext | null = null;
@@ -133,9 +146,11 @@ const ALLOWED_HTML_ATTRIBUTES = [
   'data-external',
   'data-file',
   'data-lang',
+  'data-mermaid-source',
   'd',
   'fill',
   'height',
+  'hidden',
   'href',
   'points',
   'role',
@@ -155,6 +170,8 @@ const ALLOWED_HTML_ATTRIBUTES = [
 const MARKDOWN_CACHE_ENTRY_LIMIT = 100;
 const MARKDOWN_CACHE_BYTE_BUDGET = 2 * 1024 * 1024;
 const MAX_COPY_TEXT_LENGTH = 20_000;
+const MAX_MERMAID_SOURCE_LENGTH = 100_000;
+const MERMAID_SVG_CACHE_LIMIT = 20;
 const codeBlockHtmlCache: MarkdownStringCache = new Map();
 const highlightedCodeCache: MarkdownStringCache = new Map();
 const renderedMarkdownCache: MarkdownStringCache = new Map();
@@ -263,6 +280,7 @@ function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOpti
     hashContent(getSessionReferenceContextKey(content)),
     options.disablePathLinkify ? 'no-paths' : 'paths',
     options.disableCodeHighlighting ? 'plain-code' : `highlight-code:${codeHighlighterVersion()}`,
+    options.allowMermaidHydration ? 'hydrate-mermaid' : 'defer-mermaid',
     hashContent(content),
   ].join('\u0000');
 }
@@ -424,6 +442,27 @@ function buildFileLink(raw: string, label?: string) {
 }
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+  if (lang?.trim().toLowerCase() === 'mermaid' && text.length <= MAX_MERMAID_SOURCE_LENGTH) {
+    if (
+      renderMarkdownContext?.disableCodeHighlighting &&
+      !renderMarkdownContext.allowMermaidHydration
+    ) {
+      return '<div class="mermaid-diagram mermaid-diagram-pending"><div class="mermaid-diagram-status"><span>Rendering diagram...</span></div></div>';
+    }
+    const fallback = renderCodeBlockHtml({
+      text,
+      lang,
+      copyText: text,
+      className: 'mermaid-diagram-fallback',
+      disableHighlighting: true,
+      disableCache: renderMarkdownContext?.disableCache,
+    }).replace(
+      '<div class="interactive-result-code-block',
+      '<div hidden class="interactive-result-code-block'
+    );
+    return `<div class="mermaid-diagram" data-mermaid-source="${encodeCopyPayload(text)}"><div class="mermaid-diagram-status"><span>Rendering diagram...</span></div>${fallback}</div>`;
+  }
+
   const workspacePath = state.editorContext.workspacePath || '';
   const normalizedText = SHELL_LANGS.has((lang || '').toLowerCase())
     ? formatCommandDisplay(text, workspacePath || null)
@@ -509,17 +548,10 @@ function isLocalFileHref(href: string | null): boolean {
   );
 }
 
-function isSafeExternalHref(href: string | null): boolean {
-  if (!href) return false;
-  try {
-    const parsed = new URL(href);
-    return parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
+  anchor.classList.remove('external-link');
+  for (const icon of Array.from(anchor.querySelectorAll('svg.external-link-icon'))) icon.remove();
+
   const href = anchor.getAttribute('href')?.trim() || '';
   if (isLocalFileHref(href)) {
     anchor.setAttribute('href', href);
@@ -530,6 +562,8 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   if (isSafeExternalHref(href)) {
     anchor.setAttribute('href', href);
     anchor.setAttribute('data-external', 'true');
+    anchor.classList.add('external-link');
+    anchor.prepend(createExternalLinkIconElement());
     return;
   }
 
@@ -563,7 +597,32 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       anchor.href = segment.reference.href;
       anchor.dataset.sessionId = segment.reference.id;
       anchor.title = `Open session ${segment.reference.id}`;
-      anchor.textContent = segment.reference.title;
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('class', 'session-reference-icon');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('fill', 'none');
+      icon.setAttribute('aria-hidden', 'true');
+      for (const attributes of [
+        { d: 'M7 12L17 12', linejoin: true },
+        { d: 'M7 8L13 8', linejoin: true },
+        {
+          d: 'M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z',
+          linejoin: false,
+        },
+      ]) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', attributes.d);
+        path.setAttribute('stroke', 'currentColor');
+        path.setAttribute('stroke-width', '1.6');
+        if (attributes.linejoin) {
+          path.setAttribute('stroke-linecap', 'round');
+          path.setAttribute('stroke-linejoin', 'round');
+        }
+        icon.append(path);
+      }
+      const label = document.createElement('span');
+      label.textContent = segment.reference.title;
+      anchor.append(icon, label);
       replacement.append(anchor);
     }
     node.replaceWith(replacement);
@@ -607,12 +666,14 @@ function renderMarkdownHtml(
     disablePathLinkify?: boolean;
     disableCodeHighlighting?: boolean;
     disableCache?: boolean;
+    allowMermaidHydration?: boolean;
   }
 ): string {
   const previousRenderMarkdownContext = renderMarkdownContext;
   renderMarkdownContext = {
     disableCodeHighlighting: options?.disableCodeHighlighting === true,
     disableCache: options?.disableCache === true,
+    allowMermaidHydration: options?.allowMermaidHydration === true,
   };
   try {
     const parsed = marked.parse(content) as string;
@@ -818,6 +879,7 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
       disablePathLinkify: options.disablePathLinkify,
       disableCodeHighlighting: options.disableCodeHighlighting,
       disableCache: true,
+      allowMermaidHydration: options.allowMermaidHydration,
     });
   }
 
@@ -828,6 +890,7 @@ function parseMarkdown(content: string, options: ParseMarkdownOptions): string {
   const html = renderMarkdownHtml(content, {
     disablePathLinkify: options.disablePathLinkify,
     disableCodeHighlighting: options.disableCodeHighlighting,
+    allowMermaidHydration: options.allowMermaidHydration,
   });
   setCachedValue(renderedMarkdownCache, cacheKey, html);
   return html;
@@ -839,6 +902,7 @@ export function __parseMarkdownForTests(
     cacheByContent: boolean;
     disablePathLinkify?: boolean;
     disableCodeHighlighting?: boolean;
+    allowMermaidHydration?: boolean;
   }
 ): string {
   return parseMarkdown(content, options);
@@ -850,6 +914,7 @@ export function __resetMarkdownCachesForTests() {
   renderedMarkdownCache.clear();
   sanitizeHtmlCache.clear();
   markdownCacheLru.clear();
+  mermaidSvgCache.clear();
   markdownCacheBytes = 0;
 }
 
@@ -956,12 +1021,283 @@ function getMarkdownHydrationFlags(html: string): MarkdownHydrationFlags {
   return {
     tables: html.includes('<table'),
     copyButtons: html.includes('data-copy'),
+    mermaid: html.includes('data-mermaid-source'),
   };
+}
+
+let mermaidRenderSequence = 0;
+let mermaidRenderQueue: Promise<void> = Promise.resolve();
+const mermaidSvgCache = new Map<string, string>();
+
+function readMermaidThemeColor(styles: CSSStyleDeclaration, name: string, fallback: string) {
+  return styles.getPropertyValue(name).trim() || fallback;
+}
+
+function mermaidRgb(value: string, fallback: [number, number, number]) {
+  return parseThemeColor(value) ?? fallback;
+}
+
+function mermaidRgbString(color: [number, number, number]) {
+  return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+export function getMermaidThemeConfigForTests(
+  body: HTMLElement = document.body,
+  styles: CSSStyleDeclaration = getComputedStyle(body)
+): MermaidConfig {
+  const dark =
+    body.classList.contains('vscode-dark') || body.classList.contains('vscode-high-contrast');
+  const background = readMermaidThemeColor(
+    styles,
+    '--vscode-editor-background',
+    dark ? '#1e1e1e' : '#ffffff'
+  );
+  const foreground = readMermaidThemeColor(
+    styles,
+    '--vscode-editor-foreground',
+    dark ? '#d4d4d4' : '#333333'
+  );
+  const border = readMermaidThemeColor(
+    styles,
+    '--vscode-widget-border',
+    dark ? '#6b6b6b' : '#8c8c8c'
+  );
+  const accent = readMermaidThemeColor(
+    styles,
+    '--vscode-focusBorder',
+    dark ? '#3794ff' : '#007acc'
+  );
+  const backgroundRgb = mermaidRgb(background, dark ? [30, 30, 30] : [255, 255, 255]);
+  const foregroundRgb = mermaidRgb(foreground, dark ? [212, 212, 212] : [51, 51, 51]);
+  const accentRgb = mermaidRgb(accent, dark ? [55, 148, 255] : [0, 122, 204]);
+  const primaryFill = mermaidRgbString(mixRgb(foregroundRgb, backgroundRgb, dark ? 0.13 : 0.06));
+  const secondaryFill = mermaidRgbString(mixRgb(foregroundRgb, backgroundRgb, dark ? 0.18 : 0.1));
+  const tertiaryFill = mermaidRgbString(mixRgb(foregroundRgb, backgroundRgb, dark ? 0.08 : 0.03));
+  const accentFill = mermaidRgbString(mixRgb(accentRgb, backgroundRgb, dark ? 0.18 : 0.1));
+  const line = mermaidRgbString(mixRgb(foregroundRgb, backgroundRgb, dark ? 0.78 : 0.68));
+
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    darkMode: dark,
+    htmlLabels: false,
+    themeVariables: {
+      background,
+      mainBkg: primaryFill,
+      primaryColor: primaryFill,
+      primaryTextColor: foreground,
+      primaryBorderColor: border,
+      secondaryColor: secondaryFill,
+      secondaryTextColor: foreground,
+      secondaryBorderColor: border,
+      tertiaryColor: tertiaryFill,
+      tertiaryTextColor: foreground,
+      tertiaryBorderColor: border,
+      lineColor: line,
+      textColor: foreground,
+      labelTextColor: foreground,
+      nodeBorder: border,
+      clusterBkg: tertiaryFill,
+      clusterBorder: border,
+      edgeLabelBackground: background,
+      noteBkgColor: accentFill,
+      noteTextColor: foreground,
+      noteBorderColor: border,
+      actorBkg: primaryFill,
+      actorBorder: border,
+      actorTextColor: foreground,
+      actorLineColor: line,
+      signalColor: line,
+      signalTextColor: foreground,
+      activationBkgColor: accentFill,
+      activationBorderColor: accent,
+      sequenceNumberColor: foreground,
+      labelBackground: background,
+      loopTextColor: foreground,
+      altBackground: tertiaryFill,
+      sectionBkgColor: primaryFill,
+      sectionBkgColor2: secondaryFill,
+      taskBkgColor: primaryFill,
+      taskTextColor: foreground,
+      taskBorderColor: border,
+      gridColor: line,
+      todayLineColor: accent,
+      classText: foreground,
+      fillType0: primaryFill,
+      fillType1: secondaryFill,
+      fillType2: tertiaryFill,
+      fillType3: accentFill,
+      fillType4: primaryFill,
+      fillType5: secondaryFill,
+      fillType6: tertiaryFill,
+      fillType7: accentFill,
+    },
+  };
+}
+
+function enqueueMermaidRender<T>(run: () => Promise<T>): Promise<T> {
+  const result = mermaidRenderQueue.then(run, run);
+  mermaidRenderQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
+function getCachedMermaidSvg(key: string) {
+  const svg = mermaidSvgCache.get(key);
+  if (svg === undefined) return undefined;
+  mermaidSvgCache.delete(key);
+  mermaidSvgCache.set(key, svg);
+  return svg;
+}
+
+function cacheMermaidSvg(key: string, svg: string) {
+  mermaidSvgCache.delete(key);
+  mermaidSvgCache.set(key, svg);
+  while (mermaidSvgCache.size > MERMAID_SVG_CACHE_LIMIT) {
+    const oldest = mermaidSvgCache.keys().next().value;
+    if (oldest === undefined) break;
+    mermaidSvgCache.delete(oldest);
+  }
+}
+
+async function waitForMermaidLayoutReady() {
+  const fonts = document.fonts?.ready;
+  if (fonts) {
+    await Promise.race([fonts, new Promise<void>((resolve) => setTimeout(resolve, 500))]);
+  }
+  await new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  );
+}
+
+export async function renderMermaidWithColdRetryForTests(
+  mermaid: Mermaid,
+  source: string,
+  config: MermaidConfig
+) {
+  await waitForMermaidLayoutReady();
+  mermaid.initialize(config);
+  try {
+    return await mermaid.render(`varro-mermaid-${++mermaidRenderSequence}`, source);
+  } catch (firstError) {
+    mermaid.initialize(config);
+    try {
+      await mermaid.parse(source);
+    } catch {
+      throw firstError;
+    }
+    await waitForMermaidLayoutReady();
+    mermaid.initialize(config);
+    return mermaid.render(`varro-mermaid-${++mermaidRenderSequence}`, source);
+  }
+}
+
+function showMermaidFailure(diagram: HTMLElement, message: string) {
+  const status = diagram.querySelector<HTMLElement>('.mermaid-diagram-status');
+  if (status) status.textContent = message;
+  diagram.querySelector<HTMLElement>('.mermaid-diagram-fallback')?.removeAttribute('hidden');
+  diagram.dataset.mermaidHydrated = 'error';
+}
+
+function mountMermaidSvg(diagram: HTMLElement, svg: string) {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'mermaid-diagram-toolbar';
+  toolbar.innerHTML = `<button type="button" data-mermaid-copy aria-label="Copy Mermaid source" title="Copy Mermaid source">${copySvg}</button><button type="button" data-mermaid-expand aria-label="Expand diagram" title="Expand diagram">${expandSvg}</button>`;
+  const output = document.createElement('div');
+  output.className = 'mermaid-diagram-output';
+  output.innerHTML = svg;
+  diagram.prepend(output);
+  diagram.prepend(toolbar);
+  diagram.querySelector('.mermaid-diagram-status')?.remove();
+  diagram.dataset.mermaidHydrated = 'complete';
+}
+
+export function resetMermaidDiagramsForThemeForTests(root: HTMLElement | undefined) {
+  if (!root) return;
+  for (const diagram of root.querySelectorAll<HTMLElement>(
+    '.mermaid-diagram[data-mermaid-source]'
+  )) {
+    diagram.querySelector('.mermaid-diagram-toolbar')?.remove();
+    diagram.querySelector('.mermaid-diagram-output')?.remove();
+    diagram.querySelector('.mermaid-diagram-status')?.remove();
+    const status = document.createElement('div');
+    status.className = 'mermaid-diagram-status';
+    status.innerHTML = '<span>Rendering diagram...</span>';
+    diagram.prepend(status);
+    diagram.querySelector<HTMLElement>('.mermaid-diagram-fallback')?.setAttribute('hidden', '');
+    delete diagram.dataset.mermaidHydrated;
+  }
+}
+
+async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
+  if (!root) return;
+
+  const diagrams = Array.from(
+    root.querySelectorAll<HTMLElement>(
+      '.mermaid-diagram[data-mermaid-source]:not([data-mermaid-hydrated])'
+    )
+  );
+  if (diagrams.length === 0) return;
+
+  const pending: Array<{
+    diagram: HTMLElement;
+    source: string;
+    config: MermaidConfig;
+    cacheKey: string;
+  }> = [];
+  for (const diagram of diagrams) {
+    const source = decodeCopyPayload(diagram.dataset.mermaidSource || '');
+    const config = getMermaidThemeConfigForTests();
+    const cacheKey = `${JSON.stringify(config)}\u0000${source}`;
+    const cached = getCachedMermaidSvg(cacheKey);
+    if (cached !== undefined) {
+      mountMermaidSvg(diagram, cached);
+    } else {
+      pending.push({ diagram, source, config, cacheKey });
+    }
+  }
+  if (pending.length === 0) return;
+
+  let mermaid: Mermaid;
+  try {
+    ({ default: mermaid } = await import('mermaid'));
+  } catch {
+    for (const { diagram } of pending) {
+      showMermaidFailure(diagram, 'Could not load diagram renderer. Showing Mermaid source.');
+    }
+    return;
+  }
+  for (const { diagram, source, config, cacheKey } of pending) {
+    if (!diagram.isConnected || diagram.dataset.mermaidHydrated) continue;
+    diagram.dataset.mermaidHydrated = 'loading';
+
+    try {
+      const sanitized = await enqueueMermaidRender(async () => {
+        const cached = getCachedMermaidSvg(cacheKey);
+        if (cached !== undefined) return cached;
+        const { svg } = await renderMermaidWithColdRetryForTests(mermaid, source, config);
+        const clean = DOMPurify.sanitize(svg, {
+          USE_PROFILES: { svg: true, svgFilters: true },
+        });
+        cacheMermaidSvg(cacheKey, clean);
+        return clean;
+      });
+      if (!diagram.isConnected) continue;
+      mountMermaidSvg(diagram, sanitized);
+    } catch {
+      if (!diagram.isConnected) continue;
+      showMermaidFailure(diagram, 'Could not render diagram. Showing Mermaid source.');
+    }
+  }
 }
 
 function hydrateRenderedMarkdown(root: HTMLDivElement | undefined, flags: MarkdownHydrationFlags) {
   if (flags.tables) applyTableColumnClasses(root);
   if (flags.copyButtons) applyCodeBlockCopyIcons(root);
+  if (flags.mermaid) void hydrateMermaidDiagrams(root);
 }
 
 export function MarkdownRenderer(props: MarkdownProps) {
@@ -973,6 +1309,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let tailRef: HTMLDivElement | undefined;
 
   const lw = () => props.lightweight ?? false;
+  const [mermaidPreview, setMermaidPreview] = createSignal<{ svg: string } | null>(null);
+  let appliedMermaidTheme = theme();
+
+  function closeMermaidPreview() {
+    if (!mermaidPreview()) return;
+    setMermaidPreview(null);
+    postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
+  }
 
   let pendingContent: string | null = null;
   let rafId: number | null = null;
@@ -990,12 +1334,14 @@ export function MarkdownRenderer(props: MarkdownProps) {
         cacheByContent: false,
         disablePathLinkify: lw(),
         disableCodeHighlighting: lw(),
+        allowMermaidHydration: lw(),
       })
     : '';
   let lastAppliedTailHtml = parseMarkdown(initialSegments.tailContent, {
     cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
     disablePathLinkify: !props.cacheByContent || lw(),
     disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
+    allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
   });
   let lastAppliedStableHydrationFlags = getMarkdownHydrationFlags(lastAppliedStableHtml);
   let lastAppliedTailHydrationFlags = getMarkdownHydrationFlags(lastAppliedTailHtml);
@@ -1081,11 +1427,13 @@ export function MarkdownRenderer(props: MarkdownProps) {
                   cacheByContent: false,
                   disablePathLinkify: isLightweight,
                   disableCodeHighlighting: isLightweight,
+                  allowMermaidHydration: isLightweight,
                 })}`
               : parseMarkdown(segments.stableContent, {
                   cacheByContent: false,
                   disablePathLinkify: isLightweight,
                   disableCodeHighlighting: isLightweight,
+                  allowMermaidHydration: isLightweight,
                 })
             : lastAppliedStableHtml;
       const shouldDeferTailHighlight =
@@ -1101,6 +1449,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
             disablePathLinkify: !props.cacheByContent || isLightweight,
             disableCodeHighlighting:
               segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
+            allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
           })
         : lastAppliedTailHtml;
 
@@ -1165,9 +1514,27 @@ export function MarkdownRenderer(props: MarkdownProps) {
     void highlighterVersion;
   });
 
+  createEffect(() => {
+    const nextTheme = theme();
+    if (nextTheme === appliedMermaidTheme) return;
+    appliedMermaidTheme = nextTheme;
+    closeMermaidPreview();
+    resetMermaidDiagramsForThemeForTests(stableRef);
+    resetMermaidDiagramsForThemeForTests(tailRef);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void hydrateMermaidDiagrams(stableRef);
+        void hydrateMermaidDiagrams(tailRef);
+      });
+    });
+  });
+
   const copyTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
   onCleanup(() => {
+    if (mermaidPreview()) {
+      postMessage({ type: 'vscode/mermaid-preview', payload: { open: false } });
+    }
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
@@ -1179,6 +1546,35 @@ export function MarkdownRenderer(props: MarkdownProps) {
   });
 
   function handleClick(e: MouseEvent) {
+    const mermaidCopy = (e.target as HTMLElement).closest<HTMLButtonElement>(
+      'button[data-mermaid-copy]'
+    );
+    if (mermaidCopy) {
+      const diagram = mermaidCopy.closest<HTMLElement>('.mermaid-diagram');
+      const source = decodeCopyPayload(diagram?.dataset.mermaidSource || '');
+      if (source) writeClipboard(source);
+      mermaidCopy.innerHTML = checkSvg;
+      const tid = setTimeout(() => {
+        copyTimeouts.delete(tid);
+        mermaidCopy.innerHTML = copySvg;
+      }, 1500);
+      copyTimeouts.add(tid);
+      return;
+    }
+
+    const mermaidExpand = (e.target as HTMLElement).closest<HTMLButtonElement>(
+      'button[data-mermaid-expand]'
+    );
+    if (mermaidExpand) {
+      const diagram = mermaidExpand.closest<HTMLElement>('.mermaid-diagram');
+      const svg = diagram?.querySelector<SVGSVGElement>('.mermaid-diagram-output > svg');
+      const source = decodeCopyPayload(diagram?.dataset.mermaidSource || '');
+      if (!svg || !source) return;
+      setMermaidPreview({ svg: svg.outerHTML });
+      postMessage({ type: 'vscode/mermaid-preview', payload: { open: true } });
+      return;
+    }
+
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-copy]');
     if (btn) {
       const block = btn.closest('.interactive-result-code-block');
@@ -1254,19 +1650,70 @@ export function MarkdownRenderer(props: MarkdownProps) {
   });
 
   return (
-    <div ref={ref} class="rendered-markdown">
-      <div
-        ref={stableRef}
-        data-markdown-segment="stable"
-        style={{ display: stableHtml() ? 'contents' : 'none' }}
-        innerHTML={stableHtml()}
-      />
-      <div
-        ref={tailRef}
-        data-markdown-segment="tail"
-        style={{ display: tailHtml() ? 'contents' : 'none' }}
-        innerHTML={tailHtml()}
-      />
-    </div>
+    <>
+      <div ref={ref} class="rendered-markdown">
+        <div
+          ref={stableRef}
+          data-markdown-segment="stable"
+          style={{ display: stableHtml() ? 'contents' : 'none' }}
+          innerHTML={stableHtml()}
+        />
+        <div
+          ref={tailRef}
+          data-markdown-segment="tail"
+          style={{ display: tailHtml() ? 'contents' : 'none' }}
+          innerHTML={tailHtml()}
+        />
+      </div>
+      <MermaidPreviewOverlay preview={mermaidPreview()} onClose={closeMermaidPreview} />
+    </>
+  );
+}
+
+function MermaidPreviewOverlay(props: { preview: { svg: string } | null; onClose: () => void }) {
+  createEffect(() => {
+    if (!props.preview) return;
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      props.onClose();
+    };
+    window.addEventListener('keydown', handleKeydown);
+    onCleanup(() => window.removeEventListener('keydown', handleKeydown));
+  });
+
+  return (
+    <Portal>
+      <Show when={props.preview}>
+        {(preview) => (
+          <div
+            ref={(element) => onCleanup(trapModalFocus(element))}
+            class="mermaid-preview-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mermaid diagram preview"
+            onClick={props.onClose}
+          >
+            <div class="mermaid-preview-toolbar">
+              <button
+                type="button"
+                aria-label="Close diagram preview"
+                title="Close diagram preview"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.onClose();
+                }}
+                innerHTML={closeSvg}
+              />
+            </div>
+            <div
+              class="mermaid-preview-canvas"
+              onClick={(event) => event.stopPropagation()}
+              innerHTML={preview().svg}
+            />
+          </div>
+        )}
+      </Show>
+    </Portal>
   );
 }

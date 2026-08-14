@@ -226,6 +226,196 @@ test.describe('viewport content coverage', () => {
     }
   });
 
+  test('keeps a detached anchor stable while a visible Mermaid diagram hydrates', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 486, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+    const list = page.locator('.interactive-list');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+    await list.evaluate((element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = (element.scrollHeight - element.clientHeight) * 0.5;
+      element.dispatchEvent(new Event('scroll'));
+    });
+    await waitForAnimationFrames(page, 8);
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeGreaterThan(100);
+
+    const setup = await list.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
+      const source = rows
+        .filter((row) => row.dataset.msgId?.includes('-assistant-'))
+        .find((row) => {
+          const rect = row.getBoundingClientRect();
+          return rect.top >= bounds.top && rect.bottom < bounds.bottom;
+        });
+      if (!source?.dataset.msgId) {
+        throw new Error('Mermaid height fixture is not visible');
+      }
+      return {
+        anchorId: source.dataset.msgId,
+        anchorTop: source.getBoundingClientRect().top - bounds.top,
+        sourceId: source.dataset.msgId,
+      };
+    });
+
+    const samples = await page.evaluate(async ({ anchorId, sourceId }) => {
+      const sessionId = 'session-large-transcript';
+      const harness = window as Window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{
+            parts: Array<Record<string, unknown>>;
+          }>;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const sourceMessage = harness.__varroE2E
+        ?.getSessionMessages?.(sessionId)
+        .find((message) => message.parts.some((part) => part.messageID === sourceId));
+      const textPart = sourceMessage?.parts.find((part) => part.type === 'text');
+      if (!textPart) throw new Error('Mermaid source text part is missing');
+
+      const edges = Array.from({ length: 32 }, (_, index) => `  N${index} --> N${index + 1}`);
+      const updatedPart = {
+        ...textPart,
+        text: ['```mermaid', 'flowchart TD', ...edges, '```'].join('\n'),
+      };
+      harness.__varroE2E?.updateMessagePart?.(updatedPart);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'message.part.updated',
+            properties: { part: updatedPart },
+          },
+        },
+        '*'
+      );
+
+      const frames: Array<{
+        top: number | null;
+        mountedRows: number;
+        visibleRows: number;
+        hydration: string | null;
+        status: string | null;
+      }> = [];
+      for (let frame = 0; frame < 600; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const scrollList = document.querySelector<HTMLElement>('.interactive-list');
+        if (!scrollList) throw new Error('Message list is missing');
+        const bounds = scrollList.getBoundingClientRect();
+        const rows = [...scrollList.querySelectorAll<HTMLElement>('[data-msg-id]')];
+        const anchor = rows.find((row) => row.dataset.msgId === anchorId);
+        const diagram = scrollList.querySelector<HTMLElement>(
+          `[data-msg-id="${sourceId}"] .mermaid-diagram`
+        );
+        frames.push({
+          top: anchor ? anchor.getBoundingClientRect().top - bounds.top : null,
+          mountedRows: rows.length,
+          visibleRows: rows.filter((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.bottom > bounds.top && rect.top < bounds.bottom;
+          }).length,
+          hydration: diagram?.dataset.mermaidHydrated ?? null,
+          status: diagram?.querySelector('.mermaid-diagram-status')?.textContent ?? null,
+        });
+        if (diagram?.dataset.mermaidHydrated === 'complete' && frame >= 8) break;
+      }
+      return frames;
+    }, setup);
+
+    expect(
+      samples.some((sample) => sample.hydration === 'complete'),
+      JSON.stringify(samples.slice(-5))
+    ).toBe(true);
+    expect(
+      samples.every(
+        (sample) => sample.top !== null && Math.abs(sample.top - setup.anchorTop) < 1.5
+      ),
+      JSON.stringify({ setup, samples })
+    ).toBe(true);
+    expect(Math.max(...samples.map((sample) => sample.mountedRows))).toBeLessThan(50);
+    expect(samples.every((sample) => sample.visibleRows > 0)).toBe(true);
+
+    const sourceRow = page.locator(`[data-msg-id="${setup.sourceId}"]`);
+    const firstDiagram = sourceRow.locator('.mermaid-diagram').first();
+    const inlineGeometry = await firstDiagram.evaluate((element) => {
+      const output = element.querySelector<HTMLElement>('.mermaid-diagram-output');
+      const svg = output?.querySelector<SVGSVGElement>('svg');
+      if (!output || !svg) throw new Error('Hydrated Mermaid geometry is missing');
+      return {
+        outputHeight: output.getBoundingClientRect().height,
+        svgHeight: svg.getBoundingClientRect().height,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(inlineGeometry.outputHeight).toBeLessThanOrEqual(
+      Math.min(420, inlineGeometry.viewportHeight * 0.5) + 1
+    );
+    expect(inlineGeometry.svgHeight).toBeGreaterThan(inlineGeometry.outputHeight);
+
+    const expandDiagram = firstDiagram.getByRole('button', { name: 'Expand diagram' });
+    await expandDiagram.focus();
+    await page.keyboard.press('Enter');
+    const preview = page.getByRole('dialog', { name: 'Mermaid diagram preview' });
+    await expect(preview).toBeVisible();
+    const previewSvgHeight = await preview
+      .locator('.mermaid-preview-canvas svg')
+      .evaluate((svg) => svg.getBoundingClientRect().height);
+    expect(previewSvgHeight).toBeGreaterThan(inlineGeometry.outputHeight);
+    await preview.getByRole('button', { name: 'Close diagram preview' }).click();
+    await expect(preview).toHaveCount(0);
+
+    const hydrated = await list.evaluate((element, sourceId) => {
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${sourceId}"]`);
+      if (!row) throw new Error('Hydrated Mermaid row is missing');
+      return {
+        height: row.getBoundingClientRect().height,
+        scrollTop: element.scrollTop,
+      };
+    }, setup.sourceId);
+    await list.evaluate((element, { scrollTop, height }) => {
+      element.scrollTop = Math.max(0, scrollTop - Math.max(height + 1_000, 4_000));
+      element.dispatchEvent(new Event('scroll'));
+    }, hydrated);
+    await waitForAnimationFrames(page, 4);
+    await expect(page.locator(`[data-msg-id="${setup.sourceId}"]`)).toHaveCount(0);
+
+    await list.hover();
+    let sourceVisible = false;
+    for (let step = 0; step < 16; step += 1) {
+      await page.mouse.wheel(0, 420);
+      await waitForAnimationFrames(page, 2);
+      sourceVisible = await list.evaluate((element, sourceId) => {
+        const row = element.querySelector<HTMLElement>(`[data-msg-id="${sourceId}"]`);
+        if (!row) return false;
+        const rowRect = row.getBoundingClientRect();
+        const listRect = element.getBoundingClientRect();
+        return rowRect.bottom > listRect.top && rowRect.top < listRect.bottom;
+      }, setup.sourceId);
+      if (sourceVisible) break;
+    }
+    expect(sourceVisible).toBe(true);
+    await waitForAnimationFrames(page, 4);
+
+    const remounted = await list.evaluate((element, sourceId) => {
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${sourceId}"]`);
+      if (!row) throw new Error('Remounted Mermaid row is missing');
+      return {
+        height: row.getBoundingClientRect().height,
+        hydration: row.querySelector<HTMLElement>('.mermaid-diagram')?.dataset.mermaidHydrated,
+        mountedRows: element.querySelectorAll('[data-msg-id]').length,
+      };
+    }, setup.sourceId);
+    expect(remounted.hydration).toBe('complete');
+    expect(Math.abs(remounted.height - hydrated.height)).toBeLessThan(1);
+    expect(remounted.mountedRows).toBeLessThan(50);
+  });
+
   test('virtualized message blocks stay aligned to whole CSS pixels', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=heterogeneous-large-transcript');
     const track = page.locator('.interactive-list-track');

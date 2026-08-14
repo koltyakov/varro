@@ -61,6 +61,7 @@
     "highlight.js": "11.12.0",
     "jsonc-parser": "^3.3.1",
     "marked": "18.0.9",
+    "mermaid": "^11.16.1",
     "solid-js": "1.9.14"
   },
   "devDependencies": {

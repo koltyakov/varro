@@ -105,6 +105,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'vscode/open-folder': true,
   'vscode/open-settings': true,
   'vscode/show-output': true,
+  'vscode/mermaid-preview': true,
   'files/drop': true,
   'files/drop-content': true,
   'pdfs/store': true,
@@ -153,6 +154,11 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return typeof payload?.includeAllTime === 'boolean'
         ? { type, payload: { includeAllTime: payload.includeAllTime } }
         : null;
+    }
+
+    case 'vscode/mermaid-preview': {
+      const payload = asRecord(message?.payload);
+      return typeof payload?.open === 'boolean' ? { type, payload: { open: payload.open } } : null;
     }
 
     case 'server/restart': {

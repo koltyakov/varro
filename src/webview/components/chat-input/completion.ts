@@ -1,6 +1,7 @@
 import type { CompletionItem, MentionCompletionItem } from './CompletionMenu';
-import type { Agent } from '../../types';
+import type { Agent, Session } from '../../types';
 import type { DroppedFile } from '../../../shared/protocol';
+import { normalizeSessionTitle } from '../../../shared/session-title';
 
 export const SKILLS_COMMAND_NAME = 'skills';
 
@@ -32,7 +33,7 @@ export type MentionCompletionSource = {
 export type CompletionSelection =
   | { type: 'set-slash'; value: string }
   | { type: 'run-slash'; value: string }
-  | { type: 'apply-mention'; value: string; file?: DroppedFile };
+  | { type: 'apply-mention'; value: string; file?: DroppedFile; session?: Session };
 
 export function getActiveCompletion(text: string, cursor: number) {
   if (cursor < 0 || cursor > text.length) return null;
@@ -60,6 +61,14 @@ export function getActiveCompletion(text: string, cursor: number) {
 
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\n')) + 1;
   const token = prefix.slice(tokenStart);
+  if (token.startsWith('&')) {
+    return {
+      type: 'session' as const,
+      query: token.slice(1),
+      start: tokenStart,
+      end: cursor,
+    };
+  }
   if (!token.startsWith('@')) return null;
 
   return {
@@ -68,6 +77,28 @@ export function getActiveCompletion(text: string, cursor: number) {
     start: tokenStart,
     end: cursor,
   };
+}
+
+export function getSessionCompletionItems(sessions: Session[]): MentionCompletionItem[] {
+  return sessions.slice(0, 10).map((session) => ({
+    key: `session:${session.id}`,
+    type: 'session',
+    label: normalizeSessionTitle(session.title) || 'Untitled',
+    detail: '',
+    value: `session:${session.id} `,
+    session,
+  }));
+}
+
+export function normalizeSessionLookupQuery(query: string) {
+  return query
+    .trim()
+    .replace(/^sessions?:/i, '')
+    .toLowerCase();
+}
+
+export function getSessionReferenceIds(text: string) {
+  return Array.from(text.matchAll(/(?:^|\s)session:([a-z0-9_-]+)/gi), (match) => match[1]!);
 }
 
 export function getLeadingSlashCommand(text: string) {
@@ -108,11 +139,13 @@ export function getCompletionSelection(
   if (!('value' in item)) return null;
 
   const file = item.type === 'file' ? item.file : undefined;
+  const session = item.type === 'session' ? item.session : undefined;
 
   return {
     type: 'apply-mention',
     value: item.value,
     file,
+    session,
   };
 }
 

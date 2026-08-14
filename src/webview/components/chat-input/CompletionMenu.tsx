@@ -6,6 +6,8 @@ import {
   observePopupViewport,
 } from '../../lib/popup-position';
 import type { DroppedFile } from '../../../shared/protocol';
+import type { Session } from '../../types';
+import { formatRelativeAge } from '../../lib/message-metrics';
 
 const COMPLETION_MENU_EDGE_INSET = 4;
 
@@ -24,6 +26,14 @@ export type MentionCompletionItem =
       detail: string;
       value: string;
       file: DroppedFile;
+    }
+  | {
+      key: string;
+      type: 'session';
+      label: string;
+      detail: string;
+      value: string;
+      session: Session;
     };
 
 export type SlashCommand = {
@@ -105,7 +115,12 @@ export function CompletionMenu(props: {
         {(item, index) => {
           const isSlash = item.type === 'slash';
           const title = 'name' in item ? `/${item.name}` : item.label;
-          const detail = 'description' in item ? item.description : item.detail;
+          const detail =
+            item.type === 'session'
+              ? formatRelativeAge(item.session.time.updated, Date.now())
+              : 'description' in item
+                ? item.description
+                : item.detail;
           return (
             <button
               ref={(el) => itemRefs.set(index(), el)}
@@ -118,7 +133,9 @@ export function CompletionMenu(props: {
                   <Show
                     when={item.type === 'agent'}
                     fallback={
-                      item.type === 'file' && item.file.type === 'directory' ? (
+                      item.type === 'session' ? (
+                        <CompletionSessionIcon />
+                      ) : item.type === 'file' && item.file.type === 'directory' ? (
                         <FolderIcon width={12} height={12} />
                       ) : (
                         <CompletionFileIcon />
@@ -135,7 +152,10 @@ export function CompletionMenu(props: {
                 </span>
               </Show>
               <CompletionTitle title={title} />
-              <span class="composer-completion-detail" title={detail}>
+              <span
+                class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
+                title={detail}
+              >
                 {detail}
               </span>
             </button>
@@ -143,6 +163,32 @@ export function CompletionMenu(props: {
         }}
       </For>
     </div>
+  );
+}
+
+function CompletionSessionIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 12L17 12"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M7 8L13 8"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z"
+        stroke="currentColor"
+        stroke-width="1.6"
+      />
+    </svg>
   );
 }
 

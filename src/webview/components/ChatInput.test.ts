@@ -88,6 +88,12 @@ vi.mock('./chat/SessionActionFeedback', () => ({
 
 vi.mock('../lib/client', () => ({
   client: {
+    session: {
+      get: vi.fn(async () => {
+        throw new Error('Session not found');
+      }),
+      list: vi.fn(async () => ({ items: [], hasMore: false })),
+    },
     varro: {
       session: {
         diffSummary: vi.fn(async () => ({
@@ -214,6 +220,10 @@ afterEach(() => {
     activeStartedAt: null,
   });
   vi.mocked(client.varro.resolveWorkspacePath).mockClear();
+  vi.mocked(client.session.list).mockReset();
+  vi.mocked(client.session.list).mockResolvedValue({ items: [], hasMore: false });
+  vi.mocked(client.session.get).mockReset();
+  vi.mocked(client.session.get).mockRejectedValue(new Error('Session not found'));
   setExpandedDiffOverlay(testDiffOverlayOwner, false);
 });
 
@@ -1800,6 +1810,137 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);
     expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
     expect(container?.querySelector('.changed-files-block')).toBe(files);
+  });
+
+  it.each(['&session-auth', '&sessions:session-auth'])(
+    'looks up session titles from %s and inserts a session reference',
+    async (lookup) => {
+      vi.useFakeTimers();
+      const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
+      vi.mocked(client.session.list).mockResolvedValue({ items: [result], hasMore: false });
+      vi.mocked(client.session.get).mockResolvedValue(result);
+      setInputText(lookup);
+
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, lookup.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'h', bubbles: true }));
+      await vi.advanceTimersByTimeAsync(120);
+      await flushAsyncWork();
+
+      expect(client.session.list).toHaveBeenCalledWith({
+        limit: 30,
+        search: 'session-auth',
+        roots: true,
+        signal: expect.any(AbortSignal),
+      });
+      if (lookup.startsWith('&sessions:')) {
+        expect(client.session.get).toHaveBeenCalledWith('session-auth');
+      }
+      const item = container?.querySelector<HTMLButtonElement>('.completion-session');
+      expect(item?.querySelector('.composer-completion-title')?.textContent).toBe(
+        'Investigate authentication'
+      );
+      expect(item?.querySelector('.composer-completion-age')).not.toBeNull();
+
+      item?.click();
+      expect(inputText()).toBe('session:session-auth ');
+      const reference = container?.querySelector<HTMLElement>(
+        '.composer-session-reference[data-chip-type="mention-session"]'
+      );
+      expect(reference?.textContent).toBe('Investigate authentication');
+      expect(reference?.dataset.chipId).toBeUndefined();
+    }
+  );
+
+  it('resolves pasted session markers to titled links', async () => {
+    const result = session('session-auth', 2_000, { title: 'Investigate authentication' });
+    vi.mocked(client.session.get).mockResolvedValue(result);
+    setInputText('Review session:session-auth');
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(client.session.get).toHaveBeenCalledWith('session-auth');
+    await vi.waitFor(() =>
+      expect(
+        container?.querySelector<HTMLElement>(
+          '.composer-session-reference[data-chip-type="mention-session"]'
+        )
+      ).not.toBeNull()
+    );
+    const reference = container?.querySelector<HTMLElement>(
+      '.composer-session-reference[data-chip-type="mention-session"]'
+    );
+    expect(reference?.textContent).toBe('Investigate authentication');
+    expect(reference?.dataset.chipMarker).toBe('session:session-auth');
+  });
+
+  it('renders HTTPS URLs as editable links without replacing their DOM while typing', () => {
+    setInputText("What's this https://iconoir.com?");
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const reference = container?.querySelector<HTMLElement>('.composer-external-link');
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!reference || !editor || !reference.firstChild) {
+      throw new Error('Expected editable external link');
+    }
+    expect(reference?.textContent).toBe('https://iconoir.com');
+    expect(container?.querySelector('.composer-external-link-icon')).toBeNull();
+    expect(reference?.dataset.chipMarker).toBeUndefined();
+    expect(reference?.getAttribute('contenteditable')).toBeNull();
+    expect(inputText()).toBe("What's this https://iconoir.com?");
+
+    const trailingText = reference.nextSibling;
+    if (!trailingText || trailingText.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected trailing URL punctuation');
+    }
+    editor.focus();
+    trailingText.textContent = '/1?';
+    setCollapsedSelection(trailingText, 2);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    expect(inputText()).toBe("What's this https://iconoir.com/1?");
+    expect(container?.querySelector('.composer-external-link')).toBe(reference);
+    expect(document.activeElement).toBe(editor);
+
+    trailingText.textContent = '/12?';
+    setCollapsedSelection(trailingText, 3);
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    expect(inputText()).toBe("What's this https://iconoir.com/12?");
+    expect(container?.querySelector('.composer-external-link')).toBe(reference);
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it('escapes a URL into plain text when typing a trailing space', () => {
+    setInputText('https://iconoir.com');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    const reference = container?.querySelector<HTMLElement>('.composer-external-link');
+    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    editor.focus();
+    setCollapsedSelection(reference.firstChild, 'https://iconoir.com'.length);
+    editor.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: ' ',
+      })
+    );
+
+    expect(inputText()).toBe('https://iconoir.com ');
+    const currentReference = container?.querySelector<HTMLElement>('.composer-external-link');
+    expect(currentReference?.textContent).toBe('https://iconoir.com');
+    expect(currentReference?.nextSibling?.textContent).toContain(' ');
+    expect(document.activeElement).toBe(editor);
   });
 
   it('queues busy composer attachments and clears them from the input', () => {
@@ -5227,6 +5368,14 @@ describe('ChatInput composer history hotkeys', () => {
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     pressKey(editor, { key: 'z', metaKey: true });
+    expect(inputText()).toBe('hello');
+    editor?.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'historyUndo',
+      })
+    );
     expect(inputText()).toBe('hello');
 
     pressKey(editor, { key: 'z', ctrlKey: true });
