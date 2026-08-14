@@ -11,6 +11,7 @@ import { AutoApproveJudge } from './auto-approve-judge';
 import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
+import { DraftImageStore } from './draft-image-store';
 import { FileSearchService } from './file-search-service';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
@@ -56,6 +57,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly sessionTrash: SessionTrashManager;
   private readonly pinnedSessions: PinnedSessionManager;
   private readonly queuedMessages: QueuedMessageStore;
+  private readonly draftImages: DraftImageStore;
   private readonly hiddenSessions: HiddenSessionManager;
   private readonly autoApproveJudge: AutoApproveJudge;
   private readonly commitMessageService: CommitMessageService;
@@ -128,6 +130,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionTrash = new SessionTrashManager(persistence);
     this.pinnedSessions = new PinnedSessionManager(persistence);
     this.queuedMessages = new QueuedMessageStore(persistence);
+    this.draftImages = new DraftImageStore(persistence);
     this.hiddenSessions = new HiddenSessionManager();
     this.autoApproveJudge = new AutoApproveJudge(server, this.hiddenSessions, isOpenAIPro, () =>
       vscode.workspace.getConfiguration('varro').get<string>('chat.autoApproveModel', '')
@@ -207,6 +210,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.lastStatusBarStateKey = '';
         },
         queuedMessages: () => this.queuedMessages.list(),
+        draftImages: () => this.draftImages.list(),
         flushPendingServerEvents: () => this.serverEventBridge.flushPendingEvents(),
       }
     );
@@ -228,6 +232,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       refreshOpenCodeConfig: (previousRouting, currentRouting) =>
         this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),
+      removeSessionImages: (sessionIds) =>
+        this.droppedFilesService.removeSessionOwnedFiles(sessionIds),
       postApiResponse: (requestGeneration, payload) =>
         this.webviewSession.postApiResponse(payload, requestGeneration),
     });
@@ -288,6 +294,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         handleDroppedPaths: (paths) => this.handleDroppedPaths(paths),
         handleDroppedContent: (files) => this.handleDroppedContent(files),
         storePdf: (payload) => this.storePdf(payload),
+        storeImage: (payload) => this.storeImage(payload),
+        releaseImages: (payload) => this.releaseImages(payload),
         removeContextFile: (path) => this.removeContextFile(path),
         clearContextFiles: () => this.clearContextFiles(),
         pickFiles: () => this.pickFiles(),
@@ -295,6 +303,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         runInTerminal: (command, title) => this.runInTerminal(command, title),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
         updateQueuedMessages: ({ messages }) => this.queuedMessages.update(messages),
+        updateDraftImages: ({ images }) => this.draftImages.update(images),
         setMermaidPreviewOpen: (open) => this.setMermaidPreviewOpen(open),
       })
     );
@@ -409,6 +418,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.ralphHost.dispose();
     await this.serverEventBridge.dispose();
     await this.queuedMessages.dispose();
+    await this.draftImages.dispose();
     this.configDisposable.dispose();
     this.windowStateDisposable.dispose();
     this.providerFileRefresh.dispose();
@@ -489,6 +499,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (contextFile) {
       this.post({ type: 'pdfs/stored', payload: { id: payload.id, contextFile } });
     }
+  }
+
+  private async storeImage(payload: Extract<WebviewMessage, { type: 'images/store' }>['payload']) {
+    const [contextFile] = await this.droppedFilesService.fromContent([
+      { name: payload.name, content: payload.content, size: payload.size },
+    ]);
+    if (contextFile) {
+      this.post({ type: 'images/stored', payload: { id: payload.id, contextFile } });
+    }
+  }
+
+  private async releaseImages(
+    payload: Extract<WebviewMessage, { type: 'images/release' }>['payload']
+  ) {
+    if (payload.deferred) {
+      for (const path of payload.paths) {
+        this.droppedFilesService.deferOwnedFileRemoval(path, payload.sessionId);
+      }
+      return;
+    }
+    await this.droppedFilesService.removeOwnedFiles(payload.paths);
   }
 
   private removeContextFile(path: string) {

@@ -142,11 +142,43 @@ export function CompletionMenu(props: {
                       )
                     }
                   >
-                    <svg width="12" height="12" viewBox="0 0 32 32" aria-hidden="true">
-                      <path
-                        fill="currentColor"
-                        d="M28 12V4h-8v3.546l-6 5.25V11H4v10h10v-1.796l6 5.25V28h8v-8h-8v1.796l-6-5.25v-1.092l6-5.25V12h8zM22 22h4v4h-4v-4zM12 19H6v-6h6v6zM22 6h4v4h-4V6z"
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <rect
+                        x="2"
+                        y="21"
+                        width="7"
+                        height="5"
+                        rx="0.6"
+                        transform="rotate(-90 2 21)"
+                        stroke="currentColor"
+                        stroke-width="1.6"
                       />
+                      <rect
+                        x="17"
+                        y="15.5"
+                        width="7"
+                        height="5"
+                        rx="0.6"
+                        transform="rotate(-90 17 15.5)"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                      />
+                      <rect
+                        x="2"
+                        y="10"
+                        width="7"
+                        height="5"
+                        rx="0.6"
+                        transform="rotate(-90 2 10)"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                      />
+                      <path
+                        d="M7 17.5H10.5C11.6046 17.5 12.5 16.6046 12.5 15.5V8.5C12.5 7.39543 11.6046 6.5 10.5 6.5H7"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                      />
+                      <path d="M12.5 12H17" stroke="currentColor" stroke-width="1.6" />
                     </svg>
                   </Show>
                 </span>
@@ -154,7 +186,7 @@ export function CompletionMenu(props: {
               <CompletionTitle title={title} />
               <span
                 class={`composer-completion-detail${item.type === 'session' ? ' composer-completion-age' : ''}`}
-                title={detail}
+                title={item.type === 'session' ? undefined : detail}
               >
                 {detail}
               </span>

@@ -16,6 +16,7 @@ import {
   getAssistantContainerVariant,
   getUserMessageEditContext,
   getUserMessageEditText,
+  getUserMessageMarkupFormat,
   getUserMessagePreviewText,
   parseUserMessageContent,
   stripCompactionBoundaryMarkdown,
@@ -66,6 +67,7 @@ afterEach(() => {
   resetProviderConnectionState();
   setShowSettings(false);
   setAppState('sessions', []);
+  setAppState('allAgents', []);
   resetToolCallExpansionState();
   delete (window as unknown as Record<string, unknown>).__sendToExtension;
 });
@@ -448,6 +450,78 @@ describe('Message user prompt rendering', () => {
     });
   });
 
+  it('compacts standalone SVG prompt markup into a chip that opens in an editor', () => {
+    const svg = '<svg viewBox="0 0 10 10">\n  <path d="M0 0h10v10z" />\n</svg>';
+    const send = vi.fn();
+    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-svg'),
+          parts: [textPart('text-svg', svg)],
+        }),
+      container!
+    );
+
+    const chip = container?.querySelector('.user-message-format-chip');
+    expect(chip?.textContent).toBe('SVG59 B');
+    expect(chip?.getAttribute('data-copy-marker')).toBe(svg);
+    expect(container?.querySelector('.user-message-text')?.textContent).not.toContain('<svg');
+
+    (chip as HTMLButtonElement | null)?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: svg,
+        title: 'SVG user message',
+        language: 'xml',
+      },
+    });
+  });
+
+  it('preserves prompt prose while compacting a trailing XML document', () => {
+    const prompt = [
+      'In input, change the agent chip icon to',
+      '',
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<svg width="16px" height="16px" viewBox="0 0 24 24">',
+      '  <rect x="2" y="21" width="7" height="5" />',
+      '</svg>',
+    ].join('\n');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-prose-svg'),
+          parts: [textPart('text-prose-svg', prompt)],
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelectorAll('.user-message-text');
+    expect(messageText).toHaveLength(2);
+    expect(messageText?.[0]?.textContent).toBe('In input, change the agent chip icon to');
+    expect(messageText?.[1]?.textContent).toBe('SVG143 B');
+    expect(
+      container?.querySelector('.user-message-format-chip')?.getAttribute('data-copy-marker')
+    ).toBe(prompt.slice(prompt.indexOf('<?xml')));
+    expect(container?.textContent).not.toContain('<rect');
+  });
+
+  it('leaves malformed markup as user prompt text', () => {
+    const malformed = '<svg><path></svg>';
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-malformed-svg'),
+          parts: [textPart('text-malformed-svg', malformed)],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.user-message-format-chip')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(malformed);
+  });
+
   it('does not render an attachments separator for attachment-only user prompts', () => {
     cleanup = render(
       () =>
@@ -675,6 +749,73 @@ describe('Message user prompt rendering', () => {
     );
   });
 
+  it('renders delegated vision files and agents as chips without exposing routing context', () => {
+    const image = imageFilePart('image-1', '1786723794731-image-1');
+    image.source = {
+      text: {
+        value: '{file:/tmp/varro-drops/drop-1/1786723794731-image-1}',
+        start: 102,
+        end: 162,
+      },
+      type: 'file',
+      path: '/tmp/varro-drops/drop-1/1786723794731-image-1',
+    };
+
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-delegated-vision'),
+          parts: [
+            textPart('text-1', "What's on this image? [Image 1] @vision"),
+            {
+              id: 'agent-1',
+              sessionID: 'session-1',
+              messageID: 'message-1',
+              type: 'agent',
+              name: 'vision',
+              source: { value: '@vision', start: 32, end: 39 },
+            },
+            textPart(
+              'text-2',
+              '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
+                'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.'
+            ),
+            image,
+          ],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      "What's on this image? Image 1 Vision"
+    );
+    expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
+    expect(container?.textContent).not.toContain('When calling the vision subagent');
+    expect(container?.querySelector('.chat-image-img')).toBeInstanceOf(HTMLImageElement);
+  });
+
+  it('renders known textual agent mentions as chips when no agent part is returned', () => {
+    setAppState('allAgents', [
+      {
+        name: 'vision',
+        mode: 'subagent',
+        permission: [],
+      },
+    ]);
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-textual-agent'),
+          parts: [textPart('text-1', "What's on the image? @vision")],
+        }),
+      container!
+    );
+
+    const chip = container?.querySelector('.user-message-text .inline-chip');
+    expect(chip?.textContent).toBe('Vision');
+    expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
+  });
+
   it('renders the legacy Image placeholder as the Image 1 pill', () => {
     cleanup = render(
       () =>
@@ -842,6 +983,18 @@ describe('Message tool call expansion', () => {
 });
 
 describe('getUserMessagePreviewText', () => {
+  it('classifies complete XML and SVG documents without matching surrounding prose', () => {
+    expect(getUserMessageMarkupFormat('<?xml version="1.0"?>\n<feed><item /></feed>')).toEqual({
+      kind: 'xml',
+      byteSize: 43,
+    });
+    expect(getUserMessageMarkupFormat('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toEqual({
+      kind: 'svg',
+      byteSize: 46,
+    });
+    expect(getUserMessageMarkupFormat('Render <svg></svg> here')).toBeNull();
+  });
+
   it('ignores working-directory boilerplate and keeps the first meaningful text', () => {
     expect(
       getUserMessagePreviewText([

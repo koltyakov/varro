@@ -53,6 +53,10 @@ export interface MessageRouterCallbacks {
   handleDroppedPaths(paths: string[]): Promise<void>;
   handleDroppedContent(files: DroppedContentFile[]): Promise<void>;
   storePdf(payload: Extract<WebviewMessage, { type: 'pdfs/store' }>['payload']): Promise<void>;
+  storeImage(payload: Extract<WebviewMessage, { type: 'images/store' }>['payload']): Promise<void>;
+  releaseImages(
+    payload: Extract<WebviewMessage, { type: 'images/release' }>['payload']
+  ): Promise<void>;
   removeContextFile(path: string): void;
   clearContextFiles(): void;
   notifyContextFilesChanged(): void;
@@ -66,6 +70,9 @@ export interface MessageRouterCallbacks {
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
   handleRalphMessage(msg: RalphMessage): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
+  updateDraftImages(
+    payload: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']
+  ): Promise<void>;
   log(payload: LogPayload): void;
 }
 
@@ -80,6 +87,9 @@ export class MessageRouter {
           break;
         case 'queued-messages/update':
           await this.callbacks.updateQueuedMessages(msg.payload);
+          break;
+        case 'composer/images-update':
+          await this.callbacks.updateDraftImages(msg.payload);
           break;
         case 'commands/state':
           this.callbacks.updateCommandState(
@@ -150,6 +160,12 @@ export class MessageRouter {
           break;
         case 'pdfs/store':
           await this.callbacks.storePdf(msg.payload);
+          break;
+        case 'images/store':
+          await this.callbacks.storeImage(msg.payload);
+          break;
+        case 'images/release':
+          await this.callbacks.releaseImages(msg.payload);
           break;
         case 'files/remove':
           this.handleFilesRemoveMessage(msg);

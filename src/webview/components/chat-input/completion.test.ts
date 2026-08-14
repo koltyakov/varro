@@ -47,6 +47,21 @@ describe('getMentionCompletionItems', () => {
     );
   });
 
+  it('keeps matching agents ahead of file results', () => {
+    const completions = getMentionCompletionItems({
+      rawQuery: 'help',
+      agents,
+      files: Array.from({ length: 10 }, (_, index) => ({
+        path: `/workspace/help-${index}.ts`,
+        relativePath: `help-${index}.ts`,
+        type: 'file' as const,
+      })),
+    });
+
+    expect(completions).toHaveLength(10);
+    expect(completions[0]).toEqual(expect.objectContaining({ type: 'agent', label: '@helper' }));
+  });
+
   it('terminates file mentions after selection', () => {
     const completions = getMentionCompletionItems({
       rawQuery: 'readme',

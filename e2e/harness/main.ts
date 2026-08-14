@@ -46,6 +46,7 @@ const SCENARIO_NAMES = [
   'sticky-preview',
   'sticky-preview-first-image',
   'sticky-preview-large-transcript',
+  'sticky-preview-render-variants',
   'sticky-preview-terminal-attachment',
   'new-turn-placement',
   'todo-queue',
@@ -1612,6 +1613,115 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     state.messagesBySessionId[session.id] = messages;
     state.persistedActiveSessionId = session.id;
     state.nextSequence = 70;
+    return state;
+  }
+
+  if (name === 'sticky-preview-render-variants') {
+    const session = makeSession(
+      'session-sticky-preview-render-variants',
+      'Sticky preview render variants',
+      BASE_TIME - 500
+    );
+    const variants = [
+      {
+        id: 'plain',
+        text: ['Plain text prompt used to verify sticky collision geometry.'],
+      },
+      {
+        id: 'markdown',
+        text: ['Review this code:\n```ts\nconst answer = 42;\n```'],
+      },
+      {
+        id: 'svg',
+        text: ['Update this icon:\n<svg viewBox="0 0 16 16"><path d="M2 8h12"/></svg>'],
+      },
+      {
+        id: 'terminal',
+        text: ['[Selection from terminal zsh]\n```text\nnpm run test\n7 passed\n```'],
+      },
+      {
+        id: 'selection',
+        text: ['[Selection from /workspace/src/app.ts: 10-18]'],
+      },
+      {
+        id: 'image',
+        text: [] as string[],
+      },
+      {
+        id: 'agent',
+        text: [] as string[],
+      },
+    ];
+    const setupUser = makeUserMessage(
+      session.id,
+      'message-sticky-variant-setup-user',
+      ['Setup history before the collision variants.'],
+      BASE_TIME - 120_000
+    );
+    const messages: MessageEntry[] = [
+      setupUser,
+      makeAssistantMessage(
+        session.id,
+        'message-sticky-variant-setup-assistant',
+        setupUser.info.id,
+        Array.from(
+          { length: 20 },
+          (_, paragraph) => `Setup response ${paragraph + 1}: provide scrollable history.`
+        ).join('\n\n'),
+        BASE_TIME - 119_000
+      ),
+    ];
+
+    for (const [index, variant] of variants.entries()) {
+      const user = makeUserMessage(
+        session.id,
+        `message-sticky-variant-${variant.id}-user`,
+        variant.text,
+        BASE_TIME - 100_000 + index * 10_000
+      );
+      if (variant.id === 'image') {
+        user.parts.push({
+          id: 'message-sticky-variant-image-file',
+          sessionID: session.id,
+          messageID: user.info.id,
+          type: 'file',
+          mime: 'image/svg+xml',
+          filename: 'variant.svg',
+          url:
+            'data:image/svg+xml,' +
+            encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>'),
+        });
+      }
+      if (variant.id === 'agent') {
+        user.parts.push({
+          id: 'message-sticky-variant-agent-part',
+          sessionID: session.id,
+          messageID: user.info.id,
+          type: 'agent',
+          name: 'explore',
+        });
+      }
+      messages.push(
+        user,
+        makeAssistantMessage(
+          session.id,
+          `message-sticky-variant-${variant.id}-assistant`,
+          user.info.id,
+          Array.from(
+            { length: 14 },
+            (_, paragraph) =>
+              `${variant.id} response ${paragraph + 1}: preserve the sticky prompt without blinking or collision.`
+          ).join('\n\n'),
+          BASE_TIME - 99_000 + index * 10_000
+        )
+      );
+    }
+
+    state.sessions = [session];
+    state.sessionStatuses[session.id] = { type: 'idle' };
+    state.messagesBySessionId[session.id] = messages;
+    state.persistedActiveSessionId = session.id;
+    state.nextSequence = 71;
     return state;
   }
 

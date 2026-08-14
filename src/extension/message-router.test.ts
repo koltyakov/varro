@@ -37,6 +37,8 @@ function createCallbacks(): MessageRouterCallbacks {
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
     handleDroppedContent: vi.fn(() => Promise.resolve()),
     storePdf: vi.fn(() => Promise.resolve()),
+    storeImage: vi.fn(() => Promise.resolve()),
+    releaseImages: vi.fn(() => Promise.resolve()),
     removeContextFile: vi.fn(),
     clearContextFiles: vi.fn(),
     notifyContextFilesChanged: vi.fn(),
@@ -50,11 +52,30 @@ function createCallbacks(): MessageRouterCallbacks {
     handleApiRequest: vi.fn(() => Promise.resolve()),
     handleRalphMessage: vi.fn(),
     updateQueuedMessages: vi.fn(() => Promise.resolve()),
+    updateDraftImages: vi.fn(() => Promise.resolve()),
     log: vi.fn(),
   };
 }
 
 describe('MessageRouter', () => {
+  it('persists composer image snapshots', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const images = [
+      {
+        id: 'image-1',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'image.png',
+        size: 1,
+      },
+    ];
+
+    await router.handleMessage({ type: 'composer/images-update', payload: { images } });
+
+    expect(cb.updateDraftImages).toHaveBeenCalledWith({ images });
+  });
+
   it('dispatches Mermaid preview layout state', async () => {
     const cb = createCallbacks();
     const router = new MessageRouter(cb);

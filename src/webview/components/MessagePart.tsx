@@ -13,6 +13,7 @@ import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { hasVisibleReasoningContent } from '../lib/part-utils';
 import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
+import { AgentChip } from './message/AgentChip';
 
 export function MessagePart(props: {
   part: Part;
@@ -57,16 +58,7 @@ export function MessagePart(props: {
           </Show>
         );
       case 'agent':
-        return (
-          <div class="chat-subtask-part">
-            <div class="subtask-header">
-              <span class="subtask-dot" />
-              <span>
-                Handing off to <span class="subtask-agent-name">{formatAgentLabel(part.name)}</span>
-              </span>
-            </div>
-          </div>
-        );
+        return <AgentChip part={part} />;
       case 'patch':
         return null;
       case 'retry':

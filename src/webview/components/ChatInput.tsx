@@ -65,6 +65,7 @@ import {
   replaceClipboardImages,
   replaceNativePdfs,
   setNativePdfContextFile,
+  setClipboardImageContextFile,
   stripClipboardImagePlaceholders,
   replaceContextFiles,
   connectionInitialized,
@@ -110,7 +111,12 @@ import {
 import { getVariantsForModel } from '../lib/model-variants';
 import { getContextWindow } from '../lib/message-metrics';
 import { getPromptTextForClipboardImages } from '../lib/clipboard-images';
-import { modelSupportsPdf, modelSupportsVision } from '../lib/model-capabilities';
+import {
+  modelSupportsPdf,
+  modelSupportsTools,
+  modelSupportsVision,
+} from '../lib/model-capabilities';
+import { canDelegateVision } from '../lib/vision-delegation';
 import {
   getClipboardImageAttachmentSequence,
   getContextFileAttachmentSequence,
@@ -256,6 +262,17 @@ function composerClipboardImages() {
 
 function composerNativePdfs() {
   return state.nativePdfs;
+}
+
+function removeClipboardImageWithCleanup(id: string) {
+  const path = state.clipboardImages.find((image) => image.id === id)?.contextFile?.path;
+  removeClipboardImage(id);
+  if (path) {
+    postMessage({
+      type: 'images/release',
+      payload: { paths: [path], deferred: false },
+    });
+  }
 }
 
 function composerSelection() {
@@ -690,10 +707,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let composerDisposed = false;
   const pendingPasteTransactions: PasteTransaction[] = [];
   const pasteTransactionsByEvent = new Map<ClipboardEvent, PasteTransaction>();
+  const pendingImageStores = new Set<string>();
   onCleanup(() => {
     composerDisposed = true;
     pendingPasteTransactions.length = 0;
     pasteTransactionsByEvent.clear();
+    pendingImageStores.clear();
   });
   const [completionIndex, setCompletionIndex] = createSignal(0);
   const [fileSearchResults, setFileSearchResults] = createSignal<DroppedFile[]>([]);
@@ -942,7 +961,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           type: 'image',
           label: image.filename,
           icon: 'image',
-          disabled: !currentModelSupportsVision(),
           previewImage: { url: image.url, alt: image.filename },
           textMarker: marker,
         });
@@ -1391,7 +1409,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       return;
     }
 
-    const showingCompletions = composerCompletions().length > 0 && !suppressCompletion();
+    const showingCompletions =
+      isFocused() && composerCompletions().length > 0 && !suppressCompletion();
 
     if (showAgentPicker() && !e.altKey && !e.ctrlKey && !e.metaKey) {
       const agents = state.agents;
@@ -1455,12 +1474,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      const completion = activeCompletion();
-      const shouldSendBareSessionCompletion =
-        completion?.type === 'session' && completion.query.length === 0;
-      if (showingCompletions && !shouldSendBareSessionCompletion) {
+      if (showingCompletions) {
         e.preventDefault();
-        void applyActiveCompletion(true);
+        void applyActiveCompletion();
+        setSuppressCompletion(true);
         return;
       }
     }
@@ -2376,7 +2393,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     if (!currentModelSupportsVision()) {
-      showSessionActionFeedback("Current model doesn't support vision", 'warning');
+      showSessionActionFeedback(
+        'Image attached; use a vision-capable model or vision subagent to send it',
+        'warning'
+      );
     }
 
     if (!pastedText || pasteHandledAsContextOnly) e.preventDefault();
@@ -2508,6 +2528,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       if (msg.type === 'pdfs/stored') {
         setNativePdfContextFile(msg.payload.id, msg.payload.contextFile);
+        return;
+      }
+      if (msg.type === 'images/stored') {
+        pendingImageStores.delete(msg.payload.id);
+        if (!setClipboardImageContextFile(msg.payload.id, msg.payload.contextFile)) {
+          postMessage({
+            type: 'images/release',
+            payload: { paths: [msg.payload.contextFile.path], deferred: false },
+          });
+        }
         return;
       }
       if (msg.type !== 'files/search-results') return;
@@ -2726,32 +2756,82 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return modelSupportsVision(current.providerID, current.modelID, state.providers);
   }
 
+  function canDelegateCurrentImages(text = inputText()) {
+    const sessionId = composerSessionId();
+    const sessionPromptTexts = sessionId
+      ? state.messages.flatMap((entry) =>
+          entry.info.sessionID === sessionId && entry.info.role === 'user'
+            ? entry.parts.flatMap((part) => (part.type === 'text' ? [part.text] : []))
+            : []
+        )
+      : [];
+    return canDelegateVision([text, ...sessionPromptTexts], state.allAgents, state.providers);
+  }
+
+  function currentPromptCanHandleImages(text = inputText()) {
+    return (
+      currentModelSupportsVision() ||
+      (currentModelSupportsTools() && canDelegateCurrentImages(text))
+    );
+  }
+
   function currentModelSupportsPdf() {
     const current = currentModel();
     if (!current.providerID || !current.modelID) return false;
     return modelSupportsPdf(current.providerID, current.modelID, state.providers);
   }
 
+  function currentModelSupportsTools() {
+    const current = currentModel();
+    if (!current.providerID || !current.modelID) return false;
+    return modelSupportsTools(current.providerID, current.modelID, state.providers);
+  }
+
   const hasPendingPdfFallback = () =>
     !currentModelSupportsPdf() && state.nativePdfs.some((pdf) => !pdf.contextFile);
 
   function hasSendableClipboardImages() {
-    return currentModelSupportsVision() && state.clipboardImages.length > 0;
+    return currentPromptCanHandleImages() && state.clipboardImages.length > 0;
   }
 
   function getSendableInputText(text = inputText()) {
     return getPromptTextForClipboardImages(
       text,
       state.clipboardImages,
-      currentModelSupportsVision()
+      currentPromptCanHandleImages(text)
     );
   }
+
+  const hasPendingDelegatedImages = () =>
+    !currentModelSupportsVision() &&
+    currentModelSupportsTools() &&
+    canDelegateCurrentImages() &&
+    state.clipboardImages.some((image) => !image.contextFile);
+
+  createEffect(() => {
+    if (currentModelSupportsVision() || !currentModelSupportsTools()) return;
+    if (!canDelegateCurrentImages()) return;
+    for (const image of composerClipboardImages()) {
+      if (image.contextFile || pendingImageStores.has(image.id)) continue;
+      pendingImageStores.add(image.id);
+      postMessage({
+        type: 'images/store',
+        payload: {
+          id: image.id,
+          name: image.filename,
+          content: image.url.slice(image.url.indexOf(',') + 1),
+          size: image.size,
+        },
+      });
+    }
+  });
 
   const hasPendingApproval = () => composerHasActiveQuestion() || composerHasActivePermission();
   const canSend = () =>
     isAbortSlashCommand(inputText()) ||
     (!pendingWorkspacePath() &&
       !hasPendingPdfFallback() &&
+      !hasPendingDelegatedImages() &&
       (!hasPendingApproval() || !composerEditingMessage()) &&
       (getSendableInputText().trim().length > 0 ||
         state.droppedFiles.length > 0 ||
@@ -2773,8 +2853,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   );
   const showBusySendOptions = createMemo(() => isBusyWithoutInterruption());
 
-  const clipboardImagesDisabled = () =>
-    composerClipboardImages().length > 0 && !currentModelSupportsVision();
+  const clipboardImagesNeedVision = () =>
+    composerClipboardImages().length > 0 && !currentPromptCanHandleImages();
   const currentSessionMessageEntries = createMemo(() =>
     getMessageEntriesForSession(state.messages, composerSessionId())
   );
@@ -3397,7 +3477,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               clipboardImages={visibleClipboardImages()}
               nativePdfs={visibleNativePdfs()}
               nativePdfsSupported={currentModelSupportsPdf()}
-              clipboardImagesDisabled={clipboardImagesDisabled()}
+              clipboardImagesNeedVision={clipboardImagesNeedVision()}
               onToggleActiveContext={() => toggleCurrentDocumentEnabled(composerSessionId())}
               onClearTerminalSelection={() => postMessage({ type: 'terminal-selection/clear' })}
               onClearDiagnostics={() => setState('attachedDiagnostics', null)}
@@ -3471,7 +3551,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 postMessage({ type: 'files/remove', payload: { path } });
               } else if (chipId.startsWith('img:')) {
                 const id = chipId.slice(4);
-                removeClipboardImage(id);
+                removeClipboardImageWithCleanup(id);
               }
             }}
             onChipClick={(chipId) => {

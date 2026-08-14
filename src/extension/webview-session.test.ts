@@ -165,6 +165,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     onHidden: vi.fn(),
     resetStatusBarCache: vi.fn(),
     queuedMessages: vi.fn<() => InitialWebviewState['queuedMessages']>(() => undefined),
+    draftImages: vi.fn<() => InitialWebviewState['clipboardImages']>(() => []),
     flushPendingServerEvents: vi.fn(),
   };
 

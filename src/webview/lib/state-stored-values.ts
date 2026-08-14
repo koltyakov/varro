@@ -113,7 +113,7 @@ function normalizeStoredAttachmentSequence(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-function normalizeStoredClipboardImage(
+export function normalizeStoredClipboardImage(
   value: unknown
 ): NonNullable<QueuedMessage['clipboardImages']>[number] | null {
   const record = asStoredRecord(value);

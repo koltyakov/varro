@@ -25,6 +25,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'files/dropped',
   'pdfs/picked',
   'pdfs/stored',
+  'images/stored',
   'files/removed',
   'files/search-results',
   'config/update',
@@ -134,6 +135,12 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     }
 
     case 'pdfs/stored': {
+      const payload = asRecord(record.payload);
+      if (typeof payload?.id !== 'string' || !isDroppedFile(payload.contextFile)) return null;
+      return { type, payload: { id: payload.id, contextFile: payload.contextFile } };
+    }
+
+    case 'images/stored': {
       const payload = asRecord(record.payload);
       if (typeof payload?.id !== 'string' || !isDroppedFile(payload.contextFile)) return null;
       return { type, payload: { id: payload.id, contextFile: payload.contextFile } };

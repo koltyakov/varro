@@ -131,6 +131,7 @@ export interface RestProxyCallbacks {
     currentRouting: OpenCodeModelRouting
   ): Promise<void>;
   cleanupExpiredRecycleBin(): Promise<void>;
+  removeSessionImages(sessionIds: Iterable<string>): Promise<void>;
   postApiResponse(requestGeneration: number, payload: ApiResponsePayload): void;
 }
 
@@ -1141,7 +1142,9 @@ export class RestProxy {
     if (!entry) {
       throw new Error('404 Session not found');
     }
-    this.callbacks.sessionState.removeSessions(entry.sessions.map((session) => session.id));
+    const sessionIds = entry.sessions.map((session) => session.id);
+    await this.callbacks.removeSessionImages(sessionIds);
+    this.callbacks.sessionState.removeSessions(sessionIds);
     return true;
   }
 
@@ -1155,12 +1158,15 @@ export class RestProxy {
   private async deleteSessionForDirectory(session: SessionDeleteTarget) {
     const path = this.buildScopedSessionPath(session.id, session.directory);
     try {
-      return await this.callbacks.server.request('DELETE', path);
+      const result = await this.callbacks.server.request('DELETE', path);
+      await this.callbacks.removeSessionImages([session.id]);
+      return result;
     } catch (err) {
       // Sessions can predate the server's current ID format (legacy ULIDs get
       // a 500, not a 404), which would leave their trash entries undeletable.
       // Only propagate the failure when the session still exists server-side.
       if (await this.sessionExistsOnServer(session.id)) throw err;
+      await this.callbacks.removeSessionImages([session.id]);
       return true;
     }
   }

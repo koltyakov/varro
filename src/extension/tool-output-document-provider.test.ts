@@ -109,6 +109,26 @@ describe('ToolOutputDocumentProvider', () => {
     }
   });
 
+  it('opens markup in an XML editor tab', async () => {
+    const provider = new ToolOutputDocumentProvider();
+
+    try {
+      await provider.open({ content: '<svg />', title: 'SVG user message', language: 'xml' });
+
+      expect(vscodeMock.Uri.from).toHaveBeenCalledWith(
+        expect.objectContaining({ path: expect.stringContaining('SVG user message.xml') })
+      );
+      expect(vscodeMock.languages.setTextDocumentLanguage).toHaveBeenCalledWith(
+        expect.anything(),
+        'xml'
+      );
+      const uri = vscodeMock.Uri.from.mock.results[0]?.value as { toString(): string };
+      expect(vscodeMock.provider?.provideTextDocumentContent(uri)).toBe('<svg />');
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('drops the buffer when opening fails so nothing leaks', async () => {
     vscodeMock.workspace.openTextDocument.mockRejectedValueOnce(new Error('nope'));
     const provider = new ToolOutputDocumentProvider();

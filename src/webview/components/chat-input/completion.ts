@@ -216,7 +216,7 @@ export function getMentionCompletionItems({
     return agentItems.slice(0, 10);
   }
 
-  return [...fileItems, ...agentItems].slice(0, 10);
+  return [...agentItems, ...fileItems].slice(0, 10);
 }
 
 export function createMentionCompletionSource({

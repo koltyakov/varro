@@ -55,6 +55,7 @@ describe('DroppedFilesService', () => {
   afterEach(async () => {
     await Promise.allSettled(services.map((service) => service.dispose()));
     services = [];
+    vi.useRealTimers();
   });
 
   it('writes dropped files with restricted permissions in a private temp directory', async () => {
@@ -348,6 +349,52 @@ describe('DroppedFilesService', () => {
       service.fromContent([{ name: 'accepted.txt', content: 'YQ==', size: 1 }])
     ).resolves.toHaveLength(1);
     expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains a sent image until the deferred removal window expires', async () => {
+    vi.useFakeTimers();
+    const dropsDir = '/tmp/varro-drops/drop-deferred-image';
+    const remove = vi.fn(async () => {});
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never, {
+      create: vi.fn(async () => dropsDir),
+      remove,
+      write: vi.fn(async () => {}),
+    });
+    services.push(service);
+    const [image] = await service.fromContent([{ name: 'image.png', content: 'YQ==', size: 1 }]);
+
+    service.deferOwnedFileRemoval(image!.path);
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000 - 1);
+    expect(remove).not.toHaveBeenCalledWith(image!.path, { force: true });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(remove).toHaveBeenCalledWith(image!.path, { force: true });
+  });
+
+  it('removes temporary images owned only by deleted sessions', async () => {
+    vi.useFakeTimers();
+    const remove = vi.fn(async () => {});
+    const service = new DroppedFilesService({ context: { workspacePath: '/repo' } } as never, {
+      create: vi.fn(async () => '/tmp/varro-drops/drop-session-images'),
+      remove,
+      write: vi.fn(async () => {}),
+    });
+    services.push(service);
+    const [first, shared] = await service.fromContent([
+      { name: 'first.png', content: 'YQ==', size: 1 },
+      { name: 'shared.png', content: 'Yg==', size: 1 },
+    ]);
+
+    service.deferOwnedFileRemoval(first!.path, 'session-1');
+    service.deferOwnedFileRemoval(shared!.path, 'session-1');
+    service.deferOwnedFileRemoval(shared!.path, 'session-2');
+    await service.removeSessionOwnedFiles(['session-1']);
+
+    expect(remove).toHaveBeenCalledWith(first!.path, { force: true });
+    expect(remove).not.toHaveBeenCalledWith(shared!.path, { force: true });
+
+    await service.removeSessionOwnedFiles(['session-2']);
+    expect(remove).toHaveBeenCalledWith(shared!.path, { force: true });
   });
 
   it('sweeps stale matching drop directories with absent owner markers on first use', async () => {

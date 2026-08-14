@@ -14,8 +14,18 @@ vi.mock('../Message', () => ({
     if (!first || !first.text) return '(no content)';
     return first.text;
   }),
-  parseUserMessageContent: vi.fn(() => ({
-    messageTexts: [],
+  getUserMessageMarkupSuffix: vi.fn((text: string) => {
+    const index = text.indexOf('<svg');
+    if (index < 0) return null;
+    const content = text.slice(index);
+    return {
+      prefix: text.slice(0, index).trim(),
+      content,
+      format: { kind: 'svg', byteSize: new TextEncoder().encode(content).byteLength },
+    };
+  }),
+  parseUserMessageContent: vi.fn((parts: { text?: string }[]) => ({
+    messageTexts: parts.flatMap((part) => (part.text ? [part.text] : [])),
     attachments: [],
     fileParts: [],
   })),
@@ -166,6 +176,34 @@ describe('getStickyUserMessagePreview', () => {
       id: 'u1',
       index: 0,
       text: 'active prompt',
+      attachmentCount: 0,
+      imageCount: 0,
+    });
+  });
+
+  it('includes compact markup metadata without changing the prompt identity', () => {
+    const messages = [user('u1', '<svg>\n<path />\n</svg>'), assistant('a1')];
+
+    expect(getStickyUserMessagePreview(messages, 1)).toEqual({
+      id: 'u1',
+      index: 0,
+      text: '<svg>\n<path />\n</svg>',
+      format: { kind: 'svg', byteSize: 21 },
+      attachmentCount: 0,
+      imageCount: 0,
+    });
+  });
+
+  it('keeps prose before trailing markup in the compact sticky preview', () => {
+    const text = 'Change the icon to\n\n<svg>\n<path />\n</svg>';
+    const messages = [user('u1', text), assistant('a1')];
+
+    expect(getStickyUserMessagePreview(messages, 1)).toEqual({
+      id: 'u1',
+      index: 0,
+      text,
+      format: { kind: 'svg', byteSize: 21 },
+      formatPrefix: 'Change the icon to',
       attachmentCount: 0,
       imageCount: 0,
     });
@@ -334,6 +372,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         ...baseArgs,
+        preview: { ...baseArgs.preview, index: 1 },
         shouldVirtualize: false,
         visibleRange: { start: 0, end: 5 },
         rowTop: -100,
@@ -346,6 +385,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         ...baseArgs,
+        preview: { ...baseArgs.preview, index: 1 },
         shouldVirtualize: false,
         visibleRange: { start: 0, end: 5 },
         rowTop: 10,
@@ -354,7 +394,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ).toBe(false);
   });
 
-  it('with previous preview and bounds, hides if rowBottom > 0', () => {
+  it('hides the first prompt sticky once its real card reaches the list top', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         ...baseArgs,
@@ -362,9 +402,38 @@ describe('shouldShowStickyUserMessagePreview', () => {
         visibleRange: { start: 0, end: 5 },
         previousPreviewId: 'u1',
         stickyPreviewTop: 10,
+        stickyPreviewBottom: 100,
+        rowTop: 0,
+        rowBottom: 50,
+      })
+    ).toBe(false);
+  });
+
+  it('keeps the previous preview until its card reaches the sticky collision boundary', () => {
+    expect(
+      shouldShowStickyUserMessagePreview({
+        ...baseArgs,
+        preview: { ...baseArgs.preview, index: 1 },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 5 },
+        previousPreviewId: 'u1',
+        stickyPreviewTop: 10,
         stickyPreviewBottom: 50,
         rowTop: 10,
-        rowBottom: 50,
+        rowBottom: 49,
+      })
+    ).toBe(true);
+    expect(
+      shouldShowStickyUserMessagePreview({
+        ...baseArgs,
+        preview: { ...baseArgs.preview, index: 1 },
+        shouldVirtualize: false,
+        visibleRange: { start: 0, end: 5 },
+        previousPreviewId: 'u1',
+        stickyPreviewTop: 10,
+        stickyPreviewBottom: 50,
+        rowTop: 10,
+        rowBottom: 51,
       })
     ).toBe(false);
   });

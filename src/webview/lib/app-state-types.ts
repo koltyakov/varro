@@ -1,4 +1,9 @@
-import type { ChatModelSelection, DroppedFile, EditorDiagnostic } from '../../shared/protocol';
+import type {
+  ChatModelSelection,
+  ClipboardImageSnapshot,
+  DroppedFile,
+  EditorDiagnostic,
+} from '../../shared/protocol';
 import type { NativePdfAttachment } from '../../shared/native-pdf';
 
 export type SelectedModel = ChatModelSelection;
@@ -29,12 +34,4 @@ export interface AttachedDiagnostics {
   total: number;
 }
 
-export interface ClipboardImage {
-  id: string;
-  url: string;
-  mime: string;
-  filename: string;
-  size: number;
-  contentKey?: string;
-  attachmentSequence?: number;
-}
+export type ClipboardImage = ClipboardImageSnapshot;

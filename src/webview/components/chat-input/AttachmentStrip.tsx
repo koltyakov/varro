@@ -32,7 +32,7 @@ export function AttachmentStrip(props: {
   clipboardImages: ClipboardImage[];
   nativePdfs: NativePdfAttachment[];
   nativePdfsSupported: boolean;
-  clipboardImagesDisabled: boolean;
+  clipboardImagesNeedVision: boolean;
   onToggleActiveContext: () => void;
   onClearTerminalSelection: () => void;
   onClearDiagnostics: () => void;
@@ -119,11 +119,11 @@ export function AttachmentStrip(props: {
             return (
               <AttachmentChip
                 label={item.value.filename}
-                disabled={props.clipboardImagesDisabled}
+                disabled={props.clipboardImagesNeedVision}
                 icon="image"
                 title={
-                  props.clipboardImagesDisabled
-                    ? `${item.value.filename} · Current model doesn't support vision, so this image will not be sent`
+                  props.clipboardImagesNeedVision
+                    ? `${item.value.filename} · Use a vision-capable model or vision subagent to send this image`
                     : item.value.filename
                 }
                 onClick={

@@ -767,6 +767,36 @@ describe('RichComposerArea', () => {
     );
   });
 
+  it('sizes agent icons consistently with image icons', async () => {
+    renderComposer({
+      value: '@vision [Image 1]',
+      cursorOffset: 0,
+      chips: [
+        {
+          id: 'agent:vision',
+          type: 'mention-agent',
+          label: 'vision',
+          icon: 'agent',
+          textMarker: '@vision',
+        },
+        {
+          id: 'image:1',
+          type: 'image',
+          label: 'Image 1',
+          icon: 'image',
+          textMarker: '[Image 1]',
+        },
+      ],
+    });
+
+    await flushAsyncWork();
+
+    const agentIcon = container?.querySelector('[data-chip-type="mention-agent"] svg');
+    const imageIcon = container?.querySelector('[data-chip-type="image"] svg');
+    expect(agentIcon?.getAttribute('width')).toBe(imageIcon?.getAttribute('width'));
+    expect(agentIcon?.getAttribute('height')).toBe(imageIcon?.getAttribute('height'));
+  });
+
   it('reports the chip id through onChipClick when an inline chip is clicked', async () => {
     const onChipClick = vi.fn();
     const chip: RichComposerChip = {

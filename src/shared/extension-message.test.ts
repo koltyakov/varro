@@ -402,6 +402,22 @@ describe('parseExtensionMessage', () => {
         contextFile: { path: '/tmp/spec.pdf', relativePath: 'spec.pdf', type: 'file' },
       },
     });
+
+    expect(
+      parseExtensionMessage({
+        type: 'images/stored',
+        payload: {
+          id: 'image-1',
+          contextFile: { path: '/tmp/image.png', relativePath: 'image.png', type: 'file' },
+        },
+      })
+    ).toEqual({
+      type: 'images/stored',
+      payload: {
+        id: 'image-1',
+        contextFile: { path: '/tmp/image.png', relativePath: 'image.png', type: 'file' },
+      },
+    });
   });
 
   it('parses files/removed with a path and rejects malformed payloads', () => {

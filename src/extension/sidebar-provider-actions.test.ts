@@ -128,6 +128,8 @@ function createActionFixture() {
     handleDroppedPaths: vi.fn(() => Promise.resolve()),
     handleDroppedContent: vi.fn(() => Promise.resolve()),
     storePdf: vi.fn(() => Promise.resolve()),
+    storeImage: vi.fn(() => Promise.resolve()),
+    releaseImages: vi.fn(() => Promise.resolve()),
     removeContextFile: vi.fn(),
     clearContextFiles: vi.fn(),
     pickFiles: vi.fn(() => Promise.resolve()),
@@ -135,6 +137,9 @@ function createActionFixture() {
     runInTerminal: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
+      Promise.resolve()
+    ),
+    updateDraftImages: vi.fn<SidebarProviderActionDeps['updateDraftImages']>(() =>
       Promise.resolve()
     ),
   } satisfies SidebarProviderActionFixtureDeps;

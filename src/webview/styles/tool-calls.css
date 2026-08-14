@@ -42,7 +42,7 @@
   border-radius: var(--radius-inset);
   background: color-mix(in srgb, var(--color-vscode-fg) 10%, var(--color-vscode-input-bg));
   color: var(--color-vscode-fg);
-  vertical-align: baseline;
+  vertical-align: -1px;
   line-height: 1.35;
   cursor: default;
   user-select: none;
@@ -51,7 +51,7 @@
 }
 
 .rich-composer .inline-chip:hover {
-  background: color-mix(in srgb, var(--color-vscode-fg) 16%, var(--color-vscode-input-bg));
+  background: color-mix(in srgb, var(--color-vscode-fg) 12%, var(--color-vscode-input-bg));
 }
 
 .rich-composer .inline-chip[data-chip-type='mention-file'],
@@ -2539,7 +2539,7 @@ kbd {
 }
 
 .user-message-text > .inline-chip {
-  vertical-align: -1px;
+  vertical-align: -2px;
   margin: 0 1px;
   gap: 4px;
   padding: 1px 5px;
@@ -2554,6 +2554,12 @@ kbd {
 .user-message-text > .inline-chip .inline-chip-icon {
   width: 12px;
   height: 12px;
+}
+
+.user-message-text > .user-message-format-chip {
+  margin: 0;
+  padding: 3px 7px;
+  letter-spacing: 0.02em;
 }
 
 .user-message-text > .inline-chip-clickable {

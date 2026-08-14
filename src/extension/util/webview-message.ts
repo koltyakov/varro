@@ -43,7 +43,7 @@ const MAX_SEARCH_QUERY_LENGTH = 200;
  *  tool cannot push an unbounded string through the bridge. */
 const MAX_OPEN_TEXT_LENGTH = 2_000_000;
 const MAX_OPEN_TEXT_TITLE_LENGTH = 200;
-const OPEN_TEXT_LANGUAGES = new Set(['plaintext', 'json', 'markdown', 'shellscript']);
+const OPEN_TEXT_LANGUAGES = new Set(['plaintext', 'json', 'markdown', 'shellscript', 'xml']);
 const MAX_DROPPED_PATHS = 100;
 const MAX_DROPPED_CONTENT_NAME_LENGTH = 512;
 const MAX_DROPPED_CONTENT_BASE64_LENGTH = Math.ceil(MAX_DROPPED_CONTENT_FILE_BYTES / 3) * 4;
@@ -109,9 +109,12 @@ const WEBVIEW_MESSAGE_TYPES = {
   'files/drop': true,
   'files/drop-content': true,
   'pdfs/store': true,
+  'images/store': true,
+  'images/release': true,
   'files/remove': true,
   'files/clear': true,
   'queued-messages/update': true,
+  'composer/images-update': true,
   'files/pick': true,
   'files/search': true,
   'file/read': true,
@@ -177,6 +180,16 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         payload: {
           messages,
         },
+      };
+    }
+
+    case 'composer/images-update': {
+      const payload = asRecord(message?.payload);
+      const images = sanitizeClipboardImages(payload?.images);
+      if (!images) return null;
+      return {
+        type,
+        payload: { images },
       };
     }
 
@@ -314,7 +327,8 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       return { type, payload: { files } };
     }
 
-    case 'pdfs/store': {
+    case 'pdfs/store':
+    case 'images/store': {
       const payload = asRecord(message?.payload);
       const id = getBoundedString(payload?.id, 512);
       const name = getBoundedString(payload?.name, MAX_DROPPED_CONTENT_NAME_LENGTH);
@@ -331,6 +345,24 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
         return null;
       }
       return { type, payload: { id, name, content, size } };
+    }
+
+    case 'images/release': {
+      const payload = asRecord(message?.payload);
+      if (!Array.isArray(payload?.paths) || payload.paths.length > 5) return null;
+      const paths = payload.paths.map((path) => getBoundedString(path, MAX_PATH_LENGTH));
+      if (!paths.every((path): path is string => Boolean(path))) return null;
+      if (typeof payload.deferred !== 'boolean') return null;
+      const sessionId = getBoundedString(payload.sessionId, 512);
+      if (payload.sessionId !== undefined && !sessionId) return null;
+      return {
+        type,
+        payload: {
+          paths,
+          deferred: payload.deferred,
+          ...(sessionId ? { sessionId } : {}),
+        },
+      };
     }
 
     case 'files/remove':
@@ -896,6 +928,40 @@ function sanitizeQueuedMessages(
     >['payload']['messages'][number]),
     nativePdfs: pdfsByIndex[index]!,
   }));
+}
+
+function sanitizeClipboardImages(
+  value: unknown
+): Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']['images'] | null {
+  if (!Array.isArray(value) || value.length > 5) return null;
+  const images: Extract<WebviewMessage, { type: 'composer/images-update' }>['payload']['images'] =
+    [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const id = getBoundedString(record?.id, 512);
+    const mime = getBoundedString(record?.mime, 256);
+    const filename = getBoundedString(record?.filename, MAX_DROPPED_CONTENT_NAME_LENGTH);
+    const size = getSafeInteger(record?.size);
+    const url = getBoundedString(record?.url, MAX_API_BODY_SINGLE_STRING_BYTES);
+    if (!id || !mime || !filename || size === null || !url || size > 5 * 1024 * 1024) return null;
+    const prefix = `data:${mime};base64,`;
+    if (!url.startsWith(prefix) || getBase64DecodedSize(url.slice(prefix.length)) !== size)
+      return null;
+    const contentKey = getBoundedString(record?.contentKey, 512);
+    const attachmentSequence = getSafeInteger(record?.attachmentSequence);
+    if (record?.contentKey !== undefined && !contentKey) return null;
+    if (record?.attachmentSequence !== undefined && attachmentSequence === null) return null;
+    images.push({
+      id,
+      url,
+      mime,
+      filename,
+      size,
+      ...(contentKey ? { contentKey } : {}),
+      ...(attachmentSequence !== null ? { attachmentSequence } : {}),
+    });
+  }
+  return images;
 }
 
 function sanitizePromptBodyWithNativePdfs(

@@ -61,11 +61,17 @@ export {
 export {
   getUserMessageEditText,
   getUserMessageEditContext,
+  getUserMessageMarkupFormat,
+  getUserMessageMarkupSuffix,
   getUserMessagePreviewText,
   hasUserMessageEditableContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
-export type { ParsedUserMessageContent } from './message/UserMessageContent';
+export type {
+  ParsedUserMessageContent,
+  UserMessageMarkupFormat,
+  UserMessageMarkupSuffix,
+} from './message/UserMessageContent';
 
 const FINAL_MARK_PULSE_MIN_DURATION_MS = 600;
 const FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS = 6;
@@ -362,12 +368,20 @@ export function Message(props: {
     return (
       parsed.messageTexts.some((text) => text.trim().length > 0) ||
       parsed.attachments.length > 0 ||
-      parsed.fileParts.length > 0
+      parsed.fileParts.length > 0 ||
+      parsed.agentParts.length > 0
     );
   });
   const isStandaloneTerminalMessage = createMemo(() => {
     const parsed = parsedUserContent();
-    if (!parsed || parsed.messageTexts.length !== 0 || parsed.fileParts.length !== 0) return false;
+    if (
+      !parsed ||
+      parsed.messageTexts.length !== 0 ||
+      parsed.fileParts.length !== 0 ||
+      parsed.agentParts.length !== 0
+    ) {
+      return false;
+    }
     const attachment = parsed.attachments[0];
     return (
       parsed.attachments.length === 1 &&
@@ -381,6 +395,7 @@ export function Message(props: {
     return (
       parsed.messageTexts.length === 0 &&
       parsed.attachments.length === 0 &&
+      parsed.agentParts.length === 0 &&
       parsed.fileParts.length > 0 &&
       parsed.fileParts.every((part) => part.mime.startsWith('image/'))
     );

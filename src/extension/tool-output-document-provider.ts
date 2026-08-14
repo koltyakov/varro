@@ -62,6 +62,7 @@ const EXTENSION_BY_LANGUAGE: Record<string, string> = {
   json: 'json',
   markdown: 'md',
   shellscript: 'sh',
+  xml: 'xml',
 };
 
 function toFilename(title: string, language?: string) {

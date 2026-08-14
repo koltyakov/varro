@@ -504,6 +504,17 @@ export type WebviewThemeKind = 'light' | 'dark' | 'high-contrast' | 'high-contra
 
 export type DesktopSessionPaneSide = 'left' | 'right';
 
+export type ClipboardImageSnapshot = {
+  id: string;
+  url: string;
+  mime: string;
+  filename: string;
+  size: number;
+  contentKey?: string;
+  attachmentSequence?: number;
+  contextFile?: Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
+};
+
 export type QueuedMessageSnapshot = {
   id: string;
   sessionId: string;
@@ -511,15 +522,7 @@ export type QueuedMessageSnapshot = {
   agent?: string;
   paused?: boolean;
   droppedFiles: DroppedFile[];
-  clipboardImages: Array<{
-    id: string;
-    url: string;
-    mime: string;
-    filename: string;
-    size: number;
-    contentKey?: string;
-    attachmentSequence?: number;
-  }>;
+  clipboardImages: ClipboardImageSnapshot[];
   nativePdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
@@ -531,6 +534,7 @@ export type InitialWebviewState = {
   editorContext: EditorContext;
   terminalSelection: { text: string; terminalName: string } | null;
   droppedFiles: DroppedFile[];
+  clipboardImages?: ClipboardImageSnapshot[];
   emptyStateLogoUri: string;
   remoteExtensionHost?: boolean;
   showInlineFileChanges?: boolean;
@@ -573,6 +577,7 @@ export type ExtensionMessage =
   | { type: 'files/dropped'; payload: DroppedFile[] }
   | { type: 'pdfs/picked'; payload: NativePdfAttachment[] }
   | { type: 'pdfs/stored'; payload: { id: string; contextFile: DroppedFile } }
+  | { type: 'images/stored'; payload: { id: string; contextFile: DroppedFile } }
   | { type: 'files/removed'; payload: { path: string } }
   | {
       type: 'files/search-results';
@@ -628,6 +633,15 @@ export type WebviewMessage =
       type: 'pdfs/store';
       payload: { id: string; name: string; content: string; size: number };
     }
+  | {
+      type: 'images/store';
+      payload: { id: string; name: string; content: string; size: number };
+    }
+  | {
+      type: 'images/release';
+      payload: { paths: string[]; deferred: boolean; sessionId?: string };
+    }
+  | { type: 'composer/images-update'; payload: { images: ClipboardImageSnapshot[] } }
   | { type: 'files/remove'; payload: { path: string } }
   | { type: 'files/clear' }
   | { type: 'queued-messages/update'; payload: { messages: QueuedMessageSnapshot[] } }

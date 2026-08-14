@@ -84,6 +84,11 @@ describe('SessionSendOperations', () => {
         filename: 'image.png',
         size: 10,
         attachmentSequence: 2,
+        contextFile: {
+          path: '/tmp/varro-drops/image.png',
+          relativePath: 'image.png',
+          type: 'file',
+        },
       },
     ]);
     appStore.setState('todos', [
@@ -148,6 +153,14 @@ describe('SessionSendOperations', () => {
     expect(resetTodoSync).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'files/clear' });
     expect(postMessage).toHaveBeenCalledWith({ type: 'terminal-selection/clear' });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'images/release',
+      payload: {
+        paths: ['/tmp/varro-drops/image.png'],
+        deferred: true,
+        sessionId: 'session-1',
+      },
+    });
   });
 
   it('clears sent composer attachments while the network send is pending', async () => {

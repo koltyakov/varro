@@ -73,7 +73,7 @@ function renderAttachmentStrip(props: Partial<AttachmentStripProps> = {}) {
     clipboardImages: [],
     nativePdfs: [],
     nativePdfsSupported: true,
-    clipboardImagesDisabled: false,
+    clipboardImagesNeedVision: false,
     onToggleActiveContext: vi.fn(),
     onClearTerminalSelection: vi.fn(),
     onClearDiagnostics: vi.fn(),
@@ -202,20 +202,20 @@ describe('AttachmentStrip', () => {
     expect(renderResult.onRemoveFile).toHaveBeenNthCalledWith(2, '/workspace/docs');
   });
 
-  it('marks clipboard images disabled only when the current model cannot send them', () => {
+  it('strikes through clipboard images while indicating that vision routing is needed', () => {
     const firstRender = renderAttachmentStrip({
       clipboardImages: [createClipboardImage()],
-      clipboardImagesDisabled: true,
+      clipboardImagesNeedVision: true,
     });
 
-    const disabledImageChip = getChip('diagram.png');
-    expect(disabledImageChip?.getAttribute('data-disabled')).toBe('true');
-    expect(disabledImageChip?.getAttribute('data-icon')).toBe('image');
-    expect(disabledImageChip?.getAttribute('data-title')).toBe(
-      "diagram.png · Current model doesn't support vision, so this image will not be sent"
+    const imageChip = getChip('diagram.png');
+    expect(imageChip?.getAttribute('data-disabled')).toBe('true');
+    expect(imageChip?.getAttribute('data-icon')).toBe('image');
+    expect(imageChip?.getAttribute('data-title')).toBe(
+      'diagram.png · Use a vision-capable model or vision subagent to send this image'
     );
 
-    disabledImageChip
+    imageChip
       ?.querySelector('.attachment-chip-mock-remove')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -226,7 +226,7 @@ describe('AttachmentStrip', () => {
 
     renderAttachmentStrip({
       clipboardImages: [createClipboardImage()],
-      clipboardImagesDisabled: false,
+      clipboardImagesNeedVision: false,
     });
 
     const enabledImageChip = getChip('diagram.png');

@@ -57,7 +57,7 @@ Varro can include more than the text in the composer.
 - Diagnostics from the active file when you explicitly attach current Problems with `/diagnostics`
 - Explicitly attached files or folders
 - Explicit line ranges attached from the editor selection command
-- Pasted image attachments when the selected model supports vision
+- Pasted image attachments when the selected model supports vision, or path-backed images delegated through a configured `@vision` subagent
 - Native PDF attachments when the selected model advertises PDF input support
 
 The current document appears as a chip above the composer. You can click that chip to disable or re-enable live current-document context for the active session.
@@ -81,6 +81,31 @@ Use any of these flows to add more context.
 - Type `&` to search recent root sessions and insert a stable `session:<id>` reference. Session references in the composer and rendered responses open the referenced session.
 
 Varro keeps at most five pasted images, with a maximum size of 5 MiB per image. Native PDFs can be picked, dropped, or pasted and are limited to 20 MiB in total. When the selected model does not advertise PDF input support, a picked or dropped PDF with an available file path is sent as a file reference instead of native PDF data. A pasted PDF without an available path remains visible but is not sent. In environments where other dropped items do not expose local paths, content-only drops are limited to 20 files, 10 MiB per file, and 50 MiB in total.
+
+### Add Vision To A Text-Only Model
+
+Varro can delegate pasted images from a tool-capable text-only model, such as GLM, to an OpenCode subagent named `vision`. Add the agent to `opencode.json` and replace the example model with a model available from one of your configured providers:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "vision": {
+      "description": "Inspects images for text-only parent agents",
+      "mode": "subagent",
+      "model": "openai/gpt-5.6-luna",
+      "prompt": "Analyze every supplied image carefully. Return a concise textual description, including visible text, UI state, diagrams, errors, and details relevant to the parent agent's request.",
+      "permission": {
+        "read": "allow",
+        "edit": "deny",
+        "bash": "deny"
+      }
+    }
+  }
+}
+```
+
+Restart OpenCode after changing its configuration. The `vision` agent must have an explicit model that OpenCode reports as supporting image input. With a non-vision parent model, pasted images retain the normal disabled appearance and are not sent unless the prompt contains an exact `@vision` mention. Once `@vision` is present, Varro materializes the images as private temporary files and instructs OpenCode to include those files in the vision subagent task. The parent model must support tool calls and be allowed to invoke the `vision` subagent.
 
 ## Composer Behavior
 
@@ -250,33 +275,38 @@ Example:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "openai/gpt-5",
-  "small_model": "openai/gpt-5-mini",
+  "model": "openai/gpt-5.6-sol",
+  "small_model": "openai/gpt-5.6-luna",
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "openai/gpt-5"
+      "model": "openai/gpt-5.6-sol"
     },
     "plan": {
       "mode": "primary",
-      "model": "openai/gpt-5-mini",
+      "model": "openai/gpt-5.6-terra",
       "temperature": 0.1
     },
     "explore": {
       "mode": "subagent",
       "description": "Fast read-only codebase exploration",
-      "model": "openai/gpt-5-mini"
+      "model": "openai/gpt-5.6-luna"
     },
     "review": {
       "mode": "subagent",
       "description": "Read-only code review",
-      "model": "anthropic/claude-sonnet-4-20250514",
+      "model": "openai/gpt-5.6-terra",
       "temperature": 0.1
     },
     "general": {
       "mode": "subagent",
       "description": "General multi-step execution",
-      "model": "openai/gpt-5"
+      "model": "openai/gpt-5.6-terra"
+    },
+    "vision": {
+      "mode": "subagent",
+      "description": "Image inspection for text-only parent models",
+      "model": "openai/gpt-5.6-luna"
     }
   }
 }
@@ -284,11 +314,9 @@ Example:
 
 A practical default setup is:
 
-- `build`: strongest coding model
-- `explore`: cheaper, fast model
-- `plan`: cheaper or reasoning-tuned model
-- `review`: strong analysis model with low temperature
-- `docs`: cheaper general model unless documentation quality is especially important
+- `build` and the global default: Sol for primary implementation work
+- `general`, `plan`, and `review`: Terra for general-purpose subagent work and analysis
+- `vision`, `explore`, `small_model`, and other lightweight helpers: Luna for fast, inexpensive focused tasks
 
 Additional recommendations:
 

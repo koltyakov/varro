@@ -446,7 +446,6 @@ export function MessageList() {
   let upwardStickyHandoff: {
     preview: StickyUserMessagePreview;
     messageId: string;
-    releaseTop: number;
     acceptsBoundaryEntry: boolean;
     sourceEntered: boolean;
     lastInputAt: number;
@@ -2760,20 +2759,6 @@ export function MessageList() {
     };
   }
 
-  function getStickyUserMessageHandoffReleaseTop(containerRect: DOMRect) {
-    const stickyBounds = getStickyUserMessagePreviewBounds(containerRect);
-    if (!stickyBounds || !containerRef) return null;
-
-    const stickyText = containerRef.querySelector<HTMLElement>('.latest-user-message-sticky-text');
-    if (!stickyText) return stickyBounds.bottom;
-
-    const textHeight = stickyText.getBoundingClientRect().height;
-    const maximumTextHeight = Number.parseFloat(getComputedStyle(stickyText).maxHeight);
-    if (!(textHeight > 0) || !(maximumTextHeight > textHeight)) return stickyBounds.bottom;
-
-    return stickyBounds.bottom + maximumTextHeight - textHeight;
-  }
-
   function handleStickyPreviewGeometryChange() {
     scheduleStickyPreviewGeometryRefresh();
   }
@@ -2788,15 +2773,8 @@ export function MessageList() {
     sourceEntered: boolean,
     acceptsBoundaryEntry = false
   ) {
-    const containerRect = containerRef?.getBoundingClientRect();
-    const releaseTop = containerRect
-      ? (getStickyUserMessageHandoffReleaseTop(containerRect) ??
-        previousStickyPreviewBounds?.bottom ??
-        0)
-      : 0;
     if (upwardStickyHandoff?.messageId === preview.id) {
       upwardStickyHandoff.preview = preview;
-      upwardStickyHandoff.releaseTop = Math.max(upwardStickyHandoff.releaseTop, releaseTop);
       upwardStickyHandoff.acceptsBoundaryEntry ||= acceptsBoundaryEntry;
       upwardStickyHandoff.sourceEntered ||= sourceEntered;
       upwardStickyHandoff.lastInputAt = performance.now();
@@ -2805,7 +2783,6 @@ export function MessageList() {
     upwardStickyHandoff = {
       preview,
       messageId: preview.id,
-      releaseTop,
       acceptsBoundaryEntry,
       sourceEntered,
       lastInputAt: performance.now(),
@@ -2837,11 +2814,29 @@ export function MessageList() {
       clearUpwardStickyHandoff();
       return false;
     }
+    if (getStickyUserMessagePreviewHideReason(handoff.preview) === 'next-prompt') {
+      clearUpwardStickyHandoff();
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = handoff.messageId;
+      return false;
+    }
 
     const containerRect = containerRef.getBoundingClientRect();
     const sourceRect = source.getBoundingClientRect();
-    if (sourceRect.top - containerRect.top > handoff.releaseTop) {
+    if (handoff.preview.index === 0 && sourceRect.top >= containerRect.top) {
       clearUpwardStickyHandoff();
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = handoff.messageId;
+      return false;
+    }
+    const stickyOverlay = containerRef.querySelector<HTMLElement>(
+      '.latest-user-message-sticky-overlay'
+    );
+    const stickyOverlayRect = stickyOverlay?.getBoundingClientRect();
+    if (stickyOverlayRect && sourceRect.bottom > stickyOverlayRect.bottom) {
+      clearUpwardStickyHandoff();
+      setStickyUserMessagePreview(null);
+      previousStickyPreviewId = handoff.messageId;
       return false;
     }
     if (sourceRect.bottom >= containerRect.top) {
@@ -2982,6 +2977,15 @@ export function MessageList() {
   ) {
     const reason = getStickyUserMessagePreviewHideReason(preview, geometry);
     if (reason !== 'source') return reason === 'next-prompt';
+    if (preview?.index === 0 && containerRef) {
+      const source = getStickyUserMessageSourceElement(preview.id);
+      if (
+        source &&
+        source.getBoundingClientRect().top >= containerRef.getBoundingClientRect().top
+      ) {
+        return true;
+      }
+    }
     return !(activeSessionWorking() && !userScrollRecentlyActive());
   }
 
@@ -3869,12 +3873,12 @@ export function MessageList() {
     ) {
       beginUpwardStickyHandoff(currentStickyPreview, true);
       scheduleUpwardStickyHandoffRelease();
-      setStickyUserMessagePreview(null);
       previousStickyPreviewId = currentStickyPreview.id;
     } else if (
       actualScrollMovement &&
       scrollDelta > 0.5 &&
       currentStickyPreview &&
+      !shouldDeferStickyDuringUpwardHandoff() &&
       shouldHideStickyUserMessagePreviewImmediately(currentStickyPreview)
     ) {
       setStickyUserMessagePreview(null);
@@ -4009,22 +4013,42 @@ export function MessageList() {
       const currentStickySource = currentStickyPreview
         ? getStickyUserMessageSourceElement(currentStickyPreview.id)
         : null;
+      const currentStickySourceRect = currentStickySource?.getBoundingClientRect();
       if (
         currentStickyPreview &&
         currentStickySource &&
-        (currentStickySource.getBoundingClientRect().bottom - deltaY >
-          getWheelContainerRect().top ||
+        currentStickySourceRect &&
+        (currentStickySourceRect.bottom - deltaY > getWheelContainerRect().top ||
           (Math.abs(deltaY) < 1 &&
-            currentStickySource.getBoundingClientRect().bottom - deltaY >=
-              getWheelContainerRect().top - 0.5))
+            currentStickySourceRect.bottom - deltaY >= getWheelContainerRect().top - 0.5))
       ) {
         beginUpwardStickyHandoff(currentStickyPreview, false, Math.abs(deltaY) < 1);
-        setStickyUserMessagePreview(null);
         previousStickyPreviewId = currentStickyPreview.id;
+        const handoff = upwardStickyHandoff;
+        const stickyOverlayRect = containerRef
+          .querySelector<HTMLElement>('.latest-user-message-sticky-overlay')
+          ?.getBoundingClientRect();
+        const firstPromptWillReachTop =
+          currentStickyPreview.index === 0 &&
+          currentStickySourceRect.top - deltaY >= getWheelContainerRect().top;
+        if (
+          handoff &&
+          (firstPromptWillReachTop ||
+            (stickyOverlayRect &&
+              currentStickySourceRect.bottom - deltaY > stickyOverlayRect.bottom))
+        ) {
+          clearUpwardStickyHandoff();
+          setStickyUserMessagePreview(null);
+        }
       }
     }
     if (containerRef && deltaY > 0.5) {
-      clearUpwardStickyHandoff();
+      if (upwardStickyHandoff?.sourceEntered) {
+        upwardStickyHandoff.lastInputAt = performance.now();
+        scheduleUpwardStickyHandoffRelease();
+      } else {
+        clearUpwardStickyHandoff();
+      }
       const top = containerRef.scrollTop;
       const maxScrollTop = getEditMaxScrollTop(top);
       if (maxScrollTop !== null && top + deltaY >= maxScrollTop - 1) {
@@ -4558,13 +4582,7 @@ export function MessageList() {
     const candidate = stickyUserMessagePreviewCandidate();
     const current = untrack(stickyUserMessagePreview);
 
-    if (candidate && shouldDeferStickyDuringUpwardHandoff()) {
-      if (current) {
-        setStickyUserMessagePreview(null);
-        previousStickyPreviewId = current.id;
-      }
-      return;
-    }
+    if (current && shouldDeferStickyDuringUpwardHandoff()) return;
 
     if (
       current?.id === candidate?.id &&
@@ -5778,8 +5796,6 @@ export function MessageList() {
     }
   }
 
-  const stickyPreviewTitle = 'Click to scroll to message';
-
   function loadingOlderHistory(sessionId = state.activeSessionId) {
     return (
       !!sessionId &&
@@ -6012,12 +6028,12 @@ export function MessageList() {
             {(preview) => (
               <StickyUserMessagePreviewCard
                 preview={preview()}
+                parts={messages()[messageIndexById().get(preview().id) ?? -1]?.parts}
                 sentAt={messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created}
                 showSentTimestamp={showPromptNumbers()}
                 promptNumber={
                   promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
                 }
-                title={stickyPreviewTitle}
                 loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
                 onGeometryChange={handleStickyPreviewGeometryChange}

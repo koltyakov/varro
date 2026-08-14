@@ -81,6 +81,7 @@ export class WebviewSession {
       onHidden(): void;
       resetStatusBarCache(): void;
       queuedMessages(): InitialWebviewState['queuedMessages'];
+      draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
     }
   ) {}
@@ -280,6 +281,7 @@ export class WebviewSession {
       editorContext: this.contextProvider.context,
       terminalSelection: this.contextProvider.terminalSelection,
       droppedFiles: this.contextFilesState.getContextFiles(),
+      clipboardImages: this.deps.draftImages(),
       emptyStateLogoUri: this.bridge.emptyStateLogoUri() || '',
       remoteExtensionHost: Boolean(vscode.env?.remoteName),
       showInlineFileChanges: config.showInlineFileChanges,

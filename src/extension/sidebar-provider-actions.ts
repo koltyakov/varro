@@ -47,6 +47,8 @@ export interface SidebarProviderActionDeps {
     files: Array<{ name: string; content: string; size: number }>
   ): Promise<void>;
   storePdf: MessageRouterCallbacks['storePdf'];
+  storeImage: MessageRouterCallbacks['storeImage'];
+  releaseImages: MessageRouterCallbacks['releaseImages'];
   removeContextFile(path: string): void;
   clearContextFiles(): void;
   pickFiles(): Promise<void>;
@@ -54,6 +56,7 @@ export interface SidebarProviderActionDeps {
   runInTerminal(command: string, title?: string): void | Promise<void>;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
+  updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
   setMermaidPreviewOpen: MessageRouterCallbacks['setMermaidPreviewOpen'];
 }
 
@@ -111,6 +114,7 @@ export function createSidebarProviderActions(
       deps.runInTerminal(`opencode --session ${sessionId}`, 'OpenCode Session'),
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
+    updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
     openFolder: async () => {
@@ -133,6 +137,8 @@ export function createSidebarProviderActions(
     handleDroppedPaths: (paths) => deps.handleDroppedPaths(paths),
     handleDroppedContent: (files) => deps.handleDroppedContent(files),
     storePdf: (payload) => deps.storePdf(payload),
+    storeImage: (payload) => deps.storeImage(payload),
+    releaseImages: (payload) => deps.releaseImages(payload),
     removeContextFile: (path) => deps.removeContextFile(path),
     clearContextFiles: () => deps.clearContextFiles(),
     notifyContextFilesChanged: () => deps.contextFilesState.notifyContextFilesChanged(),

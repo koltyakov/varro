@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WebviewMessage } from '../../shared/protocol';
 import type { AssistantMessage, Part, Permission, ToolPart } from '../types';
 import {
   applyMessagePartDelta,
@@ -869,6 +870,42 @@ describe('clipboard image placeholders', () => {
     removeClipboardImage('img-1');
 
     expect(inputText()).toBe('Before _____ middle _____ after');
+  });
+
+  it('synchronizes pasted image changes to host persistence', () => {
+    const send = vi.fn<(message: WebviewMessage) => void>();
+    (window as unknown as { __sendToExtension?: typeof send }).__sendToExtension = send;
+
+    addClipboardImage({
+      id: 'img-persisted',
+      url: 'data:image/png;base64,AA==',
+      mime: 'image/png',
+      filename: 'image.png',
+      size: 1,
+    });
+    removeClipboardImage('img-persisted');
+
+    expect(send).toHaveBeenNthCalledWith(1, {
+      type: 'composer/images-update',
+      payload: {
+        images: [
+          {
+            id: 'img-persisted',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'image.png',
+            size: 1,
+            attachmentSequence: expect.any(Number),
+          },
+        ],
+      },
+    });
+    expect(send).toHaveBeenNthCalledWith(2, {
+      type: 'composer/images-update',
+      payload: { images: [] },
+    });
+
+    delete (window as unknown as { __sendToExtension?: unknown }).__sendToExtension;
   });
 
   it('replaces placeholders for all clipboard images when clearing them', () => {

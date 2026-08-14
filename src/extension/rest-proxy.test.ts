@@ -139,6 +139,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
     ensureServerStarted: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
+    removeSessionImages: vi.fn(() => Promise.resolve()),
     postApiResponse: vi.fn(),
     ...overrides,
   };
@@ -1383,6 +1384,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(11, 'DELETE', '/session/some-id'));
     expect(serverRequest).toHaveBeenCalledWith('GET', '/session?limit=1000000');
     expect(callbacks.sessionTrash.moveToTrash).toHaveBeenCalledWith('some-id', []);
+    expect(callbacks.removeSessionImages).toHaveBeenCalledWith(['s1']);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['s1']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 11, data: true });
   });
@@ -1406,6 +1408,7 @@ describe('RestProxy handleRequest', () => {
       ['DELETE', '/session/some-id?directory=%2Frepo%2Farchive'],
     ]);
     expect(callbacks.sessionTrash.moveToTrash).not.toHaveBeenCalled();
+    expect(callbacks.removeSessionImages).toHaveBeenCalledWith(['some-id']);
     expect(callbacks.sessionState.removeSessions).toHaveBeenCalledWith(['some-id']);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, { id: 111, data: true });
   });
@@ -1452,6 +1455,7 @@ describe('RestProxy handleRequest', () => {
       } as never,
     });
     await proxy.handleRequest(makePayload(13, 'DELETE', '/session/nonexistent'));
+    expect(callbacks.removeSessionImages).not.toHaveBeenCalled();
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 13,
       error: '404 Session not found',

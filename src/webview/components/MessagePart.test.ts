@@ -358,7 +358,7 @@ describe('MessagePart', () => {
     );
   });
 
-  it('renders agent handoff and compaction notices', () => {
+  it('renders agent chips and compaction notices', () => {
     renderPart({
       id: 'agent-1',
       sessionID: 'session-1',
@@ -367,7 +367,10 @@ describe('MessagePart', () => {
       name: 'explore',
     });
 
-    expect(container?.textContent).toContain('Handing off to Explore');
+    const chip = container?.querySelector('.message-attachment-chip');
+    expect(chip?.textContent).toBe('Explore');
+    expect(chip?.getAttribute('data-copy-marker')).toBe('@explore');
+    expect(chip?.getAttribute('title')).toBe('Agent: Explore');
 
     cleanup?.();
     cleanup = undefined;

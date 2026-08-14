@@ -30,7 +30,11 @@ import {
   getContextFileAttachmentSequence,
   getNativePdfAttachmentSequence,
 } from '../../lib/attachment-order';
-import { modelSupportsPdf, modelSupportsVision } from '../../lib/model-capabilities';
+import {
+  modelSupportsPdf,
+  modelSupportsTools,
+  modelSupportsVision,
+} from '../../lib/model-capabilities';
 import { getVariantsForModel } from '../../lib/model-variants';
 import { getNewChatDraftGeneration } from '../../lib/new-chat-draft';
 import { getWorkspaceRelativePath, isSamePath } from '../../lib/path-display';
@@ -41,12 +45,14 @@ import {
 } from '../../lib/state-messages';
 import type {
   MessageEntry,
+  Agent,
   Part,
   PermissionRule,
   Provider,
   Session,
   SessionStatus,
 } from '../../types';
+import { canDelegateVision } from '../../lib/vision-delegation';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -60,6 +66,8 @@ type ComposerState = {
   clipboardImages: ClipboardImage[];
   nativePdfs?: NativePdfAttachment[];
   attachedDiagnostics?: AttachedDiagnostics | null;
+  allAgents?: Agent[];
+  visionDelegationTexts?: string[];
 };
 
 export type SessionSendBody = {
@@ -138,6 +146,14 @@ type StateBoundSendDependencies = {
 
 type OptimisticMessageEntry = MessageEntry;
 
+type OptimisticImage = Pick<ClipboardImage, 'url' | 'mime' | 'filename'>;
+
+type SessionSendPayload = {
+  body: SessionSendBody;
+  effectiveModel: SelectedModel | null;
+  optimisticImages?: OptimisticImage[];
+};
+
 export function getAttachmentReference(
   file: { path: string; type: 'file' | 'directory' },
   workspacePath: string | null
@@ -156,20 +172,35 @@ export function buildSessionSendBody(
   text: string,
   isCurrentDocumentEnabled: (sessionId: string) => boolean,
   options?: SendFlowOptions
-): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null {
+): SessionSendPayload | null {
   const effectiveModel = routingStore.resolveSelectedModel(
     composerState.selectedModel,
     composerState.providers,
     composerState.providerDefaults,
     { allowHidden: true }
   );
-  const includeClipboardImages = effectiveModel
+  const includeNativeClipboardImages = effectiveModel
     ? modelSupportsVision(
         effectiveModel.providerID,
         effectiveModel.modelID,
         composerState.providers
       )
     : true;
+  const delegateClipboardImages =
+    !includeNativeClipboardImages &&
+    !!effectiveModel &&
+    modelSupportsTools(
+      effectiveModel.providerID,
+      effectiveModel.modelID,
+      composerState.providers
+    ) &&
+    canDelegateVision(
+      [text, ...(composerState.visionDelegationTexts ?? [])],
+      composerState.allAgents ?? [],
+      composerState.providers
+    ) &&
+    composerState.clipboardImages.every((image) => image.contextFile);
+  const includeClipboardImages = includeNativeClipboardImages || delegateClipboardImages;
   const promptText = getPromptTextForClipboardImages(
     text,
     composerState.clipboardImages,
@@ -305,12 +336,20 @@ export function buildSessionSendBody(
       }
       continue;
     }
-    if (!includeClipboardImages) continue;
+    if (includeNativeClipboardImages) {
+      parts.push({
+        type: 'file',
+        mime: attachment.image.mime,
+        filename: attachment.image.filename,
+        url: attachment.image.url,
+      });
+      continue;
+    }
+    if (!delegateClipboardImages || !attachment.image.contextFile) continue;
+    const imagePath = attachment.image.contextFile.path.replace(/\\/g, '/');
     parts.push({
-      type: 'file',
-      mime: attachment.image.mime,
-      filename: attachment.image.filename,
-      url: attachment.image.url,
+      type: 'text',
+      text: `[Image for @vision: ${imagePath}]\nWhen calling the vision subagent, include {file:${imagePath}} in its task prompt.`,
     });
   }
 
@@ -346,7 +385,19 @@ export function buildSessionSendBody(
   if (options?.noReply) body.noReply = true;
   if (options?.delivery) body.delivery = options.delivery;
 
-  return { body, effectiveModel };
+  return {
+    body,
+    effectiveModel,
+    ...(delegateClipboardImages
+      ? {
+          optimisticImages: composerState.clipboardImages.map(({ url, mime, filename }) => ({
+            url,
+            mime,
+            filename,
+          })),
+        }
+      : {}),
+  };
 }
 
 export function getQueuedAttachmentSnapshot(composerState: {
@@ -374,6 +425,7 @@ export function getQueuedAttachmentSnapshot(composerState: {
       filename: image.filename,
       size: image.size,
       ...(image.contentKey ? { contentKey: image.contentKey } : {}),
+      ...(image.contextFile ? { contextFile: { ...image.contextFile } } : {}),
       attachmentSequence: image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
     })),
     nativePdfs: (composerState.nativePdfs ?? []).map((pdf) => ({
@@ -622,6 +674,8 @@ function areClipboardImagesEqual(left: ClipboardImage, right: ClipboardImage) {
     left.filename === right.filename &&
     left.size === right.size &&
     left.contentKey === right.contentKey &&
+    left.contextFile?.path === right.contextFile?.path &&
+    left.contextFile?.relativePath === right.contextFile?.relativePath &&
     (left.attachmentSequence ?? getClipboardImageAttachmentSequence(left.id)) ===
       (right.attachmentSequence ?? getClipboardImageAttachmentSequence(right.id))
   );
@@ -727,6 +781,17 @@ export class SessionSendOperations {
         })),
       },
       ...capturedAttachments.snapshot,
+      allAgents: appStore.state.allAgents.map((agent) => ({
+        ...agent,
+        ...(agent.model ? { model: { ...agent.model } } : {}),
+      })),
+      visionDelegationTexts: targetSessionId
+        ? appStore.state.messages.flatMap((entry) =>
+            entry.info.sessionID === targetSessionId && entry.info.role === 'user'
+              ? entry.parts.flatMap((part) => (part.type === 'text' ? [part.text] : []))
+              : []
+          )
+        : [],
     };
     const currentDocumentEnabled = composerStore.getCurrentDocumentEnabled(targetSessionId);
     const ensureSessionPermission = this.deps.ensureSessionPermission;
@@ -777,8 +842,17 @@ export class SessionSendOperations {
           clearSentComposerAttachments: () => {
             clearedAttachments ??= clearCapturedComposerAttachments(capturedAttachments);
           },
-          commitSentComposerAttachments: () => {
+          commitSentComposerAttachments: (sentSessionId) => {
             if (!clearedAttachments) return;
+            const imagePaths = clearedAttachments.clipboardImages.flatMap((image) =>
+              image.contextFile ? [image.contextFile.path] : []
+            );
+            if (imagePaths.length > 0) {
+              postMessage({
+                type: 'images/release',
+                payload: { paths: imagePaths, deferred: true, sessionId: sentSessionId },
+              });
+            }
             commitClearedComposerAttachments(clearedAttachments);
             clearedAttachments = null;
           },
@@ -851,7 +925,7 @@ export async function sendMessageWithDependencies(
       sessionId: string,
       text: string,
       options?: SessionSendOptions
-    ): { body: SessionSendBody; effectiveModel: SelectedModel | null } | null;
+    ): SessionSendPayload | null;
     requestMessageListScrollToBottom(targetMessageId?: string): void;
     startLoading(): void;
     setError(message: string | null): void;
@@ -870,7 +944,7 @@ export async function sendMessageWithDependencies(
     postFilesClear(): void;
     postTerminalSelectionClear(): void;
     clearSentComposerAttachments?(): void;
-    commitSentComposerAttachments?(): void;
+    commitSentComposerAttachments?(sessionId: string): void;
     restoreSentComposerAttachments?(): void;
     syncSession(sessionId: string): Promise<void>;
     syncSessionMessages(sessionId: string): Promise<void>;
@@ -905,7 +979,7 @@ export async function sendMessageWithDependencies(
 
   const sendPayload = deps.buildSendPayload(sessionId, text, options);
   if (!sendPayload) return false;
-  const { body, effectiveModel } = sendPayload;
+  const { body, effectiveModel, optimisticImages } = sendPayload;
   const messageId = createOpenCodeMessageID();
   const sendBody = { ...body, messageID: messageId };
   if (sendBody.variant === undefined) delete sendBody.variant;
@@ -917,7 +991,8 @@ export async function sendMessageWithDependencies(
     sendBody,
     sendBody.agent ?? deps.getSelectedAgent?.() ?? 'build',
     effectiveModel,
-    options?.optimisticModel
+    options?.optimisticModel,
+    optimisticImages
   );
   batch(() => {
     if (optimisticMessage) deps.beforeOptimisticPublish?.();
@@ -955,7 +1030,7 @@ export async function sendMessageWithDependencies(
     await deps.sendAsync(sessionId, sendBody);
     if (shouldClearComposer) {
       if (canClearComposerBeforeSend) {
-        deps.commitSentComposerAttachments?.();
+        deps.commitSentComposerAttachments?.(sessionId);
       } else if (deps.clearSentComposerAttachments) {
         deps.clearSentComposerAttachments();
       } else if (deps.getActiveSessionId() === sessionId) {
@@ -1043,7 +1118,8 @@ function createOptimisticUserMessage(
   body: SessionSendBody,
   agent: string,
   effectiveModel: SelectedModel | null,
-  optimisticModelFallback?: SelectedModel
+  optimisticModelFallback?: SelectedModel,
+  optimisticImages: OptimisticImage[] = []
 ): OptimisticMessageEntry | null {
   const model = body.model ?? effectiveModel ?? optimisticModelFallback;
   if (!model) return null;
@@ -1078,6 +1154,17 @@ function createOptimisticUserMessage(
     }
     return [];
   });
+  parts.push(
+    ...optimisticImages.map((image, index): Part => ({
+      id: `${messageId}-optimistic-file-${index}`,
+      sessionID: sessionId,
+      messageID: messageId,
+      type: 'file',
+      mime: image.mime,
+      filename: image.filename,
+      url: image.url,
+    }))
+  );
   if (parts.length === 0) return null;
 
   const modelVariant =

@@ -71,6 +71,74 @@ describe('MessageListChrome', () => {
     expect(container?.querySelector('.latest-user-message-sticky-bottom-fade')).not.toBeNull();
   });
 
+  it('renders XML and SVG sticky previews as compact format chips', () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-svg',
+            index: 3,
+            text: '<svg>...</svg>',
+            format: { kind: 'svg', byteSize: 18 * 1024 },
+            formatPrefix: 'Change the agent chip icon to',
+            attachmentCount: 0,
+            imageCount: 0,
+          }}
+        />
+      ),
+      container!
+    );
+
+    expect(container?.querySelector('.latest-user-message-sticky-text')?.textContent).toBe(
+      'Change the agent chip icon to SVG18 KB'
+    );
+    expect(container?.querySelector('.latest-user-message-sticky-text')?.textContent).not.toContain(
+      '<svg>'
+    );
+  });
+
+  it('renders sticky chips and links through the user message renderer', () => {
+    cleanup = render(
+      () => (
+        <StickyUserMessagePreviewCard
+          preview={{
+            id: 'msg-rich',
+            index: 3,
+            text: 'Review @src/app.ts and https://example.com',
+            attachmentCount: 1,
+            imageCount: 0,
+          }}
+          parts={[
+            {
+              id: 'part-rich',
+              sessionID: 'session-1',
+              messageID: 'msg-rich',
+              type: 'text',
+              text: 'Review @src/app.ts and https://example.com',
+            },
+            {
+              id: 'part-file',
+              sessionID: 'session-1',
+              messageID: 'msg-rich',
+              type: 'text',
+              text: '[Attached file: src/app.ts]',
+            },
+          ]}
+        />
+      ),
+      container!
+    );
+
+    expect(
+      container?.querySelector('.latest-user-message-sticky-text .inline-chip')
+    ).not.toBeNull();
+    expect(
+      container?.querySelector<HTMLAnchorElement>(
+        '.latest-user-message-sticky-text a.external-link'
+      )?.href
+    ).toBe('https://example.com/');
+  });
+
   it('renders a prompt number counter on the sticky card when provided', () => {
     cleanup = render(
       () => (
@@ -237,7 +305,7 @@ describe('MessageListChrome', () => {
     expect(onGeometryChange).toHaveBeenCalledOnce();
   });
 
-  it('invokes the click handler with a custom title', () => {
+  it('invokes the click handler without a redundant title', () => {
     const onClick = vi.fn();
     const preview = {
       id: 'msg-1',
@@ -247,19 +315,13 @@ describe('MessageListChrome', () => {
       imageCount: 0,
     };
     cleanup = render(
-      () => (
-        <StickyUserMessagePreviewCard
-          preview={preview}
-          title="Click to scroll to message"
-          onClick={onClick}
-        />
-      ),
+      () => <StickyUserMessagePreviewCard preview={preview} onClick={onClick} />,
       container!
     );
 
     const card = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(card?.classList.contains('latest-user-message-sticky-clickable')).toBe(true);
-    expect(card?.getAttribute('title')).toBe('Click to scroll to message');
+    expect(card?.hasAttribute('title')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(onClick).toHaveBeenCalledWith(preview);

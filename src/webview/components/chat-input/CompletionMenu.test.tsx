@@ -122,7 +122,7 @@ describe('CompletionMenu', () => {
     expect(buttons[0]?.textContent).toContain('/plan');
     expect(buttons[1]?.className).toContain('selected');
     expect(buttons[1]?.querySelector('.composer-completion-icon svg')?.getAttribute('width')).toBe(
-      '12'
+      '16'
     );
     expect(buttons[2]?.querySelector('.composer-completion-title')?.getAttribute('title')).toBe(
       fileItem.label
@@ -284,5 +284,6 @@ describe('CompletionMenu', () => {
     expect(icon?.getAttribute('height')).toBe('16');
     expect(icon?.querySelectorAll('path')).toHaveLength(3);
     expect(age?.textContent).toBe('5m');
+    expect(age?.getAttribute('title')).toBeNull();
   });
 });

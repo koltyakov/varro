@@ -1,10 +1,17 @@
-import { getUserMessagePreviewText, parseUserMessageContent } from '../Message';
+import {
+  getUserMessageMarkupSuffix,
+  getUserMessagePreviewText,
+  parseUserMessageContent,
+} from '../Message';
+import type { UserMessageMarkupFormat } from '../Message';
 import type { Message, MessageEntry, Part } from '../../types';
 
 export type StickyUserMessagePreview = {
   id: string;
   index: number;
   text: string;
+  format?: UserMessageMarkupFormat;
+  formatPrefix?: string;
   attachmentCount: number;
   imageCount: number;
 };
@@ -12,11 +19,21 @@ export type StickyUserMessagePreview = {
 function getStickyUserMessageCounts(parts: Part[]): {
   attachmentCount: number;
   imageCount: number;
+  format?: UserMessageMarkupFormat;
+  formatPrefix?: string;
 } {
   const parsed = parseUserMessageContent(parts);
   const imageCount = parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length;
   const attachmentCount = parsed.attachments.length + (parsed.fileParts.length - imageCount);
-  return { attachmentCount, imageCount };
+  const firstText = parsed.messageTexts.find((text) => text.trim().length > 0);
+  const markup = firstText ? getUserMessageMarkupSuffix(firstText) : null;
+  const formatPrefix = markup?.prefix.replace(/\s+/g, ' ').trim();
+  return {
+    attachmentCount,
+    imageCount,
+    ...(markup ? { format: markup.format } : {}),
+    ...(formatPrefix ? { formatPrefix } : {}),
+  };
 }
 
 export const STICKY_PREVIEW_MIN_VIEWPORT_HEIGHT_PX = 480;
@@ -126,9 +143,28 @@ export function shouldShowStickyUserMessagePreview(args: {
 
   const isPreviousPreview = args.previousPreviewId === preview.id;
 
-  // A mounted row reflects the current layout more accurately than a virtual range that may still
-  // be reconciling after scrolling or measurement updates.
-  if (args.rowBottom !== null && args.rowBottom !== undefined && args.rowBottom > 0) return false;
+  if (
+    preview.index === 0 &&
+    args.rowTop !== null &&
+    args.rowTop !== undefined &&
+    args.rowTop >= 0
+  ) {
+    return false;
+  }
+
+  // Keep the previous sticky while its real card is still fully covered by the painted overlay.
+  // This makes compact and attachment-only prompts hand off at the same visual boundary.
+  if (args.rowBottom !== null && args.rowBottom !== undefined && args.rowBottom > 0) {
+    return (
+      isPreviousPreview &&
+      args.stickyPreviewBottom !== null &&
+      args.stickyPreviewBottom !== undefined &&
+      args.rowBottom <= args.stickyPreviewBottom &&
+      (args.nextUserMessageTop === null ||
+        args.nextUserMessageTop === undefined ||
+        args.nextUserMessageTop > args.stickyPreviewBottom)
+    );
+  }
 
   const firstVisibleIndex = args.visibleRange.coreStart ?? args.visibleRange.start;
   if (args.shouldVirtualize && preview.index < firstVisibleIndex) {

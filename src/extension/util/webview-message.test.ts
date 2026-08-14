@@ -384,6 +384,16 @@ describe('webview message validation', () => {
       type: 'vscode/open-text',
       payload: { content: 'failed', title: 'Edit error', language: 'plaintext' },
     });
+
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open-text',
+        payload: { content: '<svg />', title: 'SVG user message', language: 'xml' },
+      })
+    ).toEqual({
+      type: 'vscode/open-text',
+      payload: { content: '<svg />', title: 'SVG user message', language: 'xml' },
+    });
   });
 
   it('normalizes accepted API request methods to uppercase', () => {
@@ -978,6 +988,64 @@ describe('webview message validation', () => {
             size: 3 * 1024 * 1024,
           })),
         },
+      })
+    ).toBeNull();
+  });
+
+  it('validates delegated image storage and release messages', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'images/store',
+        payload: { id: 'image-1', name: 'image.png', content: 'YQ==', size: 1 },
+      })
+    ).toEqual({
+      type: 'images/store',
+      payload: { id: 'image-1', name: 'image.png', content: 'YQ==', size: 1 },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'images/release',
+        payload: { paths: ['/tmp/image.png'], deferred: true, sessionId: 'session-1' },
+      })
+    ).toEqual({
+      type: 'images/release',
+      payload: { paths: ['/tmp/image.png'], deferred: true, sessionId: 'session-1' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'images/store',
+        payload: { id: 'image-1', name: 'image.png', content: 'YQ==', size: 2 },
+      })
+    ).toBeNull();
+  });
+
+  it('validates composer image persistence messages', () => {
+    const message = {
+      type: 'composer/images-update',
+      payload: {
+        images: [
+          {
+            id: 'image-1',
+            url: 'data:image/png;base64,AA==',
+            mime: 'image/png',
+            filename: 'image.png',
+            size: 1,
+          },
+        ],
+      },
+    };
+
+    expect(parseWebviewMessage(message)).toEqual(message);
+    expect(
+      parseWebviewMessage({
+        type: 'composer/images-update',
+        payload: { images: Array.from({ length: 6 }, () => message.payload.images[0]) },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'composer/images-update',
+        payload: { images: [null] },
       })
     ).toBeNull();
   });

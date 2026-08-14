@@ -5,6 +5,7 @@ import { STORAGE_KEYS } from './state-storage';
 beforeEach(() => {
   window.localStorage.clear();
   delete (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
+  delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
 });
 
 describe('composer draft persistence', () => {
@@ -82,6 +83,39 @@ describe('composer draft persistence', () => {
         type: 'file',
         lineRanges: [{ startLine: 2, endLine: 4 }],
         attachmentSequence: 3,
+      },
+    ]);
+  });
+
+  it('restores pasted images from host state without stale temporary files', () => {
+    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+      clipboardImages: [
+        {
+          id: 'image-1',
+          url: 'data:image/png;base64,AA==',
+          mime: 'image/png',
+          filename: 'pasted-image-1.png',
+          size: 1,
+          attachmentSequence: 4,
+          contextFile: {
+            path: '/tmp/old-host/image.png',
+            relativePath: 'image.png',
+            type: 'file',
+          },
+        },
+      ],
+    };
+
+    const restored = createAppState();
+
+    expect(restored.state.clipboardImages).toEqual([
+      {
+        id: 'image-1',
+        url: 'data:image/png;base64,AA==',
+        mime: 'image/png',
+        filename: 'pasted-image-1.png',
+        size: 1,
+        attachmentSequence: 4,
       },
     ]);
   });

@@ -126,6 +126,7 @@ export function modelSupportsVision(
     'multimodal',
   ]);
   if (explicitCapability != null) return explicitCapability;
+  if (capabilities?.attachment === true) return true;
 
   const modalityCandidates = [
     rawModel.modalities,

@@ -69,6 +69,7 @@ import {
   readInitialWebviewState,
   readShowThinking,
   readStoredBooleanRecord,
+  normalizeStoredClipboardImage,
   readStoredDroppedFiles,
   readStoredPermissionModes,
   readStoredQueuedMessages,
@@ -238,6 +239,10 @@ export function createAppState(): AppStateInstance {
     readStoredDroppedFiles(STORAGE_KEYS.inputDraftFiles),
     initialWebviewState.droppedFiles ?? []
   );
+  const initialClipboardImages = (initialWebviewState.clipboardImages ?? [])
+    .slice(0, 5)
+    .map(normalizeStoredClipboardImage)
+    .filter((image): image is ClipboardImage => image !== null);
   const currentDocumentWorkspace =
     initialWebviewState.editorContext?.workspacePath?.replace(/\\/g, '/').replace(/\/+$/, '') ||
     null;
@@ -246,7 +251,7 @@ export function createAppState(): AppStateInstance {
   );
   resetAttachmentOrderState();
   seedContextFileAttachmentSequences(initialDroppedFiles);
-  seedClipboardImageAttachmentSequences([]);
+  seedClipboardImageAttachmentSequences(initialClipboardImages);
   writeStored(
     STORAGE_KEYS.inputDraftFiles,
     initialDroppedFiles.length > 0 ? initialDroppedFiles : null
@@ -285,7 +290,7 @@ export function createAppState(): AppStateInstance {
       : true,
     draftCurrentDocumentEnabled: null,
     droppedFiles: initialDroppedFiles,
-    clipboardImages: [],
+    clipboardImages: initialClipboardImages,
     nativePdfs: [],
     sessions: [],
     sessionsLoadError: null,

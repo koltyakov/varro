@@ -20,6 +20,7 @@ const MAX_CONCURRENT_DROPPED_PATH_STATS = 8;
 const STALE_DROPS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const DROP_DIRECTORY_NAME_PATTERN = /^drop-[a-zA-Z0-9_-]+$/;
 const DROP_OWNER_MARKER_NAME = '.varro-owner.json';
+const SENT_IMAGE_RETENTION_MS = 30 * 60 * 1000;
 
 interface DropOwnerMarker {
   version: 1;
@@ -61,6 +62,9 @@ export class DroppedFilesService {
   private readonly activeContentWrites = new Set<Promise<unknown>>();
   private readonly ownedContentFiles = new Map<string, number>();
   private readonly ownedRemovalPromises = new Map<string, Promise<boolean>>();
+  private readonly deferredRemovalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly sessionOwnedFiles = new Map<string, Set<string>>();
+  private readonly fileSessionOwners = new Map<string, Set<string>>();
   private ownedContentBytes = 0;
   private reservedContentBytes = 0;
 
@@ -177,6 +181,11 @@ export class DroppedFilesService {
   }
 
   async removeOwnedFile(path: string): Promise<boolean> {
+    const timer = this.deferredRemovalTimers.get(path);
+    if (timer) {
+      clearTimeout(timer);
+      this.deferredRemovalTimers.delete(path);
+    }
     const pending = this.ownedRemovalPromises.get(path);
     if (pending) return pending;
     const size = this.ownedContentFiles.get(path);
@@ -192,10 +201,25 @@ export class DroppedFilesService {
     }
   }
 
+  deferOwnedFileRemoval(path: string, sessionId?: string): void {
+    if (sessionId && this.ownedContentFiles.has(path)) {
+      getOrCreateSet(this.sessionOwnedFiles, sessionId).add(path);
+      getOrCreateSet(this.fileSessionOwners, path).add(sessionId);
+    }
+    if (!this.ownedContentFiles.has(path) || this.deferredRemovalTimers.has(path)) return;
+    const timer = setTimeout(() => {
+      this.deferredRemovalTimers.delete(path);
+      void this.removeOwnedFile(path);
+    }, SENT_IMAGE_RETENTION_MS);
+    timer.unref?.();
+    this.deferredRemovalTimers.set(path, timer);
+  }
+
   private async removeOwnedFileNow(path: string, size: number): Promise<boolean> {
     try {
       await this.tempDropsOps.remove(path, { force: true });
       this.ownedContentFiles.delete(path);
+      this.clearFileSessionOwnership(path);
       this.ownedContentBytes = Math.max(0, this.ownedContentBytes - size);
       return true;
     } catch (err) {
@@ -208,6 +232,35 @@ export class DroppedFilesService {
 
   async removeOwnedFiles(paths: Iterable<string>): Promise<void> {
     await Promise.allSettled(Array.from(paths, (path) => this.removeOwnedFile(path)));
+  }
+
+  async removeSessionOwnedFiles(sessionIds: Iterable<string>): Promise<void> {
+    const orphanedPaths = new Set<string>();
+    for (const sessionId of sessionIds) {
+      const paths = this.sessionOwnedFiles.get(sessionId);
+      this.sessionOwnedFiles.delete(sessionId);
+      if (!paths) continue;
+
+      for (const path of paths) {
+        const owners = this.fileSessionOwners.get(path);
+        owners?.delete(sessionId);
+        if (owners && owners.size > 0) continue;
+        this.fileSessionOwners.delete(path);
+        orphanedPaths.add(path);
+      }
+    }
+    await this.removeOwnedFiles(orphanedPaths);
+  }
+
+  private clearFileSessionOwnership(path: string): void {
+    const owners = this.fileSessionOwners.get(path);
+    this.fileSessionOwners.delete(path);
+    if (!owners) return;
+    for (const sessionId of owners) {
+      const paths = this.sessionOwnedFiles.get(sessionId);
+      paths?.delete(path);
+      if (paths?.size === 0) this.sessionOwnedFiles.delete(sessionId);
+    }
   }
 
   async fromPaths(paths: string[]) {
@@ -307,6 +360,8 @@ export class DroppedFilesService {
     this.dropsDirGeneration += 1;
     const dropsDir = this.tempDropsDir;
     this.tempDropsDir = null;
+    for (const timer of this.deferredRemovalTimers.values()) clearTimeout(timer);
+    this.deferredRemovalTimers.clear();
     await this.dropsDirCreation;
     await Promise.allSettled(this.activeContentWrites);
     if (dropsDir && (await this.removeDropsDir(dropsDir))) {
@@ -443,6 +498,14 @@ function isDropOwnerMarker(value: unknown): value is DropOwnerMarker {
 
 function isMissingFileError(value: unknown): boolean {
   return !!value && typeof value === 'object' && 'code' in value && value.code === 'ENOENT';
+}
+
+function getOrCreateSet(map: Map<string, Set<string>>, key: string): Set<string> {
+  const existing = map.get(key);
+  if (existing) return existing;
+  const created = new Set<string>();
+  map.set(key, created);
+  return created;
 }
 
 function isProcessAlive(pid: number): boolean {

@@ -15,6 +15,7 @@ import {
   setState,
   setInputText,
   addContextFile,
+  addClipboardImage,
   MAX_CLIPBOARD_IMAGES,
   MAX_CLIPBOARD_IMAGE_SIZE,
   nextPastedImageIndex,
@@ -1856,7 +1857,7 @@ describe('ChatInput', () => {
     }
   );
 
-  it('sends a prompt ending in a bare ampersand on Enter', async () => {
+  it('selects a session completion on Enter for a bare ampersand', async () => {
     setState('sessions', [session('session-auth', 2_000, { title: 'Investigate authentication' })]);
     setInputText('Run both commands &');
 
@@ -1876,7 +1877,48 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
 
-    expect(sendMessageMock).toHaveBeenCalledWith('Run both commands &', { noReply: false });
+    expect(inputText()).toBe('Run both commands session:session-auth ');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('selects a slash completion before Enter runs it', async () => {
+    setState('commands', [
+      {
+        name: 'zzvarrotest',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText('/zzv');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/zzv'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('/zzvarrotest');
+    expect(container?.querySelector('.composer-completion-menu')).toBeNull();
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('zzvarrotest', '');
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('resolves pasted session markers to titled links', async () => {
@@ -4030,7 +4072,7 @@ describe('ChatInput', () => {
     }
   });
 
-  it('warns when pasting an image for a model without vision support', async () => {
+  it('attaches and disables an image for a model without vision support', async () => {
     const fileReader = installControllableFileReader();
     try {
       setupModelState();
@@ -4044,16 +4086,150 @@ describe('ChatInput', () => {
       dispatchImagePaste(editor, [new File(['image'], 'unsupported.png', { type: 'image/png' })]);
 
       expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
-        "Current model doesn't support vision",
+        'Image attached; use a vision-capable model or vision subagent to send it',
         'warning'
       );
 
       fileReader.resolve('unsupported.png');
       await flushAsyncWork();
       expect(state.clipboardImages).toHaveLength(1);
+      expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeInstanceOf(
+        HTMLElement
+      );
     } finally {
       fileReader.restore();
     }
+  });
+
+  it('enables a non-vision image chip after an exact @vision mention', async () => {
+    const fileReader = installControllableFileReader();
+    setState('providers', [
+      {
+        id: 'zai',
+        name: 'Z.AI',
+        source: 'api',
+        models: {
+          'glm-4.7': {
+            id: 'glm-4.7',
+            name: 'GLM 4.7',
+            capabilities: { vision: false, toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+      {
+        id: 'vision-provider',
+        name: 'Vision Provider',
+        source: 'api',
+        models: {
+          viewer: {
+            id: 'viewer',
+            name: 'Viewer',
+            capabilities: { vision: true, toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { zai: 'glm-4.7', 'vision-provider': 'viewer' });
+    setState('selectedModel', { providerID: 'zai', modelID: 'glm-4.7' });
+    setState('allAgents', [
+      {
+        name: 'vision',
+        mode: 'subagent',
+        permission: [],
+        model: { providerID: 'vision-provider', modelID: 'viewer' },
+      },
+    ]);
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    dispatchImagePaste(editor, [new File(['image'], 'delegated.png', { type: 'image/png' })]);
+    fileReader.resolve('delegated.png');
+    await flushAsyncWork();
+
+    const stagedImageChip = container?.querySelector('.chat-attachment-chip');
+    expect(stagedImageChip).toBeInstanceOf(HTMLElement);
+    expect(stagedImageChip?.classList).toContain('disabled');
+
+    setInputText('@vision inspect [Image 1]');
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
+
+    setState('activeSessionId', 'session-1');
+    setState('messages', [
+      {
+        info: {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'zai', modelID: 'glm-4.7' },
+        },
+        parts: [
+          {
+            id: 'text-1',
+            sessionID: 'session-1',
+            messageID: 'user-1',
+            type: 'text',
+            text: '@vision inspect the previous image',
+          },
+        ],
+      },
+    ]);
+    setInputText('Inspect [Image 1]');
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
+    fileReader.restore();
+  });
+
+  it('immediately makes a staged image sendable after switching to a vision model', async () => {
+    setState('providers', [
+      {
+        id: 'custom',
+        name: 'Custom',
+        source: 'api',
+        models: {
+          text: {
+            id: 'text',
+            name: 'Text',
+            capabilities: { toolcall: true, vision: false },
+            cost: { input: 0, output: 0 },
+          },
+          vision: {
+            id: 'vision',
+            name: 'Vision',
+            capabilities: { attachment: true, toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { custom: 'text' });
+    setState('selectedModel', { providerID: 'custom', modelID: 'text' });
+    addClipboardImage({
+      id: 'image-1',
+      url: 'data:image/png;base64,aW1hZ2U=',
+      mime: 'image/png',
+      filename: 'Image 1',
+      size: 5,
+    });
+    setInputText('[Image 1]');
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.chat-send-button')?.classList).toContain('disabled');
+
+    setState('selectedModel', { providerID: 'custom', modelID: 'vision' });
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.chat-send-button')?.classList).toContain('enabled');
+    expect(container?.querySelector('.chat-attachment-chip.disabled')).toBeNull();
   });
 
   it.each(['image first', 'mention first'])(

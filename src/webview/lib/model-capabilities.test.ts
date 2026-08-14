@@ -149,6 +149,21 @@ describe('model capability helpers', () => {
     expect(modelSupportsVision('openai', 'text-only-list', providers)).toBe(false);
   });
 
+  it('reads image support from legacy attachment capability metadata', () => {
+    const providers: Provider[] = [
+      provider('custom', {
+        multimodal: {
+          id: 'multimodal',
+          name: 'Custom Model',
+          capabilities: { attachment: true, toolcall: true },
+          cost: { input: 0, output: 0 },
+        },
+      }),
+    ];
+
+    expect(modelSupportsVision('custom', 'multimodal', providers)).toBe(true);
+  });
+
   it('strictly reads PDF support from capabilities.input', () => {
     const providers: Provider[] = [
       provider('openai', {

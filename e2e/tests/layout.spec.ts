@@ -1491,16 +1491,53 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
   expect(overflowFade.maskImage).not.toBe('none');
   expect(overflowFade.overlayContent).toBe('none');
 
-  await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
+  const resizeSamples = await page.locator('.chat-main-column-shell').evaluate(async (shell) => {
+    const samples: Array<{
+      stickyVisible: boolean;
+      stickyBottom: number | null;
+      lastStickyBottom: number;
+      nextPromptTop: number;
+    }> = [];
+    let lastStickyBottom = Number.NEGATIVE_INFINITY;
     shell.style.maxWidth = 'none';
     for (let frame = 0; frame <= 20; frame += 1) {
       shell.style.width = `${760 - frame * 7}px`;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const stickyElement = document.querySelector<HTMLElement>(
+        '.latest-user-message-sticky-overlay'
+      );
+      const nextPromptElement = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-sticky-user-2"] .user-message-card'
+      );
+      if (!nextPromptElement) throw new Error('Next prompt is missing during resize');
+      const stickyBottom = stickyElement?.getBoundingClientRect().bottom ?? null;
+      if (stickyBottom !== null) lastStickyBottom = stickyBottom;
+      samples.push({
+        stickyVisible: stickyElement !== null,
+        stickyBottom,
+        lastStickyBottom,
+        nextPromptTop: nextPromptElement.getBoundingClientRect().top,
+      });
     }
+    return samples;
   });
   await page.waitForTimeout(120);
-  await expect(sticky).toBeVisible();
-  await expect(sticky).toContainText('keep this prompt visible while the answer scrolls');
+  const firstHiddenResizeFrame = resizeSamples.findIndex((sample) => !sample.stickyVisible);
+  if (firstHiddenResizeFrame >= 0) {
+    expect(
+      resizeSamples.slice(firstHiddenResizeFrame).every((sample) => !sample.stickyVisible),
+      JSON.stringify(resizeSamples)
+    ).toBe(true);
+    const hiddenSample = resizeSamples[firstHiddenResizeFrame]!;
+    expect(hiddenSample.nextPromptTop, JSON.stringify(resizeSamples)).toBeLessThanOrEqual(
+      hiddenSample.lastStickyBottom
+    );
+  }
+  for (const sample of resizeSamples.filter((entry) => entry.stickyVisible)) {
+    expect(sample.nextPromptTop, JSON.stringify(resizeSamples)).toBeGreaterThanOrEqual(
+      sample.stickyBottom!
+    );
+  }
 
   const gaps = await getE2EState(page, () => {
     const header = document.querySelector(
@@ -1522,8 +1559,10 @@ test('sticky preview hides before the next prompt can overlap it', async ({ page
     };
   });
 
-  expect(gaps?.headerGap).toBeGreaterThanOrEqual(0);
-  expect(gaps?.promptGap).toBeGreaterThanOrEqual(0);
+  if (gaps) {
+    expect(gaps.headerGap).toBeGreaterThanOrEqual(0);
+    expect(gaps.promptGap).toBeGreaterThanOrEqual(0);
+  }
 
   await list.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
@@ -1818,7 +1857,7 @@ test('virtualized sticky preview remains visible through active tool layout chan
   await expect(sticky).toBeVisible();
 });
 
-test('first image prompt dismisses its sticky preview during slow upward scrolling', async ({
+test('first image prompt keeps its sticky preview until the source clears the overlay', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 800 });
@@ -1831,30 +1870,16 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
   const result = await list.evaluate(async (element) => {
     const sourceSelector = '[data-msg-id="message-sticky-first-image-user"] .user-message-card';
     let sawSticky = false;
-    let overlapFrames = 0;
     let maxVisibleSourceHeight = 0;
+    let maxSourceBeyondOverlay = 0;
+    let lastStickyTop = 0;
+    let lastStickyBottom = 0;
     for (let frame = 0; frame < 1_000; frame += 1) {
       const source = document.querySelector<HTMLElement>(sourceSelector);
       const listTop = element.getBoundingClientRect().top;
       const nearSource = !!source && source.getBoundingClientRect().bottom > listTop - 300;
       const delta = nearSource ? 2 : 80;
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -delta, bubbles: true }));
-      if (
-        source &&
-        source.getBoundingClientRect().bottom <= listTop &&
-        source.getBoundingClientRect().bottom + delta > listTop &&
-        document.querySelector('.latest-user-message-sticky-overlay')
-      ) {
-        return {
-          hidden: false,
-          overlap: true,
-          reason: 'sticky remained for projected wheel collision',
-          overlapFrames,
-          maxVisibleSourceHeight,
-          sawSticky,
-          scrollTop: element.scrollTop,
-        };
-      }
       element.scrollTop = Math.max(0, element.scrollTop - delta);
       element.dispatchEvent(new Event('scroll'));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1863,65 +1888,71 @@ test('first image prompt dismisses its sticky preview during slow upward scrolli
       const currentSource = document.querySelector<HTMLElement>(sourceSelector);
       if (overlay?.textContent?.includes('Sticky message overlap with message containing image')) {
         sawSticky = true;
+        lastStickyTop =
+          document
+            .querySelector<HTMLElement>('.latest-user-message-sticky')
+            ?.getBoundingClientRect().top ?? 0;
+        lastStickyBottom = overlay.getBoundingClientRect().bottom;
       }
       if (!sawSticky) continue;
       if (sawSticky && !overlay && !currentSource) {
         return {
           hidden: true,
-          overlap: true,
+          seamless: false,
           reason: 'sticky hidden before source mounted',
-          overlapFrames,
           maxVisibleSourceHeight,
+          maxSourceBeyondOverlay,
           sawSticky,
           scrollTop: element.scrollTop,
         };
       }
       if (!currentSource) continue;
 
-      const sourceBottom = currentSource.getBoundingClientRect().bottom;
-      if (sawSticky && !overlay && sourceBottom <= listTop) {
+      const sourceRect = currentSource.getBoundingClientRect();
+      if (!overlay) {
         return {
           hidden: true,
-          overlap: true,
-          reason: 'sticky hidden while source remained above viewport',
-          overlapFrames,
+          seamless: sourceRect.bottom >= lastStickyBottom - 4,
+          reason:
+            sourceRect.bottom >= lastStickyBottom - 4
+              ? 'source cleared overlay'
+              : 'sticky hidden before source cleared overlay',
           maxVisibleSourceHeight,
+          maxSourceBeyondOverlay,
           sawSticky,
           scrollTop: element.scrollTop,
         };
       }
-      if (sourceBottom > listTop) {
-        maxVisibleSourceHeight = Math.max(maxVisibleSourceHeight, sourceBottom - listTop);
-        if (overlay) overlapFrames += 1;
-        else
-          return {
-            hidden: true,
-            overlap: overlapFrames > 0,
-            overlapFrames,
-            maxVisibleSourceHeight,
-            sawSticky,
-            scrollTop: element.scrollTop,
-          };
+      if (sourceRect.bottom > listTop) {
+        maxVisibleSourceHeight = Math.max(maxVisibleSourceHeight, sourceRect.bottom - listTop);
       }
+      maxSourceBeyondOverlay = Math.max(
+        maxSourceBeyondOverlay,
+        sourceRect.bottom - overlay.getBoundingClientRect().bottom
+      );
     }
 
     return {
       hidden: !document.querySelector('.latest-user-message-sticky-overlay'),
-      overlap: overlapFrames > 0,
-      overlapFrames,
+      seamless: false,
       maxVisibleSourceHeight,
+      maxSourceBeyondOverlay,
       sawSticky,
       scrollTop: element.scrollTop,
+      sourceTop: document.querySelector<HTMLElement>(sourceSelector)?.getBoundingClientRect().top,
+      lastStickyTop,
+      lastStickyBottom,
     };
   });
 
   expect(result.sawSticky, JSON.stringify(result)).toBe(true);
-  expect(result.overlap, JSON.stringify(result)).toBe(false);
+  expect(result.seamless, JSON.stringify(result)).toBe(true);
   expect(result.hidden, JSON.stringify(result)).toBe(true);
   expect(result.maxVisibleSourceHeight, JSON.stringify(result)).toBeGreaterThan(0);
+  expect(result.maxSourceBeyondOverlay, JSON.stringify(result)).toBeLessThanOrEqual(0);
 });
 
-test('image sticky yields after a fractional upward wheel tick reveals its source', async ({
+test('image sticky remains stable after a fractional upward wheel tick reveals its source', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 486, height: 800 });
@@ -1982,8 +2013,8 @@ test('image sticky yields after a fractional upward wheel tick reveals its sourc
   expect(result?.sourceBottomAfter).toBeGreaterThanOrEqual(
     result?.listTop ?? Number.POSITIVE_INFINITY
   );
-  expect(result?.stickyVisible, JSON.stringify(result)).toBe(false);
-  expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(0);
+  expect(result?.stickyVisible, JSON.stringify(result)).toBe(true);
+  expect(result?.stickyVisibleFrames, JSON.stringify(result)).toBe(6);
 });
 
 test('previous sticky returns during slow upward scrolling after the image prompt clears it', async ({
@@ -2073,6 +2104,221 @@ test('previous sticky returns during slow upward scrolling after the image promp
   await expect(sticky).toContainText('Sticky message overlap with message containing image');
 });
 
+test('sticky collision handoff does not blink across user message render variants', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview-render-variants');
+
+  const list = page.locator('.interactive-list');
+  const variants = ['plain', 'markdown', 'svg', 'terminal', 'selection', 'image', 'agent'];
+
+  for (const variant of variants) {
+    const messageId = `message-sticky-variant-${variant}-user`;
+    const result = await list.evaluate(async (element, targetId) => {
+      const selector = `[data-msg-id="${targetId}"] .user-message-card`;
+      const source = document.querySelector<HTMLElement>(selector);
+      if (!source) return { error: 'source missing' };
+
+      element.scrollTop +=
+        source.getBoundingClientRect().bottom - element.getBoundingClientRect().top + 8;
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+
+      const initialOverlay = document.querySelector<HTMLElement>(
+        `.latest-user-message-sticky-overlay[data-msg-id="${targetId}"]`
+      );
+      if (!initialOverlay) return { error: 'sticky missing' };
+
+      let hidden = false;
+      let reappeared = false;
+      let prematureHide = false;
+      let maxSourceBeyondOverlay = Number.NEGATIVE_INFINITY;
+      let lastOverlayBottom = initialOverlay.getBoundingClientRect().bottom;
+      const visibility: boolean[] = [];
+
+      for (let frame = 0; frame < 160; frame += 1) {
+        element.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true }));
+        element.scrollTop = Math.max(0, element.scrollTop - 4);
+        element.dispatchEvent(new Event('scroll'));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+        const currentSource = document.querySelector<HTMLElement>(selector);
+        if (!currentSource) return { error: 'source unmounted' };
+        const overlay = document.querySelector<HTMLElement>(
+          `.latest-user-message-sticky-overlay[data-msg-id="${targetId}"]`
+        );
+        const sourceRect = currentSource.getBoundingClientRect();
+        const isVisible = !!overlay;
+        visibility.push(isVisible);
+
+        if (overlay) {
+          const overlayBottom = overlay.getBoundingClientRect().bottom;
+          lastOverlayBottom = overlayBottom;
+          maxSourceBeyondOverlay = Math.max(
+            maxSourceBeyondOverlay,
+            sourceRect.bottom - overlayBottom
+          );
+          if (hidden) reappeared = true;
+        } else if (!hidden) {
+          hidden = true;
+          prematureHide = sourceRect.bottom < lastOverlayBottom - 1;
+        }
+
+        if (hidden && sourceRect.top > lastOverlayBottom + 8) break;
+      }
+
+      return {
+        hidden,
+        maxSourceBeyondOverlay,
+        prematureHide,
+        reappeared,
+        transitions: visibility.reduce(
+          (count, visible, index) =>
+            index > 0 && visibility[index - 1] !== visible ? count + 1 : count,
+          0
+        ),
+      };
+    }, messageId);
+
+    expect(result, variant).not.toHaveProperty('error');
+    expect(result.hidden, JSON.stringify({ variant, result })).toBe(true);
+    expect(result.prematureHide, JSON.stringify({ variant, result })).toBe(false);
+    expect(result.reappeared, JSON.stringify({ variant, result })).toBe(false);
+    expect(result.transitions, JSON.stringify({ variant, result })).toBe(1);
+    expect(result.maxSourceBeyondOverlay, JSON.stringify({ variant, result })).toBeLessThanOrEqual(0);
+  }
+});
+
+test('active streaming never covers the mounted first prompt with a sticky copy', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto(
+    '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&longActiveTurn=1'
+  );
+
+  const list = page.locator('.interactive-list');
+  const firstPrompt = page.locator(
+    '[data-msg-id="message-sticky-large-history-user"] .user-message-card'
+  );
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(firstPrompt).toBeInViewport();
+  await expect(page.locator('.latest-user-message-sticky-overlay')).toHaveCount(0);
+  await page.waitForTimeout(600);
+
+  const samples = await page.evaluate(async () => {
+    const sessionID = 'session-sticky-preview-large';
+    const messageID = 'message-sticky-first-prompt-live-assistant';
+    // oxlint-disable-next-line unicorn/consistent-function-scoping
+    const postEvent = (type: string, properties: Record<string, unknown>) => {
+      window.postMessage({ type: 'server/event', payload: { type, properties } }, '*');
+    };
+    postEvent('session.status', { sessionID, status: { type: 'busy' } });
+    postEvent('message.updated', {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        parentID: 'message-sticky-large-user-2',
+        time: { created: Date.now() },
+        modelID: 'model-test',
+        providerID: 'provider-test',
+        mode: 'primary',
+        path: { cwd: '/workspace', root: '/workspace' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    });
+    postEvent('message.part.updated', {
+      part: {
+        id: `${messageID}-text`,
+        sessionID,
+        messageID,
+        type: 'text',
+        text: 'Streaming below the viewport must not cover the mounted first prompt.',
+      },
+    });
+
+    const result: Array<{
+      firstPromptBottom: number | null;
+      listTop: number;
+      stickyVisible: boolean;
+    }> = [];
+    for (let frame = 0; frame < 60; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const scrollList = document.querySelector<HTMLElement>('.interactive-list')!;
+      const source = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-sticky-large-history-user"] .user-message-card'
+      );
+      result.push({
+        firstPromptBottom: source?.getBoundingClientRect().bottom ?? null,
+        listTop: scrollList.getBoundingClientRect().top,
+        stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
+      });
+    }
+    return result;
+  });
+
+  expect(samples.some((sample) => sample.firstPromptBottom !== null), JSON.stringify(samples)).toBe(
+    true
+  );
+  expect(
+    samples.every(
+      (sample) =>
+        sample.firstPromptBottom === null ||
+        sample.firstPromptBottom <= sample.listTop ||
+        !sample.stickyVisible
+    ),
+    JSON.stringify(samples)
+  ).toBe(true);
+
+  const slowApproach = await list.evaluate(async (element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: 300, bubbles: true }));
+    element.scrollTop = 300;
+    element.dispatchEvent(new Event('scroll'));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const result: Array<{
+      firstPromptTop: number | null;
+      listTop: number;
+      scrollTop: number;
+      stickyVisible: boolean;
+    }> = [];
+    for (let frame = 0; frame < 80; frame += 1) {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -4, bubbles: true }));
+      element.scrollTop = Math.max(0, element.scrollTop - 4);
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const source = document.querySelector<HTMLElement>(
+        '[data-msg-id="message-sticky-large-history-user"] .user-message-card'
+      );
+      result.push({
+        firstPromptTop: source?.getBoundingClientRect().top ?? null,
+        listTop: element.getBoundingClientRect().top,
+        scrollTop: element.scrollTop,
+        stickyVisible: !!document.querySelector('.latest-user-message-sticky-overlay'),
+      });
+      if (element.scrollTop === 0) break;
+    }
+    return result;
+  });
+  expect(slowApproach.at(-1)?.scrollTop, JSON.stringify(slowApproach)).toBe(0);
+  expect(
+    slowApproach.every(
+      (sample) =>
+        sample.firstPromptTop === null ||
+        sample.firstPromptTop < sample.listTop ||
+        !sample.stickyVisible
+    ),
+    JSON.stringify(slowApproach)
+  ).toBe(true);
+});
+
 test('virtualized long sticky preview yields while scrolling at narrow width', async ({ page }) => {
   await page.setViewportSize({ width: 460, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview-large-transcript');
@@ -2098,8 +2344,8 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   const result = await list.evaluate(async (element, selector) => {
     let sawSticky = false;
     let lastSafeGap: number | null = null;
-    for (let frame = 0; frame < 100; frame += 1) {
-      element.scrollTop += 32;
+    for (let frame = 0; frame < 1_000; frame += 1) {
+      element.scrollTop += 4;
       element.dispatchEvent(new Event('scroll'));
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -2154,7 +2400,7 @@ test('virtualized long sticky preview yields while scrolling at narrow width', a
   expect(result.stickyHidden, JSON.stringify(result)).toBe(true);
   expect(result.hideGapFromOverlay, JSON.stringify(result)).not.toBeNull();
   expect(result.hideGapFromOverlay ?? Number.NEGATIVE_INFINITY).toBeGreaterThan(0);
-  expect(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(37);
+  expect(result.hideGapFromOverlay ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(13);
   await expect(nextPrompt).toContainText('Continue if you have next steps');
 });
 

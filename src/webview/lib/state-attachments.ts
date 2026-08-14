@@ -19,6 +19,7 @@ import {
 } from './attachment-order';
 import { MAX_NATIVE_PDF_TOTAL_BYTES } from '../../shared/native-pdf';
 import { STORAGE_KEYS, writeStored } from './state-storage';
+import { postMessage } from './bridge';
 import { readStoredBooleanRecord } from './state-stored-values';
 
 export const MAX_CLIPBOARD_IMAGES = 5;
@@ -203,6 +204,7 @@ export function replaceClipboardImages(images: ClipboardImage[]): ClipboardImage
     'clipboardImages',
     capped.map((image) => ({ ...image }))
   );
+  persistClipboardImages();
   return dropped;
 }
 
@@ -244,6 +246,21 @@ export function addClipboardImage(image: ClipboardImage) {
     })
   );
 
+  persistClipboardImages();
+
+  return true;
+}
+
+export function setClipboardImageContextFile(id: string, contextFile: DroppedFile) {
+  if (!state.clipboardImages.some((item) => item.id === id)) return false;
+  setState(
+    'clipboardImages',
+    produce((images) => {
+      const image = images.find((item) => item.id === id);
+      if (image) image.contextFile = { ...contextFile };
+    })
+  );
+  persistClipboardImages();
   return true;
 }
 
@@ -257,6 +274,7 @@ export function removeClipboardImage(id: string, replacePlaceholder = true) {
       if (idx !== -1) images.splice(idx, 1);
     })
   );
+  persistClipboardImages();
   if (image && replacePlaceholder) replaceClipboardImagePlaceholder(image.filename);
 }
 
@@ -266,7 +284,15 @@ export function clearClipboardImages() {
   }
   clearClipboardImageAttachmentSequences();
   setState('clipboardImages', []);
+  persistClipboardImages();
   if (inputText().trim().length === 0) setNextPastedImageIndex(1);
+}
+
+function persistClipboardImages() {
+  postMessage({
+    type: 'composer/images-update',
+    payload: { images: state.clipboardImages.map((image) => ({ ...image })) },
+  });
 }
 
 function replaceClipboardImagePlaceholder(filename: string) {

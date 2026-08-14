@@ -4157,7 +4157,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
   it('returns false on vertically narrow screens', () => {
     expect(
       shouldShowStickyUserMessagePreview({
-        preview: previewFixture,
+        preview: { ...previewFixture, index: 1 },
         shouldVirtualize: false,
         visibleRange: { start: 0, end: 4 },
         rowTop: -120,
@@ -4170,7 +4170,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
   it('returns true when virtualization places the prompt above the visible range', () => {
     expect(
       shouldShowStickyUserMessagePreview({
-        preview: previewFixture,
+        preview: { ...previewFixture, index: 1 },
         shouldVirtualize: true,
         visibleRange: { start: 5, end: 10 },
         rowTop: null,
@@ -4219,7 +4219,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     ).toBe(false);
   });
 
-  it('hides the current sticky preview while any part of the prompt is visible', () => {
+  it('keeps the current sticky preview while the prompt remains covered by it', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         preview: previewFixture,
@@ -4232,10 +4232,10 @@ describe('shouldShowStickyUserMessagePreview', () => {
         stickyPreviewTop: 10,
         stickyPreviewBottom: 60,
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('hides the current sticky preview once the prompt peeks above it', () => {
+  it('keeps the current sticky preview when the prompt peeks into its covered area', () => {
     expect(
       shouldShowStickyUserMessagePreview({
         preview: previewFixture,
@@ -4248,7 +4248,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
         stickyPreviewTop: 10,
         stickyPreviewBottom: 60,
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('hides the current sticky preview once the prompt extends below it', () => {
@@ -7333,6 +7333,9 @@ describe('MessageList sticky prompt preview', () => {
         if (this.classList.contains('latest-user-message-sticky-overlay')) {
           return new DOMRect(0, 10, 500, 74);
         }
+        if (this.classList.contains('latest-user-message-sticky')) {
+          return new DOMRect(0, 18, 500, 50);
+        }
         if (this.classList.contains('latest-user-message-sticky-text')) {
           return new DOMRect(0, 22, 500, 18);
         }
@@ -7359,16 +7362,10 @@ describe('MessageList sticky prompt preview', () => {
     expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
       'Prompt 2'
     );
-    // A projected crossing that does not move the source must restore the current sticky.
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
-    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
-    list.dispatchEvent(new Event('scroll'));
     expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
       'Prompt 2'
     );
-
-    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
-    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
     vi.advanceTimersByTime(181);
     animationFrames.flush();
     await Promise.resolve();
@@ -7379,6 +7376,29 @@ describe('MessageList sticky prompt preview', () => {
     const stickyText = container?.querySelector<HTMLElement>('.latest-user-message-sticky-text');
     expect(stickyText).toBeInstanceOf(HTMLDivElement);
     stickyText!.style.maxHeight = '72px';
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
+    user2Top = -30;
+    assistant1Top = 20;
+    list.scrollTop = 1_180;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 2'
+    );
+
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: 20, bubbles: true }));
+    user2Top = -50;
+    list.scrollTop = 1_200;
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 2'
+    );
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
     user2Top = 70;
@@ -7397,7 +7417,9 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
-    expect(container?.querySelector('.latest-user-message-sticky')).toBeNull();
+    expect(container?.querySelector('.latest-user-message-sticky')?.textContent).toContain(
+      'Prompt 1'
+    );
 
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true }));
     user2Top = 150;
@@ -8043,7 +8065,7 @@ describe('MessageList sticky prompt preview', () => {
 
     const sticky = container?.querySelector<HTMLElement>('.latest-user-message-sticky');
     expect(sticky).toBeInstanceOf(HTMLDivElement);
-    expect(sticky?.getAttribute('title')).toBe('Click to scroll to message');
+    expect(sticky?.hasAttribute('title')).toBe(false);
 
     sticky?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 

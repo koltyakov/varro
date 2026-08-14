@@ -2,7 +2,7 @@ import { createComputed, createRoot, createSignal } from 'solid-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DroppedFile, EditorContext } from '../../shared/protocol';
 import type { ClipboardImage, NativePdfAttachment } from '../lib/app-state-types';
-import type { Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
+import type { Agent, Message, MessageEntry, Part, PermissionRule, Provider } from '../types';
 import { setState } from '../lib/state';
 import type { SessionSendBody } from './session/session-send';
 import {
@@ -77,6 +77,8 @@ function createState(overrides?: {
     total: number;
     diagnostics: EditorContext['diagnostics'];
   } | null;
+  allAgents?: Agent[];
+  visionDelegationTexts?: string[];
 }) {
   return {
     selectedAgent: 'build',
@@ -443,6 +445,136 @@ describe('session-send helpers', () => {
     });
   });
 
+  it('materializes images as vision-subagent file references for a non-vision model', () => {
+    const result = buildSessionSendBody(
+      createState({
+        selectedModel: { providerID: 'zai', modelID: 'glm-4.7' },
+        providers: [
+          provider('zai', {
+            'glm-4.7': {
+              id: 'glm-4.7',
+              name: 'GLM 4.7',
+              capabilities: { toolcall: true, vision: false },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+          provider('openai', {
+            'gpt-4.1-mini': {
+              id: 'gpt-4.1-mini',
+              name: 'GPT-4.1 mini',
+              capabilities: { toolcall: true, vision: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ],
+        providerDefaults: { zai: 'glm-4.7', openai: 'gpt-4.1-mini' },
+        allAgents: [
+          {
+            name: 'vision',
+            mode: 'subagent',
+            permission: [],
+            model: { providerID: 'openai', modelID: 'gpt-4.1-mini' },
+          },
+        ],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,aW1hZ2U=',
+            mime: 'image/png',
+            filename: 'Image 1',
+            size: 5,
+            contextFile: {
+              path: '/tmp/varro-drops/drop-1/Image 1.png',
+              relativePath: 'Image 1.png',
+              type: 'file',
+            },
+          },
+        ],
+      }),
+      'session-1',
+      '@vision inspect [Image 1]',
+      () => false
+    );
+
+    expect(result?.body.parts).toEqual([
+      { type: 'text', text: '@vision inspect [Image 1]' },
+      { type: 'text', text: '[Working directory: /repo]' },
+      {
+        type: 'text',
+        text:
+          '[Image for @vision: /tmp/varro-drops/drop-1/Image 1.png]\n' +
+          'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
+      },
+    ]);
+    expect(result?.optimisticImages).toEqual([
+      {
+        url: 'data:image/png;base64,aW1hZ2U=',
+        mime: 'image/png',
+        filename: 'Image 1',
+      },
+    ]);
+  });
+
+  it('delegates an image when vision was referenced earlier in the session', () => {
+    const result = buildSessionSendBody(
+      createState({
+        selectedModel: { providerID: 'zai', modelID: 'glm-4.7' },
+        providers: [
+          provider('zai', {
+            'glm-4.7': {
+              id: 'glm-4.7',
+              name: 'GLM 4.7',
+              capabilities: { toolcall: true, vision: false },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+          provider('openai', {
+            viewer: {
+              id: 'viewer',
+              name: 'Viewer',
+              capabilities: { toolcall: true, vision: true },
+              cost: { input: 0, output: 0 },
+            },
+          }),
+        ],
+        providerDefaults: { zai: 'glm-4.7', openai: 'viewer' },
+        allAgents: [
+          {
+            name: 'vision',
+            mode: 'subagent',
+            permission: [],
+            model: { providerID: 'openai', modelID: 'viewer' },
+          },
+        ],
+        visionDelegationTexts: ['Earlier request for @vision'],
+        clipboardImages: [
+          {
+            id: 'img-1',
+            url: 'data:image/png;base64,aW1hZ2U=',
+            mime: 'image/png',
+            filename: 'Image 1',
+            size: 5,
+            contextFile: {
+              path: '/tmp/varro-drops/drop-1/Image 1.png',
+              relativePath: 'Image 1.png',
+              type: 'file',
+            },
+          },
+        ],
+      }),
+      'session-1',
+      'Inspect [Image 1]',
+      () => false
+    );
+
+    expect(result?.body.parts).toContainEqual({
+      type: 'text',
+      text:
+        '[Image for @vision: /tmp/varro-drops/drop-1/Image 1.png]\n' +
+        'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/Image 1.png} in its task prompt.',
+    });
+  });
+
   it('omits the variant for an explicit default reasoning selection', () => {
     const result = buildSessionSendBody(
       createState({
@@ -664,6 +796,13 @@ describe('session-send helpers', () => {
             model: { providerID: 'openai', modelID: 'gpt-4o' },
           },
           effectiveModel: { providerID: 'openai', modelID: 'gpt-4o' },
+          optimisticImages: [
+            {
+              url: 'data:image/png;base64,aW1hZ2U=',
+              mime: 'image/png',
+              filename: 'Image 1',
+            },
+          ],
         }),
         requestMessageListScrollToBottom,
         startLoading: vi.fn(),
@@ -708,6 +847,13 @@ describe('session-send helpers', () => {
     expect(optimisticEntry.parts).toMatchObject([
       { type: 'text', text: 'hello' },
       { type: 'text', text: '[Working directory: /repo]' },
+      {
+        id: expect.stringContaining('-optimistic-file-0'),
+        type: 'file',
+        mime: 'image/png',
+        filename: 'Image 1',
+        url: 'data:image/png;base64,aW1hZ2U=',
+      },
     ]);
     expect(sendAsync).toHaveBeenCalledWith('session-1', {
       messageID: optimisticEntry.info.id,

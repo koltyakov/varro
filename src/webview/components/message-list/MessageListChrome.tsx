@@ -3,9 +3,13 @@ import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
-import type { Permission, QuestionRequest } from '../../types';
+import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
+import {
+  UserMessagePreviewContent,
+  formatUserMessageMarkupSize,
+} from '../message/UserMessageContent';
 import type { StickyUserMessagePreview } from './sticky-preview';
 
 const STALE_LOADING_TOTAL_MS = 90_000;
@@ -70,11 +74,11 @@ function bindStickyTextOverflowFade(
 
 export function StickyUserMessagePreviewCard(props: {
   preview: StickyUserMessagePreview;
+  parts?: Part[];
   promptNumber?: number;
   sentAt?: number;
   showSentTimestamp?: boolean;
   onClick?: (preview: StickyUserMessagePreview) => void;
-  title?: string;
   loading?: boolean;
   onGeometryChange?: () => void;
 }) {
@@ -85,7 +89,7 @@ export function StickyUserMessagePreviewCard(props: {
 
   return (
     <div class="latest-user-message-sticky-wrap" aria-hidden="true">
-      <div class="latest-user-message-sticky-overlay">
+      <div class="latest-user-message-sticky-overlay" data-msg-id={props.preview.id}>
         <div class="latest-user-message-sticky-top" />
         <div class="latest-user-message-sticky-shell">
           <Show when={props.promptNumber}>
@@ -97,19 +101,53 @@ export function StickyUserMessagePreviewCard(props: {
           </Show>
           <div
             class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
-            title={props.loading ? 'Loading message' : props.title}
-            onClick={() => {
+            title={props.loading ? 'Loading message' : undefined}
+            onClick={(event) => {
+              const target = event.target;
+              if (target instanceof Element && target.closest('a, button')) return;
               if (!props.loading) props.onClick?.(props.preview);
             }}
           >
             <div class="latest-user-message-sticky-text-clip">
               <div
-                class="latest-user-message-sticky-text"
+                class={`latest-user-message-sticky-text${props.parts ? ' rendered-markdown' : ''}`}
                 ref={(text) =>
                   bindStickyTextOverflowFade(text, () => props.preview.text, props.onGeometryChange)
                 }
               >
-                {props.preview.text}
+                <Show
+                  when={props.parts}
+                  fallback={
+                    <Show when={props.preview.format} fallback={props.preview.text}>
+                      {(format) => (
+                        <>
+                          <Show when={props.preview.formatPrefix}>
+                            {(prefix) => <span>{prefix()} </span>}
+                          </Show>
+                          <span
+                            class="latest-user-message-format-chip"
+                            title={`${format().kind.toUpperCase()} content`}
+                          >
+                            <span>{format().kind.toUpperCase()}</span>
+                            <span class="latest-user-message-format-detail">
+                              {formatUserMessageMarkupSize(format().byteSize)}
+                            </span>
+                          </span>
+                        </>
+                      )}
+                    </Show>
+                  }
+                >
+                  {(parts) => (
+                    <UserMessagePreviewContent
+                      parts={parts()}
+                      fallback={props.preview.text}
+                      onOpenImagePreview={() => {
+                        if (!props.loading) props.onClick?.(props.preview);
+                      }}
+                    />
+                  )}
+                </Show>
               </div>
             </div>
             <Show when={props.loading}>
@@ -189,6 +227,10 @@ export function TurnNavigationRail(props: {
           const active = () => turn.id === props.activeTurnId;
           const loading = () => turn.id === props.loadingTurnId;
           const label = () => {
+            if (turn.format) {
+              const format = `${turn.format.kind.toUpperCase()} content`;
+              return turn.formatPrefix ? `${turn.formatPrefix} ${format}` : format;
+            }
             const text = turn.text.replaceAll(/\s+/g, ' ').trim();
             return text.length > 80 ? `${text.slice(0, 77)}...` : text;
           };
