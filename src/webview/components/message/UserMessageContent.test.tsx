@@ -353,6 +353,7 @@ describe('UserMessageContent', () => {
       messageText?.querySelectorAll<HTMLButtonElement>('.inline-chip-clickable') ?? []
     );
     expect(imageChips.map((chip) => chip.textContent?.trim())).toEqual(['Image 1', 'Image 2']);
+    expect(imageChips.every((chip) => !chip.hasAttribute('title'))).toBe(true);
 
     imageChips[1]?.click();
 

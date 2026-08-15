@@ -2160,8 +2160,10 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
+    const card = container?.querySelector('.user-message-card');
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     expect(trigger?.hasAttribute('title')).toBe(false);
+    expect(card?.hasAttribute('title')).toBe(false);
 
     trigger?.click();
 

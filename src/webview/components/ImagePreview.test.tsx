@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { ImagePreviewOverlay } from './ImagePreview';
@@ -84,5 +84,20 @@ describe('ImagePreviewOverlay focus management', () => {
 
     expect(overlay()).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('closes from side clicks but not clicks on the image figure', () => {
+    const onClose = vi.fn();
+    dispose = render(() => <ImagePreviewOverlay image={image} onClose={onClose} />, container);
+
+    overlay()
+      ?.querySelector('.chat-image-preview-overlay-inner')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    overlay()
+      ?.querySelector('.chat-image-preview-figure')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

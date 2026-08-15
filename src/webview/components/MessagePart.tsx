@@ -14,6 +14,7 @@ import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usa
 import { hasVisibleReasoningContent } from '../lib/part-utils';
 import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
 import { AgentChip } from './message/AgentChip';
+import { InlineMessageImage } from './InlineMessageImage';
 
 export function MessagePart(props: {
   part: Part;
@@ -361,7 +362,7 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
             aria-label={`Open image preview: ${displayName()}`}
             onClick={openPreview}
           >
-            <img src={props.part.url} alt={displayName()} class="chat-image-img" />
+            <InlineMessageImage src={props.part.url} alt={displayName()} />
           </button>
           <figcaption class="chat-image-caption">
             {displayName()} <span class="chat-image-mime">· {props.part.mime}</span>

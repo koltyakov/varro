@@ -31,6 +31,7 @@ import { ExternalLinkIcon } from '../ExternalLinkIcon';
 import { isSafeExternalHref, splitExternalLinkText } from '../../lib/external-link';
 import { formatAgentLabel } from '../../lib/format';
 import { AgentChip } from './AgentChip';
+import { InlineMessageImage } from '../InlineMessageImage';
 
 export type MessageAttachment =
   | {
@@ -915,7 +916,7 @@ function UserImageCarousel(props: {
                   aria-label={`Open image preview: ${currentDisplayName()}`}
                   onClick={() => props.onOpenPreview(props.activeIndex)}
                 >
-                  <img src={part().url} alt={currentDisplayName()} class="chat-image-img" />
+                  <InlineMessageImage src={part().url} alt={currentDisplayName()} />
                 </button>
                 <figcaption class="chat-image-caption message-image-carousel-caption-row">
                   <span class="message-image-carousel-caption" title={currentDisplayName()}>
@@ -1242,7 +1243,7 @@ function UserMessageImage(props: { part: FilePart; onOpenPreview: () => void }) 
         aria-label={`Open image preview: ${displayName()}`}
         onClick={props.onOpenPreview}
       >
-        <img src={props.part.url} alt={displayName()} class="chat-image-img" />
+        <InlineMessageImage src={props.part.url} alt={displayName()} />
       </button>
     </figure>
   );
@@ -1260,7 +1261,6 @@ function InlineImageAttachmentChip(props: {
     (props.index === 0 && props.part.filename === 'Image'
       ? 'Image 1'
       : getInlineImageLabel(props.part));
-  const title = () => `${label()}${props.part.mime ? ` · ${props.part.mime}` : ''}`;
   const copyMarker = () => props.marker ?? getInlineImageMarker(props.part) ?? label();
 
   return (
@@ -1268,7 +1268,6 @@ function InlineImageAttachmentChip(props: {
       type="button"
       class="inline-chip inline-chip-clickable"
       data-copy-marker={copyMarker()}
-      title={title()}
       aria-label={`Open image preview: ${label()}`}
       onClick={props.onClick}
     >

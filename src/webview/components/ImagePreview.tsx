@@ -88,11 +88,11 @@ export function ImagePreviewOverlay(props: {
               <CloseIcon />
             </button>
             <div class="chat-image-preview-overlay-scroll">
-              <div
-                class="chat-image-preview-overlay-inner"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <figure class="chat-image-preview-figure">
+              <div class="chat-image-preview-overlay-inner">
+                <figure
+                  class="chat-image-preview-figure"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <img src={image().url} alt={image().alt} class="chat-image-preview-img" />
                   <Show when={props.showNavigation}>
                     <div class="chat-image-preview-nav-group">
