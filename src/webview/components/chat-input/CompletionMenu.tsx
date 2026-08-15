@@ -1,5 +1,7 @@
 import { For, Show, createEffect, onCleanup, onMount } from 'solid-js';
+import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
+import { MaterialChipIcon } from '../MaterialChipIcon';
 import {
   clampPopupToViewport,
   flipPopupDownIfNeeded,
@@ -134,52 +136,20 @@ export function CompletionMenu(props: {
                     when={item.type === 'agent'}
                     fallback={
                       item.type === 'session' ? (
-                        <CompletionSessionIcon />
+                        <MaterialChipIcon kind="session" class="completion-session-icon" />
                       ) : item.type === 'file' && item.file.type === 'directory' ? (
                         <FolderIcon width={12} height={12} />
                       ) : (
-                        <CompletionFileIcon />
+                        <FileTypeIcon
+                          path={
+                            item.type === 'file' ? item.file.relativePath || item.file.path : ''
+                          }
+                          class="completion-file-type-icon"
+                        />
                       )
                     }
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <rect
-                        x="2"
-                        y="21"
-                        width="7"
-                        height="5"
-                        rx="0.6"
-                        transform="rotate(-90 2 21)"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                      />
-                      <rect
-                        x="17"
-                        y="15.5"
-                        width="7"
-                        height="5"
-                        rx="0.6"
-                        transform="rotate(-90 17 15.5)"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                      />
-                      <rect
-                        x="2"
-                        y="10"
-                        width="7"
-                        height="5"
-                        rx="0.6"
-                        transform="rotate(-90 2 10)"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                      />
-                      <path
-                        d="M7 17.5H10.5C11.6046 17.5 12.5 16.6046 12.5 15.5V8.5C12.5 7.39543 11.6046 6.5 10.5 6.5H7"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                      />
-                      <path d="M12.5 12H17" stroke="currentColor" stroke-width="1.6" />
-                    </svg>
+                    <MaterialChipIcon kind="agent" class="completion-agent-icon" />
                   </Show>
                 </span>
               </Show>
@@ -195,53 +165,6 @@ export function CompletionMenu(props: {
         }}
       </For>
     </div>
-  );
-}
-
-function CompletionSessionIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M7 12L17 12"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M7 8L13 8"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z"
-        stroke="currentColor"
-        stroke-width="1.6"
-      />
-    </svg>
-  );
-}
-
-function CompletionFileIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 21.4V2.6C4 2.26863 4.26863 2 4.6 2H16.2515C16.4106 2 16.5632 2.06321 16.6757 2.17574L19.8243 5.32426C19.9368 5.43679 20 5.5894 20 5.74853V21.4C20 21.7314 19.7314 22 19.4 22H4.6C4.26863 22 4 21.7314 4 21.4Z"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M16 2V5.4C16 5.73137 16.2686 6 16.6 6H20"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
   );
 }
 

@@ -121,9 +121,7 @@ describe('CompletionMenu', () => {
     expect(buttons).toHaveLength(3);
     expect(buttons[0]?.textContent).toContain('/plan');
     expect(buttons[1]?.className).toContain('selected');
-    expect(buttons[1]?.querySelector('.composer-completion-icon svg')?.getAttribute('width')).toBe(
-      '16'
-    );
+    expect(buttons[1]?.querySelector('.completion-agent-icon')).toBeInstanceOf(HTMLImageElement);
     expect(buttons[2]?.querySelector('.composer-completion-title')?.getAttribute('title')).toBe(
       fileItem.label
     );
@@ -240,7 +238,7 @@ describe('CompletionMenu', () => {
     expect(icon?.getAttribute('height')).toBe('12');
   });
 
-  it('renders the outlined document icon for file mention completions', () => {
+  it('renders a Material file-type icon for file mention completions', () => {
     cleanup = render(
       () =>
         CompletionMenu({
@@ -251,15 +249,10 @@ describe('CompletionMenu', () => {
       container!
     );
 
-    const icon = container?.querySelector('.composer-completion-icon svg');
-    const paths = icon?.querySelectorAll('path') ?? [];
-    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
-    expect(icon?.getAttribute('width')).toBe('12');
-    expect(icon?.getAttribute('height')).toBe('12');
-    expect(icon?.getAttribute('fill')).toBe('none');
-    expect(paths).toHaveLength(2);
-    expect(paths[0]?.getAttribute('stroke')).toBe('currentColor');
-    expect(paths[0]?.getAttribute('stroke-width')).toBe('1.6');
+    const icon = container?.querySelector('.composer-completion-icon img');
+    expect(icon).toBeInstanceOf(HTMLImageElement);
+    expect(icon?.classList).toContain('file-type-icon');
+    expect(icon?.classList).toContain('completion-file-type-icon');
   });
 
   it('renders a session icon for session completions', () => {
@@ -277,12 +270,11 @@ describe('CompletionMenu', () => {
       container!
     );
 
-    const icon = container?.querySelector('.composer-completion-icon svg');
+    const icon = container?.querySelector('.composer-completion-icon img');
     const age = container?.querySelector('.composer-completion-age');
-    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
-    expect(icon?.getAttribute('width')).toBe('16');
-    expect(icon?.getAttribute('height')).toBe('16');
-    expect(icon?.querySelectorAll('path')).toHaveLength(3);
+    expect(icon).toBeInstanceOf(HTMLImageElement);
+    expect(icon?.classList).toContain('material-chip-icon');
+    expect(icon?.classList).toContain('completion-session-icon');
     expect(age?.textContent).toBe('5m');
     expect(age?.getAttribute('title')).toBeNull();
   });

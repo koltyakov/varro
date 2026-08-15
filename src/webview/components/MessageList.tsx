@@ -947,15 +947,24 @@ export function MessageList() {
 
   function beginWidthResize(options?: { fontChanged?: boolean }) {
     if (!widthResizeAnchor && !autoScroll()) {
+      const rememberedElement = lastDetachedVisibleAnchor
+        ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
+        : null;
+      const containerRect = containerRef?.getBoundingClientRect();
+      const rememberedRect = rememberedElement?.getBoundingClientRect();
+      const rememberedAnchor =
+        lastDetachedVisibleAnchor &&
+        rememberedRect &&
+        containerRect &&
+        rememberedRect.bottom > containerRect.top &&
+        rememberedRect.top < containerRect.bottom
+          ? lastDetachedVisibleAnchor
+          : null;
       const virtualAnchor =
         containerRef && shouldVirtualize()
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
           : null;
-      const rememberedAnchor =
-        lastDetachedVisibleAnchor && getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
-          ? lastDetachedVisibleAnchor
-          : null;
-      widthResizeAnchor = virtualAnchor ?? rememberedAnchor ?? captureMountedVisibleScrollAnchor();
+      widthResizeAnchor = rememberedAnchor ?? virtualAnchor ?? captureMountedVisibleScrollAnchor();
     }
     widthResizeActive = true;
     widthResizeIncludesFontChange ||= !!options?.fontChanged;
@@ -2343,6 +2352,59 @@ export function MessageList() {
       top: lastVirtualContentOrigin + (metrics.prefix[index] ?? 0) - containerScrollTop,
       topPad: 0,
     };
+  }
+
+  function capturePaintedVisibleScrollAnchorFromIndex(startIndex: number) {
+    if (!containerRef) return null;
+    const startMessageId = messageIds()[startIndex];
+    if (!startMessageId) return null;
+    const containerRect = containerRef.getBoundingClientRect();
+    let fallback: VisibleScrollAnchor | null = null;
+    // Prefix lookup can land on a row whose gap is visible after its content has cleared the viewport.
+    let row: HTMLElement | null = mountedMessageRows.get(startMessageId) ?? null;
+    while (row) {
+      const rowRect = row.getBoundingClientRect();
+      if (rowRect.top >= containerRect.bottom) break;
+      const messageId = row.dataset.msgId;
+      if (messageId && rowRect.bottom > containerRect.top) {
+        fallback ??= { messageId, top: rowRect.top - containerRect.top, topPad: 0 };
+        for (const element of row.querySelectorAll<HTMLElement>('[data-assistant-render-key]')) {
+          const renderKey = element.dataset.assistantRenderKey;
+          if (!renderKey) continue;
+          const elementRect = element.getBoundingClientRect();
+          if (
+            elementRect.height <= 0 ||
+            elementRect.bottom <= containerRect.top ||
+            elementRect.top >= containerRect.bottom
+          ) {
+            continue;
+          }
+          const activityGroupKey = element.dataset.assistantActivityGroupKey;
+          return {
+            messageId,
+            ...(renderKey.startsWith('activity-group:') && activityGroupKey
+              ? { activityGroupKey }
+              : { renderKey }),
+            top: elementRect.top - containerRect.top,
+            messageTop: rowRect.top - containerRect.top,
+            topPad: 0,
+          };
+        }
+        for (const child of row.children) {
+          if (!(child instanceof HTMLElement)) continue;
+          const childRect = child.getBoundingClientRect();
+          if (
+            childRect.height > 0 &&
+            childRect.bottom > containerRect.top &&
+            childRect.top < containerRect.bottom
+          ) {
+            return { messageId, top: rowRect.top - containerRect.top, topPad: 0 };
+          }
+        }
+      }
+      row = row.nextElementSibling instanceof HTMLElement ? row.nextElementSibling : null;
+    }
+    return fallback;
   }
 
   function genericStructuralAnchorCanOwnScroll(sessionId: string | null) {
@@ -3993,17 +4055,12 @@ export function MessageList() {
             scrollTop: getVirtualScrollTop(containerRef.scrollTop),
           })
         : null;
-      const messageId = index === null ? null : messageIds()[index];
-      const row = messageId ? mountedMessageRows.get(messageId) : null;
-      if (messageId && row) {
-        const containerRect = getWheelContainerRect();
-        const rect = row.getBoundingClientRect();
-        if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
-          directMovementAnchor = {
-            anchor: { messageId, top: rect.top - containerRect.top, topPad: 0 },
-            scrollTop: containerRef.scrollTop,
-          };
-        }
+      const anchor = index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index);
+      if (anchor) {
+        directMovementAnchor = {
+          anchor,
+          scrollTop: containerRef.scrollTop,
+        };
       }
     }
     clearActivityExitReserve();

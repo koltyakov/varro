@@ -459,6 +459,13 @@
   display: block;
 }
 
+.composer-completion-icon img {
+  display: block;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
 .composer-completion-item.selected .composer-completion-icon {
   color: var(--color-vscode-fg);
 }

@@ -2,6 +2,7 @@ import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
 import { getFileTypeIcon } from '../FileTypeIcon';
+import { createMaterialChipIconElement, type MaterialChipIconKind } from '../MaterialChipIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
 type ComposerClipboardEvent = ClipboardEvent & {
@@ -136,8 +137,9 @@ export function RichComposerArea(props: {
 
     const hasFormatIcon =
       chip.icon === 'file' || (chip.icon === 'image' && /\.[^./]+$/.test(chip.path || chip.label));
-    const icon = chip.type === 'external-link' || hasFormatIcon ? null : getChipIcon(chip.icon);
-    if (icon || hasFormatIcon) {
+    const materialIconKind = getMaterialIconKind(chip.icon);
+    const icon = hasFormatIcon || materialIconKind ? null : getChipIcon(chip.icon);
+    if (icon || hasFormatIcon || materialIconKind) {
       const iconWrapper = document.createElement('span');
       iconWrapper.className = 'inline-chip-icon-wrap';
       if (chip.type === 'external-link' || chip.type === 'mention-session') {
@@ -151,6 +153,13 @@ export function RichComposerArea(props: {
         image.setAttribute('aria-hidden', 'true');
         image.draggable = false;
         iconWrapper.appendChild(image);
+      } else if (materialIconKind) {
+        iconWrapper.appendChild(
+          createMaterialChipIconElement(
+            materialIconKind,
+            `inline-chip-icon${materialIconKind === 'external-link' ? ' composer-external-link-icon' : ''}`
+          )
+        );
       } else if (icon) {
         iconWrapper.innerHTML = icon;
       }
@@ -158,7 +167,7 @@ export function RichComposerArea(props: {
     }
 
     if (chip.type === 'external-link') {
-      span.textContent = chip.label;
+      span.appendChild(document.createTextNode(chip.label));
     } else {
       const labelSpan = document.createElement('span');
       labelSpan.className = 'inline-chip-label';
@@ -726,16 +735,21 @@ export function extractText(el: HTMLElement): string {
 }
 
 function getChipIcon(icon?: string): string {
-  if (icon === 'image')
-    return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/></svg>';
   if (icon === 'folder') return FOLDER_ICON_SVG;
-  if (icon === 'agent')
-    return '<svg class="inline-chip-icon" viewBox="0 0 24 24" fill="none" width="11" height="11"><rect x="2" y="21" width="7" height="5" rx="0.6" transform="rotate(-90 2 21)" stroke="currentColor" stroke-width="1.6"></rect><rect x="17" y="15.5" width="7" height="5" rx="0.6" transform="rotate(-90 17 15.5)" stroke="currentColor" stroke-width="1.6"></rect><rect x="2" y="10" width="7" height="5" rx="0.6" transform="rotate(-90 2 10)" stroke="currentColor" stroke-width="1.6"></rect><path d="M7 17.5H10.5C11.6046 17.5 12.5 16.6046 12.5 15.5V8.5C12.5 7.39543 11.6046 6.5 10.5 6.5H7" stroke="currentColor" stroke-width="1.6"></path><path d="M12.5 12H17" stroke="currentColor" stroke-width="1.6"></path></svg>';
-  if (icon === 'session')
-    return '<svg class="inline-chip-icon" viewBox="0 0 24 24" fill="none" width="11" height="11"><path d="M7 12L17 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 8L13 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z" stroke="currentColor" stroke-width="1.6"/></svg>';
-  if (icon === 'terminal')
-    return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z"/></svg>';
   return '<svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M3.5 2A1.5 1.5 0 002 3.5v9A1.5 1.5 0 003.5 14h9a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0012.5 2h-9zM4 4h8v1H4V4zm0 2.5h8v1H4v-1zm0 2.5h5v1H4V9z"/></svg>';
+}
+
+function getMaterialIconKind(icon?: string): MaterialChipIconKind | null {
+  if (
+    icon === 'agent' ||
+    icon === 'image' ||
+    icon === 'terminal' ||
+    icon === 'session' ||
+    icon === 'external-link'
+  ) {
+    return icon;
+  }
+  return null;
 }
 
 export function findNodeAtOffset(

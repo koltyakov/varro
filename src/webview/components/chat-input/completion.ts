@@ -241,7 +241,7 @@ export function createMentionCompletionSource({
       item: {
         key: `agent:${agent.name}`,
         type: 'agent',
-        label: `@${agent.name}`,
+        label: agent.name,
         detail: agent.description || getAgentBadgeLine(agent),
         value: `@${agent.name} `,
       },
@@ -258,7 +258,7 @@ export function createMentionCompletionSource({
       item: {
         key: `file:${file.path}`,
         type: 'file',
-        label: `@${file.relativePath}`,
+        label: file.relativePath,
         detail: file.type === 'directory' ? 'Folder' : 'Workspace file',
         value:
           file.type === 'directory'

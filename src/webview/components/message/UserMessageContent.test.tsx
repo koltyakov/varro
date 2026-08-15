@@ -552,6 +552,9 @@ describe('UserMessageContent', () => {
       "What's on this image? Image 1 Vision"
     );
     expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
+    expect(container?.querySelector('.user-message-text .material-chip-icon')).toBeInstanceOf(
+      HTMLImageElement
+    );
     expect(container?.textContent).not.toContain('When calling the vision subagent');
     expect(container?.querySelector('.chat-image-img')).toBeInstanceOf(HTMLImageElement);
   });
@@ -565,6 +568,7 @@ describe('UserMessageContent', () => {
     expect(chip?.textContent).toContain('Vision');
     expect(chip?.getAttribute('title')).toBe('Agent: Vision');
     expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
+    expect(chip?.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);
     expect(container?.querySelector('.user-message-text')?.textContent).toBe('Run the review');
   });
 

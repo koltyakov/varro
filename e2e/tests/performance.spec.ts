@@ -350,6 +350,81 @@ test('large transcripts keep rendered rows bounded while narrowing a detached ch
   expect(geometry.maxDelta, JSON.stringify(geometry)).toBeLessThanOrEqual(3);
 });
 
+test('viewport narrowing preserves the first visible row through host-shaped reflow', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=large-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    element.scrollTop = Math.floor(element.scrollHeight / 2);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(300);
+  const target = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const card = [...element.querySelectorAll<HTMLElement>('.user-message-card')].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.bottom > bounds.top && rect.top < bounds.bottom;
+    });
+    const row = card?.closest<HTMLElement>('[data-msg-id]');
+    if (!row?.dataset.msgId) return null;
+    return {
+      id: row.dataset.msgId,
+      top: card!.getBoundingClientRect().top - element.getBoundingClientRect().top,
+    };
+  });
+  expect(target).not.toBeNull();
+  const listBounds = await list.boundingBox();
+  await page.mouse.move(listBounds!.x + 20, listBounds!.y + listBounds!.height / 2);
+  await page.mouse.wheel(0, target!.top - 9);
+  await page.waitForTimeout(100);
+  const anchor = await list.evaluate((element, anchorId) => {
+    const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+    const card = row?.querySelector<HTMLElement>('.user-message-card');
+    return card
+      ? {
+          id: anchorId,
+          top: card.getBoundingClientRect().top - element.getBoundingClientRect().top,
+        }
+      : null;
+  }, target!.id);
+  expect(anchor).not.toBeNull();
+
+  await page.setViewportSize({ width: 360, height: 786 });
+  const samples = await list.evaluate(async (element, anchorId) => {
+    const readTop = () => {
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+      const card = row?.querySelector<HTMLElement>('.user-message-card');
+      return card && row
+        ? {
+            top: card.getBoundingClientRect().top - element.getBoundingClientRect().top,
+            rowTop: row.getBoundingClientRect().top - element.getBoundingClientRect().top,
+            scrollTop: element.scrollTop,
+          }
+        : null;
+    };
+    const values = [readTop()];
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      values.push(readTop());
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 180));
+    values.push(readTop());
+    return values;
+  }, anchor!.id);
+
+  expect(samples.every((top) => top !== null), JSON.stringify(samples)).toBe(true);
+  expect(
+    Math.max(...samples.map((sample) => Math.abs(sample!.top - anchor!.top))),
+    JSON.stringify(samples)
+  ).toBeLessThanOrEqual(3);
+  expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
+});
+
 test('width resizing preserves bottom follow and respects user detachment', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');

@@ -2027,7 +2027,9 @@ describe('ChatInput', () => {
       throw new Error('Expected editable external link');
     }
     expect(reference?.textContent).toBe('https://iconoir.com');
-    expect(container?.querySelector('.composer-external-link-icon')).toBeNull();
+    expect(container?.querySelector('.composer-external-link-icon')).toBeInstanceOf(
+      HTMLImageElement
+    );
     expect(reference?.dataset.chipMarker).toBeUndefined();
     expect(reference?.getAttribute('contenteditable')).toBeNull();
     expect(inputText()).toBe("What's this https://iconoir.com?");
@@ -2061,9 +2063,12 @@ describe('ChatInput', () => {
 
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     const reference = container?.querySelector<HTMLElement>('.composer-external-link');
-    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    const linkText = reference?.lastChild;
+    if (!editor || !linkText || linkText.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected editable external link');
+    }
     editor.focus();
-    setCollapsedSelection(reference.firstChild, 'https://iconoir.com'.length);
+    setCollapsedSelection(linkText, 'https://iconoir.com'.length);
     editor.dispatchEvent(
       new InputEvent('beforeinput', {
         bubbles: true,

@@ -54,6 +54,11 @@
   background: color-mix(in srgb, var(--color-vscode-fg) 12%, var(--color-vscode-input-bg));
 }
 
+.rich-composer .inline-chip {
+  vertical-align: middle;
+  transform: translateY(-1px);
+}
+
 .rich-composer .inline-chip[data-chip-type='mention-file'],
 .rich-composer .inline-chip[data-chip-type='image'] {
   cursor: pointer;
@@ -80,21 +85,25 @@
   text-underline-offset: 2px;
 }
 
-.composer-session-reference .inline-chip-icon-wrap {
+.composer-session-reference .inline-chip-icon-wrap,
+.composer-external-link .inline-chip-icon-wrap {
   display: inline;
   margin-right: 3px;
 }
 
-.composer-session-reference .inline-chip-icon-wrap::after {
+.composer-session-reference .inline-chip-icon-wrap::after,
+.composer-external-link .inline-chip-icon-wrap::after {
   content: '\2060';
 }
 
-.composer-session-reference .inline-chip-icon {
+.composer-session-reference .inline-chip-icon,
+.composer-external-link .inline-chip-icon {
   display: inline-block;
   width: 12px;
   height: 12px;
   vertical-align: -2px;
   opacity: 0.58;
+  object-fit: contain;
 }
 
 .inline-chip.disabled {
@@ -118,6 +127,13 @@
 }
 
 .inline-chip .file-type-icon {
+  width: 11px;
+  height: 11px;
+  object-fit: contain;
+}
+
+.inline-chip .material-chip-icon {
+  display: block;
   width: 11px;
   height: 11px;
   object-fit: contain;

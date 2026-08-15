@@ -51,6 +51,7 @@ import {
   getUserMessageEditContext,
   getUserMessageEditText,
   hasUserMessageEditableContent,
+  isWrapperlessUserMessageContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
 
@@ -372,35 +373,10 @@ export function Message(props: {
       parsed.agentParts.length > 0
     );
   });
-  const isStandaloneTerminalMessage = createMemo(() => {
+  const isWrapperlessUserMessage = createMemo(() => {
     const parsed = parsedUserContent();
-    if (
-      !parsed ||
-      parsed.messageTexts.length !== 0 ||
-      parsed.fileParts.length !== 0 ||
-      parsed.agentParts.length !== 0
-    ) {
-      return false;
-    }
-    const attachment = parsed.attachments[0];
-    return (
-      parsed.attachments.length === 1 &&
-      attachment?.type === 'terminal-selection' &&
-      Boolean(attachment.text)
-    );
+    return parsed ? isWrapperlessUserMessageContent(parsed) : false;
   });
-  const isImageOnlyMessage = createMemo(() => {
-    const parsed = parsedUserContent();
-    if (!parsed) return false;
-    return (
-      parsed.messageTexts.length === 0 &&
-      parsed.attachments.length === 0 &&
-      parsed.agentParts.length === 0 &&
-      parsed.fileParts.length > 0 &&
-      parsed.fileParts.every((part) => part.mime.startsWith('image/'))
-    );
-  });
-  const isWrapperlessUserMessage = () => isStandaloneTerminalMessage() || isImageOnlyMessage();
   const isEditingUserMessage = () => isUser() && editingMessageId() === props.info.id;
   const canEditUserMessage = () =>
     isUser() &&

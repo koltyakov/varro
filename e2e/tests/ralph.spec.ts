@@ -149,10 +149,12 @@ test('start form blocks the uncovered sessions pane and restores it on close', a
     .getByRole('button')
     .first();
   await expect(targetSession).toBeVisible();
-  const targetBox = await targetSession.boundingBox();
-  if (!targetBox) throw new Error('Target session has no pointer geometry');
+  const targetCenter = await targetSession.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  });
 
-  await page.mouse.click(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
+  await page.mouse.click(targetCenter.x, targetCenter.y);
 
   await expect(dialog).toBeVisible();
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('Host command events');

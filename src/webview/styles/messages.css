@@ -1459,6 +1459,7 @@ body.vscode-light
   margin-right: 3px;
   vertical-align: -3px;
   color: var(--color-vscode-muted);
+  object-fit: contain;
 }
 
 .rendered-markdown a.file-path-link,
@@ -1487,6 +1488,7 @@ body.vscode-light
   margin-right: 2px;
   vertical-align: -2px;
   color: var(--color-vscode-muted);
+  object-fit: contain;
 }
 
 .rendered-markdown img {

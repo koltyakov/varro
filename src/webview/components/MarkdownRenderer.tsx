@@ -21,6 +21,7 @@ import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { isSafeExternalHref } from '../lib/external-link';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
+import { createMaterialChipIconElement } from './MaterialChipIcon';
 
 interface MarkdownProps {
   content: string;
@@ -551,7 +552,7 @@ function isLocalFileHref(href: string | null): boolean {
 
 function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.classList.remove('external-link');
-  for (const icon of Array.from(anchor.querySelectorAll('svg.external-link-icon'))) icon.remove();
+  for (const icon of Array.from(anchor.querySelectorAll('.external-link-icon'))) icon.remove();
 
   const href = anchor.getAttribute('href')?.trim() || '';
   if (isLocalFileHref(href)) {
@@ -572,7 +573,7 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.removeAttribute('data-external');
 }
 
-function prependLinkIcon(anchor: HTMLAnchorElement, icon: SVGSVGElement) {
+function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement) {
   anchor.setAttribute('aria-label', anchor.textContent ?? '');
   const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
   let firstText = walker.nextNode();
@@ -621,29 +622,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       anchor.href = segment.reference.href;
       anchor.dataset.sessionId = segment.reference.id;
       anchor.title = `Open session ${segment.reference.id}`;
-      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      icon.setAttribute('class', 'session-reference-icon');
-      icon.setAttribute('viewBox', '0 0 24 24');
-      icon.setAttribute('fill', 'none');
-      icon.setAttribute('aria-hidden', 'true');
-      for (const attributes of [
-        { d: 'M7 12L17 12', linejoin: true },
-        { d: 'M7 8L13 8', linejoin: true },
-        {
-          d: 'M3 20.2895V5C3 3.89543 3.89543 3 5 3H19C20.1046 3 21 3.89543 21 5V15C21 16.1046 20.1046 17 19 17H7.96125C7.35368 17 6.77906 17.2762 6.39951 17.7506L4.06852 20.6643C3.71421 21.1072 3 20.8567 3 20.2895Z',
-          linejoin: false,
-        },
-      ]) {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', attributes.d);
-        path.setAttribute('stroke', 'currentColor');
-        path.setAttribute('stroke-width', '1.6');
-        if (attributes.linejoin) {
-          path.setAttribute('stroke-linecap', 'round');
-          path.setAttribute('stroke-linejoin', 'round');
-        }
-        icon.append(path);
-      }
+      const icon = createMaterialChipIconElement('session', 'session-reference-icon');
       const label = document.createElement('span');
       label.textContent = segment.reference.title;
       const firstWord = segment.reference.title.match(/^\S+/)?.[0] ?? '';

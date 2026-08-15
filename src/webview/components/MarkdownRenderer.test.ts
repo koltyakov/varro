@@ -34,7 +34,7 @@ beforeAll(() => loadCodeHighlighter());
 
 function assertInertWithSafeAnchor(root: ParentNode) {
   expect(root.querySelector('script')).toBeNull();
-  expect(root.querySelector('img')).toBeNull();
+  expect(root.querySelector('img:not(.external-link-icon)')).toBeNull();
   expect(root.querySelector('style')).toBeNull();
 
   for (const element of Array.from(root.querySelectorAll('*'))) {
@@ -259,7 +259,7 @@ describe('MarkdownRenderer', () => {
     );
 
     expect(container?.querySelector('script')).toBeNull();
-    expect(container?.querySelector('img')).toBeNull();
+    expect(container?.querySelector('img:not(.external-link-icon)')).toBeNull();
     expect(container?.textContent).not.toContain('alert(1)');
 
     const links = Array.from(container?.querySelectorAll('a') || []);
@@ -272,7 +272,7 @@ describe('MarkdownRenderer', () => {
     expect(docsLink?.firstElementChild?.firstElementChild?.classList).toContain(
       'external-link-icon'
     );
-    expect(docsLink?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
+    expect(docsLink?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
     expect(badLink?.hasAttribute('href')).toBe(false);
     expect(badLink?.querySelector('.external-link-icon')).toBeNull();
 
@@ -522,7 +522,7 @@ describe('MarkdownRenderer', () => {
     const insecure = links.find((link) => link.textContent === 'Insecure');
     expect(secure?.getAttribute('data-external')).toBe('true');
     expect(secure?.getAttribute('href')).toBe('https://example.test/docs');
-    expect(secure?.querySelector('.external-link-icon')).toBeInstanceOf(SVGSVGElement);
+    expect(secure?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
     expect(insecure?.hasAttribute('data-external')).toBe(false);
     expect(insecure?.hasAttribute('href')).toBe(false);
     expect(insecure?.querySelector('.external-link-icon')).toBeNull();

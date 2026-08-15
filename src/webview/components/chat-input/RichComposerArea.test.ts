@@ -243,14 +243,18 @@ describe('RichComposerArea', () => {
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     if (!editor) throw new Error('Expected composer editor');
     expect(reference?.textContent).toBe('https://iconoir.com');
-    expect(container?.querySelector('.composer-external-link-icon')).toBeNull();
+    expect(container?.querySelector('.composer-external-link-icon')).toBeInstanceOf(
+      HTMLImageElement
+    );
     expect(reference?.dataset.chipMarker).toBeUndefined();
     expect(reference?.getAttribute('contenteditable')).toBeNull();
     expect(extractText(editor)).toBe('See https://iconoir.com');
 
-    if (!reference?.firstChild) throw new Error('Expected external link text');
-    reference.firstChild.textContent = 'https://iconoir.dev';
-    setCollapsedSelection(reference.firstChild, 'https://iconoir.dev'.length);
+    const linkText = reference?.lastChild;
+    if (!linkText || linkText.nodeType !== Node.TEXT_NODE)
+      throw new Error('Expected external link text');
+    linkText.textContent = 'https://iconoir.dev';
+    setCollapsedSelection(linkText, 'https://iconoir.dev'.length);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     expect(onInput).toHaveBeenCalledWith(
@@ -278,10 +282,13 @@ describe('RichComposerArea', () => {
 
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     const reference = container?.querySelector<HTMLElement>('.composer-external-link');
-    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    const linkText = reference?.lastChild;
+    if (!editor || !linkText || linkText.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected editable external link');
+    }
     editor.focus();
-    reference.firstChild.textContent = "https://iconoir.com what's this";
-    setCollapsedSelection(reference.firstChild, "https://iconoir.com what's this".length);
+    linkText.textContent = "https://iconoir.com what's this";
+    setCollapsedSelection(linkText, "https://iconoir.com what's this".length);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     expect(reference.textContent).toBe('https://iconoir.com');
@@ -312,9 +319,12 @@ describe('RichComposerArea', () => {
 
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
     const reference = container?.querySelector<HTMLElement>('.composer-external-link');
-    if (!editor || !reference?.firstChild) throw new Error('Expected editable external link');
+    const linkText = reference?.lastChild;
+    if (!editor || !linkText || linkText.nodeType !== Node.TEXT_NODE) {
+      throw new Error('Expected editable external link');
+    }
     editor.focus();
-    setCollapsedSelection(reference.firstChild, 'https://iconoir.com'.length);
+    setCollapsedSelection(linkText, 'https://iconoir.com'.length);
     const event = new InputEvent('beforeinput', {
       bubbles: true,
       cancelable: true,
@@ -844,10 +854,13 @@ describe('RichComposerArea', () => {
 
     await flushAsyncWork();
 
-    const agentIcon = container?.querySelector('[data-chip-type="mention-agent"] svg');
-    const imageIcon = container?.querySelector('[data-chip-type="image"] svg');
-    expect(agentIcon?.getAttribute('width')).toBe(imageIcon?.getAttribute('width'));
-    expect(agentIcon?.getAttribute('height')).toBe(imageIcon?.getAttribute('height'));
+    const agentIcon = container?.querySelector('[data-chip-type="mention-agent"] img');
+    const imageIcon = container?.querySelector('[data-chip-type="image"] img');
+    expect(agentIcon).toBeInstanceOf(HTMLImageElement);
+    expect(agentIcon?.classList).toContain('material-chip-icon');
+    expect(imageIcon).toBeInstanceOf(HTMLImageElement);
+    expect(imageIcon?.classList).toContain('material-chip-icon');
+    expect(imageIcon?.classList).toContain('inline-chip-icon');
   });
 
   it('reports the chip id through onChipClick when an inline chip is clicked', async () => {

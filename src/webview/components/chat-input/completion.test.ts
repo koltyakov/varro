@@ -42,7 +42,7 @@ describe('getMentionCompletionItems', () => {
       files,
     });
 
-    expect(completions.some((item) => item.type === 'file' && item.label === '@README.md')).toBe(
+    expect(completions.some((item) => item.type === 'file' && item.label === 'README.md')).toBe(
       true
     );
   });
@@ -59,7 +59,9 @@ describe('getMentionCompletionItems', () => {
     });
 
     expect(completions).toHaveLength(10);
-    expect(completions[0]).toEqual(expect.objectContaining({ type: 'agent', label: '@helper' }));
+    expect(completions[0]).toEqual(
+      expect.objectContaining({ type: 'agent', label: 'helper', value: '@helper ' })
+    );
   });
 
   it('terminates file mentions after selection', () => {
@@ -85,9 +87,7 @@ describe('getMentionCompletionItems', () => {
       meta: { showFileSearchHint: true },
     });
 
-    expect(completions.some((item) => item.type === 'agent' && item.label === '@helper')).toBe(
-      true
-    );
+    expect(completions.some((item) => item.type === 'agent' && item.label === 'helper')).toBe(true);
     expect(completions.some((item) => item.type === 'file')).toBe(false);
   });
 
@@ -125,7 +125,7 @@ describe('getMentionCompletionItems', () => {
     expect(completions).toContainEqual(
       expect.objectContaining({
         type: 'file',
-        label: '@docs',
+        label: 'docs',
         detail: 'Folder',
         value: '@docs/',
       })

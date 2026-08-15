@@ -536,6 +536,9 @@ describe('Message user prompt rendering', () => {
 
     expect(attachments).toBeInstanceOf(HTMLDivElement);
     expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
+    expect(container?.querySelector('.user-message-card')?.classList).toContain(
+      'user-message-card-wrapperless'
+    );
   });
 
   it('renders sent attachments above the user text while leaving images below', () => {
@@ -616,6 +619,27 @@ describe('Message user prompt rendering', () => {
     expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(2);
     expect(messageText?.querySelectorAll('.inline-chip-clickable')).toHaveLength(2);
     expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-card')?.classList).not.toContain(
+      'user-message-card-wrapperless'
+    );
+  });
+
+  it('renders a sole inline attachment without a user bubble', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-single-inline-file'),
+          parts: [textPart('text-1', '@README.md'), textPart('text-2', 'README.md')],
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('README.md');
+    expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(1);
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-card')?.classList).toContain(
+      'user-message-card-wrapperless'
+    );
   });
 
   it('links workspace session IDs in user messages and leaves unknown IDs unchanged', () => {
@@ -672,7 +696,7 @@ describe('Message user prompt rendering', () => {
     expect(link?.getAttribute('data-external')).toBe('true');
     expect(link?.firstElementChild?.classList).toContain('link-leading-content');
     expect(link?.firstElementChild?.firstElementChild?.classList).toContain('external-link-icon');
-    expect(link?.querySelectorAll('.external-link-icon path')).toHaveLength(9);
+    expect(link?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
     expect(container?.querySelectorAll('a.external-link')).toHaveLength(1);
     expect(container?.querySelector('.user-message-text')?.textContent).toContain(
       '(one), but not http://example.test/insecure.'

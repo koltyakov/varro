@@ -3,6 +3,7 @@ import { Portal } from 'solid-js/web';
 import { AttachmentLabel } from '../AttachmentLabel';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
+import { MaterialChipIcon } from '../MaterialChipIcon';
 import { WarningIcon } from '../WarningIcon';
 
 export function AttachmentChip(props: {
@@ -100,17 +101,13 @@ export function AttachmentChip(props: {
         </button>
       </Show>
       <Show when={props.icon === 'image' && !hasFormatIcon()}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-        </svg>
+        <MaterialChipIcon kind="image" class="chip-icon" />
       </Show>
       <Show when={props.icon === 'folder'}>
         <FolderIcon class="chip-icon" width="12" height="12" />
       </Show>
       <Show when={props.icon === 'terminal'}>
-        <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M1.75 2h12.5c.97 0 1.75.78 1.75 1.75v8.5c0 .97-.78 1.75-1.75 1.75H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.78.78 2 1.75 2zm0 1a.75.75 0 00-.75.75v8.5c0 .41.34.75.75.75h12.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H1.75zm2.03 2.22a.75.75 0 011.06 0L6.56 6.94 4.84 8.66a.75.75 0 11-1.06-1.06L4.44 7 3.78 6.28a.75.75 0 010-1.06zM8 8.25h4a.75.75 0 010 1.5H8a.75.75 0 010-1.5z" />
-        </svg>
+        <MaterialChipIcon kind="terminal" class="chip-icon" />
       </Show>
       <Show when={props.icon === 'warning'}>
         <WarningIcon class="chip-icon" width={12} height={12} />
