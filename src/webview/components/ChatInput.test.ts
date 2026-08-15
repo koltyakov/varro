@@ -2189,9 +2189,11 @@ describe('ChatInput', () => {
     });
   });
 
-  it('dispatches a queued message with the agent selected when it was queued', async () => {
+  it('dispatches a queued message on authoritative idle without waiting for a timer', async () => {
     vi.useFakeTimers();
+    setIsLoading(true);
     setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
     setState('selectedAgent', 'plan');
     setState('queuedMessages', [
       {
@@ -2203,7 +2205,20 @@ describe('ChatInput', () => {
     ]);
 
     cleanup = render(() => ChatInput(), container!);
-    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    setIsLoading(false);
+    await flushAsyncWork();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+
+    for (const handler of serverEventHandlers.get('session.status') ?? []) {
+      handler({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type: 'idle' } },
+      });
+    }
+    setState('sessionStatus', 'session-1', { type: 'idle' });
     await flushAsyncWork();
 
     expect(sendMessageMock).toHaveBeenCalledWith('Implement the plan', {

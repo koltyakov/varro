@@ -1966,7 +1966,28 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       void dispatchQueuedMessage(nextQueued);
     }, 250);
   });
+  let queueDispatchDisposed = false;
+  const dispatchAfterAuthoritativeIdle = (sessionId: string) => {
+    queueMicrotask(() => {
+      if (queueDispatchDisposed || !connectionInitialized() || dispatchingQueuedMessageId()) return;
+      const next = findNextQueuedMessageForDispatch();
+      if (!next) return;
+      const completedRootId = getSessionTreeRootId(sessionId) || sessionId;
+      const queuedRootId = getSessionTreeRootId(next.sessionId) || next.sessionId;
+      if (completedRootId !== queuedRootId) return;
+      void dispatchQueuedMessage(next);
+    });
+  };
   const queuedSteerAdmissionCleanups = [
+    serverEvents.on('session.status', (event) => {
+      const properties = event.properties;
+      if (properties?.status?.type !== 'idle' || typeof properties.sessionID !== 'string') return;
+      dispatchAfterAuthoritativeIdle(properties.sessionID);
+    }),
+    serverEvents.on('session.idle', (event) => {
+      const sessionId = event.properties?.sessionID;
+      if (typeof sessionId === 'string') dispatchAfterAuthoritativeIdle(sessionId);
+    }),
     serverEvents.on('session.next.prompted', (event) => {
       const properties = event.properties;
       if (properties?.delivery !== 'steer') return;
@@ -1979,6 +2000,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }),
   ];
   onCleanup(() => {
+    queueDispatchDisposed = true;
     if (queueDispatchTimer) clearTimeout(queueDispatchTimer);
     if (fileSearchTimer) clearTimeout(fileSearchTimer);
     for (const cleanup of queuedSteerAdmissionCleanups) cleanup();
