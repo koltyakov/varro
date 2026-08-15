@@ -60,9 +60,20 @@ export function RichComposerArea(props: {
   let isComposing = false;
   let historyHandledByKeydown = false;
   const [preview, setPreview] = createSignal<{
+    chipId: string;
     image: { url: string; alt: string };
     style: Record<string, string>;
   } | null>(null);
+
+  createEffect(() => {
+    const current = preview();
+    if (
+      current &&
+      !props.chips.some((chip) => chip.id === current.chipId && chip.previewImage)
+    ) {
+      setPreview(null);
+    }
+  });
 
   onMount(() => {
     if (editorEl) {
@@ -515,6 +526,7 @@ export function RichComposerArea(props: {
     );
 
     setPreview({
+      chipId: chip.id,
       image: chip.previewImage,
       style: {
         left: `${center}px`,

@@ -720,6 +720,57 @@ describe('RichComposerArea', () => {
     expect(preview?.style.bottom).toBe(`${window.innerHeight - 380 + 22}px`);
   });
 
+  it('dismisses an image preview when the hovered chip is removed', async () => {
+    const chip: RichComposerChip = {
+      id: 'img:1',
+      type: 'image',
+      label: 'Image 1',
+      icon: 'image',
+      previewImage: { url: 'blob:image-1', alt: 'Image 1' },
+      textMarker: '[Image 1]',
+    };
+    const [value, setValue] = createSignal(chip.textMarker);
+
+    cleanup = render(
+      () =>
+        RichComposerArea({
+          editorRef: () => {},
+          placeholder: 'Compose',
+          get value() {
+            return value();
+          },
+          cursorOffset: 0,
+          get chips() {
+            return value().includes(chip.textMarker) ? [chip] : [];
+          },
+          isFocused: true,
+          showCompletionMenu: false,
+          completionItems: [],
+          completionSelectedIndex: 0,
+          onInput: () => {},
+          onKeyDown: () => {},
+          onPaste: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+          onClick: () => {},
+          onKeyUp: () => {},
+          onSelect: () => {},
+          onSelectCompletion: () => {},
+        }),
+      container!
+    );
+    await flushAsyncWork();
+
+    const inlineChip = container?.querySelector<HTMLElement>('.inline-chip');
+    inlineChip?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(document.querySelector('.chat-attachment-image-preview')).not.toBeNull();
+
+    setValue('');
+    await flushAsyncWork();
+
+    expect(document.querySelector('.chat-attachment-image-preview')).toBeNull();
+  });
+
   it('uses the chip title for hover text when provided', async () => {
     const chip: RichComposerChip = {
       id: 'file:/workspace/src/webview/components/chat-input/BusySendMenu.test.tsx',
