@@ -16,7 +16,7 @@ import {
 const ZAI_QUOTA_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const ZAI_PROVIDER_IDS = new Set(['zai', 'zai-coding-plan']);
-const ZAI_MONTHLY_SEARCH_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
+const ZAI_MCP_MODELS = new Set(['search-prime', 'web-reader', 'zread']);
 
 type ZaiPayloadResult =
   | { kind: 'available'; windows: ProviderLimitWindow[] }
@@ -168,11 +168,12 @@ function buildZaiWindow(
   const currentValue = parseFiniteNumber(limitRecord.currentValue);
   const explicitRemaining = parseFiniteNumber(limitRecord.remaining);
   const usage = parseFiniteNumber(limitRecord.usage);
-  const limit =
+  const explicitLimit =
     usage ??
     (currentValue != null && explicitRemaining != null ? currentValue + explicitRemaining : null);
   const remaining = explicitRemaining ?? (percent != null ? Math.max(0, 100 - percent) : null);
   if (remaining == null) return null;
+  const limit = explicitLimit ?? (percent != null ? 100 : null);
 
   const descriptor = getZaiWindowDescriptor(type, limitRecord);
 
@@ -214,22 +215,49 @@ function findAliasedZaiAuthRecord(
 
 function getZaiWindowDescriptor(type: string, limitRecord: Record<string, unknown>) {
   if (type === 'TOKENS_LIMIT') {
+    const unit = parseFiniteNumber(limitRecord.unit);
+    const number = parseFiniteNumber(limitRecord.number);
+    if (unit === 3 && number === 5) {
+      return {
+        id: 'five_hour',
+        label: '5 Hours Quota',
+        unit: 'unknown' as const,
+      };
+    }
+    if (unit === 6 && number === 1) {
+      return {
+        id: 'weekly',
+        label: 'Weekly Quota',
+        unit: 'unknown' as const,
+      };
+    }
+
     return {
-      id: 'five_hour',
-      label: '5 Hours Quota',
+      id: buildZaiQuotaId('tokens', unit, number),
+      label: 'Tokens Quota',
       unit: 'unknown' as const,
     };
   }
 
-  if (type === 'TIME_LIMIT' && isZaiMonthlySearchQuota(limitRecord)) {
+  if (type === 'TIME_LIMIT' && isZaiMcpQuota(limitRecord)) {
     return {
-      id: 'monthly_web_search_reader_zread',
-      label: 'Total Monthly Web Search / Reader / Zread Quota',
+      id: 'mcp',
+      label: 'MCP Quota',
       unit: 'unknown' as const,
     };
   }
 
-  if (type === 'TIME_LIMIT') return { id: 'time', label: 'Time', unit: 'unknown' as const };
+  if (type === 'TIME_LIMIT') {
+    return {
+      id: buildZaiQuotaId(
+        'time',
+        parseFiniteNumber(limitRecord.unit),
+        parseFiniteNumber(limitRecord.number)
+      ),
+      label: 'Time Quota',
+      unit: 'unknown' as const,
+    };
+  }
 
   return {
     id:
@@ -258,12 +286,16 @@ function formatNumeric(value: number) {
   return Number.isInteger(value) ? String(value) : String(value);
 }
 
-function isZaiMonthlySearchQuota(limitRecord: Record<string, unknown>) {
+function buildZaiQuotaId(prefix: string, unit: number | null, number: number | null) {
+  return `${prefix}_${unit ?? 'unknown'}_${number ?? 'unknown'}`;
+}
+
+function isZaiMcpQuota(limitRecord: Record<string, unknown>) {
   const usageDetails = Array.isArray(limitRecord.usageDetails) ? limitRecord.usageDetails : [];
   if (usageDetails.length === 0) return false;
 
   return usageDetails.some((detail) => {
     const modelCode = getString(asRecord(detail)?.modelCode).toLowerCase();
-    return ZAI_MONTHLY_SEARCH_MODELS.has(modelCode);
+    return ZAI_MCP_MODELS.has(modelCode);
   });
 }

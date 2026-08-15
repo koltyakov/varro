@@ -906,6 +906,82 @@ describe('ChatInput', () => {
     expect(chip?.textContent).toContain('80%');
   });
 
+  it('shows Z.ai MCP quota only in provider limit popup details', async () => {
+    setState('providers', [
+      {
+        id: 'zai-coding-plan',
+        name: 'Z.AI Coding Plan',
+        source: 'api',
+        models: {
+          'glm-4.5': {
+            id: 'glm-4.5',
+            name: 'GLM-4.5',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { 'zai-coding-plan': 'glm-4.5' });
+    setState('selectedModel', { providerID: 'zai-coding-plan', modelID: 'glm-4.5' });
+    setState('providerLimits', {
+      'zai-coding-plan:glm-4.5': {
+        providerID: 'zai-coding-plan',
+        modelID: 'glm-4.5',
+        status: 'available',
+        source: 'provider',
+        checkedAt: 1,
+        windows: [
+          {
+            id: 'five_hour',
+            label: '5 Hours Quota',
+            unit: 'unknown',
+            remaining: 87,
+            limit: 100,
+            resetAt: null,
+            percent: 13,
+          },
+          {
+            id: 'weekly',
+            label: 'Weekly Quota',
+            unit: 'unknown',
+            remaining: 98,
+            limit: 100,
+            resetAt: null,
+            percent: 2,
+          },
+          {
+            id: 'mcp',
+            label: 'MCP Quota',
+            unit: 'unknown',
+            remaining: 1_000,
+            limit: 1_000,
+            resetAt: null,
+            percent: 0,
+          },
+        ],
+      },
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const chip = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
+    expect(chip?.textContent).toContain('87%');
+    expect(chip?.textContent).toContain('98%');
+    expect(chip?.textContent).not.toContain('100%');
+
+    chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await Promise.resolve();
+
+    const popup = container?.querySelector('.provider-limit-popup');
+    expect(popup?.textContent).toContain('5 Hours Quota');
+    expect(popup?.textContent).toContain('Weekly Quota');
+    expect(popup?.textContent).toContain('MCP Quota');
+    expect(popup?.textContent).toContain('87/100 left');
+    expect(popup?.textContent).toContain('98/100 left');
+    expect(popup?.textContent).toContain('1,000/1,000 left');
+  });
+
   it('filters provider-limit badges for the selected model', () => {
     setState('providers', [
       {

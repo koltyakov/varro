@@ -265,6 +265,43 @@ describe('format helpers', () => {
     ]);
   });
 
+  it('keeps a non-period MCP quota out of compact period badges', () => {
+    const limit = availableLimit([
+      {
+        id: 'five_hour',
+        label: '5 Hours Quota',
+        unit: 'unknown',
+        remaining: 87,
+        limit: null,
+        resetAt: null,
+        percent: 13,
+      },
+      {
+        id: 'weekly',
+        label: 'Weekly Quota',
+        unit: 'unknown',
+        remaining: 98,
+        limit: null,
+        resetAt: null,
+        percent: 2,
+      },
+      {
+        id: 'mcp',
+        label: 'MCP Quota',
+        unit: 'unknown',
+        remaining: 1_000,
+        limit: 1_000,
+        resetAt: null,
+        percent: 0,
+      },
+    ]);
+
+    expect(getProviderLimitCompactBadges(limit)).toEqual([
+      { label: '87%', tone: 'default' },
+      { label: '98%', tone: 'default' },
+    ]);
+  });
+
   it('derives period prefixes for weekly and monthly windows', () => {
     expect(
       formatProviderLimitCompactPrefix(
