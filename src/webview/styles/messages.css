@@ -1804,7 +1804,7 @@ body.vscode-light
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 12%, transparent) transparent;
   font-family: var(--font-mono);
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
   line-height: 1.65;
   tab-size: 2;
   background: var(--color-vscode-result-editor-bg) !important;
