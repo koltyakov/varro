@@ -2860,6 +2860,36 @@ describe('MessageList loading row', () => {
     ).toBeNull();
   });
 
+  it('shows the worked summary when a completed response is loaded directly in a fork', async () => {
+    setState('activeSessionId', 'forked-session');
+    replaceMessages([
+      {
+        info: {
+          ...userMessage('user-1'),
+          sessionID: 'forked-session',
+          time: { created: 1_000 },
+        },
+        parts: [textPart('text-user-1', 'Prompt')],
+      },
+      {
+        info: assistantMessage('assistant-1', {
+          sessionID: 'forked-session',
+          time: { created: 2_000, completed: 11_000 },
+          tokens: { input: 42, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+        parts: [textPart('text-assistant-1', 'Final response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 42 ↓ 7');
+    expect(container?.querySelector('.trailing-assistant-summary-row')).toBeInstanceOf(
+      HTMLDivElement
+    );
+  });
+
   it('keeps the worked summary visible across post-completion signals until a new prompt', async () => {
     setState('activeSessionId', 'session-1');
     const completedDialog: MessageEntry[] = [

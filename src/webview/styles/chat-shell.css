@@ -572,6 +572,10 @@ input:focus-visible {
   flex: 0 0 auto;
 }
 
+.interactive-list-track.virtualized .interactive-item-container.trailing-assistant-summary-row {
+  contain: layout style;
+}
+
 /* Revealed timestamps extend into the following row's gap. Let them escape
    virtualized row paint containment and keep that row above adjacent content. */
 .interactive-list-track.virtualized

@@ -1003,6 +1003,8 @@ body.vscode-light
 }
 
 .model-change-indicator.assistant-dialog-summary {
+  --assistant-summary-fork-border: color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+
   font-variant-numeric: tabular-nums;
   margin-top: 10px;
   margin-bottom: 0;
@@ -1028,10 +1030,65 @@ body.vscode-light
 }
 
 .assistant-dialog-summary-content {
+  position: relative;
+  height: 24px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+.assistant-dialog-summary-fork {
+  position: absolute;
+  right: 5px;
+  top: 1px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-vscode-muted);
+  background: var(--color-vscode-bg);
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  border-radius: var(--radius-control);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-vscode-widget-shadow) 70%, transparent);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 100ms ease,
+    color 100ms ease,
+    background-color 100ms ease;
+}
+
+.assistant-dialog-summary:hover .assistant-dialog-summary-fork,
+.assistant-dialog-summary-fork:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.assistant-dialog-summary-fork:hover:not(:disabled) {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-surface-hover);
+}
+
+.assistant-dialog-summary-fork:focus-visible {
+  outline: 2px solid var(--color-vscode-accent);
+  outline-offset: 1px;
+}
+
+.assistant-dialog-summary-fork:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+@media (hover: none) {
+  .assistant-dialog-summary-fork:not(:disabled) {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .assistant-dialog-summary-content::before,
@@ -1040,6 +1097,12 @@ body.vscode-light
   flex: 1;
   height: 1px;
   background: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  transition: background-color 100ms ease;
+}
+
+.assistant-dialog-summary:hover .assistant-dialog-summary-content::before,
+.assistant-dialog-summary:hover .assistant-dialog-summary-content::after {
+  background: var(--assistant-summary-fork-border);
 }
 
 .assistant-dialog-summary-actions {
@@ -1055,7 +1118,7 @@ body.vscode-light
 
 .assistant-dialog-summary-action {
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  border: 1px solid var(--assistant-summary-fork-border);
   background: color-mix(in srgb, var(--color-vscode-fg) 8%, transparent);
   color: var(--color-vscode-fg);
   border-radius: var(--radius-pill);

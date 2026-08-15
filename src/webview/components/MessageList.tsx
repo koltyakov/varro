@@ -1518,6 +1518,7 @@ export function MessageList() {
       explicitTerminalFinalResponseMessageId() ??
       structurallyTrailingRejectedInteractionMessageId() ??
       trailingSummaryOwner()?.messageId ??
+      (!isLoading() && !activeSessionWorking() ? trailingFinalResponseMessageId() : null) ??
       null
   );
 

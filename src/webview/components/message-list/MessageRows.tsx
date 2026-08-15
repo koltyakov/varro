@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { isAbortedAssistantError } from '../../../shared/error-classification';
-import { implementPlan, openPlan } from '../../hooks/useOpenCode';
+import { forkSession, implementPlan, openPlan } from '../../hooks/useOpenCode';
 import {
   editingMessage,
   registerInlineEditMount,
@@ -12,6 +12,7 @@ import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
+import { ForkIcon } from '../ForkIcon';
 import { Message as MessageComponent } from '../Message';
 import {
   buildPlanDocumentContent,
@@ -235,8 +236,30 @@ export function AssistantDialogSummaryForMessage(
         void openPlan(buildPlanDocumentContent(props.msg.parts), props.msg.info.sessionID)
       }
       onSkipPlan={() => skipPlanSession(props.msg.info.sessionID)}
+      onFork={() => {
+        const boundaryMessageId = getForkBoundaryMessageId(
+          state.messages,
+          props.msg.info.sessionID,
+          props.msg.info.id
+        );
+        void (boundaryMessageId
+          ? forkSession(props.msg.info.sessionID, boundaryMessageId)
+          : forkSession(props.msg.info.sessionID));
+      }}
     />
   );
+}
+
+export function getForkBoundaryMessageId(
+  messages: readonly MessageEntry[],
+  sessionId: string,
+  summarizedMessageId: string
+): string | undefined {
+  const summarizedIndex = messages.findIndex((entry) => entry.info.id === summarizedMessageId);
+  if (summarizedIndex < 0) return undefined;
+
+  return messages.slice(summarizedIndex + 1).find((entry) => entry.info.sessionID === sessionId)
+    ?.info.id;
 }
 
 function AssistantDialogSummary(props: {
@@ -245,6 +268,7 @@ function AssistantDialogSummary(props: {
   onOpenPlan?: () => void;
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
+  onFork: () => void;
 }) {
   const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
@@ -267,6 +291,16 @@ function AssistantDialogSummary(props: {
             ? 'Collecting stats...'
             : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
         </span>
+        <button
+          type="button"
+          class="assistant-dialog-summary-fork"
+          aria-label="Fork chat from here"
+          title="Fork chat from here"
+          disabled={isLoading()}
+          onClick={() => props.onFork()}
+        >
+          <ForkIcon />
+        </button>
       </div>
       <Show when={props.showImplementPlanAction}>
         <div class="assistant-dialog-summary-actions">
