@@ -1953,7 +1953,39 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
-  it('selects a slash completion before Enter runs it', async () => {
+  it('selects an agent completion on Enter without sending the message', async () => {
+    setState('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setInputText('Ask @hel');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, 'Ask @hel'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'l', bubbles: true }));
+    await flushAsyncWork();
+
+    expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe('Ask @helper ');
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('runs a parameterless slash completion on the first Enter', async () => {
     setState('commands', [
       {
         name: 'zzvarrotest',
@@ -1979,17 +2011,39 @@ describe('ChatInput', () => {
     );
     await flushAsyncWork();
 
-    expect(inputText()).toBe('/zzvarrotest');
+    expect(inputText()).toBe('');
     expect(container?.querySelector('.composer-completion-menu')).toBeNull();
-    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
+    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('zzvarrotest', '');
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('selects a parameterized slash completion without running it', async () => {
+    setState('commands', [
+      {
+        name: 'zzvarrotest',
+        description: 'Run matching tests',
+        template: 'Run matching tests',
+        hints: ['pattern'],
+      },
+    ]);
+    setInputText('/zzv');
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, '/zzv'.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', bubbles: true }));
+    await flushAsyncWork();
 
     editor.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
     );
     await flushAsyncWork();
 
-    expect(runSlashCommandByNameMock).toHaveBeenCalledWith('zzvarrotest', '');
+    expect(inputText()).toBe('/zzvarrotest');
+    expect(runSlashCommandByNameMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 

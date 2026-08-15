@@ -1318,6 +1318,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           name: command.name,
           aliases: [],
           description: command.description || command.template,
+          acceptsArguments: true,
           action: () => {},
           key: `skill:${command.name}`,
           type: 'slash' as const,
@@ -1478,7 +1479,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       if (showingCompletions) {
         e.preventDefault();
-        void applyActiveCompletion();
+        const items = composerCompletions();
+        const item = items[Math.min(completionIndex(), items.length - 1)];
+        void applyActiveCompletion(item?.type === 'slash' && !item.acceptsArguments);
         setSuppressCompletion(true);
         return;
       }

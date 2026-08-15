@@ -68,6 +68,7 @@ export function getSlashCommands(props: {
       name: SKILLS_COMMAND_NAME,
       aliases: [],
       description: 'Browse available skills',
+      acceptsArguments: true,
       action: () => {},
     },
     {
@@ -132,6 +133,7 @@ export function getSlashCommands(props: {
       name: 'stats',
       aliases: [],
       description: 'Generate a usage report; add all for all time',
+      acceptsArguments: true,
       action: (args) => {
         props.onGenerateStats(args.trim().toLowerCase() === 'all');
       },
@@ -237,6 +239,7 @@ export function getSlashCommands(props: {
       name: command.name,
       aliases: [],
       description: command.description || command.template,
+      acceptsArguments: (command.hints?.length ?? 0) > 0,
       source: command.source,
       action: (args) => {
         void runSlashCommandByName(command.name, args);
