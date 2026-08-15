@@ -160,6 +160,7 @@ describe('ChangedFilesList', () => {
 
     cleanup = render(() => <ChangedFilesList />, container!);
     container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+    expect(container?.querySelector('.changed-files-file-icon')).toBeInstanceOf(HTMLImageElement);
     container?.querySelector<HTMLButtonElement>('.changed-files-row-button')?.click();
 
     expect(send).toHaveBeenCalledWith({

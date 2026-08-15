@@ -310,9 +310,9 @@ describe('DiffView', () => {
     expect(hasExpandedDiffOverlay()).toBe(true);
     expect(overlayViewport?.scrollTop).toBe(57);
     expect(overlay?.textContent).toContain('final context');
-    expect(
-      overlay?.querySelector('.diff-view-overlay-title .diff-view-file-type')?.textContent
-    ).toBe('TS');
+    expect(overlay?.querySelector('.diff-view-overlay-title .diff-view-icon')).toBeInstanceOf(
+      HTMLImageElement
+    );
     expect(overlay?.querySelector('.diff-view-overlay-close svg')?.getAttribute('width')).toBe(
       '10'
     );
@@ -979,7 +979,7 @@ describe('DiffView', () => {
     expect(filename).toBeInstanceOf(HTMLButtonElement);
     expect(preview).toBeInstanceOf(HTMLDivElement);
     expect(filename?.textContent).toBe('Chat.tsx');
-    expect(container?.querySelector('.diff-view-file-type')?.textContent).toBe('TSX');
+    expect(container?.querySelector('.diff-view-icon')).toBeInstanceOf(HTMLImageElement);
     expect(filename?.getAttribute('title')).toBe('Open full diff: src/webview/components/Chat.tsx');
     expect(filename?.textContent).not.toContain('src/webview/components/Chat.tsx');
 

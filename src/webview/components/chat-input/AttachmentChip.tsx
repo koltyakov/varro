@@ -1,12 +1,13 @@
 import { Show, createSignal } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { AttachmentLabel } from '../AttachmentLabel';
-import { DocumentIcon } from '../DocumentIcon';
+import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { WarningIcon } from '../WarningIcon';
 
 export function AttachmentChip(props: {
   label: string;
+  path?: string;
   detail?: string | null;
   disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal' | 'warning';
@@ -18,6 +19,10 @@ export function AttachmentChip(props: {
 }) {
   const [previewStyle, setPreviewStyle] = createSignal<Record<string, string> | null>(null);
   const [showTitle, setShowTitle] = createSignal(props.title !== props.label);
+  const hasFormatIcon = () =>
+    props.icon === 'file' ||
+    props.icon === undefined ||
+    (props.icon === 'image' && /\.[^./]+$/.test(props.path || props.label));
   let labelElement: HTMLSpanElement | undefined;
 
   const updateTitleVisibility = () => {
@@ -94,7 +99,7 @@ export function AttachmentChip(props: {
           </svg>
         </button>
       </Show>
-      <Show when={props.icon === 'image'}>
+      <Show when={props.icon === 'image' && !hasFormatIcon()}>
         <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
           <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
         </svg>
@@ -110,15 +115,8 @@ export function AttachmentChip(props: {
       <Show when={props.icon === 'warning'}>
         <WarningIcon class="chip-icon" width={12} height={12} />
       </Show>
-      <Show
-        when={
-          props.icon !== 'image' &&
-          props.icon !== 'folder' &&
-          props.icon !== 'terminal' &&
-          props.icon !== 'warning'
-        }
-      >
-        <DocumentIcon class="chip-icon" width="12" height="12" />
+      <Show when={hasFormatIcon()}>
+        <FileTypeIcon path={props.path || props.label} class="chip-icon" />
       </Show>
       <AttachmentLabel
         ref={(element) => (labelElement = element)}

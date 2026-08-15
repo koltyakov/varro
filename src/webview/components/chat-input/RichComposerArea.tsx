@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { splitExternalLinkText } from '../../lib/external-link';
+import { getFileTypeIcon } from '../FileTypeIcon';
 import { CompletionMenu, type CompletionItem } from './CompletionMenu';
 
 type ComposerClipboardEvent = ClipboardEvent & {
@@ -16,6 +17,7 @@ export type RichComposerChip = {
   id: string;
   type: 'mention-file' | 'mention-agent' | 'mention-session' | 'external-link' | 'image';
   label: string;
+  path?: string;
   title?: string;
   detail?: string;
   icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent' | 'session' | 'external-link';
@@ -132,14 +134,26 @@ export function RichComposerArea(props: {
     if (chip.previewImage) span.dataset.previewImage = 'true';
     span.setAttribute('title', chip.title || chip.label);
 
-    const icon = chip.type === 'external-link' ? null : getChipIcon(chip.icon);
-    if (icon) {
+    const hasFormatIcon =
+      chip.icon === 'file' || (chip.icon === 'image' && /\.[^./]+$/.test(chip.path || chip.label));
+    const icon = chip.type === 'external-link' || hasFormatIcon ? null : getChipIcon(chip.icon);
+    if (icon || hasFormatIcon) {
       const iconWrapper = document.createElement('span');
       iconWrapper.className = 'inline-chip-icon-wrap';
       if (chip.type === 'external-link' || chip.type === 'mention-session') {
         iconWrapper.contentEditable = 'false';
       }
-      iconWrapper.innerHTML = icon;
+      if (hasFormatIcon) {
+        const image = document.createElement('img');
+        image.className = 'file-type-icon inline-chip-icon';
+        image.src = getFileTypeIcon(chip.path || chip.label);
+        image.alt = '';
+        image.setAttribute('aria-hidden', 'true');
+        image.draggable = false;
+        iconWrapper.appendChild(image);
+      } else if (icon) {
+        iconWrapper.innerHTML = icon;
+      }
       span.appendChild(iconWrapper);
     }
 

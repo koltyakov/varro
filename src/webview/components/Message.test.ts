@@ -558,13 +558,13 @@ describe('Message user prompt rendering', () => {
 
     expect(children[0]?.classList.contains('message-attachments')).toBe(true);
     expect(children[0]?.textContent).toContain('extension-message.ts');
-    expect(children[1]?.classList.contains('chat-attachment-chip')).toBe(true);
-    expect(children[1]?.textContent).toContain('spec.pdf');
-    expect(children[2]?.classList.contains('user-message-text-scroll')).toBe(true);
-    expect(children[2]?.textContent).toContain('Please review this.');
-    expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
-    expect(children[3]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
-    expect(children[3]?.querySelector('.chat-image-caption')).toBeNull();
+    expect(children[0]?.textContent).toContain('spec.pdf');
+    expect(children[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
+    expect(children[1]?.classList.contains('user-message-text-scroll')).toBe(true);
+    expect(children[1]?.textContent).toContain('Please review this.');
+    expect(children[2]?.classList.contains('chat-image-figure')).toBe(true);
+    expect(children[2]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(children[2]?.querySelector('.chat-image-caption')).toBeNull();
   });
 
   it('expands a terminal-only message with its terminal name and line count', () => {
@@ -1460,6 +1460,7 @@ describe('Message user editing', () => {
     window.getSelection()?.removeAllRanges();
     const card = container?.querySelector<HTMLElement>('.user-message-card');
     expect(card?.classList.contains('user-message-card-editable')).toBe(true);
+    expect(card?.hasAttribute('title')).toBe(false);
 
     card?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 

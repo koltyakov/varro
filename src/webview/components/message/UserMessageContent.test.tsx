@@ -214,12 +214,45 @@ describe('UserMessageContent', () => {
     expect(children[0]?.classList.contains('message-attachments')).toBe(true);
     expect(children[0]?.classList.contains('message-attachments-leading')).toBe(true);
     expect(children[0]?.textContent).toContain('extension-message.ts');
-    expect(children[1]?.classList.contains('chat-attachment-chip')).toBe(true);
-    expect(children[1]?.textContent).toContain('spec.pdf');
-    expect(children[2]?.classList.contains('user-message-text-scroll')).toBe(true);
-    expect(children[2]?.textContent).toContain('Please review this.');
-    expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
-    expect(children[3]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+    expect(children[0]?.textContent).toContain('spec.pdf');
+    expect(children[0]?.querySelectorAll('.message-attachment-chip')).toHaveLength(2);
+    expect(children[0]?.querySelectorAll('.message-attachment-chip .file-type-icon')).toHaveLength(
+      2
+    );
+    expect(children[1]?.classList.contains('user-message-text-scroll')).toBe(true);
+    expect(children[1]?.textContent).toContain('Please review this.');
+    expect(children[2]?.classList.contains('chat-image-figure')).toBe(true);
+    expect(children[2]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+  });
+
+  it('collapses excess attachments into a popup', () => {
+    renderUserContent([
+      textPart('text-1', 'one.ts'),
+      textPart('text-2', 'two.ts'),
+      textPart('text-3', 'three.ts'),
+      textPart('text-4', 'four.ts'),
+    ]);
+
+    const trigger = container?.querySelector<HTMLButtonElement>(
+      '.message-attachment-overflow-trigger'
+    );
+    expect(trigger?.textContent).toBe('+1');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('.message-attachment-overflow-menu')).toBeNull();
+    const rail = container?.querySelector('.message-file-attachments');
+    const railChildCount = rail?.childElementCount;
+
+    trigger?.click();
+
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('.message-attachment-overflow-menu')).toBeNull();
+    expect(rail?.childElementCount).toBe(railChildCount);
+    const popup = document.body.querySelector('.message-attachment-overflow-menu');
+    expect(popup?.getAttribute('aria-label')).toBe('Remaining attachments');
+    expect(popup?.textContent).toContain('four.ts');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(document.body.querySelector('.message-attachment-overflow-menu')).toBeNull();
   });
 
   it('expands a standalone terminal selection into a terminal code block', () => {
@@ -302,6 +335,7 @@ describe('UserMessageContent', () => {
       (chip) => chip.getAttribute('title') === 'src/main.ts:2-4'
     );
     expect(selectionChip?.textContent).toContain('main.ts');
+    expect(selectionChip?.querySelector('.file-type-icon')).toBeInstanceOf(HTMLImageElement);
     expect(selectionChip?.querySelector('.chip-detail')?.textContent).toBe('L2-4');
     selectionChip?.click();
     expect(send).toHaveBeenCalledWith({
@@ -313,6 +347,7 @@ describe('UserMessageContent', () => {
       (chip) => chip.getAttribute('title') === 'assets/'
     );
     expect(folderChip?.textContent).toContain('assets');
+    expect(folderChip?.querySelector('.file-type-icon')).toBeNull();
     folderChip?.click();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -330,6 +365,9 @@ describe('UserMessageContent', () => {
     const messageText = container?.querySelector('.user-message-text');
     expect(messageText?.textContent).toBe('Test README.md');
     expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(messageText?.querySelector('.inline-chip .file-type-icon')).toBeInstanceOf(
+      HTMLImageElement
+    );
     expect(messageText?.querySelector('.inline-chip')?.getAttribute('data-copy-marker')).toBe(
       '@README.md'
     );

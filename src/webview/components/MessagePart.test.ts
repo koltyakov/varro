@@ -422,6 +422,7 @@ describe('MessagePart', () => {
     });
 
     expect(container?.querySelector('.chip-label')?.textContent).toBe('docs/spec.pdf');
+    expect(container?.querySelector('.file-type-icon')).toBeInstanceOf(HTMLImageElement);
   });
 
   it('opens and closes image previews for image attachments', () => {

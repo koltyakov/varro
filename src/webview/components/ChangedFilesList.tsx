@@ -10,6 +10,7 @@ import {
 import { getDiffSummaryStats, getMessageToolSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
+import { FileTypeIcon } from './FileTypeIcon';
 
 const KIND_BADGE: Record<FileChangeKind, { label: string; title: string; class: string }> = {
   added: { label: 'A', title: 'Added', class: 'is-added' },
@@ -182,6 +183,7 @@ function ChangedFileItem(props: { change: FileChange }) {
       >
         {badge().label}
       </span>
+      <FileTypeIcon path={openPath()} class="changed-files-file-icon" />
       <span class="changed-files-path">
         <span class="changed-files-dir">{dir()}</span>
         <span class="changed-files-name">{leaf()}</span>

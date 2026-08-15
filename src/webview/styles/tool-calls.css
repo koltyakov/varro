@@ -117,6 +117,12 @@
   flex-shrink: 0;
 }
 
+.inline-chip .file-type-icon {
+  width: 11px;
+  height: 11px;
+  object-fit: contain;
+}
+
 .inline-chip .inline-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -438,22 +444,9 @@
 
 .diff-view-icon {
   width: 14px;
+  height: 14px;
   flex-shrink: 0;
-  color: var(--color-vscode-muted);
-  opacity: 0.5;
-}
-
-.diff-view-file-type {
-  width: 14px;
-  flex-shrink: 0;
-  transform: translateY(1px);
-  color: color-mix(in srgb, var(--color-vscode-accent) 72%, var(--color-vscode-fg));
-  font-family: var(--font-mono);
-  font-size: 7.5px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.45px;
-  text-align: center;
+  opacity: 0.7;
 }
 
 .diff-view-filename-slot {
@@ -518,11 +511,6 @@
 
 .diff-view-widget-inline .diff-view-item-expandable:hover {
   background: color-mix(in srgb, var(--color-vscode-fg) 7%, var(--color-vscode-result-editor-bg));
-}
-
-.diff-view-widget-inline :is(.diff-view-icon, .diff-view-file-type),
-.diff-view-overlay-title :is(.diff-view-icon, .diff-view-file-type) {
-  opacity: 0.7;
 }
 
 .diff-view-widget-inline .diff-view-filename {
@@ -2718,38 +2706,83 @@ kbd {
 }
 
 .message-attachments {
-  --attachment-chip-gap: 4px;
-  --attachment-chip-max-width: 100%;
-  --attachment-chip-pair-min-width: 18ch;
   display: flex;
   flex-direction: row;
-  gap: var(--attachment-chip-gap);
-  flex-wrap: wrap;
+  gap: 12px;
+  flex-wrap: nowrap;
   min-width: 0;
   max-width: 100%;
 }
 
-.message-attachments:has(> :nth-child(2)) {
-  --attachment-chip-max-width: min(
-    100%,
-    max(var(--attachment-chip-pair-min-width), calc((100% - var(--attachment-chip-gap)) / 2))
-  );
+.message-attachments.message-attachments-leading {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
-.message-attachments.message-attachments-leading {
-  margin: -12px -15px 12px;
-  width: calc(100% + 30px);
-  max-width: calc(100% + 30px);
-  padding: 12px 15px 10px;
+.user-message-card:has(.message-file-attachments.message-attachments-leading) {
+  margin-top: 33px;
+}
+
+.message-file-attachments {
+  --attachment-chip-max-width: min(220px, 80vw);
+  position: relative;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
+}
+
+.message-file-attachments.message-attachments-leading {
+  position: absolute;
+  top: -32px;
+  right: 0;
+  bottom: auto;
+  justify-content: flex-end;
+}
+
+.user-message-card-editable:has(.message-file-attachments:hover) {
+  border-color: color-mix(in srgb, var(--color-vscode-request-border) 45%, transparent);
+}
+
+.message-attachment-visible {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   overflow: hidden;
-  border-top-left-radius: var(--radius-bubble);
-  border-top-right-radius: var(--radius-bubble);
-  background: color-mix(
-    in srgb,
-    var(--color-vscode-widget-bg) 62%,
-    var(--color-vscode-request-bubble)
-  );
-  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border) 18%, transparent);
+}
+
+.message-attachment-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.message-attachment-measure-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px;
+  border: 1px dashed var(--color-vscode-border-strong);
+  border-radius: var(--radius-chip);
+  font-size: 11.5px;
+  font-weight: 500;
+  max-width: min(220px, 80vw);
+  overflow: hidden;
+}
+
+.message-attachment-measure-item .file-type-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 
 .message-attachments.message-attachments-standalone {
@@ -2758,77 +2791,54 @@ kbd {
   border: none;
 }
 
-.message-attachment-chip,
-.message-attachments > .chat-attachment-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 5px;
-  line-height: 1.35;
-  border: 1px solid var(--color-vscode-border-strong);
-  border-radius: var(--radius-inset);
-  background: var(--color-vscode-surface-hover);
-  color: var(--color-vscode-fg);
+.message-file-attachments .message-attachment-chip {
   flex: 0 0 auto;
-  max-width: var(--attachment-chip-max-width);
-  min-width: 0;
-  width: auto;
-  overflow: hidden;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
-.message-attachment-chip .chip-icon,
-.message-attachments > .chat-attachment-chip .chip-icon {
-  font-size: 11px;
-  color: var(--color-vscode-fg-muted);
-  flex-shrink: 0;
-}
-
-.message-attachment-chip .chip-label,
-.message-attachments > .chat-attachment-chip .chip-label {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.message-attachment-chip .chip-label-with-extension,
-.message-attachments > .chat-attachment-chip .chip-label-with-extension {
-  display: flex;
-  text-overflow: clip;
-}
-
-.message-attachment-chip .chip-label-stem,
-.message-attachments > .chat-attachment-chip .chip-label-stem {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.message-attachment-chip .chip-label-extension,
-.message-attachments > .chat-attachment-chip .chip-label-extension {
-  flex-shrink: 0;
-}
-
-.message-attachment-chip .chip-detail,
-.message-attachments > .chat-attachment-chip .chip-detail {
-  color: var(--color-vscode-fg-muted);
+.message-attachment-overflow-trigger {
+  flex: 0 0 auto;
+  min-width: 26px;
+  justify-content: center;
+  color: var(--color-vscode-muted);
   font-size: 10px;
-  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.message-attachment-chip-clickable {
-  cursor: pointer;
+.message-attachment-overflow-menu {
+  position: fixed;
+  z-index: var(--z-menu-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 180px;
+  max-width: min(300px, calc(100vw - 40px));
+  padding: 5px;
+  border: 1px solid var(--color-vscode-border-strong);
+  border-radius: 8px;
+  background: var(--color-vscode-widget-bg);
+  box-shadow: var(--shadow-popover);
 }
 
-.message-attachment-chip-clickable:hover {
-  background: var(--color-vscode-surface-hover);
-  border-color: var(--color-vscode-border-strong);
+.message-attachment-overflow-menu .message-attachment-chip {
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
   color: var(--color-vscode-fg);
+}
+
+.message-attachment-overflow-menu .message-attachment-chip:hover {
+  background: var(--color-vscode-surface-hover);
+  color: var(--color-vscode-fg);
+}
+
+.message-attachment-overflow-menu .message-attachment-chip:hover .chip-label {
+  color: var(--color-vscode-fg);
+  text-decoration: none;
 }
 
 @media (max-width: 480px) {
@@ -2843,14 +2853,16 @@ kbd {
   }
 
   .message-attachments {
-    --attachment-chip-gap: 3px;
-    --attachment-chip-pair-min-width: 14ch;
+    gap: 10px;
   }
 
-  .message-attachment-chip,
-  .message-attachments > .chat-attachment-chip {
-    gap: 3px;
-    padding: 2px 5px;
+  .message-file-attachments {
+    gap: 6px;
+  }
+
+  .message-attachment-visible,
+  .message-attachment-measure {
+    gap: 8px;
   }
 }
 

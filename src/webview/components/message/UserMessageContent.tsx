@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import {
   formatDisplayPath,
   getLeafPathName,
@@ -23,9 +24,8 @@ import { AttachmentLabel } from '../AttachmentLabel';
 import { ImagePreviewOverlay, createImagePreviewEffect } from '../ImagePreview';
 import type { PreviewImage } from '../ImagePreview';
 import { renderCodeBlockHtml } from '../MarkdownRenderer';
-import { MessagePart } from '../MessagePart';
 import { getPdfDataUrlSize } from '../../../shared/native-pdf';
-import { DocumentIcon } from '../DocumentIcon';
+import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { ExternalLinkIcon } from '../ExternalLinkIcon';
 import { isSafeExternalHref, splitExternalLinkText } from '../../lib/external-link';
@@ -70,6 +70,10 @@ type IndexedMessageAttachment = {
   attachment: MessageAttachment;
   marker: string | null;
 };
+
+type DisplayMessageAttachment =
+  | { type: 'message'; attachment: MessageAttachment }
+  | { type: 'file-part'; part: FilePart };
 
 type InlineRenderableAttachment =
   | { type: 'message-attachment'; attachment: MessageAttachment }
@@ -525,6 +529,14 @@ export function UserMessageContent(props: { parts: Part[] }) {
   const otherFileParts = createMemo(() =>
     parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
   );
+  const attachmentCount = createMemo(() => visibleAttachments().length + otherFileParts().length);
+  const displayAttachments = createMemo<DisplayMessageAttachment[]>(() => [
+    ...visibleAttachments().map(({ attachment }) => ({
+      type: 'message' as const,
+      attachment,
+    })),
+    ...otherFileParts().map((part) => ({ type: 'file-part' as const, part })),
+  ]);
   const [activeImageIndex, setActiveImageIndex] = createSignal(0);
   const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
 
@@ -594,7 +606,7 @@ export function UserMessageContent(props: { parts: Part[] }) {
     parsed().attachments.length > 0 ||
     parsed().agentParts.length > 0;
   const hasTrailingAttachmentContent = () =>
-    otherFileParts().length > 0 || parsed().messageTexts.length > 0 || imageParts().length > 0;
+    parsed().messageTexts.length > 0 || imageParts().length > 0 || visibleAgentParts().length > 0;
   const handleCopy = (event: ClipboardEvent) => {
     if (!event.clipboardData) return;
 
@@ -624,21 +636,18 @@ export function UserMessageContent(props: { parts: Part[] }) {
       class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
       onCopy={handleCopy}
     >
-      <Show when={visibleAttachments().length > 0}>
-        <div
-          class={`message-attachments${hasTrailingAttachmentContent() ? ' message-attachments-leading' : ' message-attachments-standalone'}`}
-        >
-          <For each={visibleAttachments()}>
-            {({ attachment }) => <MessageAttachmentChip attachment={attachment} />}
-          </For>
-        </div>
+      <Show when={visibleAttachments().length > 0 || otherFileParts().length > 0}>
+        <MessageAttachmentRail
+          attachments={displayAttachments()}
+          leading={hasTrailingAttachmentContent()}
+          label={`${attachmentCount()} ${attachmentCount() === 1 ? 'attachment' : 'attachments'}`}
+        />
       </Show>
       <Show when={visibleAgentParts().length > 0}>
         <div class="message-attachments message-attachments-leading">
           <For each={visibleAgentParts()}>{(part) => <AgentChip part={part} />}</For>
         </div>
       </Show>
-      <For each={otherFileParts()}>{(part) => <MessagePart part={part} />}</For>
       <Show when={standaloneTerminalAttachment()}>
         {(attachment) => <TerminalMessageCodeBlock attachment={attachment()} />}
       </Show>
@@ -1262,6 +1271,8 @@ function InlineImageAttachmentChip(props: {
       ? 'Image 1'
       : getInlineImageLabel(props.part));
   const copyMarker = () => props.marker ?? getInlineImageMarker(props.part) ?? label();
+  const path = () => props.part.source?.path || props.part.filename;
+  const hasFormatIcon = () => /\.[^./]+$/.test(path() || '');
 
   return (
     <button
@@ -1271,9 +1282,22 @@ function InlineImageAttachmentChip(props: {
       aria-label={`Open image preview: ${label()}`}
       onClick={props.onClick}
     >
-      <svg class="inline-chip-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
-        <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
-      </svg>
+      <Show
+        when={hasFormatIcon()}
+        fallback={
+          <svg
+            class="inline-chip-icon"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            width="11"
+            height="11"
+          >
+            <path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.3l-2.6-2.6a.5.5 0 00-.7 0L7.5 11 5.9 9.4a.5.5 0 00-.7 0L2 12.6V3zm3.5 4a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+          </svg>
+        }
+      >
+        <FileTypeIcon path={path()} class="inline-chip-icon" />
+      </Show>
       <span class="inline-chip-label">{label()}</span>
     </button>
   );
@@ -1293,6 +1317,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
       ? (attachment() as Extract<MessageAttachment, { type: 'file-selection' }>)
       : null;
   const copyMarker = () => getInlineAttachmentCopyMarker(attachment());
+  const filePath = () => getMessageAttachmentPath(attachment());
 
   const handleClick = () => openAttachment(attachment());
 
@@ -1306,7 +1331,7 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
     >
       <Show
         when={isFolder()}
-        fallback={<DocumentIcon class="inline-chip-icon" width="11" height="11" />}
+        fallback={<FileTypeIcon path={filePath()} class="inline-chip-icon" />}
       >
         <FolderIcon class="inline-chip-icon" width="11" height="11" />
       </Show>
@@ -1377,7 +1402,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
         </svg>
       );
     }
-    return <DocumentIcon class="chip-icon" width="12" height="12" />;
+    return <FileTypeIcon path={getMessageAttachmentPath(attachment())} class="chip-icon" />;
   };
 
   const detail = () => {
@@ -1396,7 +1421,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       when={!isOpenable()}
       fallback={
         <button
-          class="message-attachment-chip message-attachment-chip-clickable"
+          class="chat-attachment-chip message-attachment-chip message-attachment-chip-clickable clickable"
           data-copy-marker={getStandaloneAttachmentCopyText(attachment())}
           title={getAttachmentTitle(attachment())}
           onClick={handleClick}
@@ -1411,7 +1436,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       }
     >
       <span
-        class="message-attachment-chip"
+        class="chat-attachment-chip message-attachment-chip"
         data-copy-marker={getStandaloneAttachmentCopyText(attachment())}
         title={getAttachmentTitle(attachment())}
       >
@@ -1424,6 +1449,229 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
       </span>
     </Show>
   );
+}
+
+function MessageAttachmentRail(props: {
+  attachments: DisplayMessageAttachment[];
+  leading: boolean;
+  label: string;
+}) {
+  const [visibleCount, setVisibleCount] = createSignal(Math.min(props.attachments.length, 3));
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  const [menuPosition, setMenuPosition] = createSignal({ left: 0, top: 0 });
+  let root: HTMLDivElement | undefined;
+  let measurement: HTMLDivElement | undefined;
+  let menu: HTMLDivElement | undefined;
+
+  const remainingAttachments = createMemo(() => props.attachments.slice(visibleCount()));
+  const updateVisibleCount = () => {
+    if (!root || !measurement || root.clientWidth <= 0) return;
+
+    const itemWidths = Array.from(
+      measurement.querySelectorAll<HTMLElement>('.message-attachment-measure-item')
+    ).map((item) => item.getBoundingClientRect().width);
+    if (itemWidths.length !== props.attachments.length || itemWidths.some((width) => width <= 0)) {
+      return;
+    }
+
+    const gap = 10;
+    const totalWidth = itemWidths.reduce(
+      (total, width, index) => total + width + (index > 0 ? gap : 0),
+      0
+    );
+    if (totalWidth <= root.clientWidth) {
+      setVisibleCount(props.attachments.length);
+      return;
+    }
+
+    const overflowControlWidth = 26;
+    const overflowGap = 8;
+    const availableWidth = Math.max(0, root.clientWidth - overflowControlWidth - overflowGap);
+    let usedWidth = 0;
+    let count = 0;
+    for (const width of itemWidths) {
+      const nextWidth = usedWidth + width + (count > 0 ? gap : 0);
+      if (nextWidth > availableWidth) break;
+      usedWidth = nextWidth;
+      count += 1;
+    }
+    setVisibleCount(Math.max(1, count));
+  };
+
+  createEffect(() => {
+    if (props.attachments.length === 0) return;
+    updateVisibleCount();
+    if (!root) return;
+    const stopObservingResize = observeSettledResize(root, updateVisibleCount);
+    onCleanup(stopObservingResize);
+  });
+
+  createEffect(() => {
+    if (remainingAttachments().length === 0) setMenuOpen(false);
+  });
+
+  createEffect(() => {
+    if (!menuOpen()) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !root?.contains(event.target) &&
+        !menu?.contains(event.target)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    onCleanup(() => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    });
+  });
+
+  const toggleMenu = (event: MouseEvent) => {
+    event.stopPropagation();
+    if (menuOpen()) {
+      setMenuOpen(false);
+      return;
+    }
+
+    const trigger = event.currentTarget;
+    if (!(trigger instanceof HTMLElement)) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = Math.min(260, window.innerWidth - 16);
+    setMenuPosition({
+      left: Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.right - menuWidth)),
+      top: rect.bottom + 4,
+    });
+    setMenuOpen(true);
+
+    queueMicrotask(() => {
+      if (!menu) return;
+      const menuRect = menu.getBoundingClientRect();
+      setMenuPosition({
+        left: Math.max(
+          8,
+          Math.min(window.innerWidth - menuRect.width - 8, rect.right - menuRect.width)
+        ),
+        top:
+          menuRect.bottom <= window.innerHeight - 8
+            ? rect.bottom + 4
+            : Math.max(8, rect.top - menuRect.height - 4),
+      });
+    });
+  };
+
+  return (
+    <div
+      ref={(element) => (root = element)}
+      class={`message-attachments message-file-attachments${props.leading ? ' message-attachments-leading' : ' message-attachments-standalone'}`}
+      aria-label={props.label}
+    >
+      <div class="message-attachment-visible">
+        <For each={props.attachments.slice(0, visibleCount())}>
+          {(attachment) => <DisplayMessageAttachmentItem attachment={attachment} />}
+        </For>
+      </div>
+      <Show when={remainingAttachments().length > 0}>
+        <button
+          type="button"
+          class="chat-attachment-chip clickable message-attachment-overflow-trigger"
+          aria-label={`Show ${remainingAttachments().length} more attachments`}
+          aria-expanded={menuOpen()}
+          onPointerDown={(event) => {
+            if (event.pointerType === 'mouse') event.preventDefault();
+          }}
+          onClick={toggleMenu}
+        >
+          +{remainingAttachments().length}
+        </button>
+      </Show>
+      <Show when={menuOpen()}>
+        <Portal mount={document.body}>
+          <div
+            ref={(element) => (menu = element)}
+            class="message-attachment-overflow-menu"
+            role="dialog"
+            aria-label="Remaining attachments"
+            style={{ left: `${menuPosition().left}px`, top: `${menuPosition().top}px` }}
+            onClick={() => setMenuOpen(false)}
+          >
+            <For each={remainingAttachments()}>
+              {(attachment) => <DisplayMessageAttachmentItem attachment={attachment} />}
+            </For>
+          </div>
+        </Portal>
+      </Show>
+      <div
+        ref={(element) => (measurement = element)}
+        class="message-attachment-measure"
+        aria-hidden="true"
+      >
+        <For each={props.attachments}>
+          {(attachment) => (
+            <span class="message-attachment-measure-item">
+              <FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />
+              <span>{getDisplayMessageAttachmentLabel(attachment)}</span>
+              <Show when={getDisplayMessageAttachmentDetail(attachment)}>
+                {(detail) => <span class="chip-detail">{detail()}</span>}
+              </Show>
+            </span>
+          )}
+        </For>
+      </div>
+    </div>
+  );
+}
+
+function DisplayMessageAttachmentItem(props: { attachment: DisplayMessageAttachment }) {
+  return props.attachment.type === 'message' ? (
+    <MessageAttachmentChip attachment={props.attachment.attachment} />
+  ) : (
+    <MessageFileAttachment part={props.attachment.part} />
+  );
+}
+
+function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment): string {
+  if (attachment.type === 'message') return getAttachmentLabel(attachment.attachment);
+  return getMessageFileAttachmentLabel(attachment.part);
+}
+
+function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment): string | null {
+  if (attachment.type !== 'message') return null;
+  if (attachment.attachment.type === 'file-selection') {
+    return formatContextLineRanges(attachment.attachment.lineRanges);
+  }
+  if (attachment.attachment.type === 'terminal-selection') {
+    return getTerminalLineCountLabel(attachment.attachment.text) ?? 'terminal';
+  }
+  return null;
+}
+
+function getDisplayMessageAttachmentPath(attachment: DisplayMessageAttachment): string | undefined {
+  if (attachment.type === 'message') return getMessageAttachmentPath(attachment.attachment);
+  return attachment.part.source?.path || attachment.part.filename;
+}
+
+function MessageFileAttachment(props: { part: FilePart }) {
+  const label = () => getMessageFileAttachmentLabel(props.part);
+  const path = () => props.part.source?.path || props.part.filename;
+
+  return (
+    <span class="chat-attachment-chip message-attachment-chip" title={label()}>
+      <FileTypeIcon path={path()} class="chip-icon" />
+      <AttachmentLabel label={label()} preserveExtension />
+    </span>
+  );
+}
+
+function getMessageFileAttachmentLabel(part: FilePart): string {
+  const path = part.source?.path || part.filename;
+  return path ? formatDisplayPath(path, state.editorContext.workspacePath) : '(file)';
 }
 
 function getTerminalLineCountLabel(text: string | undefined): string | null {
@@ -1441,6 +1689,12 @@ function getAttachmentLabel(attachment: MessageAttachment): string {
     case 'file-reference':
       return getLeafPathName(attachment.path);
   }
+}
+
+function getMessageAttachmentPath(attachment: MessageAttachment): string | undefined {
+  if (attachment.type === 'file-selection') return attachment.filename;
+  if (attachment.type === 'file-reference') return attachment.path;
+  return undefined;
 }
 
 function getAttachmentTitle(attachment: MessageAttachment): string {

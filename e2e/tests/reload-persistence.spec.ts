@@ -112,6 +112,8 @@ test('keeps composer text and attached files after reload', async ({ page }) => 
     )
     .toBe(true);
   await expect(
-    page.locator('.chat-attachment-chip').filter({ hasText: 'persisted.ts' })
+    page
+      .locator('.chat-attachments-container .chat-attachment-chip')
+      .filter({ hasText: 'persisted.ts' })
   ).toHaveCount(0);
 });

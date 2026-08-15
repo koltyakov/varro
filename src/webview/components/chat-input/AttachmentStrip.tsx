@@ -64,6 +64,7 @@ export function AttachmentStrip(props: {
             return (
               <AttachmentChip
                 label={item.value.filename}
+                path={item.value.filename}
                 detail={item.value.lineRange}
                 disabled={!props.activeContextEnabled}
                 title={props.activeContextTitle || item.value.filename}
@@ -102,6 +103,7 @@ export function AttachmentStrip(props: {
             return (
               <AttachmentChip
                 label={getDroppedFileLabel(item.value)}
+                path={item.value.relativePath || item.value.path}
                 detail={lineRange}
                 icon={item.value.type === 'directory' ? 'folder' : 'file'}
                 title={
@@ -119,6 +121,7 @@ export function AttachmentStrip(props: {
             return (
               <AttachmentChip
                 label={item.value.filename}
+                path={item.value.filename}
                 disabled={props.clipboardImagesNeedVision}
                 icon="image"
                 title={
@@ -136,6 +139,11 @@ export function AttachmentStrip(props: {
           return (
             <AttachmentChip
               label={item.value.filename}
+              path={
+                item.value.contextFile?.relativePath ||
+                item.value.contextFile?.path ||
+                item.value.filename
+              }
               detail={props.nativePdfsSupported ? 'PDF' : undefined}
               icon={props.nativePdfsSupported ? undefined : 'file'}
               title={

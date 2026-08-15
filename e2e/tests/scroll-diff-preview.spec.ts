@@ -219,7 +219,7 @@ test.describe('diff preview anchoring', () => {
     expect(Math.abs(layout.rightEdgeDelta)).toBeLessThan(1);
     expect(layout.listFilter).toBe('blur(40px)');
     expect(layout.listOpacity).toBe('0.1');
-    await expect(overlay.locator('.diff-view-overlay-title .diff-view-file-type')).toHaveText('TS');
+    await expect(overlay.locator('.diff-view-overlay-title .diff-view-icon')).toBeVisible();
 
     const overlayFilename = overlay.locator('.diff-view-overlay-filename');
     await overlayFilename.click();

@@ -776,6 +776,7 @@ describe('RichComposerArea', () => {
       id: 'file:/workspace/src/webview/components/chat-input/BusySendMenu.test.tsx',
       type: 'mention-file',
       label: 'BusySendMenu.test.tsx',
+      path: 'src/webview/components/chat-input/BusySendMenu.test.tsx',
       title: 'src/webview/components/chat-input/BusySendMenu.test.tsx',
       icon: 'file',
       textMarker: '@src/webview/components/chat-input/BusySendMenu.test.tsx',
@@ -793,6 +794,7 @@ describe('RichComposerArea', () => {
     expect(inlineChip?.getAttribute('title')).toBe(
       'src/webview/components/chat-input/BusySendMenu.test.tsx'
     );
+    expect(inlineChip?.querySelector('.file-type-icon')).toBeInstanceOf(HTMLImageElement);
   });
 
   it('renders directory chips with the folder icon', async () => {

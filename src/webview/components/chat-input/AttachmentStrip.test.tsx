@@ -6,6 +6,7 @@ import { AttachmentStrip } from './AttachmentStrip';
 
 type MockAttachmentChipProps = {
   label: string;
+  path?: string;
   detail?: string | null;
   disabled?: boolean;
   icon?: 'file' | 'folder' | 'image' | 'terminal';
@@ -24,6 +25,7 @@ vi.mock('./AttachmentChip', () => ({
       data-disabled={props.disabled ? 'true' : 'false'}
       data-icon={props.icon ?? 'file'}
       data-label={props.label}
+      data-path={props.path ?? ''}
       data-preview-url={props.previewImage?.url ?? ''}
       data-title={props.title ?? ''}
     >
@@ -129,6 +131,7 @@ describe('AttachmentStrip', () => {
     expect(activeContextChip?.getAttribute('data-detail')).toBe('L4-8');
     expect(activeContextChip?.getAttribute('data-disabled')).toBe('true');
     expect(activeContextChip?.getAttribute('data-title')).toBe('src/active.ts');
+    expect(activeContextChip?.getAttribute('data-path')).toBe('src/active.ts');
     expect(activeContextChip?.getAttribute('data-clickable')).toBe('true');
     expect(terminalChip?.getAttribute('data-detail')).toBe('terminal');
     expect(terminalChip?.getAttribute('data-icon')).toBe('terminal');
@@ -187,6 +190,7 @@ describe('AttachmentStrip', () => {
     expect(fileChip?.getAttribute('data-detail')).toBe('L5, L9-12');
     expect(fileChip?.getAttribute('data-icon')).toBe('file');
     expect(fileChip?.getAttribute('data-title')).toBe('src/app.ts L5, L9-12');
+    expect(fileChip?.getAttribute('data-path')).toBe('src/app.ts');
     expect(directoryChip?.getAttribute('data-detail')).toBe('');
     expect(directoryChip?.getAttribute('data-icon')).toBe('folder');
     expect(directoryChip?.getAttribute('data-title')).toBe('/workspace/docs');
@@ -211,6 +215,7 @@ describe('AttachmentStrip', () => {
     const imageChip = getChip('diagram.png');
     expect(imageChip?.getAttribute('data-disabled')).toBe('true');
     expect(imageChip?.getAttribute('data-icon')).toBe('image');
+    expect(imageChip?.getAttribute('data-path')).toBe('diagram.png');
     expect(imageChip?.getAttribute('data-title')).toBe(
       'diagram.png · Use a vision-capable model or vision subagent to send this image'
     );
@@ -320,6 +325,7 @@ describe('AttachmentStrip', () => {
     expect(getChip('spec.pdf')?.getAttribute('data-title')).toBe('spec.pdf');
     expect(getChip('spec.pdf')?.getAttribute('data-detail')).toBe('');
     expect(getChip('spec.pdf')?.getAttribute('data-icon')).toBe('file');
+    expect(getChip('spec.pdf')?.getAttribute('data-path')).toBe('spec.pdf');
     getChip('spec.pdf')?.querySelector<HTMLButtonElement>('.attachment-chip-mock-click')?.click();
     expect(onOpenFile).toHaveBeenCalledWith({
       path: '/workspace/spec.pdf',

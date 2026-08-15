@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
+import { getFileTypeIcon } from '../FileTypeIcon';
 import { AttachmentChip } from './AttachmentChip';
 
 let container: HTMLDivElement;
@@ -72,6 +73,20 @@ describe('AttachmentChip', () => {
 
     expect(container.querySelector<HTMLElement>('.chat-attachment-chip')?.title).toBe(
       'src/app.ts L4-8'
+    );
+    expect(container.querySelector<HTMLImageElement>('.file-type-icon')?.src).toBe(
+      getFileTypeIcon('app.ts')
+    );
+  });
+
+  it('uses a format icon for named images while preserving previews', () => {
+    cleanup = render(
+      () => <AttachmentChip label="diagram.png" path="images/diagram.png" icon="image" />,
+      container
+    );
+
+    expect(container.querySelector<HTMLImageElement>('.file-type-icon')?.src).toBe(
+      getFileTypeIcon('images/diagram.png')
     );
   });
 });

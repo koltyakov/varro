@@ -8,6 +8,7 @@ import { observeSettledResize } from '../lib/settled-resize-observer';
 import { getToolDiffPreviewState, setToolDiffPreviewState } from '../lib/tool-call-expansion-state';
 import { state } from '../lib/state';
 import type { FileDiff } from '../types';
+import { FileTypeIcon } from './FileTypeIcon';
 import { renderHighlightedCodeHtml } from './MarkdownRenderer';
 
 type UnifiedDiffLine = {
@@ -150,32 +151,6 @@ function getDiffFileType(file: string | undefined) {
     label: override?.label ?? extension.slice(0, 3).toUpperCase(),
     language: override?.language ?? extension,
   };
-}
-
-function DiffFileFormatIcon(props: { type: { label: string; language?: string } | null }) {
-  return (
-    <Show
-      when={props.type}
-      fallback={
-        <svg
-          class="diff-view-icon"
-          width="14"
-          height="14"
-          viewBox="0 0 32 32"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M13 4 6 11v17h20V4H13Zm-1 3.828V10H9.828L12 7.828ZM24 26H8V12h6V6h10v20Z" />
-        </svg>
-      }
-    >
-      {(type) => (
-        <span class="diff-view-file-type" aria-hidden="true">
-          {type().label}
-        </span>
-      )}
-    </Show>
-  );
 }
 
 function parseUnifiedHunk(line: string): UnifiedDiffHunk | null {
@@ -954,7 +929,7 @@ function DiffItem(props: {
           if (canExpand()) toggleExpanded();
         }}
       >
-        <DiffFileFormatIcon type={fileType()} />
+        <FileTypeIcon path={file()} class="diff-view-icon" />
         <span class="diff-view-filename-slot">
           <button
             type="button"
@@ -1100,7 +1075,7 @@ function DiffItem(props: {
               <div class="diff-view-overlay-panel" onClick={(event) => event.stopPropagation()}>
                 <header class="diff-view-overlay-header" onClick={toggleExpanded}>
                   <div class="diff-view-overlay-title">
-                    <DiffFileFormatIcon type={fileType()} />
+                    <FileTypeIcon path={file()} class="diff-view-icon" />
                     <button
                       type="button"
                       class="diff-view-overlay-filename"

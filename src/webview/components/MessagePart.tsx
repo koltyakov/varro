@@ -15,6 +15,7 @@ import { hasVisibleReasoningContent } from '../lib/part-utils';
 import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
 import { AgentChip } from './message/AgentChip';
 import { InlineMessageImage } from './InlineMessageImage';
+import { FileTypeIcon } from './FileTypeIcon';
 
 export function MessagePart(props: {
   part: Part;
@@ -328,6 +329,7 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
     }
     return '(file)';
   };
+  const filePath = () => props.part.source?.path || props.part.filename;
   const openPreview = () => {
     setPreviewImage({
       url: props.part.url,
@@ -348,9 +350,7 @@ function FileBlock(props: { part: Extract<Part, { type: 'file' }> }) {
         when={isImage()}
         fallback={
           <div class="chat-attachment-chip">
-            <svg class="chip-icon" viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-              <path d="M9.5 1.1l3.4 3.5.1.4v10c0 .6-.4 1-1 1H4c-.6 0-1-.4-1-1V2c0-.6.4-1 1-1h5.1l.4.1z" />
-            </svg>
+            <FileTypeIcon path={filePath()} class="chip-icon" />
             <span class="chip-label">{displayName()}</span>
           </div>
         }

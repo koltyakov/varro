@@ -446,11 +446,6 @@ export function Message(props: {
                 : assistantContainerClass()
             } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
             onClick={handleUserCardClick}
-            title={
-              canEditUserMessage() && !isEditingUserMessage() && !isImageOnlyMessage()
-                ? 'Click to edit message'
-                : undefined
-            }
           >
             <Show when={isUser() && props.promptNumber}>
               {(promptNumber) => (
