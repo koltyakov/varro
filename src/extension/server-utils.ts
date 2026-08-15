@@ -1,6 +1,8 @@
 import type { ChildProcess } from 'child_process';
 import type { ServerStatus } from '../shared/protocol';
 
+export { asRecord } from '../shared/type-utils';
+
 export function isPortInUseMessage(text: string): boolean {
   return /\bEADDRINUSE\b|address already in use|port .* (already )?in use|only one usage of each socket address/i.test(
     text
@@ -91,10 +93,6 @@ export function compareVersions(left: string, right: string): number {
     }
   }
   return 0;
-}
-
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
 export function getString(value: unknown): string | undefined {

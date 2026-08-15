@@ -1,4 +1,5 @@
 import type { ProviderLimitStatus, ProviderLimitWindow } from '../../shared/protocol';
+import { formatRelativeReset } from './time-format';
 
 export function formatVariantLabel(variant: string) {
   return variant
@@ -349,20 +350,4 @@ function formatCompactValue(value: number, unit?: ProviderLimitWindow['unit']) {
   if (unit === 'usd') return value.toFixed(1).replace(/\.0$/, '');
   if (Number.isInteger(value) || value >= 10) return `${Math.round(value)}`;
   return value.toFixed(1).replace(/\.0$/, '');
-}
-
-function formatRelativeReset(resetAt: number, now: number) {
-  const remainingMs = Math.max(resetAt - now, 0);
-  if (remainingMs < 1000) return '<1s';
-
-  const totalSeconds = Math.round(remainingMs / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-
-  const totalMinutes = Math.round(totalSeconds / 60);
-  if (totalMinutes < 60) return `${totalMinutes}m`;
-
-  const totalHours = Math.round(totalMinutes / 60);
-  if (totalHours < 48) return `${totalHours}h`;
-
-  return `${Math.round(totalHours / 24)}d`;
 }

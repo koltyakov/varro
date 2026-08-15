@@ -9,6 +9,7 @@ import type {
   QuestionRequest,
 } from '../shared/opencode-types';
 import { normalizeSessionTitle } from '../shared/session-title';
+import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import { logger } from './logger';
 
@@ -283,7 +284,10 @@ export class SessionStateManager {
     switch (type) {
       case 'session.created':
       case 'session.updated': {
-        this.rememberSessionMetadata(asRecord(props?.info), getString(props?.sessionID));
+        this.rememberSessionMetadata(
+          asRecord(props?.info) ?? undefined,
+          getString(props?.sessionID)
+        );
         break;
       }
       case 'session.deleted': {
@@ -337,7 +341,7 @@ export class SessionStateManager {
         changed =
           (error && isAbortedErrorRecord(error)
             ? this.clearAbortedSession(sessionID)
-            : this.markSessionFailed(sessionID, error)) || changed;
+            : this.markSessionFailed(sessionID, error ?? undefined)) || changed;
         break;
       }
       case 'message.updated': {
@@ -1281,10 +1285,6 @@ function validateBlockingRequestSnapshots(value: unknown): BlockingRequestSnapsh
     .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-}
-
 function getString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -1406,7 +1406,7 @@ function serializeQuestionRequestProps(props: Record<string, unknown>): Record<s
 
   const questions = Array.isArray(props.questions)
     ? props.questions
-        .map((item) => serializeQuestionDefinition(asRecord(item)))
+        .map((item) => serializeQuestionDefinition(asRecord(item) ?? undefined))
         .filter((item): item is NonNullable<typeof item> => item !== null)
     : [];
   if (Array.isArray(props.questions)) {
@@ -1432,7 +1432,7 @@ function serializeQuestionDefinition(question: Record<string, unknown> | undefin
   const header = trimOptionalString(getString(question.header));
   const options = Array.isArray(question.options)
     ? question.options
-        .map((item) => serializeQuestionOption(asRecord(item)))
+        .map((item) => serializeQuestionOption(asRecord(item) ?? undefined))
         .filter((item): item is NonNullable<typeof item> => item !== null)
         .slice(0, MAX_PERSISTED_METADATA_ENTRIES)
     : [];

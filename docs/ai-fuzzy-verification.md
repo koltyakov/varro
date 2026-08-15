@@ -64,7 +64,7 @@ Build first, then verify the deterministic contracts nearest to the fuzzy scenar
 
 ```sh
 npm run build
-npm run test -- src/webview/components/MessageList.test.ts
+npm run test -- src/webview/components/MessageList
 npm run test -- src/webview/components/message-list/virtualization.test.ts
 npm run test:e2e -- e2e/tests/scroll-auto-scroll.spec.ts
 npm run test:e2e -- e2e/tests/scroll-streaming.spec.ts
@@ -506,7 +506,7 @@ Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the
 
 Likely deterministic homes include:
 
-- `src/webview/components/MessageList.test.ts`
+- `src/webview/components/MessageList.*.test.ts`
 - `src/webview/components/message-list/virtualization.test.ts`
 - `e2e/tests/scroll-auto-scroll.spec.ts`
 - `e2e/tests/scroll-streaming.spec.ts`

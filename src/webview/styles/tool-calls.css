@@ -2709,6 +2709,10 @@ kbd {
   overscroll-behavior: contain;
 }
 
+.user-message-terminal-code-block pre.code-block {
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
+}
+
 .user-message-empty {
   color: var(--color-vscode-muted);
   font-style: italic;

@@ -1,7 +1,8 @@
 import type { OpenCodeModelRoute, ServerEvent } from '../shared/protocol';
+import { asRecord as asRecordShared } from '../shared/type-utils';
 
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+  return asRecordShared(value) ?? undefined;
 }
 
 export function assertValidJson(value: string, label: string) {

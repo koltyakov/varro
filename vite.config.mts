@@ -6,11 +6,12 @@ import { defineConfig } from 'vite';
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [solid(), tailwindcss()],
   optimizeDeps: {
     entries: ['preview.html', 'e2e/harness/index.html'],
   },
+  server: mode === 'e2e' ? { hmr: false, watch: null } : undefined,
   build: {
     outDir: resolve(projectRoot, 'dist/webview'),
     emptyOutDir: true,
@@ -27,4 +28,4 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 900,
   },
-});
+}));

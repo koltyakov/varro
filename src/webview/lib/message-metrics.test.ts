@@ -3,10 +3,7 @@ import type { AssistantMessage, FileDiff, Message, MessageEntry, Part, Provider 
 import {
   getAssistantDiffRequest,
   formatCost,
-  formatDuration,
   formatNumber,
-  formatTurnDuration,
-  formatRelativeAge,
   getAssistantDuration,
   getAssistantTotalTokens,
   getContextWindow,
@@ -85,28 +82,9 @@ describe('message metrics helpers', () => {
     ).toBe(false);
   });
 
-  it('formats numbers and durations across thresholds', () => {
+  it('formats numbers', () => {
     expect(formatNumber(undefined)).toBe('0');
     expect(formatNumber(1_234.4)).toBe('1,234');
-    expect(formatDuration(undefined)).toBe('');
-    expect(formatDuration(500)).toBe('500ms');
-    expect(formatDuration(1_500)).toBe('2s');
-    expect(formatDuration(9_500)).toBe('10s');
-    expect(formatDuration(15_000)).toBe('15s');
-    expect(formatDuration(125_000)).toBe('2m 5s');
-    expect(formatDuration(60_000)).toBe('1m');
-    expect(formatDuration(7_200_000)).toBe('2h');
-    expect(formatDuration(3_660_000)).toBe('1h 1m');
-    expect(formatDuration(90_000_000)).toBe('1d 1h');
-    expect(formatDuration(172_800_000)).toBe('2d');
-  });
-
-  it('clamps sub-second turn durations to <1s', () => {
-    expect(formatTurnDuration(undefined)).toBe('<1s');
-    expect(formatTurnDuration(2)).toBe('<1s');
-    expect(formatTurnDuration(999)).toBe('<1s');
-    expect(formatTurnDuration(1_500)).toBe('2s');
-    expect(formatTurnDuration(125_000)).toBe('2m 5s');
   });
 
   it('formats cost values', () => {
@@ -243,26 +221,6 @@ describe('message metrics helpers', () => {
       )
     ).toEqual(diffs);
     expect(getTaskDiffs(assistantMessage(), diffs)).toEqual(diffs);
-  });
-
-  it('formats relative age across all thresholds', () => {
-    const now = 1_000_000_000;
-    expect(formatRelativeAge(now, now)).toBe('now');
-    expect(formatRelativeAge(now - 30_000, now)).toBe('now');
-    expect(formatRelativeAge(now - 5 * 60_000, now)).toBe('5m');
-    expect(formatRelativeAge(now - 59 * 60_000, now)).toBe('59m');
-    expect(formatRelativeAge(now - 3 * 3_600_000, now)).toBe('3h');
-    expect(formatRelativeAge(now - 23 * 3_600_000, now)).toBe('23h');
-    expect(formatRelativeAge(now - 2 * 86_400_000, now)).toBe('2d');
-    expect(formatRelativeAge(now - 6 * 86_400_000, now)).toBe('6d');
-    expect(formatRelativeAge(now - 7 * 86_400_000, now)).toBe('1w');
-    expect(formatRelativeAge(now - 14 * 86_400_000, now)).toBe('2w');
-    expect(formatRelativeAge(now - 30 * 86_400_000, now)).toBe('4w');
-  });
-
-  it('clamps future timestamps to now in relative age', () => {
-    const now = 1_000_000_000;
-    expect(formatRelativeAge(now + 60_000, now)).toBe('now');
   });
 
   it('detects unsettled tool parts by status', () => {

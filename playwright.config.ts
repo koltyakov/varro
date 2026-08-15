@@ -18,7 +18,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm exec vite -- --host 127.0.0.1 --port 4174 --strictPort',
+    command: 'npm exec vite -- --mode e2e --host 127.0.0.1 --port 4174 --strictPort',
     url: 'http://127.0.0.1:4174/e2e/harness/index.html',
     reuseExistingServer: false,
     timeout: 120_000,

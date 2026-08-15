@@ -8,6 +8,7 @@ import {
   latestAssistantFinishedBeforeLoading,
 } from '../../lib/message-metrics';
 import { isRunningSessionStatus } from '../../lib/session-event-reducer';
+import { logWarn } from '../../lib/log';
 import {
   invalidateSessionMessageWindowRequests,
   resetSessionMessageWindowForRefetch,
@@ -573,7 +574,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     } else if (isSessionInActiveTree(sessionId) && !isActiveTreeWorking()) {
       uiStore.stopLoading();
     }
-    deps.syncSession(sessionId).catch(() => {});
+    deps
+      .syncSession(sessionId)
+      .catch((err) => logWarn('session-event syncSession after session.idle', err));
     deps.repairSessionTitle?.(sessionId).catch((err) => deps.logError('repairSessionTitle', err));
     if (sessionId === deps.getActiveSessionId()) {
       const activeMessages = deps.getMessages();
@@ -682,7 +685,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
     }
     if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
-    deps.syncSession(sessionId).catch(() => {});
+    deps
+      .syncSession(sessionId)
+      .catch((err) => logWarn('session-event syncSession after session.error', err));
     deps.syncSessionMessages(sessionId).catch((err) => deps.logError('syncSessionMessages', err));
   };
   const schedulePendingPermissionSync = () => {
@@ -1065,7 +1070,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const sid = data.properties?.sessionID as string | undefined;
       if (!sid) return;
       sessionStore.setSessionCompacting(sid, false);
-      deps.syncSession(sid).catch(() => {});
+      deps
+        .syncSession(sid)
+        .catch((err) => logWarn('session-event syncSession after session.compacted', err));
       if (isSessionInActiveTree(sid)) {
         deps.syncSessionMessages(sid).catch((err) => deps.logError('syncSessionMessages', err));
       }
@@ -1112,9 +1119,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (assistantCompleted) {
           sessionStore.markSessionResponseCompleted(sessionID, partialMessage.time?.completed);
         }
-        deps.syncSession(sessionID).catch(() => {});
+        deps
+          .syncSession(sessionID)
+          .catch((err) => logWarn('session-event syncSession after message.updated', err));
       } else if (assistantFinished) {
-        deps.syncSession(sessionID).catch(() => {});
+        deps
+          .syncSession(sessionID)
+          .catch((err) => logWarn('session-event syncSession after active message.updated', err));
       }
 
       if (isSessionInActiveTree(sessionID)) {

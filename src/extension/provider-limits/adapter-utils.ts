@@ -1,14 +1,6 @@
 import type { ProviderLimitStatus } from '../../shared/protocol';
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-export function getString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { asRecord, getString } from '../../shared/type-utils';
 
 export function parseFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;

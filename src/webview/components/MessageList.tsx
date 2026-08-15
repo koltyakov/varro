@@ -4159,6 +4159,21 @@ export function MessageList() {
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
+    if (target === containerRef) {
+      const pageSize = containerRef.clientHeight;
+      const maximumScrollTop = Math.max(0, containerRef.scrollHeight - pageSize);
+      let nextScrollTop = containerRef.scrollTop;
+      if (event.key === 'ArrowUp') nextScrollTop -= 40;
+      else if (event.key === 'ArrowDown') nextScrollTop += 40;
+      else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) {
+        nextScrollTop -= pageSize;
+      } else if (event.key === 'PageDown' || event.key === ' ') {
+        nextScrollTop += pageSize;
+      } else if (event.key === 'Home') nextScrollTop = 0;
+      else if (event.key === 'End') nextScrollTop = maximumScrollTop;
+      event.preventDefault();
+      containerRef.scrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
+    }
   }
 
   function cancelStickyNavigation() {
@@ -6015,6 +6030,7 @@ export function MessageList() {
         ref={containerRef}
         class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
         role="log"
+        tabIndex={0}
         aria-live="polite"
         aria-label="Chat messages"
         onWheel={onWheel}

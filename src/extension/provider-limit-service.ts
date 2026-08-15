@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ServerStatus } from '../shared/protocol';
+import { asRecord } from '../shared/type-utils';
 import { fetchProviderLimitFromAdapter } from './provider-limits';
 import type { OpenCodeServer } from './server';
 import {
@@ -324,10 +325,6 @@ type ProviderLimitLoadResult = {
   ttlStatus: ProviderLimitStatus;
   rememberLastKnownGood?: boolean;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
-}
 
 function createProviderLimitLoadResult(
   status: ProviderLimitStatus,

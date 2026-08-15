@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
 import { postMessage } from '../lib/bridge';
+import { logWarn } from '../lib/log';
 import {
   codeHighlighterVersion,
   highlightCode,
@@ -1631,7 +1632,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
           type: 'vscode/open',
           payload: { path: payload.path, line: payload.line, kind: 'file' },
         });
-      } catch {}
+      } catch (err) {
+        logWarn('markdown file-path-link payload parse', err);
+      }
       return;
     }
 

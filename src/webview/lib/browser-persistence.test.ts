@@ -7,16 +7,19 @@ declare global {
       getState(): Record<string, unknown>;
       setState(state: Record<string, unknown>): void;
     };
+    __sendToExtension?: (message: unknown) => void;
   }
 }
 
 beforeEach(() => {
   window.localStorage.clear();
   delete window.__vscodeWebviewState;
+  delete window.__sendToExtension;
 });
 
 afterEach(() => {
   delete window.__vscodeWebviewState;
+  delete window.__sendToExtension;
   vi.restoreAllMocks();
 });
 
@@ -90,5 +93,82 @@ describe('BrowserPersistence', () => {
     } finally {
       if (descriptor) Object.defineProperty(window, 'localStorage', descriptor);
     }
+  });
+
+  it('warns once when storage removal keeps failing', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    const failingStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {
+        throw new Error('quota exceeded');
+      },
+    } as unknown as Storage;
+    const storage = new BrowserPersistence(failingStorage);
+
+    storage.remove('varro.lastOpenedView');
+    storage.remove('varro.composerDraft');
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'log',
+      payload: {
+        msg: 'browser-persistence:remove:varro.lastOpenedView',
+        error: 'quota exceeded',
+        level: 'warn',
+      },
+    });
+  });
+
+  it('warns once when writing the VSCode webview state keeps failing', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    window.__vscodeWebviewState = {
+      getState: () => {
+        throw new Error('state unavailable');
+      },
+      setState: vi.fn(),
+    };
+    const storage = new BrowserPersistence();
+
+    storage.set('varro.lastOpenedView', { type: 'sessions-list' });
+    storage.set('varro.composerDraft', 'a');
+    storage.set('varro.composerDraft', 'ab');
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'log',
+      payload: {
+        msg: 'browser-persistence:vscode-state-write:varro.lastOpenedView',
+        error: 'state unavailable',
+        level: 'warn',
+      },
+    });
+  });
+
+  it('warns once when removing from the VSCode webview state keeps failing', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    window.__vscodeWebviewState = {
+      getState: () => {
+        throw new Error('state unavailable');
+      },
+      setState: vi.fn(),
+    };
+    const storage = new BrowserPersistence();
+
+    storage.remove('varro.lastOpenedView');
+    storage.remove('varro.composerDraft');
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'log',
+      payload: {
+        msg: 'browser-persistence:vscode-state-remove:varro.lastOpenedView',
+        error: 'state unavailable',
+        level: 'warn',
+      },
+    });
   });
 });

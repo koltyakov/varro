@@ -9,6 +9,8 @@ import type {
 } from '../types';
 import { validateFileDiffs } from './validate-diffs';
 
+export { formatDuration, formatTurnDuration, formatRelativeAge } from './time-format';
+
 export type TokenUsage = {
   total: number;
   input: number;
@@ -46,33 +48,6 @@ const numberFormatter = new Intl.NumberFormat('en-US');
 export function formatNumber(value: number | undefined): string {
   if (!value) return '0';
   return numberFormatter.format(Math.round(value));
-}
-
-export function formatDuration(ms: number | undefined): string {
-  if (!ms || ms < 0) return '';
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) {
-    return `${Math.round(ms / 1000)}s`;
-  }
-
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (hours < 24) return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-
-  const days = Math.floor(hours / 24);
-  const remainingHours = hours % 24;
-  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
-}
-
-/** Turn summaries stay at second granularity; sub-second work reads "<1s". */
-export function formatTurnDuration(ms: number | undefined): string {
-  if (!ms || ms < 1000) return '<1s';
-  return formatDuration(ms);
 }
 
 export function formatCost(cost: number | undefined): string {
@@ -151,20 +126,6 @@ export function getStepFinishParts(parts: Part[]): StepFinishPart[] {
 export function getTaskDiffs(message: Message, fallback: FileDiff[] | undefined): FileDiff[] {
   if (message.role === 'user') return validateFileDiffs(message.summary?.diffs);
   return fallback || [];
-}
-
-export function formatRelativeAge(timestamp: number, now: number): string {
-  const totalMinutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
-
-  if (totalMinutes < 1) return 'now';
-
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor(totalMinutes / 60);
-
-  if (days >= 7) return `${Math.floor(days / 7)}w`;
-  if (days > 0) return `${days}d`;
-  if (hours > 0) return `${hours}h`;
-  return `${totalMinutes}m`;
 }
 
 /**

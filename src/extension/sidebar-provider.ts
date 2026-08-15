@@ -12,6 +12,7 @@ import { CommitMessageService } from './commit-message-service';
 import type { ContextProvider } from './context-provider';
 import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
+import { readExtensionConfigState } from './extension-config';
 import { FileSearchService } from './file-search-service';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
@@ -22,7 +23,6 @@ import {
   ProviderFileRefreshController,
 } from './provider-file-refresh-controller';
 import type { ProviderSignatureFileSystem } from './provider-file-refresh-controller';
-import { readExtensionConfigState } from './provider-limit-config';
 import { ProviderLimitService } from './provider-limit-service';
 import { PinnedSessionManager } from './pinned-session-manager';
 import { QueuedMessageStore } from './queued-message-store';

@@ -1,8 +1,12 @@
 import type { Persistence } from '../../shared/persistence';
 import { postMessage } from './bridge';
+import { logWarn } from './log';
 
 export class BrowserPersistence implements Persistence {
+  private warnedRemoveFailure = false;
   private warnedSetFailure = false;
+  private warnedVsCodeStateRemoveFailure = false;
+  private warnedVsCodeStateWriteFailure = false;
   private readonly storage: Storage | undefined;
 
   constructor(storage?: Storage) {
@@ -22,7 +26,11 @@ export class BrowserPersistence implements Persistence {
   }
 
   set(key: string, value: unknown) {
-    writeVsCodeWebviewStateValue(key, value);
+    const vscodeStateFailure = writeVsCodeWebviewStateValue(key, value);
+    if (vscodeStateFailure && !this.warnedVsCodeStateWriteFailure) {
+      this.warnedVsCodeStateWriteFailure = true;
+      logWarn(`browser-persistence:vscode-state-write:${key}`, vscodeStateFailure.error);
+    }
 
     try {
       const serialized = JSON.stringify(value);
@@ -48,11 +56,20 @@ export class BrowserPersistence implements Persistence {
   }
 
   remove(key: string) {
-    removeVsCodeWebviewStateValue(key);
+    const vscodeStateFailure = removeVsCodeWebviewStateValue(key);
+    if (vscodeStateFailure && !this.warnedVsCodeStateRemoveFailure) {
+      this.warnedVsCodeStateRemoveFailure = true;
+      logWarn(`browser-persistence:vscode-state-remove:${key}`, vscodeStateFailure.error);
+    }
 
     try {
       this.storage?.removeItem(key);
-    } catch {}
+    } catch (err) {
+      if (!this.warnedRemoveFailure) {
+        this.warnedRemoveFailure = true;
+        logWarn(`browser-persistence:remove:${key}`, err);
+      }
+    }
   }
 }
 
@@ -82,20 +99,26 @@ function readVsCodeWebviewStateValue<T>(key: string): T | undefined {
   }
 }
 
-function writeVsCodeWebviewStateValue(key: string, value: unknown) {
+function writeVsCodeWebviewStateValue(key: string, value: unknown): { error: unknown } | undefined {
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;
     api.setState({ ...api.getState(), [key]: value });
-  } catch {}
+    return undefined;
+  } catch (err) {
+    return { error: err };
+  }
 }
 
-function removeVsCodeWebviewStateValue(key: string) {
+function removeVsCodeWebviewStateValue(key: string): { error: unknown } | undefined {
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;
     const next = { ...api.getState() };
     delete next[key];
     api.setState(next);
-  } catch {}
+    return undefined;
+  } catch (err) {
+    return { error: err };
+  }
 }

@@ -31,6 +31,7 @@ import type {
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import { parseHealthResponse, type HealthResponse } from '../../shared/health';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
+import { asRecord } from '../../shared/type-utils';
 import { applySessionShareOverride } from './session-share-overrides';
 import type {
   ProviderAuthAuthorization,
@@ -586,10 +587,6 @@ function getSharedPermissionList(): Promise<unknown[]> {
   return sharedRequest(permissionListSlot, () =>
     apiCall('GET', '/permission').then((response) => requireArray(response, '/permission'))
   );
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
 type EventHandler<TEvent extends ServerEvent = ServerEvent> = (data: TEvent) => void;

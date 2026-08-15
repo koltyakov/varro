@@ -1,0 +1,684 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render } from 'solid-js/web';
+import type { AgentPart, FilePart, Part, TextPart } from '../../types';
+import { resetDefaultAppState, setState as setAppState, state } from '../../lib/state';
+import {
+  UserMessageContent,
+  UserMessagePreviewContent,
+  formatUserMessageMarkupSize,
+  getUserMessageMarkupSuffix,
+  getUserMessagePreviewText,
+  hasUserMessageEditableContent,
+} from './UserMessageContent';
+
+const selectSessionMock = vi.hoisted(() => vi.fn());
+const retryMessageMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../hooks/useOpenCode', () => ({
+  retryMessage: retryMessageMock,
+  selectSession: selectSessionMock,
+}));
+
+let container: HTMLDivElement | null = null;
+let cleanup: (() => void) | undefined;
+let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
+
+function textPart(id: string, text: string): TextPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'text',
+    text,
+  };
+}
+
+function imageFilePart(id: string, filename: string): FilePart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'image/png',
+    filename,
+    url: `https://example.test/${id}.png`,
+  };
+}
+
+function pdfFilePart(id: string, filename: string): FilePart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'file',
+    mime: 'application/pdf',
+    filename,
+    url: `https://example.test/${id}`,
+  };
+}
+
+function agentPart(id: string, name: string, marker = `@${name}`): AgentPart {
+  return {
+    id,
+    sessionID: 'session-1',
+    messageID: 'message-1',
+    type: 'agent',
+    name,
+    source: { value: marker, start: 0, end: marker.length },
+  };
+}
+
+function renderUserContent(parts: Part[]) {
+  cleanup = render(() => UserMessageContent({ parts }), container!);
+}
+
+function installSendToExtension() {
+  const send = vi.fn();
+  (window as unknown as Record<string, unknown>).__sendToExtension = send;
+  return send;
+}
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  originalResizeObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  resetDefaultAppState();
+});
+
+afterEach(() => {
+  cleanup?.();
+  cleanup = undefined;
+  container?.remove();
+  container = null;
+  if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
+  else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+  document.body.classList.remove('chat-image-preview-open');
+  selectSessionMock.mockReset();
+  retryMessageMock.mockReset();
+  setAppState('sessions', []);
+  setAppState('allAgents', []);
+  resetDefaultAppState();
+  delete (window as unknown as Record<string, unknown>).__sendToExtension;
+});
+
+describe('UserMessageContent', () => {
+  it('renders each text part as its own paragraph in the scroll container', () => {
+    renderUserContent([textPart('text-1', 'Line 1'), textPart('text-2', 'Line 2')]);
+
+    const scrollContainer = container?.querySelector('.user-message-text-scroll');
+    expect(scrollContainer).toBeInstanceOf(HTMLDivElement);
+    expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
+    expect(scrollContainer?.querySelectorAll('.user-message-text')[0]?.textContent).toBe('Line 1');
+    expect(scrollContainer?.querySelectorAll('.user-message-text')[1]?.textContent).toBe('Line 2');
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-empty')).toBeNull();
+  });
+
+  it('shows the empty placeholder for prompts without renderable content', () => {
+    renderUserContent([textPart('text-1', '[Working directory: /repo]'), textPart('text-2', '')]);
+
+    expect(container?.querySelector('.user-message-empty')?.textContent).toBe('(no content)');
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('renders fenced code with its language and leaves fenced URLs unlinkified', () => {
+    renderUserContent([textPart('text-1', '```text\nhttps://example.test/docs\n```')]);
+
+    expect(container?.querySelector('.user-message-code-block .code-block-lang')?.textContent).toBe(
+      'text'
+    );
+    expect(container?.querySelector('.user-message-code-block code')?.textContent).toBe(
+      'https://example.test/docs\n'
+    );
+    expect(container?.querySelector('a.external-link')).toBeNull();
+  });
+
+  it('compacts standalone SVG markup into a chip that opens in an editor', () => {
+    const send = installSendToExtension();
+    const svg = '<svg viewBox="0 0 10 10">\n  <path d="M0 0h10v10z" />\n</svg>';
+    renderUserContent([textPart('text-svg', svg)]);
+
+    const chip = container?.querySelector<HTMLButtonElement>('.user-message-format-chip');
+    expect(chip?.textContent).toBe('SVG59 B');
+    expect(chip?.getAttribute('data-copy-marker')).toBe(svg);
+    expect(chip?.getAttribute('title')).toBe('Open SVG content - 59 B');
+    expect(container?.querySelector('.user-message-text')?.textContent).not.toContain('<svg');
+
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: svg,
+        title: 'SVG user message',
+        language: 'xml',
+      },
+    });
+  });
+
+  it('keeps leading prose while compacting a trailing XML document into a chip', () => {
+    const prompt = [
+      'In input, change the agent chip icon to',
+      '',
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<svg width="16px" height="16px" viewBox="0 0 24 24">',
+      '  <rect x="2" y="21" width="7" height="5" />',
+      '</svg>',
+    ].join('\n');
+    renderUserContent([textPart('text-prose-svg', prompt)]);
+
+    const messageText = container?.querySelectorAll('.user-message-text');
+    expect(messageText).toHaveLength(2);
+    expect(messageText?.[0]?.textContent).toBe('In input, change the agent chip icon to');
+    expect(messageText?.[1]?.textContent).toBe('SVG143 B');
+    expect(
+      container?.querySelector('.user-message-format-chip')?.getAttribute('data-copy-marker')
+    ).toBe(prompt.slice(prompt.indexOf('<?xml')));
+    expect(container?.textContent).not.toContain('<rect');
+  });
+
+  it('leaves malformed markup as plain message text', () => {
+    const malformed = '<svg><path></svg>';
+    renderUserContent([textPart('text-malformed-svg', malformed)]);
+
+    expect(container?.querySelector('.user-message-format-chip')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(malformed);
+  });
+
+  it('renders attachment-only prompts as a standalone attachment strip', () => {
+    renderUserContent([textPart('text-1', '[Active file: src/shared/extension-message.ts]')]);
+
+    const attachments = container?.querySelector('.message-attachments');
+    expect(attachments).toBeInstanceOf(HTMLDivElement);
+    expect(attachments?.classList.contains('message-attachments-standalone')).toBe(true);
+    expect(attachments?.textContent).toContain('extension-message.ts');
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+  });
+
+  it('orders visible attachments above text, other file parts, and images', () => {
+    renderUserContent([
+      textPart('text-1', '[Active file: src/shared/extension-message.ts]'),
+      pdfFilePart('file-1', 'spec.pdf'),
+      textPart('text-2', 'Please review this.'),
+      imageFilePart('image-1', 'diagram.png'),
+    ]);
+
+    const rendered = container?.querySelector('.rendered-markdown');
+    expect(rendered?.classList.contains('user-message-content-has-image')).toBe(true);
+    const children = Array.from(rendered?.children ?? []);
+    expect(children[0]?.classList.contains('message-attachments')).toBe(true);
+    expect(children[0]?.classList.contains('message-attachments-leading')).toBe(true);
+    expect(children[0]?.textContent).toContain('extension-message.ts');
+    expect(children[1]?.classList.contains('chat-attachment-chip')).toBe(true);
+    expect(children[1]?.textContent).toContain('spec.pdf');
+    expect(children[2]?.classList.contains('user-message-text-scroll')).toBe(true);
+    expect(children[2]?.textContent).toContain('Please review this.');
+    expect(children[3]?.classList.contains('chat-image-figure')).toBe(true);
+    expect(children[3]?.querySelector('img')?.getAttribute('alt')).toBe('diagram.png');
+  });
+
+  it('expands a standalone terminal selection into a terminal code block', () => {
+    renderUserContent([
+      textPart(
+        'text-terminal-selection',
+        '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+      ),
+    ]);
+
+    const terminalBlock = container?.querySelector('.user-message-terminal-code-block');
+    expect(terminalBlock).toBeInstanceOf(HTMLDivElement);
+    expect(terminalBlock?.querySelector('.code-block-lang')?.textContent).toBe('zsh');
+    expect(terminalBlock?.querySelector('.code-block-detail')?.textContent).toBe('2 lines');
+    expect(terminalBlock?.querySelector('code')?.textContent).toBe('npm test\nfailed output');
+    expect(container?.querySelector('.message-attachment-chip')).toBeNull();
+    expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+  });
+
+  it('opens a mixed terminal selection chip as shellscript text', () => {
+    const send = installSendToExtension();
+    renderUserContent([
+      textPart(
+        'text-1',
+        'Why does this fail?\n[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+      ),
+    ]);
+
+    const strip = container?.querySelector('.message-attachments');
+    expect(strip?.classList.contains('message-attachments-leading')).toBe(true);
+    const chip = container?.querySelector<HTMLButtonElement>(
+      '.message-attachment-chip.message-attachment-chip-clickable'
+    );
+    expect(chip).toBeInstanceOf(HTMLButtonElement);
+    expect(chip?.getAttribute('title')).toBe('Terminal: zsh');
+    expect(chip?.textContent).toContain('zsh');
+    expect(chip?.querySelector('.chip-detail')?.textContent).toBe('2 lines');
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Why does this fail?');
+
+    chip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'npm test\nfailed output',
+        title: 'zsh terminal selection',
+        language: 'shellscript',
+      },
+    });
+  });
+
+  it('renders a terminal selection without text as a non-clickable chip', () => {
+    const send = installSendToExtension();
+    renderUserContent([textPart('text-1', '[Selection from terminal zsh]')]);
+
+    const chip = container?.querySelector('.message-attachment-chip');
+    expect(chip).toBeInstanceOf(HTMLSpanElement);
+    expect(chip?.classList.contains('message-attachment-chip-clickable')).toBe(false);
+    expect(chip?.getAttribute('title')).toBe('Terminal: zsh');
+    expect(chip?.textContent).toContain('terminal');
+    expect(container?.querySelector('.user-message-terminal-code-block')).toBeNull();
+
+    chip?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('resolves attachment opens against the workspace with selection lines and directory kind', () => {
+    const send = installSendToExtension();
+    setAppState('editorContext', { ...state.editorContext, workspacePath: '/workspace' });
+    renderUserContent([
+      textPart('text-1', 'Review these\n[Selection from src/main.ts lines 2-4]'),
+      textPart('text-2', 'assets/'),
+    ]);
+
+    const chips = container?.querySelectorAll<HTMLButtonElement>(
+      '.message-attachment-chip-clickable'
+    );
+    expect(chips).toHaveLength(2);
+
+    const selectionChip = Array.from(chips ?? []).find(
+      (chip) => chip.getAttribute('title') === 'src/main.ts:2-4'
+    );
+    expect(selectionChip?.textContent).toContain('main.ts');
+    expect(selectionChip?.querySelector('.chip-detail')?.textContent).toBe('L2-4');
+    selectionChip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/workspace/src/main.ts', line: 2, kind: 'file' },
+    });
+
+    const folderChip = Array.from(chips ?? []).find(
+      (chip) => chip.getAttribute('title') === 'assets/'
+    );
+    expect(folderChip?.textContent).toContain('assets');
+    folderChip?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/workspace/assets', line: undefined, kind: 'directory' },
+    });
+  });
+
+  it('renders inline file mention chips inside the text and keeps unrelated attachments in the strip', () => {
+    renderUserContent([
+      textPart('text-1', 'Test @README.md'),
+      textPart('text-2', 'README.md'),
+      textPart('text-3', 'preview.html'),
+    ]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.textContent).toBe('Test README.md');
+    expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
+    expect(messageText?.querySelector('.inline-chip')?.getAttribute('data-copy-marker')).toBe(
+      '@README.md'
+    );
+
+    const strip = container?.querySelector('.message-attachments');
+    expect(strip).toBeInstanceOf(HTMLDivElement);
+    expect(strip?.textContent).toContain('preview.html');
+    expect(strip?.textContent).not.toContain('README.md');
+  });
+
+  it('renders inline image placeholder chips and opens the matching preview', () => {
+    renderUserContent([
+      textPart('text-1', 'Compare [Image 1] with [Image 2]'),
+      imageFilePart('image-1', 'Image 1'),
+      imageFilePart('image-2', 'Image 2'),
+    ]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.textContent).toBe('Compare Image 1 with Image 2');
+    const imageChips = Array.from(
+      messageText?.querySelectorAll<HTMLButtonElement>('.inline-chip-clickable') ?? []
+    );
+    expect(imageChips.map((chip) => chip.textContent?.trim())).toEqual(['Image 1', 'Image 2']);
+
+    imageChips[1]?.click();
+
+    const overlayImage = document.body.querySelector<HTMLImageElement>('.chat-image-preview-img');
+    expect(overlayImage?.getAttribute('src')).toBe('https://example.test/image-2.png');
+    expect(document.body.querySelector('.chat-image-preview-caption')?.textContent).toContain(
+      'Image 2'
+    );
+    expect(container?.querySelector('.message-image-carousel-caption-row')?.textContent).toContain(
+      '2 / 2'
+    );
+  });
+
+  it('maps the legacy [Image] marker to the first image pill', () => {
+    renderUserContent([textPart('text-1', 'Review [Image]'), imageFilePart('image-1', 'Image 1')]);
+
+    const imageChip = container?.querySelector('.user-message-text .inline-chip');
+    expect(imageChip?.textContent?.trim()).toBe('Image 1');
+    expect(imageChip?.getAttribute('data-copy-marker')).toBe('[Image]');
+  });
+
+  it('renders a single image as a plain figure and closes its preview with Escape', () => {
+    renderUserContent([imageFilePart('image-1', 'diagram.png')]);
+
+    expect(container?.querySelector('.message-image-carousel')).toBeNull();
+    const trigger = container?.querySelector<HTMLButtonElement>('.chat-image-preview-trigger');
+    expect(trigger?.getAttribute('aria-label')).toBe('Open image preview: diagram.png');
+
+    trigger?.click();
+
+    expect(document.body.querySelector('.chat-image-preview-overlay')).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(document.body.classList.contains('chat-image-preview-open')).toBe(true);
+    expect(
+      document.body.querySelector<HTMLImageElement>('.chat-image-preview-img')?.getAttribute('src')
+    ).toBe('https://example.test/image-1.png');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    expect(document.body.querySelector('.chat-image-preview-overlay')).toBeNull();
+    expect(document.body.classList.contains('chat-image-preview-open')).toBe(false);
+  });
+
+  it('steps the image carousel with its navigation controls', () => {
+    renderUserContent([imageFilePart('image-1', 'Image 1'), imageFilePart('image-2', 'Image 2')]);
+
+    const carousel = container?.querySelector('.message-image-carousel');
+    expect(carousel).toBeInstanceOf(HTMLDivElement);
+    const caption = carousel?.querySelector('.message-image-carousel-caption-row');
+    expect(caption?.textContent).toContain('1 / 2');
+    expect(caption?.textContent).toContain('Image 1');
+    expect(carousel?.querySelector('img')?.getAttribute('src')).toBe(
+      'https://example.test/image-1.png'
+    );
+
+    const navButtons = carousel?.querySelectorAll<HTMLButtonElement>('.message-image-carousel-nav');
+    navButtons?.[1]?.click();
+
+    expect(caption?.textContent).toContain('2 / 2');
+    expect(caption?.textContent).toContain('Image 2');
+    expect(caption?.textContent).toContain('image/png');
+    expect(carousel?.querySelector('img')?.getAttribute('src')).toBe(
+      'https://example.test/image-2.png'
+    );
+
+    navButtons?.[0]?.click();
+
+    expect(caption?.textContent).toContain('1 / 2');
+  });
+
+  it('links known session references and selects the session on click', () => {
+    setAppState('sessions', [
+      {
+        id: 'ses_found123',
+        projectID: 'project-1',
+        directory: '/repo',
+        title: 'Permission request states',
+        version: '1',
+        time: { created: 0, updated: 0 },
+      },
+    ]);
+    renderUserContent([
+      textPart('text-1', 'Session session:ses_found123 and session:ses_missing456'),
+    ]);
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.session-reference-link');
+    expect(link?.textContent).toBe('Permission request states');
+    expect(link?.getAttribute('href')).toBe('#session/ses_found123');
+    expect(link?.getAttribute('data-copy-marker')).toBe('session:ses_found123');
+    expect(link?.getAttribute('data-session-id')).toBe('ses_found123');
+    expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
+    expect(container?.textContent).toContain('session:ses_missing456');
+
+    link?.click();
+    expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
+  });
+
+  it('renders HTTPS URLs as external links and opens them through the bridge', () => {
+    const send = installSendToExtension();
+    renderUserContent([
+      textPart('text-1', 'See https://example.test/docs but not http://insecure.test/x.'),
+    ]);
+
+    const links = container?.querySelectorAll<HTMLAnchorElement>('a.external-link');
+    expect(links).toHaveLength(1);
+    const link = links?.[0];
+    expect(link?.getAttribute('href')).toBe('https://example.test/docs');
+    expect(link?.getAttribute('data-external')).toBe('true');
+    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(container?.querySelector('.user-message-text')?.textContent).toContain(
+      'See https://example.test/docs but not http://insecure.test/x.'
+    );
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://example.test/docs' },
+    });
+  });
+
+  it('keeps one-line prose ending in a URL as message text', () => {
+    renderUserContent([textPart('text-1', 'Test message https://iconoir.com')]);
+
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      'Test message https://iconoir.com'
+    );
+    expect(
+      container?.querySelector<HTMLAnchorElement>('a.external-link')?.getAttribute('href')
+    ).toBe('https://iconoir.com');
+  });
+
+  it('hides delegated vision routing context while keeping inline image and agent chips', () => {
+    const image = imageFilePart('image-1', '1786723794731-image-1');
+    image.source = {
+      text: {
+        value: '{file:/tmp/varro-drops/drop-1/1786723794731-image-1}',
+        start: 102,
+        end: 162,
+      },
+      type: 'file',
+      path: '/tmp/varro-drops/drop-1/1786723794731-image-1',
+    };
+
+    renderUserContent([
+      textPart('text-1', "What's on this image? [Image 1] @vision"),
+      agentPart('agent-1', 'vision'),
+      textPart(
+        'text-2',
+        '[Image for @vision: /tmp/varro-drops/drop-1/1786723794731-image-1]\n' +
+          'When calling the vision subagent, include {file:/tmp/varro-drops/drop-1/1786723794731-image-1} in its task prompt.'
+      ),
+      image,
+    ]);
+
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(
+      "What's on this image? Image 1 Vision"
+    );
+    expect(container?.querySelectorAll('.user-message-text .inline-chip')).toHaveLength(2);
+    expect(container?.textContent).not.toContain('When calling the vision subagent');
+    expect(container?.querySelector('.chat-image-img')).toBeInstanceOf(HTMLImageElement);
+  });
+
+  it('renders agent parts as leading chips when not mentioned in the text', () => {
+    renderUserContent([textPart('text-1', 'Run the review'), agentPart('agent-1', 'vision')]);
+
+    const strip = container?.querySelector('.message-attachments');
+    expect(strip?.classList.contains('message-attachments-leading')).toBe(true);
+    const chip = strip?.querySelector('.message-attachment-chip');
+    expect(chip?.textContent).toContain('Vision');
+    expect(chip?.getAttribute('title')).toBe('Agent: Vision');
+    expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe('Run the review');
+  });
+
+  it('renders textual agent mentions from known agents as inline chips', () => {
+    setAppState('allAgents', [
+      {
+        name: 'vision',
+        mode: 'subagent',
+        permission: [],
+      },
+    ]);
+    renderUserContent([textPart('text-1', "What's on the image? @vision")]);
+
+    const chip = container?.querySelector('.user-message-text .inline-chip');
+    expect(chip?.textContent).toBe('Vision');
+    expect(chip?.getAttribute('data-copy-marker')).toBe('@vision');
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+  });
+
+  it('toggles the overflow fade as the prompt text scrolls', () => {
+    renderUserContent([textPart('text-1', 'A long prompt')]);
+
+    const scrollContainer = container?.querySelector<HTMLElement>('.user-message-text-scroll');
+    expect(scrollContainer).not.toBeNull();
+    Object.defineProperties(scrollContainer!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 240 },
+    });
+
+    scrollContainer!.scrollTop = 0;
+    scrollContainer!.dispatchEvent(new Event('scroll'));
+    expect(scrollContainer?.classList.contains('has-more-below')).toBe(true);
+
+    scrollContainer!.scrollTop = 140;
+    scrollContainer!.dispatchEvent(new Event('scroll'));
+    expect(scrollContainer?.classList.contains('has-more-below')).toBe(false);
+  });
+
+  it('copies selection text restoring inline attachment markers', () => {
+    renderUserContent([
+      textPart('text-1', 'Check @handlers.js and @README.md today'),
+      textPart('text-2', 'handlers.js'),
+      textPart('text-3', 'README.md'),
+    ]);
+
+    const messageCard = container?.querySelector<HTMLElement>('.rendered-markdown');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(messageCard!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData },
+    });
+
+    messageCard?.dispatchEvent(event);
+
+    expect(setData).toHaveBeenCalledWith('text/plain', 'Check @handlers.js and @README.md today');
+  });
+});
+
+describe('UserMessagePreviewContent', () => {
+  it('renders the first meaningful text with inline chips', () => {
+    cleanup = render(
+      () =>
+        UserMessagePreviewContent({
+          parts: [
+            textPart('text-1', '[Working directory: /repo]'),
+            textPart('text-2', 'Check @README.md'),
+            textPart('text-3', 'README.md'),
+          ],
+          fallback: 'Fallback',
+        }),
+      container!
+    );
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.textContent).toBe('Check README.md');
+    expect(messageText?.querySelectorAll('.inline-chip')).toHaveLength(1);
+  });
+
+  it('falls back to the provided label when no message text exists', () => {
+    cleanup = render(
+      () =>
+        UserMessagePreviewContent({
+          parts: [imageFilePart('image-1', 'shot.png')],
+          fallback: 'Attachments only',
+        }),
+      container!
+    );
+
+    expect(container?.textContent).toBe('Attachments only');
+    expect(container?.querySelector('.user-message-text')).toBeNull();
+  });
+});
+
+describe('getUserMessageMarkupSuffix', () => {
+  it('splits prefix prose from a trailing markup document', () => {
+    const prompt = [
+      'In input, change the agent chip icon to',
+      '',
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<svg width="16px" height="16px" viewBox="0 0 24 24">',
+      '  <rect x="2" y="21" width="7" height="5" />',
+      '</svg>',
+    ].join('\n');
+
+    const suffix = getUserMessageMarkupSuffix(prompt);
+    expect(suffix?.prefix).toBe('In input, change the agent chip icon to');
+    expect(suffix?.content.startsWith('<?xml')).toBe(true);
+    expect(suffix?.format).toEqual({ kind: 'svg', byteSize: 143 });
+  });
+
+  it('returns null for plain prose', () => {
+    expect(getUserMessageMarkupSuffix('Just prose with no markup')).toBeNull();
+  });
+});
+
+describe('formatUserMessageMarkupSize', () => {
+  it.each([
+    [500, '500 B'],
+    [1023, '1023 B'],
+    [1024, '1 KB'],
+    [1536, '1.5 KB'],
+    [20480, '20 KB'],
+  ])('formats %d bytes as %s', (byteSize, expected) => {
+    expect(formatUserMessageMarkupSize(byteSize)).toBe(expected);
+  });
+});
+
+describe('hasUserMessageEditableContent', () => {
+  it('requires prompt text or re-addable context', () => {
+    expect(hasUserMessageEditableContent([textPart('text-1', 'fix the test')])).toBe(true);
+    expect(hasUserMessageEditableContent([textPart('text-1', '[Working directory: /repo]')])).toBe(
+      false
+    );
+    expect(hasUserMessageEditableContent([])).toBe(false);
+    expect(hasUserMessageEditableContent([imageFilePart('image-1', 'shot.png')])).toBe(true);
+    expect(
+      hasUserMessageEditableContent([
+        textPart('text-1', '[Selection from terminal zsh]\n```text\nnpm test\n```'),
+      ])
+    ).toBe(true);
+  });
+});
+
+describe('getUserMessagePreviewText', () => {
+  it('falls back to folder, agent, and empty-content labels', () => {
+    expect(getUserMessagePreviewText([textPart('text-1', 'assets/')])).toBe('Folder: assets');
+    expect(getUserMessagePreviewText([agentPart('agent-1', 'vision')])).toBe('Agent: Vision');
+    expect(getUserMessagePreviewText([])).toBe('(no content)');
+  });
+});

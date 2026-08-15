@@ -67,10 +67,7 @@ export function RichComposerArea(props: {
 
   createEffect(() => {
     const current = preview();
-    if (
-      current &&
-      !props.chips.some((chip) => chip.id === current.chipId && chip.previewImage)
-    ) {
+    if (current && !props.chips.some((chip) => chip.id === current.chipId && chip.previewImage)) {
       setPreview(null);
     }
   });

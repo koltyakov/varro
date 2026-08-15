@@ -5,7 +5,7 @@ import type {
   ProviderLimitUnit,
   ProviderLimitWindow,
 } from '../../shared/protocol';
-import { getString } from '../../shared/type-utils';
+import { asRecord, getString } from '../../shared/type-utils';
 
 export type ProviderAuthRecord =
   | { type: 'oauth'; access: string; accountId?: string }
@@ -425,10 +425,6 @@ function parseDurationMs(value: string) {
     else if (unit === 'd') total += amount * 86_400_000;
   }
   return Math.round(total);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
 function parseFiniteNumber(value: unknown) {

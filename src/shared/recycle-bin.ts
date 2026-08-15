@@ -1,4 +1,5 @@
 import type { RecycleBinEntry, RecycleBinSession } from './protocol';
+import { asRecord } from './type-utils';
 import { isSameWorkspacePath } from './workspace-path';
 
 export function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {
@@ -168,10 +169,4 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isSaneTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }

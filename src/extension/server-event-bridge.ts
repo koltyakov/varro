@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ExtensionMessage, ServerEvent, ServerStatus } from '../shared/protocol';
 import { parseServerEvent } from '../shared/protocol';
+import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import type { HiddenSessionManager } from './hidden-session-manager';
@@ -305,10 +306,6 @@ function mergeDeltaEvent(
     ...event,
     properties: { ...event.properties, [fragmentField]: fragment },
   } as ServerEvent;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
 function getRawEventType(value: unknown): string | null {

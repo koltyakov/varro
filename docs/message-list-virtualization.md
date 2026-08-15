@@ -590,7 +590,7 @@ Changes to `MessageList`, `VirtualizedContent`, row measurement, message windowi
 attachments, or inline editing should run at least:
 
 ```sh
-npm run test -- src/webview/components/MessageList.test.ts
+npm run test -- src/webview/components/MessageList
 npm run test -- src/webview/components/message-list/virtualization.test.ts
 npm run test -- src/webview/hooks/useOpenCode.sessionState.test.ts
 npm run test:e2e -- e2e/tests/scroll-auto-scroll.spec.ts

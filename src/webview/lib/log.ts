@@ -10,3 +10,16 @@ export function logError(context: string, err: unknown): void {
     },
   });
 }
+
+export function logWarn(context: string, detail?: unknown): void {
+  postMessage({
+    type: 'log',
+    payload: {
+      msg: context,
+      ...(detail !== undefined
+        ? { error: detail instanceof Error ? detail.message : String(detail) }
+        : {}),
+      level: 'warn',
+    },
+  });
+}

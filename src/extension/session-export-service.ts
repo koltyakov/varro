@@ -3,6 +3,7 @@ import { mkdtemp, open, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
+import { asRecord } from '../shared/type-utils';
 import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
 import { assertValidJson, normalizeCliOutput } from './sidebar-provider-utils';
@@ -170,12 +171,6 @@ export class SessionExportService {
       }
     });
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function getString(value: unknown): string | undefined {

@@ -398,6 +398,38 @@ describe('MarkdownRenderer', () => {
     });
   });
 
+  it('warns when a file-path-link payload fails to parse', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () => MarkdownRenderer({ content: '[Open file](./src/webview/App.tsx)' }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link).toBeInstanceOf(HTMLAnchorElement);
+    link!.dataset.file = '{invalid';
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'log',
+      payload: {
+        msg: 'markdown file-path-link payload parse',
+        error: expect.any(String),
+        level: 'warn',
+      },
+    });
+  });
+
   it('links workspace session IDs using their session titles', () => {
     setState('sessions', [
       {

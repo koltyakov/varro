@@ -9,6 +9,7 @@ import type {
   Session,
   SessionEventInfo,
 } from '../../types';
+import { asRecord } from '../../../shared/type-utils';
 
 export function isCompleteMessageInfo(value: unknown): value is Message {
   if (!value || typeof value !== 'object') return false;
@@ -236,12 +237,6 @@ function parseAssistantTokens(value: unknown): AssistantMessage['tokens'] | null
     reasoning,
     cache: { read: cacheRead, write: cacheWrite },
   };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 function getFiniteNumber(value: unknown): number | undefined {

@@ -102,6 +102,10 @@ const {
   };
 });
 
+const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
+
+vi.mock('../lib/log', () => ({ logWarn }));
+
 vi.mock('../lib/client', () => ({
   serverEvents: {
     on: serverEventsOn,
@@ -4273,6 +4277,72 @@ describe('registerSessionEventHandlers', () => {
     expect(setSessionCompactingStore).toHaveBeenCalledWith('session-1', false);
     expect(syncSession).toHaveBeenCalledWith('session-1');
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
+  });
+
+  it('warns when post-event syncSession calls fail', async () => {
+    const handlers = installHandlers();
+    const failure = new Error('offline');
+    const syncSession = vi.fn().mockRejectedValue(failure);
+    logWarn.mockClear();
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'active-session',
+        syncSession,
+        syncSessionMessages: vi.fn().mockResolvedValue(undefined),
+      })
+    );
+
+    handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+    handlers.get('session.error')?.({
+      properties: {
+        sessionID: 'session-1',
+        error: { name: 'UnknownError', data: { message: 'Command failed' } },
+      },
+    });
+    handlers.get('session.compacted')?.({ properties: { sessionID: 'session-1' } });
+    handlers.get('message.updated')?.({
+      properties: {
+        sessionID: 'background-session',
+        info: {
+          id: 'assistant-1',
+          sessionID: 'background-session',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+    handlers.get('message.updated')?.({
+      properties: {
+        sessionID: 'active-session',
+        info: {
+          id: 'assistant-2',
+          sessionID: 'active-session',
+          role: 'assistant',
+          time: { completed: 2 },
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(logWarn).toHaveBeenCalledWith('session-event syncSession after session.idle', failure);
+      expect(logWarn).toHaveBeenCalledWith(
+        'session-event syncSession after session.error',
+        failure
+      );
+      expect(logWarn).toHaveBeenCalledWith(
+        'session-event syncSession after session.compacted',
+        failure
+      );
+      expect(logWarn).toHaveBeenCalledWith(
+        'session-event syncSession after message.updated',
+        failure
+      );
+      expect(logWarn).toHaveBeenCalledWith(
+        'session-event syncSession after active message.updated',
+        failure
+      );
+    });
   });
 
   it('merges sync session updates by sessionID without overwriting existing fields with nulls', () => {
