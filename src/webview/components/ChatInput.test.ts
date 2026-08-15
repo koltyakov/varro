@@ -2281,6 +2281,33 @@ describe('ChatInput', () => {
     ).toBe(true);
   });
 
+  it('shows queue positions in the drag handles while Alt is held', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'first' },
+      { id: 'q2', sessionId: 'session-1', text: 'second' },
+      { id: 'q3', sessionId: 'session-1', text: 'third' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const handles = container!.querySelectorAll<HTMLButtonElement>(
+      '[aria-label^="Reorder queued message:"]'
+    );
+    expect([...handles].every((handle) => handle.querySelector('svg') !== null)).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
+
+    expect([...handles].map((handle) => handle.textContent?.trim())).toEqual(['1', '2', '3']);
+    expect([...handles].every((handle) => handle.querySelector('svg') === null)).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' }));
+
+    expect(container?.querySelector('.chat-queue-position')).toBeNull();
+    expect([...handles].every((handle) => handle.querySelector('svg') !== null)).toBe(true);
+  });
+
   it('keeps an edited queue row visible and cancels editing from the row', () => {
     setIsLoading(true);
     setState('activeSessionId', 'session-1');

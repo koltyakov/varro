@@ -47,6 +47,23 @@ export function QueuedMessages(props: {
 }) {
   const [draggedItemId, setDraggedItemId] = createSignal<string | null>(null);
   const [dragOverItemId, setDragOverItemId] = createSignal<string | null>(null);
+  const [isAltPressed, setIsAltPressed] = createSignal(false);
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') setIsAltPressed(true);
+  };
+  const handleKeyUp = (event: KeyboardEvent) => {
+    if (event.key === 'Alt') setIsAltPressed(false);
+  };
+  const handleBlur = () => setIsAltPressed(false);
+  window.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('keyup', handleKeyUp);
+  window.addEventListener('blur', handleBlur);
+  onCleanup(() => {
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('keyup', handleKeyUp);
+    window.removeEventListener('blur', handleBlur);
+  });
 
   return (
     <div class={`chat-queue-container${draggedItemId() ? ' is-reordering' : ''}`}>
@@ -148,7 +165,7 @@ export function QueuedMessages(props: {
                     aria-grabbed={draggedItemId() === item.id}
                   >
                     <Show
-                      when={draggedItemId()}
+                      when={draggedItemId() || isAltPressed()}
                       fallback={
                         <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                           <circle cx="5" cy="3" r="1" />
