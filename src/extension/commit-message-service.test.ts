@@ -272,12 +272,14 @@ beforeEach(() => {
 
 describe('CommitMessageService', () => {
   it('generates a scoped staged-only message with the VS Code model setting', async () => {
-    const patch = `${'x'.repeat(100_005)}SECRET_TAIL`;
+    const patch = `${'x'.repeat(60_005)}SECRET_TAIL`;
     const repository = createRepository('/repo with spaces', patch);
     repository.state.indexChanges.push({ uri: uri('/repo with spaces/docs/complete path.md') });
     repository.log.mockResolvedValue([
       { message: 'feat: prior style\r\n\r\nBody' },
       { message: 'fix: second example' },
+      { message: 'docs(extension): document the workflow' },
+      { message: 'Merge branch main' },
     ]);
     setGitRepositories([repository], { active: false });
     const request = createRequest({
@@ -309,7 +311,7 @@ describe('CommitMessageService', () => {
     expect(repository.diff).toHaveBeenCalledTimes(2);
     expect(repository.diff).toHaveBeenNthCalledWith(1, true);
     expect(repository.diff).toHaveBeenNthCalledWith(2, true);
-    expect(repository.log).toHaveBeenCalledWith({ maxEntries: 10 });
+    expect(repository.log).toHaveBeenCalledWith({ maxEntries: 50 });
     expect(ensureServerStarted).toHaveBeenCalledOnce();
     expect(isOpenAIPro).not.toHaveBeenCalled();
     expect(mocks.window.withProgress).toHaveBeenCalledWith(
@@ -356,18 +358,22 @@ describe('CommitMessageService', () => {
     });
     const system = messageBody?.system as string;
     const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
-    expect(system).toContain('untrusted data');
-    expect(system).toContain('at most 72 characters');
+    expect(system).toContain('untrusted evidence');
+    expect(system).toContain('72 characters or fewer');
+    expect(system).toContain('primary intent');
     expect(prompt).toContain('src/a.ts');
     expect(prompt).toContain('docs/complete path.md');
     expect(prompt).toContain('feat: prior style');
     expect(prompt).toContain('fix: second example');
+    expect(prompt).toContain('Conventional Commits is established');
+    expect(prompt).toContain('Observed scopes: extension');
+    expect(prompt).not.toContain('Merge branch main');
     expect(prompt).not.toContain('Body');
-    expect(prompt).not.toContain('SECRET_TAIL');
+    expect(prompt).toContain('SECRET_TAIL');
     const sentDiff = prompt
       .split('----- BEGIN UNTRUSTED STAGED DIFF -----\n')[1]
       ?.split('\n----- END UNTRUSTED STAGED DIFF -----')[0];
-    expect(sentDiff).toHaveLength(100_000);
+    expect(sentDiff).toHaveLength(60_000);
 
     expect(repository.inputBox.value).toBe(
       'feat: generated subject\n\nExplain this.\n\nMore context.'
@@ -381,6 +387,38 @@ describe('CommitMessageService', () => {
     expect(hiddenSessions.retainUntilDeleted).toHaveBeenCalledWith('helper-1');
     expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
     expect(mocks.logger.error).not.toHaveBeenCalled();
+  });
+
+  it('balances oversized diff context across generated and source files', async () => {
+    const patch = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      `+${'lock-data'.repeat(12_000)}`,
+      'diff --git a/src/checkout.ts b/src/checkout.ts',
+      '--- a/src/checkout.ts',
+      '+++ b/src/checkout.ts',
+      '@@ -1 +1 @@',
+      '-return charge();',
+      '+return retryFailedCharge();',
+    ].join('\n');
+    const repository = createRepository('/repo', patch);
+    repository.state.indexChanges.push({ uri: uri('/repo/package-lock.json') });
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    const sentDiff = prompt
+      .split('----- BEGIN UNTRUSTED STAGED DIFF -----\n')[1]
+      ?.split('\n----- END UNTRUSTED STAGED DIFF -----')[0];
+    expect(sentDiff).toHaveLength(60_000);
+    expect(sentDiff).toContain('retryFailedCharge');
+    expect(sentDiff).toContain('omitted staged diff content');
+    expect(prompt).toContain('sampled across files');
   });
 
   it('omits the model when small_model is absent and treats history failure as best effort', async () => {
@@ -579,6 +617,24 @@ describe('CommitMessageService', () => {
 
     expect(repository.inputBox.value).toContain('valid subject');
     expect(mocks.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('drops a body that only repeats the subject', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const { service } = createService(
+      createRequest({
+        messageResponse: {
+          info: {
+            structured: { subject: 'Handle failed charges', body: 'Handle failed charges.' },
+          },
+        },
+      })
+    );
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('Handle failed charges');
   });
 
   it('warns without calling OpenCode when there are no staged changes', async () => {
@@ -894,6 +950,21 @@ describe('CommitMessageService', () => {
       expect.stringContaining('invalid commit message')
     );
     expect(JSON.stringify(mocks.logger.error.mock.calls)).not.toContain(patch);
+  });
+
+  it('rejects a generic generated subject', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const { service } = createService(
+      createRequest({ messageResponse: { info: { structured: { subject: 'Update files' } } } })
+    );
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('invalid commit message')
+    );
   });
 
   it('surfaces a meaningful provider error without applying output', async () => {
