@@ -3541,12 +3541,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             completionSelectedIndex={completionIndex()}
             completionHeader={completionHeader()}
             onInput={(text, cursorOffset) => {
-              setHistoryIndex(null);
-              setHistoryDraft('');
-              setInputText(text);
-              setCaretPosition(cursorOffset);
-              setCompletionIndex(0);
-              setSuppressCompletion(false);
+              batch(() => {
+                setHistoryIndex(null);
+                setHistoryDraft('');
+                setInputText(text);
+                setCaretPosition(cursorOffset);
+                setCompletionIndex(0);
+                setSuppressCompletion(false);
+              });
             }}
             onKeyDown={handleKeydown}
             onHistory={applyComposerHistoryAction}

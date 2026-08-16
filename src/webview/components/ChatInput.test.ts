@@ -1885,6 +1885,54 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.changed-files-block')).toBe(files);
   });
 
+  it.each([
+    { trigger: '@', initial: '@hel', shortened: '@he' },
+    { trigger: '&', initial: '&aut', shortened: '&au' },
+    { trigger: '/', initial: '/zzv', shortened: '/zz' },
+  ])('keeps the $trigger completion menu mounted on backspace', async ({ initial, shortened }) => {
+    setState('allAgents', [
+      {
+        name: 'helper',
+        description: 'Help with the task',
+        mode: 'subagent',
+        builtIn: false,
+        permission: [],
+      },
+    ]);
+    setState('sessions', [session('session-auth', 2_000, { title: 'Authentication' })]);
+    setState('commands', [
+      {
+        name: 'zzvarrotest',
+        description: 'Run tests',
+        template: 'Run tests',
+      },
+    ]);
+    setInputText(initial);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    editor.focus();
+    setCollapsedSelection(editor.firstChild, initial.length);
+    editor.dispatchEvent(new KeyboardEvent('keyup', { key: initial.at(-1), bubbles: true }));
+    await flushAsyncWork();
+
+    const menu = container?.querySelector('.composer-completion-menu');
+    expect(menu).not.toBeNull();
+
+    editor.textContent = shortened;
+    if (!editor.firstChild) throw new Error('Expected updated composer editor');
+    setCollapsedSelection(editor.firstChild, shortened.length);
+    editor.dispatchEvent(
+      new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })
+    );
+    await flushAsyncWork();
+
+    expect(inputText()).toBe(shortened);
+    expect(container?.querySelector('.composer-completion-menu')).toBe(menu);
+  });
+
   it.each(['&session-auth', '&sessions:session-auth'])(
     'looks up session titles from %s and inserts a session reference',
     async (lookup) => {
