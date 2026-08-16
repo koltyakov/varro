@@ -98,6 +98,11 @@ what was omitted.
 6. Observe the complete run directly in the tracked Extension Development Host. Record the scenario,
    step, marker, and preceding actions immediately when a suspected failure occurs and again after
    settling. Screenshots are optional supporting evidence, not pass preconditions.
+   A marker is an exact painted DOM element whose own bounding rectangle intersects the viewport, not
+   merely text found inside an intersecting message row. Capture and reuse that element's stable message
+   ID plus render key or a uniquely identifying descendant. If Varro preserves a different visible
+   render item during reflow, record both identities and do not infer a jump from movement of the
+   containing row or an adjacent card.
 7. Keep DevTools closed for the first pass because docking changes webview dimensions. Use it only for
    diagnosis or metric capture, and record that the run became instrumented.
 
@@ -251,6 +256,9 @@ Pass invariants:
 
 - The recorded marker remains visually fixed during reflow until direct movement requests a new
   destination.
+- The recorded marker must be the same painted element before and after reflow. Movement of a row box
+  is not a failure when wrapping above the actual visible anchor changes that row's geometry while the
+  observed anchor element remains fixed.
 - Wrapped text, code, tables, diffs, and tool cards are neither clipped nor overlapped.
 - No stale blank row appears after changing a setting that alters offscreen heights.
 - Native `PageDown` reaches a new destination and a later resize does not undo it.
@@ -430,6 +438,9 @@ Treat any of the following as a failure even if the final screen settles correct
 
 A visual suspicion is not yet a root cause. Preserve the observation time, marker, preceding actions,
 and layout. Capture a screenshot when available, then replay before editing production code.
+For resize and measurement suspicions, first prove that the same painted element moved. Text lookup on
+an outer row, a first-intersecting-row heuristic, or movement of a neighboring card is insufficient
+when the active anchor may be a visible assistant render item inside that row.
 
 ## Run Ledger
 

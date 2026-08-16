@@ -367,7 +367,7 @@ input:focus-visible {
 .latest-user-message-sticky-meta {
   position: absolute;
   right: 10px;
-  bottom: 2px;
+  bottom: 6px;
   display: flex;
   align-items: center;
   gap: 8px;

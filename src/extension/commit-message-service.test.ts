@@ -89,6 +89,7 @@ type HiddenSessionActions = Pick<
 
 type RequestOptions = {
   config?: unknown;
+  deleteResponse?: unknown | (() => unknown | Promise<unknown>);
   providers?: unknown;
   messageResponse?: unknown | (() => unknown | Promise<unknown>);
   sessionResponse?: unknown | (() => unknown | Promise<unknown>);
@@ -192,7 +193,13 @@ function createRequest(options: RequestOptions = {}) {
       );
     }
     if (method === 'POST' && /\/session\/[^/]+\/abort\?/.test(path)) return true;
-    if (method === 'DELETE' && path.startsWith('/session/')) return true;
+    if (method === 'DELETE' && path.startsWith('/session/')) {
+      return resolveOption(
+        Object.prototype.hasOwnProperty.call(options, 'deleteResponse')
+          ? options.deleteResponse
+          : true
+      );
+    }
     throw new Error(`Unexpected request ${method} ${path}`);
   });
   return request;
@@ -843,6 +850,25 @@ describe('CommitMessageService', () => {
 
     mocks.triggerCancellation();
     await first;
+  });
+
+  it('applies a generated message without waiting for helper-session deletion', async () => {
+    const repository = createRepository();
+    setGitRepositories([repository]);
+    const deletion = deferred<unknown>();
+    const request = createRequest({ deleteResponse: () => deletion.promise });
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe(
+      'feat: generated message\n\nExplain the generated change.'
+    );
+    expect(request).toHaveBeenCalledWith('DELETE', '/session/helper-1?directory=%2Frepo');
+    expect(mocks.executeCommand).toHaveBeenCalledWith('workbench.view.scm');
+
+    deletion.resolve(true);
+    await flush();
   });
 
   it('rejects malformed output, cleans up, and never logs the staged patch', async () => {

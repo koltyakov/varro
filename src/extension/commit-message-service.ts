@@ -377,7 +377,8 @@ export class CommitMessageService {
       throwIfCancelled(attempt);
       return normalizeGeneratedMessage(response);
     } finally {
-      await this.cleanupHelperSession(attempt);
+      // Cleanup is best effort and must not delay delivery of an already-generated message.
+      void this.cleanupHelperSession(attempt);
     }
   }
 

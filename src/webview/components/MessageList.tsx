@@ -3651,7 +3651,10 @@ export function MessageList() {
     if (autoScroll()) setAutoScroll(false);
   }
 
-  function startFollowLoop(sessionId: string, options?: { immediate?: boolean }) {
+  function startFollowLoop(
+    sessionId: string,
+    options?: { immediate?: boolean; observedStreaming?: boolean }
+  ) {
     if (appendScrollRafId) return;
     if (stickyNavigationOwnsScroll()) {
       activeFollowLoopSessionId = null;
@@ -3661,13 +3664,13 @@ export function MessageList() {
     const currentlyStreaming =
       state.streamingText.length > 0 || !!state.streamingPartId || !!visibleRunningToolPart();
     if (activeFollowLoopSessionId === sessionId) {
-      if (currentlyStreaming) bottomFollowObservedStreaming = true;
+      if (currentlyStreaming || options?.observedStreaming) bottomFollowObservedStreaming = true;
       return;
     }
     if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
 
     activeFollowLoopSessionId = sessionId;
-    bottomFollowObservedStreaming = currentlyStreaming;
+    bottomFollowObservedStreaming = currentlyStreaming || !!options?.observedStreaming;
 
     if (options?.immediate) {
       tick();
@@ -4939,6 +4942,7 @@ export function MessageList() {
         if (!sessionId || state.activeSessionId !== sessionId) return;
         if (startPendingAppendScrollTransition(sessionId)) return;
         performScroll();
+        startFollowLoop(sessionId, { observedStreaming: true });
       });
     }
     prevLoading = loading;
