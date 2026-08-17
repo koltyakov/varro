@@ -329,7 +329,7 @@ export function Message(props: {
   });
   const shouldRender = () => {
     if (compactionDivider()) return true;
-    if (isUser()) return hasUserContent();
+    if (isUser()) return hasUserContent() || hasOmittedDiffs();
     return !!assistantErrorMessage() || hasVisibleAssistantOutput() || visibleDiffs().length > 0;
   };
   const hasStructuredAssistantParts = () =>
@@ -373,6 +373,8 @@ export function Message(props: {
       parsed.agentParts.length > 0
     );
   });
+  const hasOmittedDiffs = () =>
+    props.info.role === 'user' && props.info.summary?.diffsOmitted === true;
   const isWrapperlessUserMessage = createMemo(() => {
     const parsed = parsedUserContent();
     return parsed ? isWrapperlessUserMessageContent(parsed) : false;
@@ -465,6 +467,14 @@ export function Message(props: {
             >
               {sentTimestamp()}
             </time>
+          </Show>
+          <Show when={hasOmittedDiffs()}>
+            <div class="change-set-omission" role="note">
+              <span class="change-set-omission-title">Large change set condensed</span>
+              <span class="change-set-omission-detail">
+                File-by-file events were omitted to keep this chat responsive.
+              </span>
+            </div>
           </Show>
           <Show when={assistant() && visibleDiffs().length > 0}>
             <DiffSummary

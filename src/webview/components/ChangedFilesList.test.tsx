@@ -151,6 +151,50 @@ describe('ChangedFilesList', () => {
     expect(container?.querySelector('.changed-files-lines')?.textContent).toContain('-30K');
   });
 
+  it('caps large file lists and hides incomplete line totals', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [
+      {
+        info: assistantMessage(),
+        parts: Array.from({ length: 101 }, (_, index) =>
+          fileEditPart(`node_modules/package-${index}/index.js`)
+        ),
+      },
+    ]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.querySelector('.todo-block-count')?.textContent).toBe('Details omitted');
+    expect(container?.querySelector('.changed-files-lines')).toBeNull();
+    container?.querySelector<HTMLButtonElement>('.todo-block-header')?.click();
+    expect(container?.querySelectorAll('.changed-files-row')).toHaveLength(100);
+  });
+
+  it('shows a trimmed-summary notice when no file rows were retained', () => {
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session()]);
+    setState('messages', [
+      {
+        info: {
+          id: 'user-1',
+          sessionID: 'session-1',
+          role: 'user',
+          time: { created: 1 },
+          agent: 'build',
+          model: { providerID: 'provider-1', modelID: 'model-1' },
+          summary: { diffs: [], diffsTruncated: true },
+        },
+        parts: [],
+      },
+    ]);
+
+    cleanup = render(() => <ChangedFilesList />, container!);
+
+    expect(container?.querySelector('.todo-block-count')?.textContent).toBe('Details omitted');
+    expect(container?.querySelector('.changed-files-lines')).toBeNull();
+  });
+
   it('opens file rows in VS Code diff view', () => {
     const send = vi.fn();
     window.__sendToExtension = send;

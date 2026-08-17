@@ -20,7 +20,14 @@ export type UserMessage = {
   role: 'user';
   time: { created: number };
   format?: OutputFormat;
-  summary?: { title?: string; body?: string; diffs: FileDiff[] };
+  summary?: {
+    title?: string;
+    body?: string;
+    diffs: FileDiff[];
+    diffCount?: number;
+    diffsOmitted?: boolean;
+    diffsTruncated?: boolean;
+  };
   agent: string;
   model: { providerID: string; modelID: string; variant?: string };
   system?: string;
@@ -336,6 +343,9 @@ export type Session = {
     deletions: number;
     files: number;
     diffs?: FileDiff[];
+    diffCount?: number;
+    diffsOmitted?: boolean;
+    diffsTruncated?: boolean;
   };
   cost?: number;
   tokens?: {

@@ -978,6 +978,7 @@ export function MessageList() {
       state.streamingPartId ||
       state.streamingText.length > 0 ||
       visibleRunningToolPart() ||
+      activeSessionWorking() ||
       pendingExpansionScrollAnchor
     );
     if (!contentFollowRequired && activeFollowLoopSessionId && initialScrollRafId) {
@@ -3773,7 +3774,10 @@ export function MessageList() {
     }
     bottomFollowSettleFrames = 0;
     const currentlyStreaming =
-      state.streamingText.length > 0 || !!state.streamingPartId || !!visibleRunningToolPart();
+      state.streamingText.length > 0 ||
+      !!state.streamingPartId ||
+      !!visibleRunningToolPart() ||
+      activeSessionWorking();
     if (activeFollowLoopSessionId === sessionId) {
       if (currentlyStreaming || options?.observedStreaming) bottomFollowObservedStreaming = true;
       return;
@@ -3824,7 +3828,10 @@ export function MessageList() {
       }
 
       const isStreaming =
-        state.streamingText.length > 0 || state.streamingPartId || visibleRunningToolPart();
+        state.streamingText.length > 0 ||
+        state.streamingPartId ||
+        visibleRunningToolPart() ||
+        activeSessionWorking();
       if (isStreaming) bottomFollowObservedStreaming = true;
       const stable =
         Math.abs(currentHeight - lastAutoScrolledTrackHeight) <= 1 &&
@@ -6401,7 +6408,10 @@ export function MessageList() {
             when={!editingMessage() ? trailingAssistantDialogSummary() : null}
             fallback={
               <Show when={reserveLoadingRow() && !editingMessage() && !!state.activeSessionId}>
-                <LoadingRow compacting={isSessionCompacting()} visible={showLoadingRow()} />
+                <LoadingRow
+                  compacting={isSessionCompacting()}
+                  visible={!state.messagesLoading && showLoadingRow()}
+                />
               </Show>
             }
           >

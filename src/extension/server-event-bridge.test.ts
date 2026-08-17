@@ -179,6 +179,48 @@ describe('ServerEventBridge', () => {
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: parsed });
   });
 
+  it('bounds diff details in server events before persisting or posting them', () => {
+    useParsedEvents();
+    const { bridge, handlers, post, sessionState } = createMocks();
+    const event = {
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'message-1',
+          sessionID: 'session-1',
+          summary: {
+            diffs: Array.from({ length: 101 }, (_, index) => ({
+              file: `node_modules/package-${index}/index.js`,
+              additions: 1,
+              deletions: 2,
+              before: 'large before content',
+              after: 'large after content',
+            })),
+          },
+        },
+      },
+    } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(event);
+
+    const forwarded = (sessionState.handleServerEvent as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as ServerEvent;
+    const summary = (forwarded.properties as { info: { summary: Record<string, unknown> } }).info
+      .summary as {
+      diffs: unknown[];
+      diffCount: number;
+      diffsOmitted: boolean;
+      diffsTruncated: boolean;
+    };
+    expect(summary.diffs).toEqual([]);
+    expect(summary.diffCount).toBe(101);
+    expect(summary.diffsOmitted).toBe(true);
+    expect(summary.diffsTruncated).toBe(true);
+    expect(JSON.stringify(forwarded)).not.toContain('large before content');
+    expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: forwarded });
+  });
+
   it('applies an event ID only once', () => {
     useParsedEvents();
     const { bridge, handlers, post, sessionState } = createMocks();

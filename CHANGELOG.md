@@ -2,6 +2,15 @@
 
 This changelog summarizes the main user-facing improvements in each Varro minor release line. Patch releases are consolidated into their parent minor version. Dates reflect the development history.
 
+## 0.25.x - August 2026
+
+- Added an Auto accept edits permission mode that approves file changes while continuing to ask before other tool actions.
+- Improved commit message generation with richer staged-change and repository-history context, stronger validation, and safer handling of existing Source Control input.
+- Added automatic retries for sessions interrupted by transient connection failures.
+- Preserved chat content, loaded history, context, and scroll position more reliably across session activity, updates, and reopened conversations.
+- Improved slash-command completion behavior, including direct execution of `/stats` from the completion menu and stable suggestions while editing trigger text.
+- Added warnings for unignored generated dependency trees and compact handling of very large generated changes in prompts, summaries, and changed-file views.
+
 ## 0.24.x - August 2026
 
 - Streamlined assistant activity with compact summaries, clearer loading progress, expandable details, collapsed thinking blocks, turn navigation markers, and response forking.

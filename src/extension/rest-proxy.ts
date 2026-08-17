@@ -28,7 +28,10 @@ import { logger } from './logger';
 import type { ProviderLimitService } from './provider-limit-service';
 import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
-import type { OpenCodeResponseMetadata } from './open-code-transport';
+import {
+  OpenCodeResponseTooLargeError,
+  type OpenCodeResponseMetadata,
+} from './open-code-transport';
 import type {
   PendingAttentionReconciliation,
   SessionBusyAttempt,
@@ -44,12 +47,16 @@ import {
 } from './util/plan-file';
 import { getRelativePath } from './util/path';
 import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
+import { projectSummaryDiffs } from './util/summary-projection';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
 const SESSION_SUMMARY_CACHE_LIMIT = 200;
+const SESSION_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
+const SESSION_MESSAGE_FALLBACK_MAX_BYTES = 256 * 1024 * 1024;
+const SESSION_MESSAGE_RECOVERY_PAGE_SIZE = 20;
 
 type RecycleBinRequest =
   | { kind: 'list' }
@@ -126,6 +133,7 @@ export interface RestProxyCallbacks {
   getRequestGeneration(): number;
   getStatus(): ServerStatus;
   ensureServerStarted(): Promise<string | undefined>;
+  confirmPromptAdmission(workspacePath: string): Promise<boolean>;
   refreshOpenCodeConfig?(
     previousRouting: OpenCodeModelRouting,
     currentRouting: OpenCodeModelRouting
@@ -347,6 +355,19 @@ export class RestProxy {
       // admission, and on fast turns the finish can land first; pre-marking
       // here ensures the busy marker exists before any finish event arrives.
       const promptSessionID = this.parsePromptSessionID(method, payload.path);
+      if (promptSessionID) {
+        const workspacePath =
+          explicitWorkspaceDirectory ??
+          this.getCurrentWorkspaceResolutionRoot() ??
+          this.getCurrentWorkspacePath();
+        if (
+          workspacePath &&
+          normalizeWorkspaceIdentity(workspacePath) &&
+          !(await this.callbacks.confirmPromptAdmission(workspacePath))
+        ) {
+          throw new Error('Prompt cancelled because generated dependencies are not ignored by Git');
+        }
+      }
       const promptAttempt = promptSessionID
         ? this.callbacks.sessionState.markSessionBusy(promptSessionID)
         : undefined;
@@ -373,9 +394,7 @@ export class RestProxy {
       let responsePromise: Promise<unknown>;
       try {
         responsePromise = paginatedMessages
-          ? this.callbacks.server.request(method, forwardedPath, payload.body, {
-              captureNextCursor: true,
-            })
+          ? this.requestPaginatedMessages(method, forwardedPath, payload.body)
           : this.callbacks.server.request(method, forwardedPath, payload.body);
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
@@ -505,6 +524,38 @@ export class RestProxy {
     return /^\/session\/[^/]+\/message$/.test(url.pathname) && url.searchParams.has('limit');
   }
 
+  private async requestPaginatedMessages(method: string, path: string, body: unknown) {
+    try {
+      return await this.callbacks.server.request(method, path, body, {
+        captureNextCursor: true,
+        maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+      });
+    } catch (err) {
+      if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
+      const url = new URL(path, 'http://localhost');
+      const requestedLimit = Number(url.searchParams.get('limit'));
+      if (
+        Number.isSafeInteger(requestedLimit) &&
+        requestedLimit > SESSION_MESSAGE_RECOVERY_PAGE_SIZE
+      ) {
+        url.searchParams.set('limit', String(SESSION_MESSAGE_RECOVERY_PAGE_SIZE));
+        const recoveryPath = `${url.pathname}${url.search}`;
+        logger.warn(`Retrying oversized message page with a smaller window: ${recoveryPath}`);
+        return this.callbacks.server.request(method, recoveryPath, body, {
+          captureNextCursor: true,
+          maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+        });
+      }
+      logger.warn(`Trimming oversized file summaries while loading ${path}`);
+      return this.callbacks.server.request(method, path, body, {
+        captureNextCursor: true,
+        maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
+        maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+        stripSummaryDiffs: true,
+      });
+    }
+  }
+
   private parseSessionPageLimit(method: string, path: string) {
     if (method !== 'GET') return null;
     const url = new URL(path, 'http://localhost');
@@ -517,7 +568,7 @@ export class RestProxy {
 
   private formatPaginatedSessionsResponse(response: unknown, limit: number, constrained: boolean) {
     if (!Array.isArray(response)) throw new Error('Malformed session list response');
-    const sessions = response.slice(0, limit);
+    const sessions = response.slice(0, limit).map(projectSummaryDiffs);
     const hasMore = response.length > limit;
     this.rememberSessionPage(sessions, !constrained && !hasMore, constrained);
     return { items: this.filterVisibleSessions(sessions), hasMore };
@@ -572,19 +623,21 @@ export class RestProxy {
     const encodedSessionID = encodeURIComponent(sessionID);
     const [diffs, messages, sessions] = await Promise.all([
       this.callbacks.server.request('GET', `/session/${encodedSessionID}/diff`),
-      this.callbacks.server.request('GET', `/session/${encodedSessionID}/message`),
+      this.requestSessionMessagesForSummary(`/session/${encodedSessionID}/message`),
       this.readSessionListForSummary(),
     ]);
     const diffStats = summarizeSessionDiff(diffs);
+    const historyStatsUnavailable = hasOmittedMessageHistory(messages);
     const summary = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
     const tokenBreakdown = summary.tokenBreakdown;
     const model = summarizeSessionModel(messages);
     return {
       ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
       tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
+      ...(historyStatsUnavailable ? { historyStatsUnavailable: true } : {}),
       ...(model ? { model } : {}),
-      tokenBreakdown,
-      ...(summary.nestedContextBreakdown.length > 0
+      ...(!historyStatsUnavailable ? { tokenBreakdown } : {}),
+      ...(!historyStatsUnavailable && summary.nestedContextBreakdown.length > 0
         ? { nestedContextBreakdown: summary.nestedContextBreakdown }
         : {}),
       ...summarizeSessionDuration(messages),
@@ -629,6 +682,25 @@ export class RestProxy {
       }
     );
     return request;
+  }
+
+  private async requestSessionMessagesForSummary(path: string) {
+    try {
+      return await this.callbacks.server.request('GET', path);
+    } catch (err) {
+      if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
+      logger.warn(`Skipping oversized message history while summarizing ${path}`);
+      return [
+        {
+          info: {
+            role: 'user',
+            time: { created: 0 },
+            summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
+          },
+          parts: [],
+        },
+      ];
+    }
   }
 
   private async summarizeSessionTreeTokens(
@@ -732,8 +804,9 @@ export class RestProxy {
   ) {
     const url = new URL(path, 'http://localhost');
     if (method === 'GET' && url.pathname === '/session' && Array.isArray(data)) {
-      this.rememberSessionList(data);
-      return this.filterVisibleSessions(data);
+      const sessions = data.map(projectSummaryDiffs);
+      this.rememberSessionList(sessions);
+      return this.filterVisibleSessions(sessions);
     }
     if (
       method === 'GET' &&
@@ -1084,7 +1157,7 @@ export class RestProxy {
         droppedParts += 1;
       }
 
-      normalized.push({ info, parts });
+      normalized.push({ info: projectSummaryDiffs(info), parts });
     }
 
     if (droppedEntries > 0 || droppedParts > 0) {
@@ -1748,10 +1821,12 @@ function summarizeSessionMessageEdits(
   if (!Array.isArray(value)) return { files: 0, additions: 0, deletions: 0 };
 
   const diffs: Record<string, unknown>[] = [];
+  let filesTruncated = false;
   for (const entry of value) {
     const message = asRecord(entry);
     const info = asRecord(message?.info);
     const summary = asRecord(info?.summary);
+    if (summary?.diffsOmitted === true || summary?.diffsTruncated === true) filesTruncated = true;
     if (Array.isArray(summary?.diffs)) diffs.push(...summary.diffs.flatMap(asDiffRecord));
 
     if (!Array.isArray(message?.parts)) continue;
@@ -1797,7 +1872,15 @@ function summarizeSessionMessageEdits(
       });
     }
   }
-  return summarizeSessionDiff(diffs);
+  return { ...summarizeSessionDiff(diffs), ...(filesTruncated ? { filesTruncated: true } : {}) };
+}
+
+function hasOmittedMessageHistory(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((entry) => {
+    const info = asRecord(asRecord(entry)?.info);
+    return asRecord(info?.summary)?.diffsOmitted === true;
+  });
 }
 
 function asDiffRecord(value: unknown): Record<string, unknown>[] {
@@ -1816,7 +1899,9 @@ function readFirstString(source: Record<string, unknown>, keys: readonly string[
 function hasSessionEdits(
   stats: Omit<SessionDiffSummary, 'tokens' | 'durationMs' | 'activeStartedAt'>
 ) {
-  return stats.files > 0 || stats.additions > 0 || stats.deletions > 0;
+  return (
+    stats.filesTruncated === true || stats.files > 0 || stats.additions > 0 || stats.deletions > 0
+  );
 }
 
 const SESSION_FILE_CHANGE_TOOLS = new Set([

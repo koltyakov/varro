@@ -391,6 +391,30 @@ describe('SessionListView diff summaries', () => {
     });
   });
 
+  it('labels trimmed file summaries without zero line counts', async () => {
+    vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
+      files: 0,
+      filesTruncated: true,
+      historyStatsUnavailable: true,
+      additions: 0,
+      deletions: 0,
+      tokens: 0,
+      durationMs: 0,
+      activeStartedAt: null,
+    });
+    setState('sessions', [session('session-1', Date.now())]);
+
+    cleanup = render(() => <SessionListView />, container);
+
+    await vi.waitFor(() => {
+      const meta = container.querySelector('.session-item-meta')?.textContent;
+      expect(meta).toContain('Large change set');
+      expect(meta).not.toContain('+0');
+      expect(meta).not.toContain('-0');
+      expect(meta).not.toContain('tokens');
+    });
+  });
+
   it('uses loaded diff counts when stale edit counts already exist on the session', async () => {
     const diffSummarySpy = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 2,

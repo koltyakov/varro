@@ -35,6 +35,7 @@ import {
   scopeOpenCodeRequest,
 } from './rest-proxy';
 import type { RestProxyCallbacks } from './rest-proxy';
+import { OpenCodeResponseTooLargeError } from './open-code-transport';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { SessionStateManager } from './session-state-manager';
 
@@ -44,7 +45,7 @@ type SanitizedMessageResponse = {
 };
 
 type SanitizedMessageEntry = {
-  info: { id: string };
+  info: { id: string; [key: string]: unknown };
   parts: Array<{ id: string }>;
 };
 
@@ -138,6 +139,7 @@ function createCallbacks(overrides: Partial<RestProxyCallbacks> = {}): RestProxy
     getRequestGeneration: vi.fn(() => 1),
     getStatus: vi.fn(() => ({ state: 'running' as const, url: 'http://127.0.0.1:4096' })),
     ensureServerStarted: vi.fn(() => Promise.resolve('http://127.0.0.1:4096')),
+    confirmPromptAdmission: vi.fn(() => Promise.resolve(true)),
     cleanupExpiredRecycleBin: vi.fn(() => Promise.resolve()),
     removeSessionImages: vi.fn(() => Promise.resolve()),
     postApiResponse: vi.fn(),
@@ -1209,6 +1211,40 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('marks file totals unknown without rereading oversized message histories', async () => {
+    let messageAttempts = 0;
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session?limit=1000000' || path.endsWith('/diff')) {
+        return Promise.resolve([]);
+      }
+      if (path === '/session/session-1/message') {
+        messageAttempts += 1;
+        if (messageAttempts === 1) {
+          return Promise.reject(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(831, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(messageAttempts).toBe(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 831,
+      data: expect.objectContaining({
+        files: 0,
+        filesTruncated: true,
+        historyStatsUnavailable: true,
+        additions: 0,
+        deletions: 0,
+      }),
+    });
+  });
+
   it('shares the session list across concurrent diff summaries', async () => {
     const sessionList = deferred<unknown>();
     const serverRequest = vi.fn((_method: string, path: string) => {
@@ -1517,6 +1553,46 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('bounds diff details in paginated session summaries', async () => {
+    const diffs = Array.from({ length: 101 }, (_, index) => ({
+      file: `node_modules/package-${index}/index.js`,
+      additions: 1,
+      deletions: 2,
+      before: 'large before content',
+      after: 'large after content',
+      patch: 'large patch content',
+    }));
+    const serverRequest = vi.fn(() =>
+      Promise.resolve([
+        {
+          id: 'large-session',
+          directory: '/repo',
+          summary: { files: 101, additions: 101, deletions: 202, diffs },
+        },
+      ])
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(1512, 'GET', '/session?limit=1'));
+
+    const response = (callbacks.postApiResponse as Mock<RestProxyCallbacks['postApiResponse']>).mock
+      .calls[0]![1] as { data: { items: Array<Record<string, unknown>> } };
+    const session = response.data.items[0] as {
+      summary: {
+        diffs: Array<Record<string, unknown>>;
+        diffsOmitted: boolean;
+        diffsTruncated: boolean;
+        diffCount: number;
+      };
+    };
+    expect(session.summary.diffs).toEqual([]);
+    expect(session.summary.diffsOmitted).toBe(true);
+    expect(session.summary.diffsTruncated).toBe(true);
+    expect(session.summary.diffCount).toBe(101);
+  });
+
   it('forwards native session search while preserving its constraints', async () => {
     const sessions = [{ id: 'match', directory: '/repo', title: 'Dark mode' }];
     const serverRequest = vi.fn(() => Promise.resolve(sessions));
@@ -1770,6 +1846,32 @@ describe('RestProxy handleRequest', () => {
     expect(response.data[0]!.parts).toHaveLength(1);
   });
 
+  it('bounds diff details in message summaries', async () => {
+    const message = makeSessionMessage('m1', 'p1');
+    (message.info as Record<string, unknown>).summary = {
+      diffs: Array.from({ length: 101 }, (_, index) => ({
+        file: `node_modules/package-${index}/index.js`,
+        additions: 1,
+        deletions: 2,
+        before: 'large before content',
+        after: 'large after content',
+        patch: 'large patch content',
+      })),
+    };
+
+    const items = await requestSanitizedMessagePage([message]);
+    const summary = items[0]!.info.summary as {
+      diffs: Array<Record<string, unknown>>;
+      diffsOmitted: boolean;
+      diffsTruncated: boolean;
+      diffCount: number;
+    };
+    expect(summary.diffs).toEqual([]);
+    expect(summary.diffsOmitted).toBe(true);
+    expect(summary.diffsTruncated).toBe(true);
+    expect(summary.diffCount).toBe(101);
+  });
+
   it('preserves pagination cursors while sanitizing session messages', async () => {
     const messages = [
       {
@@ -1791,9 +1893,38 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest).toHaveBeenCalledWith('GET', '/session/s1/message?limit=200', undefined, {
       captureNextCursor: true,
+      maxResponseBytes: 16 * 1024 * 1024,
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 117,
+      data: { items: messages, nextCursor: 'cursor-2' },
+    });
+  });
+
+  it('retries oversized message pages with a smaller history window', async () => {
+    const messages = [makeSessionMessage('m1', 'p1')];
+    const serverRequest = vi
+      .fn()
+      .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
+      .mockResolvedValueOnce({ data: messages, nextCursor: 'cursor-2' });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(118, 'GET', '/session/s1/message?limit=200'));
+
+    expect(serverRequest).toHaveBeenNthCalledWith(
+      2,
+      'GET',
+      '/session/s1/message?limit=20',
+      undefined,
+      {
+        captureNextCursor: true,
+        maxResponseBytes: 16 * 1024 * 1024,
+      }
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 118,
       data: { items: messages, nextCursor: 'cursor-2' },
     });
   });
@@ -2176,6 +2307,38 @@ describe('RestProxy handleRequest', () => {
       id: 30,
       data: { ok: true },
     });
+  });
+
+  it('cancels prompt admission before marking busy when generated dependencies are unignored', async () => {
+    const serverRequest = vi.fn();
+    const markSessionBusy = vi.fn();
+    const confirmPromptAdmission = vi.fn(() => Promise.resolve(false));
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+      sessionState: { ...createCallbacks().sessionState, markSessionBusy } as never,
+      confirmPromptAdmission,
+    });
+
+    await proxy.handleRequest(
+      makePayload(301, 'POST', '/session/session-1/prompt_async', { parts: [] })
+    );
+
+    expect(confirmPromptAdmission).toHaveBeenCalledWith('/repo');
+    expect(markSessionBusy).not.toHaveBeenCalled();
+    expect(serverRequest).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 301,
+      error: 'Prompt cancelled because generated dependencies are not ignored by Git',
+    });
+  });
+
+  it('does not run generated dependency admission for non-prompt requests', async () => {
+    const confirmPromptAdmission = vi.fn(() => Promise.resolve(true));
+    const { proxy } = createProxy({ confirmPromptAdmission });
+
+    await proxy.handleRequest(makePayload(302, 'GET', '/session'));
+
+    expect(confirmPromptAdmission).not.toHaveBeenCalled();
   });
 
   it('extracts the session id from a prompt_async path', async () => {

@@ -14,8 +14,18 @@ export type OpenCodeResponseMetadata = {
 
 export type OpenCodeRequestOptions = {
   captureNextCursor?: boolean;
+  maxResponseBytes?: number;
+  maxProjectedResponseBytes?: number;
+  stripSummaryDiffs?: boolean;
   unscoped?: boolean;
 };
+
+export class OpenCodeResponseTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`OpenCode response exceeded the ${maxBytes}-byte safety limit`);
+    this.name = 'OpenCodeResponseTooLargeError';
+  }
+}
 
 export type OpenCodeRescopeResult = {
   state: 'connected' | 'degraded' | 'unchanged' | 'inactive' | 'cancelled' | 'superseded';
@@ -38,6 +48,7 @@ interface OpenCodeTransportOptions {
 export class OpenCodeTransport {
   private static readonly HEALTH_TIMEOUT_MS = 2000;
   private static readonly REQUEST_TIMEOUT_MS = 30_000;
+  private static readonly RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
   private static readonly MCP_AUTH_TIMEOUT_MS = 5 * 60_000 + 10_000;
   private static readonly EVENT_CONNECT_TIMEOUT_MS = 10_000;
   private static readonly EVENT_STABILITY_WINDOW_MS = 15_000;
@@ -91,7 +102,12 @@ export class OpenCodeTransport {
         init.body = JSON.stringify(body);
       }
       const res = await fetch(scoped.url, init);
-      const text = await res.text();
+      const text = await readResponseText(
+        res,
+        options?.maxResponseBytes ?? OpenCodeTransport.RESPONSE_MAX_BYTES,
+        options?.stripSummaryDiffs === true,
+        options?.maxProjectedResponseBytes
+      );
       let data: unknown = text;
       try {
         data = text ? JSON.parse(text) : null;
@@ -504,6 +520,184 @@ export class OpenCodeTransport {
 
   private isCurrentEventStream(controller: AbortController, generation: number) {
     return this.eventController === controller && this.eventStreamGeneration === generation;
+  }
+}
+
+async function readResponseText(
+  response: Response,
+  maxBytes?: number,
+  stripSummaryDiffs = false,
+  maxProjectedBytes = maxBytes
+): Promise<string> {
+  if (!maxBytes) return response.text();
+
+  const contentLength = Number(response.headers?.get('content-length'));
+  if (!stripSummaryDiffs && Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new OpenCodeResponseTooLargeError(maxBytes);
+  }
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new OpenCodeResponseTooLargeError(maxBytes);
+    }
+    const projected = stripSummaryDiffs ? stripDiffArrays(text) : text;
+    if (maxProjectedBytes && new TextEncoder().encode(projected).byteLength > maxProjectedBytes) {
+      throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
+    }
+    return projected;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const projector = stripSummaryDiffs ? new DiffArrayProjector() : null;
+  let bytes = 0;
+  let projectedBytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        throw new OpenCodeResponseTooLargeError(maxBytes);
+      }
+      const chunk = projector
+        ? projector.write(decoder.decode(value, { stream: true }))
+        : decoder.decode(value, { stream: true });
+      projectedBytes += new TextEncoder().encode(chunk).byteLength;
+      if (maxProjectedBytes && projectedBytes > maxProjectedBytes) {
+        await reader.cancel();
+        throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
+      }
+      text += chunk;
+    }
+    const finalChunk = projector
+      ? projector.write(decoder.decode()) + projector.finish()
+      : decoder.decode();
+    projectedBytes += new TextEncoder().encode(finalChunk).byteLength;
+    if (maxProjectedBytes && projectedBytes > maxProjectedBytes) {
+      throw new OpenCodeResponseTooLargeError(maxProjectedBytes);
+    }
+    return text + finalChunk;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function stripDiffArrays(text: string): string {
+  const projector = new DiffArrayProjector();
+  return projector.write(text) + projector.finish();
+}
+
+type JsonContainer = { type: 'array' } | { type: 'object'; expectingKey: boolean };
+
+class DiffArrayProjector {
+  private readonly stack: JsonContainer[] = [];
+  private inString = false;
+  private escaped = false;
+  private key = '';
+  private collectingKey = false;
+  private pendingDiffsKey = false;
+  private stripNextArray = false;
+  private stripping = false;
+  private stripDepth = 0;
+  private stripInString = false;
+  private stripEscaped = false;
+
+  write(chunk: string): string {
+    let output = '';
+    for (const char of chunk) {
+      if (this.stripping) {
+        if (this.consumeStrippedChar(char)) {
+          output += '[],"diffsOmitted":true,"diffsTruncated":true';
+        }
+        continue;
+      }
+
+      if (this.inString) {
+        output += char;
+        if (this.escaped) {
+          this.escaped = false;
+          if (this.collectingKey && this.key.length < 32) this.key += char;
+          continue;
+        }
+        if (char === '\\') {
+          this.escaped = true;
+          continue;
+        }
+        if (char === '"') {
+          this.inString = false;
+          if (this.collectingKey) this.pendingDiffsKey = this.key === 'diffs';
+          continue;
+        }
+        if (this.collectingKey && this.key.length < 32) this.key += char;
+        continue;
+      }
+
+      if (this.pendingDiffsKey && char === ':') {
+        output += char;
+        this.stripNextArray = true;
+        this.pendingDiffsKey = false;
+        const object = this.currentObject();
+        if (object) object.expectingKey = false;
+        continue;
+      }
+      if (this.pendingDiffsKey && !/\s/.test(char)) this.pendingDiffsKey = false;
+      if (this.stripNextArray && char === '[') {
+        this.stripNextArray = false;
+        this.stripping = true;
+        this.stripDepth = 1;
+        continue;
+      }
+      if (this.stripNextArray && !/\s/.test(char)) this.stripNextArray = false;
+
+      output += char;
+      if (char === '"') {
+        this.inString = true;
+        this.escaped = false;
+        this.collectingKey = this.currentObject()?.expectingKey === true;
+        this.key = '';
+      } else if (char === '{') {
+        this.stack.push({ type: 'object', expectingKey: true });
+      } else if (char === '[') {
+        this.stack.push({ type: 'array' });
+      } else if (char === '}' || char === ']') {
+        this.stack.pop();
+      } else if (char === ',') {
+        const object = this.currentObject();
+        if (object) object.expectingKey = true;
+      } else if (char === ':') {
+        const object = this.currentObject();
+        if (object) object.expectingKey = false;
+      }
+    }
+    return output;
+  }
+
+  finish(): string {
+    if (this.stripping || this.inString) throw new Error('Malformed JSON response');
+    return '';
+  }
+
+  private currentObject(): Extract<JsonContainer, { type: 'object' }> | undefined {
+    const current = this.stack[this.stack.length - 1];
+    return current?.type === 'object' ? current : undefined;
+  }
+
+  private consumeStrippedChar(char: string): boolean {
+    if (this.stripInString) {
+      if (this.stripEscaped) this.stripEscaped = false;
+      else if (char === '\\') this.stripEscaped = true;
+      else if (char === '"') this.stripInString = false;
+      return false;
+    }
+    if (char === '"') this.stripInString = true;
+    else if (char === '[' || char === '{') this.stripDepth += 1;
+    else if (char === ']' || char === '}') this.stripDepth -= 1;
+    if (this.stripDepth !== 0) return false;
+    this.stripping = false;
+    return true;
   }
 }
 

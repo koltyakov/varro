@@ -136,6 +136,8 @@ export type SessionTokenBreakdown = {
 
 export type SessionDiffSummary = {
   files: number;
+  filesTruncated?: boolean;
+  historyStatsUnavailable?: boolean;
   additions: number;
   deletions: number;
   tokens: number;

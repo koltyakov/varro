@@ -359,8 +359,27 @@ describe('MessageList loading states', () => {
 
     expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
     expect(container?.querySelector('.chat-empty-state')).toBeNull();
+    expect(container?.querySelector('.interactive-loading-row')?.classList).toContain(
+      'is-reserved'
+    );
 
     setState('messagesLoading', false);
+  });
+
+  it('does not show Thinking while a busy session is still loading messages', async () => {
+    setSessions([session('session-1', { time: { created: 1, updated: 2 } })]);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('messagesLoading', true);
+    replaceMessages([]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelector('.chat-messages-loading')).not.toBeNull();
+    const thinkingRow = container?.querySelector('.interactive-loading-row');
+    expect(thinkingRow?.classList).toContain('is-reserved');
+    expect(thinkingRow?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('waits to place a linked question until its message loads', async () => {

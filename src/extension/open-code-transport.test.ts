@@ -753,6 +753,72 @@ describe('OpenCodeTransport requests', () => {
       })
     ).resolves.toEqual({ data: [], nextCursor: 'cursor-2' });
   });
+
+  it('rejects oversized responses before reading their bodies', async () => {
+    const text = vi.fn(async () => 'should not be read');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        text,
+        body: null,
+        headers: new Headers({ 'content-length': '1025' }),
+      })) as unknown as typeof fetch
+    );
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message?limit=200', undefined, {
+        maxResponseBytes: 1024,
+      })
+    ).rejects.toThrow('OpenCode response exceeded the 1024-byte safety limit');
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('streams oversized message responses while removing diff arrays', async () => {
+    const payload = [
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            title: 'Keep this title',
+            diffs: [
+              {
+                file: 'node_modules/package/index.js',
+                before: 'x'.repeat(10_000),
+                after: 'y'.repeat(10_000),
+              },
+            ],
+          },
+        },
+        parts: [{ type: 'text', text: 'Keep this prompt' }],
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(payload)))
+    );
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message?limit=200', undefined, {
+        maxResponseBytes: 64 * 1024,
+        maxProjectedResponseBytes: 1024,
+        stripSummaryDiffs: true,
+      })
+    ).resolves.toEqual([
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            title: 'Keep this title',
+            diffs: [],
+            diffsOmitted: true,
+            diffsTruncated: true,
+          },
+        },
+        parts: [{ type: 'text', text: 'Keep this prompt' }],
+      },
+    ]);
+  });
 });
 
 describe('OpenCodeTransport request scoping', () => {

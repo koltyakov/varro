@@ -18,6 +18,7 @@ const KIND_BADGE: Record<FileChangeKind, { label: string; title: string; class: 
   removed: { label: 'D', title: 'Removed', class: 'is-removed' },
   moved: { label: 'R', title: 'Renamed', class: 'is-moved' },
 };
+const CHANGED_FILE_DISPLAY_LIMIT = 100;
 
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId);
@@ -101,18 +102,31 @@ export function ChangedFilesList() {
     return messageStats;
   });
   const total = () => summaryStats()?.files ?? changes().length;
+  const truncated = () => {
+    if (total() > CHANGED_FILE_DISPLAY_LIMIT || changes().length > CHANGED_FILE_DISPLAY_LIMIT) {
+      return true;
+    }
+    const sessionSummary = getActiveSession()?.summary;
+    if (sessionSummary?.diffsTruncated) return true;
+    return activeMessages().some((message) => {
+      const summary = message.info?.summary;
+      return !!summary && typeof summary === 'object' && summary.diffsTruncated === true;
+    });
+  };
+  const totalLabel = () => (truncated() ? 'Details omitted' : String(total()));
+  const visibleChanges = () => changes().slice(0, CHANGED_FILE_DISPLAY_LIMIT);
   const additions = () =>
     summaryStats()?.additions ??
     changes().reduce((sum, change) => sum + (change.additions ?? 0), 0);
   const deletions = () =>
     summaryStats()?.deletions ??
     changes().reduce((sum, change) => sum + (change.deletions ?? 0), 0);
-  const hasLineCounts = () => additions() > 0 || deletions() > 0;
+  const hasLineCounts = () => !truncated() && (additions() > 0 || deletions() > 0);
   // The board always starts collapsed; the user opens it on demand.
   const [collapsed, setCollapsed] = createSignal(true);
 
   return (
-    <Show when={showChangedFiles() && total() > 0}>
+    <Show when={showChangedFiles() && (total() > 0 || truncated())}>
       <div class="todo-block changed-files-block animate-fade-in">
         <button
           type="button"
@@ -133,7 +147,7 @@ export function ChangedFilesList() {
             <path d="M4 6l4 4 4-4" />
           </svg>
           <span class="todo-block-title">Files</span>
-          <span class="todo-block-count">{total()}</span>
+          <span class="todo-block-count">{totalLabel()}</span>
           <Show when={hasLineCounts()}>
             <span class="changed-files-lines">
               <span class="diff-lines-added">+{formatEditCount(additions())}</span>{' '}
@@ -143,7 +157,7 @@ export function ChangedFilesList() {
         </button>
         <Show when={!collapsed()}>
           <ul class="todo-block-list changed-files-list">
-            <For each={changes()}>{(change) => <ChangedFileItem change={change} />}</For>
+            <For each={visibleChanges()}>{(change) => <ChangedFileItem change={change} />}</For>
           </ul>
         </Show>
       </div>

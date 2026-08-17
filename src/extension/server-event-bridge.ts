@@ -8,6 +8,7 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 import type { SessionStateManager } from './session-state-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
+import { projectSummaryDiffs } from './util/summary-projection';
 
 type PostMessage = (message: ExtensionMessage) => void;
 
@@ -121,6 +122,7 @@ export class ServerEventBridge {
   }
 
   private acceptParsedEvent(event: ServerEvent) {
+    event = projectEventSummaryDiffs(event);
     let recent: RecentEventState | undefined;
     if (event.id) {
       recent = this.recentEvents.get(event.id);
@@ -237,6 +239,15 @@ export class ServerEventBridge {
       (sessionID) => this.sessionState.getSessionWorkspaceMatch(sessionID, workspacePath) === false
     );
   }
+}
+
+function projectEventSummaryDiffs(event: ServerEvent): ServerEvent {
+  const properties = asRecord(event.properties);
+  const info = asRecord(properties?.info);
+  if (!properties || !info) return event;
+  const projectedInfo = projectSummaryDiffs(info);
+  if (projectedInfo === info) return event;
+  return { ...event, properties: { ...properties, info: projectedInfo } } as ServerEvent;
 }
 
 function getCoalescableDelta(event: ServerEvent): CoalescableDelta | null {

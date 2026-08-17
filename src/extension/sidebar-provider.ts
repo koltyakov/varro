@@ -14,6 +14,7 @@ import { DroppedFilesService } from './dropped-files-service';
 import { DraftImageStore } from './draft-image-store';
 import { readExtensionConfigState } from './extension-config';
 import { FileSearchService } from './file-search-service';
+import { GeneratedDependencyTreeGuard } from './generated-dependency-tree-guard';
 import { HiddenSessionManager } from './hidden-session-manager';
 import { HostPersistence } from './host-persistence';
 import { logger } from './logger';
@@ -140,6 +141,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         .getConfiguration('varro')
         .get<boolean>('chat.autoRenameUntitledSessions', true)
     );
+    const generatedDependencyTreeGuard = new GeneratedDependencyTreeGuard();
     this.sessionState = new SessionStateManager(
       persistence,
       {
@@ -229,6 +231,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       getRequestGeneration: () => this.webviewSession.getRequestGeneration(),
       getStatus: () => this.serverEventBridge.getStatus(),
       ensureServerStarted: () => this.runtime.ensureServerStarted(),
+      confirmPromptAdmission: (workspacePath) =>
+        generatedDependencyTreeGuard.confirmPromptAdmission(workspacePath),
       refreshOpenCodeConfig: (previousRouting, currentRouting) =>
         this.refreshOpenCodeWorkspaceState(previousRouting, currentRouting),
       cleanupExpiredRecycleBin: () => this.cleanupExpiredRecycleBin(),

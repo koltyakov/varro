@@ -1316,6 +1316,28 @@ describe('Message user rendering', () => {
     expect(container?.querySelector('.user-message-empty')).toBeNull();
   });
 
+  it('renders one responsive-chat notice for an omitted change set', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...userMessage('message-large-change-set'),
+            summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
+          },
+          parts: [textPart('text-large-change-set', 'Update the infrastructure')],
+        }),
+      container!
+    );
+
+    const notice = container?.querySelector('.change-set-omission');
+    expect(notice?.textContent).toContain('Large change set condensed');
+    expect(notice?.textContent).toContain(
+      'File-by-file events were omitted to keep this chat responsive.'
+    );
+    expect(notice?.textContent).not.toContain('+0');
+    expect(notice?.textContent).not.toContain('-0');
+  });
+
   it('copies inline attachment mentions using their original marker text', () => {
     cleanup = render(
       () =>

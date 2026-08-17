@@ -932,4 +932,19 @@ describe('tool file change helpers', () => {
       'Makefile',
     ]);
   });
+
+  it('collects large file summaries without quadratic path matching', () => {
+    const diffs = Array.from({ length: 10_000 }, (_, index) => ({
+      file: `node_modules/package-${index}/index.js`,
+      additions: 1,
+      deletions: 0,
+    }));
+    const startedAt = performance.now();
+
+    const changes = getMessageFileChanges([{ info: { summary: { diffs } }, parts: [] }]);
+
+    expect(changes).toHaveLength(10_000);
+    expect(changes[9_999]?.path).toBe('node_modules/package-9999/index.js');
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+  });
 });

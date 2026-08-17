@@ -969,6 +969,12 @@ function isSameFileKey(a: string, b: string): boolean {
   return abs.endsWith(`/${rel}`);
 }
 
+function pathSuffixes(path: string): string[] {
+  const normalized = normalizePath(path);
+  const segments = normalized.split('/').filter(Boolean);
+  return segments.map((_, index) => segments.slice(index).join('/'));
+}
+
 function hasExtension(path: string): boolean {
   // A dot in the final segment signals a file (extension, e.g. `app.ts`, or a
   // dotfile, e.g. `.gitignore`); bare segments like `src/extension` are dirs.
@@ -996,6 +1002,9 @@ export function getMessageFileChanges(
   workspacePath?: string | null
 ): FileChange[] {
   const result: FileChange[] = [];
+  const exactEntries = new Map<string, FileChange>();
+  const relativeEntries = new Map<string, FileChange>();
+  const absoluteAliases = new Map<string, FileChange>();
 
   const keyFor = (change: FileChange) => {
     const path = change.toPath || change.path;
@@ -1007,9 +1016,27 @@ export function getMessageFileChanges(
 
   const record = (change: FileChange) => {
     const key = keyFor(change);
-    const existing = result.find((entry) => isSameFileKey(keyFor(entry), key));
+    const absolute = isAbsolutePath(key);
+    let existing = exactEntries.get(key);
+    if (!existing && absolute) {
+      for (const suffix of pathSuffixes(key)) {
+        existing = relativeEntries.get(suffix);
+        if (existing) break;
+      }
+    } else if (!existing) {
+      existing = absoluteAliases.get(key);
+    }
     if (!existing) {
-      result.push({ ...change });
+      const entry = { ...change };
+      result.push(entry);
+      exactEntries.set(key, entry);
+      if (absolute) {
+        for (const suffix of pathSuffixes(key)) {
+          if (!absoluteAliases.has(suffix)) absoluteAliases.set(suffix, entry);
+        }
+      } else {
+        relativeEntries.set(key, entry);
+      }
       return;
     }
     existing.kind = change.kind;
@@ -1051,12 +1078,17 @@ export function getMessageFileChanges(
   // or that have no file extension and no line counts. Real edited files keep an
   // extension or carry actual +/- counts.
   const keys = result.map(keyFor);
+  const ancestorKeys = new Set<string>();
+  for (const key of keys) {
+    let separator = key.indexOf('/');
+    while (separator !== -1) {
+      ancestorKeys.add(key.slice(0, separator));
+      separator = key.indexOf('/', separator + 1);
+    }
+  }
   return result.filter((change, index) => {
     const key = keys[index]!;
-    const isAncestor = keys.some(
-      (other, otherIndex) => otherIndex !== index && other.startsWith(`${key}/`)
-    );
-    if (isAncestor) return false;
+    if (ancestorKeys.has(key)) return false;
     const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
     return hasExtension(key) || hasCounts;
   });

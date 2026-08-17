@@ -431,6 +431,30 @@
   margin-top: 4px;
 }
 
+.change-set-omission {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border) 45%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-vscode-fg) 3%, transparent);
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.change-set-omission-title {
+  font-weight: 600;
+}
+
+.change-set-omission-detail {
+  opacity: 0.68;
+}
+
 .diff-view-widget {
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 20%, transparent);
   border-radius: var(--radius-card);

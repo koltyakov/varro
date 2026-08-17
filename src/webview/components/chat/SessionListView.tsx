@@ -157,6 +157,7 @@ export function createStableSessionIndicators(
 
 type SessionSummaryStats = {
   files: number;
+  filesTruncated?: boolean;
   additions: number;
   deletions: number;
 };
@@ -515,6 +516,7 @@ export function getSessionSummaryStats(
 
   const aggregate = {
     files: summary.files,
+    ...(summary.diffsTruncated ? { filesTruncated: true } : {}),
     additions: summary.additions,
     deletions: summary.deletions,
   } satisfies SessionSummaryStats;
@@ -561,7 +563,9 @@ export function getMessageToolSummaryStats(
 }
 
 function hasSessionSummaryEdits(stats: SessionSummaryStats) {
-  return stats.files > 0 || stats.additions > 0 || stats.deletions > 0;
+  return (
+    stats.filesTruncated === true || stats.files > 0 || stats.additions > 0 || stats.deletions > 0
+  );
 }
 
 function readDiffCount(
@@ -1262,9 +1266,21 @@ export function SessionListView(props: {
                 sessionDiffSummaryCache()[sessionId]?.status === 'loading' &&
                 sessionDiffSummaryCache()[sessionId]?.stats === null
               }
-              tokens={sessionDiffSummaryCache()[sessionId]?.stats?.tokens ?? null}
-              durationMs={sessionDiffSummaryCache()[sessionId]?.stats?.durationMs ?? null}
-              activeStartedAt={sessionDiffSummaryCache()[sessionId]?.stats?.activeStartedAt ?? null}
+              tokens={
+                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                  ? null
+                  : (sessionDiffSummaryCache()[sessionId]?.stats?.tokens ?? null)
+              }
+              durationMs={
+                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                  ? null
+                  : (sessionDiffSummaryCache()[sessionId]?.stats?.durationMs ?? null)
+              }
+              activeStartedAt={
+                sessionDiffSummaryCache()[sessionId]?.stats?.historyStatsUnavailable
+                  ? null
+                  : (sessionDiffSummaryCache()[sessionId]?.stats?.activeStartedAt ?? null)
+              }
               itemIndex={() => indexOffset + index()}
               focusedIndex={focusedIndex}
               setFocusedIndex={setFocusedIndex}
@@ -2050,7 +2066,7 @@ function SessionListItem(props: {
                 >
                   <Show when={summaryStats()}>
                     {(summary) => (
-                      <>
+                      <Show when={!summary().filesTruncated} fallback={<>Large change set</>}>
                         {summary().files} file
                         {summary().files !== 1 ? 's' : ''}
                         {' · '}
@@ -2060,7 +2076,7 @@ function SessionListItem(props: {
                         <span class="diff-lines-removed">
                           -{formatEditCount(summary().deletions)}
                         </span>
-                      </>
+                      </Show>
                     )}
                   </Show>
                 </Show>
