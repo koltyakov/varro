@@ -733,6 +733,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync,
         getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
@@ -811,6 +812,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         appendOptimisticMessage,
         removeOptimisticMessage: vi.fn(),
         sendAsync,
@@ -906,6 +908,7 @@ describe('session-send helpers', () => {
           resetTodoSync: vi.fn(),
           clearTodos: vi.fn(),
           clearSessionUsageLimit: vi.fn(),
+          setSessionFailed: vi.fn(),
           beforeOptimisticPublish: () => setTrailingUserId('pruned-user'),
           appendOptimisticMessage: (entry) => setTrailingUserId(entry.info.id),
           removeOptimisticMessage: vi.fn(),
@@ -948,6 +951,7 @@ describe('session-send helpers', () => {
     const removeOptimisticMessage = vi.fn((messageId: string) => {
       if (messageId === optimisticId) messageCount -= 1;
     });
+    const setSessionFailed = vi.fn();
 
     const result = await sendMessageWithDependencies(
       {
@@ -971,6 +975,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed,
         appendOptimisticMessage: vi.fn((entry: { info: Message; parts: Part[] }) => {
           optimisticId = entry.info.id;
           messageCount += 1;
@@ -998,6 +1003,8 @@ describe('session-send helpers', () => {
     expect(result).toBe(false);
     expect(removeOptimisticMessage).toHaveBeenCalledWith(optimisticId);
     expect(messageCount).toBe(0);
+    expect(setSessionFailed).toHaveBeenNthCalledWith(1, 'session-1', false);
+    expect(setSessionFailed).toHaveBeenNthCalledWith(2, 'session-1', true);
   });
 
   it('does not start a new loading state for steers', async () => {
@@ -1022,6 +1029,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync: vi.fn(async () => {}),
         getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
@@ -1068,6 +1076,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         beforeOptimisticPublish,
         sendAsync,
         getMessageCount: () => 1,
@@ -1114,6 +1123,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync,
         getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),
@@ -1307,6 +1317,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync: vi.fn(async () => {}),
         getMessageCount,
         clearDroppedFiles: vi.fn(),
@@ -1360,6 +1371,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync: vi.fn(async () => {}),
         getMessageCount: () => 1,
         clearDroppedFiles,
@@ -1411,6 +1423,7 @@ describe('session-send helpers', () => {
         resetTodoSync: vi.fn(),
         clearTodos: vi.fn(),
         clearSessionUsageLimit: vi.fn(),
+        setSessionFailed: vi.fn(),
         sendAsync: vi.fn(async () => {}),
         getMessageCount: () => 1,
         clearDroppedFiles: vi.fn(),

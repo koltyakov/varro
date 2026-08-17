@@ -649,6 +649,55 @@ describe('registerSessionEventHandlers', () => {
     expect(deps.syncSessionMessages).toHaveBeenCalledWith('session-1');
   });
 
+  it('waits and retries an interrupted turn after a transient connection failure', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const handlers = installHandlers();
+    const continueInterruptedSession = vi.fn().mockResolvedValue(undefined);
+    const deps = createDefaultDeps({
+      getActiveSessionId: () => 'session-1',
+      continueInterruptedSession,
+    });
+    const cleanups = registerSessionEventHandlers(deps);
+
+    try {
+      handlers.get('session.error')?.({
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'APIError',
+            data: {
+              message:
+                'Cannot connect to API: Unable to connect. Is the computer able to access the url?',
+              isRetryable: true,
+            },
+          },
+        },
+      });
+
+      expect(deps.setSessionStatusEntry).toHaveBeenLastCalledWith('session-1', {
+        type: 'retry',
+        attempt: 1,
+        message:
+          'Cannot connect to API: Unable to connect. Is the computer able to access the url?',
+        next: 5_000,
+      });
+      expect(setSessionFailed).toHaveBeenCalledWith('session-1', true);
+      expect(continueInterruptedSession).not.toHaveBeenCalled();
+
+      handlers.get('session.idle')?.({ properties: { sessionID: 'session-1' } });
+      expect(deps.setSessionStatusEntry).not.toHaveBeenLastCalledWith('session-1', {
+        type: 'idle',
+      });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(continueInterruptedSession).toHaveBeenCalledWith('session-1');
+    } finally {
+      for (const cleanup of cleanups) cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it('shows session.error on a completed assistant before message resync finishes', () => {
     const handlers = installHandlers();
     const assistant = createCompletedAssistantEntry(1, 2);
@@ -739,6 +788,7 @@ describe('registerSessionEventHandlers', () => {
         respondPermission,
       },
       abortRemoteSession: vi.fn().mockResolvedValue(true),
+      continueInterruptedSession: vi.fn().mockResolvedValue(undefined),
       logError: vi.fn(),
     });
 

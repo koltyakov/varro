@@ -829,6 +829,7 @@ export class SessionSendOperations {
           resetTodoSync: this.deps.resetTodoSync,
           clearTodos: composerStore.clearTodos,
           clearSessionUsageLimit: clearSessionUsageLimitForSessionTree,
+          setSessionFailed: sessionStore.setSessionFailed,
           beforeOptimisticPublish,
           appendOptimisticMessage: appendOptimisticMessageToActiveSession,
           removeOptimisticMessage: removeOptimisticMessageFromActiveSession,
@@ -933,6 +934,7 @@ export async function sendMessageWithDependencies(
     resetTodoSync(): void;
     clearTodos(): void;
     clearSessionUsageLimit(sessionId: string): void;
+    setSessionFailed(sessionId: string, failed: boolean): void;
     beforeOptimisticPublish?(): void;
     appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
     removeOptimisticMessage?(messageId: string): void;
@@ -997,6 +999,7 @@ export async function sendMessageWithDependencies(
   batch(() => {
     if (optimisticMessage) deps.beforeOptimisticPublish?.();
     if (expectsAssistantReply) {
+      deps.setSessionFailed(sessionId, false);
       deps.setSessionStatusEntry?.(sessionId, { type: 'busy' });
     }
     if (expectsAssistantReply && deps.getActiveSessionId() === sessionId) {
@@ -1070,6 +1073,7 @@ export async function sendMessageWithDependencies(
     if (canClearComposerBeforeSend) deps.restoreSentComposerAttachments?.();
     if (optimisticMessage) deps.removeOptimisticMessage?.(optimisticMessage.info.id);
     if (expectsAssistantReply) {
+      deps.setSessionFailed(sessionId, true);
       deps.setSessionStatusEntry?.(sessionId, { type: 'idle' });
       if (deps.getActiveSessionId() === sessionId) deps.stopLoading();
     }

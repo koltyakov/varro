@@ -1931,6 +1931,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         continue;
       }
       if (
+        getSessionTreeIdsForSession(item.sessionId).some(
+          (sessionId) =>
+            state.failedSessionIds.includes(sessionId) &&
+            state.sessionStatus[sessionId]?.type !== 'busy'
+        )
+      ) {
+        blockedSessionIds.add(item.sessionId);
+        continue;
+      }
+      if (
         steeringSessionIds.has(item.sessionId) ||
         editingSessionId === item.sessionId ||
         isSessionAwaitingInput(item.sessionId) ||

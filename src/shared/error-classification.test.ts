@@ -6,6 +6,7 @@ import {
   isPermissionRejectedToolError,
   isProviderAuthFailure,
   isQuestionSkippedToolError,
+  isTransientProviderConnectionError,
 } from './error-classification';
 
 describe('friendlyErrorName', () => {
@@ -126,6 +127,48 @@ describe('isProviderAuthFailure', () => {
       })
     ).toBe(false);
     expect(isProviderAuthFailure(undefined)).toBe(false);
+  });
+});
+
+describe('isTransientProviderConnectionError', () => {
+  it('detects retryable provider connection failures', () => {
+    expect(
+      isTransientProviderConnectionError({
+        name: 'APIError',
+        data: {
+          message:
+            'Cannot connect to API: Unable to connect. Is the computer able to access the url?',
+          isRetryable: true,
+        },
+      })
+    ).toBe(true);
+    expect(
+      isTransientProviderConnectionError({
+        name: 'APIError',
+        data: { message: 'Request failed', isRetryable: true, metadata: { code: 'ENOTFOUND' } },
+      })
+    ).toBe(true);
+  });
+
+  it('rejects HTTP and non-retryable API failures', () => {
+    expect(
+      isTransientProviderConnectionError({
+        name: 'APIError',
+        data: { message: 'Service unavailable', statusCode: 503, isRetryable: true },
+      })
+    ).toBe(false);
+    expect(
+      isTransientProviderConnectionError({
+        name: 'APIError',
+        data: { message: 'Cannot connect to API: offline', isRetryable: false },
+      })
+    ).toBe(false);
+    expect(
+      isTransientProviderConnectionError({
+        name: 'UnknownError',
+        data: { message: 'Cannot connect to API: offline', isRetryable: true },
+      })
+    ).toBe(false);
   });
 });
 

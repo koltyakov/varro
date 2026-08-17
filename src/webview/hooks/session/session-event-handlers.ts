@@ -1,4 +1,7 @@
-import { isAbortedAssistantError } from '../../../shared/error-classification';
+import {
+  isAbortedAssistantError,
+  isTransientProviderConnectionError,
+} from '../../../shared/error-classification';
 import type { ServerEvent } from '../../../shared/protocol';
 import { serverEvents } from '../../lib/client';
 import {
@@ -70,6 +73,7 @@ const MAX_DIRTY_GAP_SESSIONS = 256;
 const MAX_OVERFLOW_GAP_RECOVERIES = 16;
 const DIRTY_GAP_RETRY_MIN_MS = 100;
 const DIRTY_GAP_RETRY_MAX_MS = 30_000;
+const TRANSIENT_CONNECTION_RETRY_DELAY_MS = 5_000;
 
 type SequenceStatus = 'unknown' | 'ok' | 'gap';
 
@@ -137,6 +141,7 @@ type EventHandlerDependencies = {
   ): Promise<void>;
   setDiffs(diffs: FileDiff[]): void;
   abortRemoteSession(sessionId: string): Promise<unknown>;
+  continueInterruptedSession?(sessionId: string): Promise<void>;
   logError(context: string, err: unknown): void;
 };
 
@@ -177,6 +182,7 @@ type EventHandlerOperationDependencies = {
   invalidateMessageSync?: EventHandlerDependencies['invalidateMessageSync'];
   isMessageRemovalDeferred?: EventHandlerDependencies['isMessageRemovalDeferred'];
   abortRemoteSession: EventHandlerDependencies['abortRemoteSession'];
+  continueInterruptedSession: NonNullable<EventHandlerDependencies['continueInterruptedSession']>;
   logError: EventHandlerDependencies['logError'];
 };
 
@@ -235,6 +241,7 @@ export class SessionEventHandlerOperations {
       respondPermission: this.deps.sessionApprovalOperations.respondPermission,
       setDiffs: sessionStore.setDiffs,
       abortRemoteSession: this.deps.abortRemoteSession,
+      continueInterruptedSession: this.deps.continueInterruptedSession,
       logError: this.deps.logError,
     });
   };
@@ -255,6 +262,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     }
   >();
   const toolExecutionTimes = new Map<string, ToolExecutionTime>();
+  const transientConnectionRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-session debounce timers for the optimistic streamed-completion settle.
   const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingTerminalStepSettles = new Map<string, number>();
@@ -653,6 +661,36 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
     }
   };
+  const cancelTransientConnectionRetry = (sessionId: string) => {
+    const timer = transientConnectionRetryTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
+    transientConnectionRetryTimers.delete(sessionId);
+  };
+  const scheduleTransientConnectionRetry = (sessionId: string, message: string) => {
+    if (
+      !deps.continueInterruptedSession ||
+      deps.hasPendingAbort(sessionId) ||
+      transientConnectionRetryTimers.has(sessionId)
+    )
+      return;
+    const retryAt = Date.now() + TRANSIENT_CONNECTION_RETRY_DELAY_MS;
+    deps.setSessionStatusEntry(sessionId, {
+      type: 'retry',
+      attempt: 1,
+      message,
+      next: retryAt,
+    });
+    if (sessionId === deps.getActiveSessionId()) uiStore.startLoading();
+    const timer = setTimeout(() => {
+      transientConnectionRetryTimers.delete(sessionId);
+      if (deps.hasPendingAbort(sessionId)) return;
+      void deps.continueInterruptedSession!(sessionId).catch((err) => {
+        deps.logError('continueInterruptedSession after connection failure', err);
+        scheduleTransientConnectionRetry(sessionId, message);
+      });
+    }, TRANSIENT_CONNECTION_RETRY_DELAY_MS);
+    transientConnectionRetryTimers.set(sessionId, timer);
+  };
   const markSessionError = (sessionId: string, error: AssistantMessage['error'] | undefined) => {
     if (error) {
       const messages = deps.getMessages();
@@ -685,6 +723,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
     }
     if (sessionId === deps.getActiveSessionId() && !isActiveTreeWorking()) uiStore.stopLoading();
+    if (isTransientProviderConnectionError(error)) {
+      scheduleTransientConnectionRetry(sessionId, error?.data?.message || 'Connection lost');
+    } else {
+      cancelTransientConnectionRetry(sessionId);
+    }
     deps
       .syncSession(sessionId)
       .catch((err) => logWarn('session-event syncSession after session.error', err));
@@ -1011,7 +1054,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.deleted', (data) => {
       const id = (data.properties?.info as { id: string } | undefined)?.id;
-      if (id) deps.removeDeletedSessionTree(id);
+      if (id) {
+        cancelTransientConnectionRetry(id);
+        deps.removeDeletedSessionTree(id);
+      }
     })
   );
 
@@ -1024,6 +1070,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (deps.shouldIgnorePendingAbortStatus(sessionID, status)) return;
       const abortedRetry = deps.hasPendingAbort(sessionID);
       if (status.type === 'idle') {
+        if (abortedRetry) cancelTransientConnectionRetry(sessionID);
+        if (transientConnectionRetryTimers.has(sessionID)) return;
         handleSessionIdle(sessionID, abortedRetry);
         return;
       }
@@ -1041,6 +1089,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         if (!isActiveTreeWorking()) uiStore.stopLoading();
         return;
       }
+      if (status.type === 'busy') cancelTransientConnectionRetry(sessionID);
       deps.setSessionStatusEntry(sessionID, status);
       if (status.type === 'busy') {
         deps.clearUsageLimitOnResumedProgress(sessionID, status);
@@ -1061,7 +1110,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.idle', (data) => {
       const sid = data.properties?.sessionID as string | undefined;
-      if (sid) handleSessionIdle(sid, deps.hasPendingAbort(sid));
+      if (!sid) return;
+      const abortedRetry = deps.hasPendingAbort(sid);
+      if (abortedRetry) cancelTransientConnectionRetry(sid);
+      if (!transientConnectionRetryTimers.has(sid)) handleSessionIdle(sid, abortedRetry);
     })
   );
 
@@ -1110,6 +1162,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         partialMessage.role === 'assistant' &&
         !partialMessage.error &&
         !!partialMessage.time?.completed;
+      if (assistantCompleted) cancelTransientConnectionRetry(sessionID);
       const agent = (partialMessage as { agent?: unknown }).agent;
       if (typeof agent === 'string' && agent) {
         appStore.setState('sessionSelectedAgents', sessionID, agent);
@@ -1394,6 +1447,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     })
   );
 
+  cleanups.push(() => {
+    for (const timer of transientConnectionRetryTimers.values()) clearTimeout(timer);
+    transientConnectionRetryTimers.clear();
+  });
   return cleanups;
 }
 

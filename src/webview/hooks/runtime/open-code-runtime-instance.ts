@@ -1055,6 +1055,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       invalidateMessageSync: messageSyncGenerations.invalidate,
       isMessageRemovalDeferred,
       abortRemoteSession: (sessionId: string) => client.session.abort(sessionId),
+      continueInterruptedSession,
       logError,
     });
 

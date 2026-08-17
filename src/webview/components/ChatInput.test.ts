@@ -171,6 +171,7 @@ afterEach(() => {
   setState('providerLimits', {});
   setState('mcpStatus', {});
   setState('sessionStatus', reconcile({}));
+  setState('failedSessionIds', []);
   setState('sessionUsageLimits', {});
   setState('sessionPermissionModes', {});
   setState('sessionAutoPermissionActivity', {});
@@ -2317,6 +2318,45 @@ describe('ChatInput', () => {
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
+  });
+
+  it('does not dispatch queued messages after an API failure', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('queuedMessages', [
+      { id: 'q1', sessionId: 'session-1', text: 'Do not send after failure' },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await flushAsyncWork();
+
+    setState('failedSessionIds', ['session-1']);
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setIsLoading(false);
+    for (const eventType of ['session.status', 'session.idle']) {
+      for (const handler of serverEventHandlers.get(eventType) ?? []) {
+        handler({
+          type: eventType,
+          properties: {
+            sessionID: 'session-1',
+            ...(eventType === 'session.status' ? { status: { type: 'idle' } } : {}),
+          },
+        });
+      }
+    }
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages.map((item) => item.id)).toEqual(['q1']);
+
+    setState('failedSessionIds', []);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
 
   it('dispatches a queued message for an idle background session', async () => {

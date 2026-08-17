@@ -28,6 +28,30 @@ export function isProviderAuthFailure(
   return AUTH_INVALIDATED_RE.test(error.data?.message || '');
 }
 
+const TRANSIENT_CONNECTION_RE =
+  /cannot connect to api:|\b(?:econnreset|econnrefused|enotfound|eai_again|etimedout)\b/i;
+
+export function isTransientProviderConnectionError(
+  error:
+    | {
+        name?: string | null;
+        data?: {
+          message?: string | null;
+          statusCode?: number | null;
+          isRetryable?: boolean | null;
+          metadata?: Record<string, string> | null;
+        };
+      }
+    | undefined
+) {
+  if (error?.name !== 'APIError' || error.data?.isRetryable !== true) return false;
+  if (error.data.statusCode) return false;
+  const metadata = Object.entries(error.data.metadata ?? {})
+    .flat()
+    .join(' ');
+  return TRANSIENT_CONNECTION_RE.test(`${error.data.message || ''} ${metadata}`);
+}
+
 function normalizeAbortText(value: string | null | undefined) {
   return value?.trim().toLowerCase() || '';
 }
