@@ -102,6 +102,13 @@ export function ChatWorkspace(props: {
   onCreateSessionFromPicker: () => void;
   onCreateSession: () => void;
 }) {
+  let chatContentRef: HTMLDivElement | undefined;
+  const showActiveSessionCue = () => {
+    if (!chatContentRef) return;
+    chatContentRef.classList.remove('active-session-reselected');
+    void chatContentRef.offsetWidth;
+    chatContentRef.classList.add('active-session-reselected');
+  };
   const sidebarSubagentParentId = () =>
     props.showSessionPicker ? props.subagentParentId : props.sidebarSubagentParentId;
   const sidebarFilterLabel = () =>
@@ -188,6 +195,7 @@ export function ChatWorkspace(props: {
         sessionFilter={props.showSessionPicker ? props.sessionFilter : null}
         subagentParentId={sidebarSubagentParentId()}
         onOpenSubagents={props.onOpenSidebarSubagentSessions}
+        onActiveSessionReselect={showActiveSessionCue}
       />
     </aside>
   );
@@ -197,7 +205,12 @@ export function ChatWorkspace(props: {
       <div class="chat-header chat-header-chat-desktop">
         <div class="chat-header-inner">{activeChatHeader(props.showDesktopBackButton)}</div>
       </div>
-      <div class="chat-main-column-shell">
+      <div
+        ref={(element) => {
+          chatContentRef = element;
+        }}
+        class="chat-main-column-shell"
+      >
         <Show
           when={activeRalphSessionId()}
           fallback={

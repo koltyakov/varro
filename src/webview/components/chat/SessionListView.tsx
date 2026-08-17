@@ -882,6 +882,7 @@ export function SessionListView(props: {
   sessionFilter?: SessionListFilter | null;
   subagentParentId?: string | null;
   onOpenSubagents?: (parentSessionId: string) => void;
+  onActiveSessionReselect?: () => void;
   embedded?: boolean;
   class?: string;
 }) {
@@ -1291,6 +1292,7 @@ export function SessionListView(props: {
                 }
               }}
               onOpenSubagents={props.onOpenSubagents}
+              onActiveSessionReselect={props.onActiveSessionReselect}
               embedded={props.embedded}
             />
           );
@@ -1674,6 +1676,7 @@ function SessionListItem(props: {
   isPinned: boolean;
   onTogglePinned: () => Promise<void>;
   onOpenSubagents?: (parentSessionId: string) => void;
+  onActiveSessionReselect?: () => void;
   embedded?: boolean;
 }) {
   let rowRef: HTMLDivElement | undefined;
@@ -1797,7 +1800,10 @@ function SessionListItem(props: {
     );
   };
   const openSession = () => {
-    if (isActive()) return;
+    if (isActive()) {
+      props.onActiveSessionReselect?.();
+      return;
+    }
     openSessionWithDisplayedModel(props.session, props.diffSummary);
     if (!props.embedded) setShowSessionPicker(false);
   };

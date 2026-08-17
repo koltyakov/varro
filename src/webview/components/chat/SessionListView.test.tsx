@@ -722,15 +722,20 @@ describe('SessionListView selection', () => {
     expect(items[1]?.querySelector('.session-item-main')?.getAttribute('aria-current')).toBeNull();
   });
 
-  it('does not reload the active session from the embedded desktop list', () => {
+  it('reports an active session reselect without reloading it', () => {
     vi.mocked(selectSession).mockClear();
+    const onActiveSessionReselect = vi.fn();
     setState('sessions', [session('session-1', Date.now())]);
     setState('activeSessionId', 'session-1');
-    cleanup = render(() => <SessionListView embedded />, container);
+    cleanup = render(
+      () => <SessionListView embedded onActiveSessionReselect={onActiveSessionReselect} />,
+      container
+    );
 
     container.querySelector<HTMLButtonElement>('.session-item-main')!.click();
 
     expect(selectSession).not.toHaveBeenCalled();
+    expect(onActiveSessionReselect).toHaveBeenCalledOnce();
   });
 
   it('navigates, wraps, scrolls, and selects sessions with the keyboard', async () => {

@@ -1116,6 +1116,11 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(2);
     await page.waitForTimeout(1_250);
     const anchor = await getVisibleMessageAnchor(page.locator('.interactive-list'));
+    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
+      const container = summary.closest<HTMLElement>('.interactive-list');
+      if (!container) throw new Error('Activity summary container is missing');
+      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
 
     await page.evaluate(() => {
       const harnessWindow = window as typeof window & {
@@ -1141,14 +1146,30 @@ test.describe('auto-scroll', () => {
       harnessWindow.__varroE2E?.updateMessagePart?.(part);
     });
 
-    const exitSamples = await sampleMessageTopAcrossFrames(
-      page.locator('.interactive-list'),
-      anchor.id,
-      90
-    );
+    const [exitSamples, exploredSamples] = await Promise.all([
+      sampleMessageTopAcrossFrames(page.locator('.interactive-list'), anchor.id, 90),
+      page.locator('.interactive-list').evaluate(async (element) => {
+        const tops: Array<number | null> = [];
+        for (let frame = 0; frame < 90; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+          const summary = summaries[summaries.length - 1];
+          tops.push(
+            summary
+              ? summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null
+          );
+        }
+        return tops;
+      }),
+    ]);
     expect(
       exitSamples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
       JSON.stringify({ anchor, exitSamples })
+    ).toBe(true);
+    expect(
+      exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
+      JSON.stringify({ exploredTop, exploredSamples })
     ).toBe(true);
     await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
     await expect(page.locator('.activity-exit-bottom-reserve')).toHaveCount(0);
@@ -1215,6 +1236,226 @@ test.describe('auto-scroll', () => {
     });
 
     await expect(appendReserve).toHaveCount(0);
+  });
+
+  test('keeps first-turn Explored fixed when completion follows an activity reserve transfer', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 504, height: 800 });
+    await page.goto('/e2e/harness/index.html?scenario=blank');
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __sendToExtension?: (message: unknown) => void | Promise<void>;
+        __varroE2E?: {
+          getSessionMessages?: (sessionId: string) => Array<{
+            info: Record<string, unknown>;
+            parts: Array<Record<string, unknown>>;
+          }>;
+          updateMessageInfo?: (info: Record<string, unknown>) => void;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+          updateSessionStatus?: (sessionId: string, status: { type: 'busy' | 'idle' }) => void;
+        };
+        firstTurnActivityFixture?: {
+          sessionId: string;
+          info: Record<string, unknown>;
+          running: Record<string, unknown>;
+        };
+      };
+      const originalSend = harnessWindow.__sendToExtension;
+      harnessWindow.__sendToExtension = async (message) => {
+        const request = message as {
+          type?: string;
+          payload?: { path?: string; body?: Record<string, unknown> };
+        };
+        const match = request.payload?.path?.match(/^\/session\/([^/]+)\/prompt_async$/);
+        if (request.type !== 'api/request' || !match) {
+          await originalSend?.(message);
+          return;
+        }
+
+        const sessionId = decodeURIComponent(match[1]!);
+        await originalSend?.(message);
+        const assistant = harnessWindow.__varroE2E
+          ?.getSessionMessages?.(sessionId)
+          .findLast((entry) => entry.info.role === 'assistant');
+        if (!assistant) throw new Error('Persisted first-turn assistant is missing');
+        const info: Record<string, unknown> = {
+          ...assistant.info,
+          time: { created: Date.now() },
+        };
+        delete info.finish;
+        const completed = {
+          id: 'message-first-turn-activity-read',
+          sessionID: sessionId,
+          messageID: String(info.id),
+          type: 'tool',
+          callID: 'message-first-turn-activity-read-call',
+          tool: 'read',
+          state: {
+            status: 'completed',
+            input: { filePath: 'src/webview/components/MessageList.tsx' },
+            output: 'source',
+            title: 'Read MessageList',
+            metadata: {},
+            time: { start: Date.now() - 2, end: Date.now() - 1 },
+          },
+        };
+        const running = {
+          id: 'message-first-turn-activity-command',
+          sessionID: sessionId,
+          messageID: String(info.id),
+          type: 'tool',
+          callID: 'message-first-turn-activity-command-call',
+          tool: 'bash',
+          state: {
+            status: 'running',
+            input: { command: 'npm run test' },
+            title: 'npm run test',
+            time: { start: Date.now() },
+          },
+        };
+        harnessWindow.firstTurnActivityFixture = { sessionId, info, running };
+        harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
+        harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+        harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+        harnessWindow.__varroE2E?.updateMessagePart?.(running);
+        for (const payload of [
+          { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } },
+          { type: 'message.updated', properties: { info } },
+          { type: 'message.part.updated', properties: { part: completed } },
+          { type: 'message.part.updated', properties: { part: running } },
+        ]) {
+          window.postMessage({ type: 'server/event', payload }, '*');
+        }
+      };
+    });
+
+    const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+    await composer.fill(
+      Array.from(
+        { length: 10 },
+        (_, index) => `Keep Explored fixed through first-turn completion, line ${index + 1}.`
+      ).join('\n')
+    );
+    await page.getByTitle('Send (Enter)').click();
+
+    const list = page.locator('.interactive-list');
+    const summary = page.locator('.assistant-activity-summary').last();
+    const activeItem = page.locator(
+      '[data-activity-part-id="message-first-turn-activity-command"]'
+    );
+    await expect(summary).toContainText('Explored: 1 file');
+    await expect(activeItem).toBeVisible();
+    await activeItem.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+        firstTurnActivityFixture?: { running: Record<string, unknown> };
+      };
+      const fixture = harnessWindow.firstTurnActivityFixture;
+      if (!fixture) throw new Error('First-turn activity fixture is missing');
+      const previousState = fixture.running.state as Record<string, unknown>;
+      const completed = {
+        ...fixture.running,
+        state: {
+          status: 'completed',
+          input: previousState.input,
+          output: 'Passed',
+          title: previousState.title,
+          metadata: {},
+          time: { start: Date.now() - 1_000, end: Date.now() },
+        },
+      };
+      fixture.running = completed;
+      harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part: completed } },
+        },
+        '*'
+      );
+    });
+
+    await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
+    const reserve = page.locator('.append-scroll-bottom-reserve');
+    await expect(reserve).toBeVisible();
+    const before = await summary.evaluate((element) => {
+      const container = element.closest<HTMLElement>('.interactive-list');
+      if (!container) throw new Error('Explored container is missing');
+      return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
+
+    const samples = await list.evaluate(async (element) => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          updateMessageInfo?: (info: Record<string, unknown>) => void;
+          updateSessionStatus?: (sessionId: string, status: { type: 'idle' }) => void;
+        };
+        firstTurnActivityFixture?: {
+          sessionId: string;
+          info: Record<string, unknown>;
+        };
+      };
+      const fixture = harnessWindow.firstTurnActivityFixture;
+      if (!fixture) throw new Error('First-turn activity fixture is missing');
+      const completedInfo = {
+        ...fixture.info,
+        time: { created: Date.now() - 2_000, completed: Date.now() },
+        finish: 'stop',
+      };
+      harnessWindow.__varroE2E?.updateMessageInfo?.(completedInfo);
+      harnessWindow.__varroE2E?.updateSessionStatus?.(fixture.sessionId, { type: 'idle' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.updated', properties: { info: completedInfo } },
+        },
+        '*'
+      );
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: {
+            type: 'session.status',
+            properties: { sessionID: fixture.sessionId, status: { type: 'idle' } },
+          },
+        },
+        '*'
+      );
+
+      const result: Array<{ top: number | null; reserveHeight: number }> = [];
+      for (let frame = 0; frame < 30; frame += 1) {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => setTimeout(resolve, 0))
+        );
+        const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+        const explored = summaries[summaries.length - 1];
+        result.push({
+          top: explored
+            ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
+            : null,
+          reserveHeight:
+            element
+              .querySelector<HTMLElement>('.append-scroll-bottom-reserve')
+              ?.getBoundingClientRect().height ?? 0,
+        });
+      }
+      return result;
+    });
+
+    expect(
+      samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 0.5),
+      JSON.stringify({ before, samples })
+    ).toBe(true);
+    expect(
+      samples.every((sample) => sample.reserveHeight > 0.5),
+      JSON.stringify(samples)
+    ).toBe(true);
   });
 
   test('uses trailing activity reserve for the next active tool', async ({ page }) => {
@@ -1472,6 +1713,11 @@ test.describe('auto-scroll', () => {
     ).toBe(true);
     await expect(activeItems).toHaveCount(7);
     const collapseAnchor = await getVisibleMessageAnchor(list);
+    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
+      const container = summary.closest<HTMLElement>('.interactive-list');
+      if (!container) throw new Error('Activity summary container is missing');
+      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
 
     await page.evaluate(() => {
       const sessionId = 'session-tool-cards-large-transcript';
@@ -1493,10 +1739,30 @@ test.describe('auto-scroll', () => {
       );
     });
 
-    const samples = await sampleMessageTopAcrossFrames(list, collapseAnchor.id, 120);
+    const [samples, exploredSamples] = await Promise.all([
+      sampleMessageTopAcrossFrames(list, collapseAnchor.id, 120),
+      list.evaluate(async (element) => {
+        const tops: Array<number | null> = [];
+        for (let frame = 0; frame < 120; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+          const summary = summaries[summaries.length - 1];
+          tops.push(
+            summary
+              ? summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null
+          );
+        }
+        return tops;
+      }),
+    ]);
     expect(
       samples.every((top) => top !== null && Math.abs(top - collapseAnchor.top) <= 0.1),
       JSON.stringify({ collapseAnchor, samples })
+    ).toBe(true);
+    expect(
+      exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
+      JSON.stringify({ exploredTop, exploredSamples })
     ).toBe(true);
     await expect(activeItems).toHaveCount(0);
     await expect(page.locator('.assistant-activity-summary').last()).toContainText('Explored');
@@ -1589,6 +1855,11 @@ test.describe('auto-scroll', () => {
       };
     });
     const anchor = await getVisibleMessageAnchor(list);
+    const exploredTop = await page.locator('.assistant-activity-summary').last().evaluate((summary) => {
+      const container = summary.closest<HTMLElement>('.interactive-list');
+      if (!container) throw new Error('Activity summary container is missing');
+      return summary.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    });
 
     await page.evaluate(() => {
       const sessionID = 'session-tool-cards-large-transcript';
@@ -1608,7 +1879,23 @@ test.describe('auto-scroll', () => {
       );
     });
 
-    const samples = await sampleMessageTopAcrossFrames(list, anchor.id, 12);
+    const [samples, exploredSamples] = await Promise.all([
+      sampleMessageTopAcrossFrames(list, anchor.id, 12),
+      list.evaluate(async (element) => {
+        const tops: Array<number | null> = [];
+        for (let frame = 0; frame < 12; frame += 1) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+          const summary = summaries[summaries.length - 1];
+          tops.push(
+            summary
+              ? summary.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null
+          );
+        }
+        return tops;
+      }),
+    ]);
     await expect(activeItem).toHaveCount(0);
     const reserveHeight = await page
       .locator('.append-scroll-bottom-reserve')
@@ -1616,6 +1903,10 @@ test.describe('auto-scroll', () => {
     expect(
       samples.every((top) => top !== null && Math.abs(top - anchor.top) <= 1.5),
       JSON.stringify({ anchor, samples, reserveHeight, sourceGeometry })
+    ).toBe(true);
+    expect(
+      exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
+      JSON.stringify({ exploredTop, exploredSamples, reserveHeight, sourceGeometry })
     ).toBe(true);
     expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 0.5);
   });

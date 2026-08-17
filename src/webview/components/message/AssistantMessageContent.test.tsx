@@ -564,6 +564,43 @@ describe('AssistantMessageContent', () => {
     expect(container?.querySelector('.assistant-activity-group-settling')).toBeNull();
   });
 
+  it('does not move an existing Explored group when another activity joins it', () => {
+    const first = toolPart('read-existing', 'read', { filePath: 'src/existing.ts' });
+    const second = toolPart('grep-appended', 'grep', { pattern: 'existing' });
+    const [parts, setParts] = createSignal<Part[]>([first]);
+    const claimedKeys = new Set<string>();
+    const renderContent = () => (
+      <AssistantMessageContent
+        info={createAssistantMessage({ time: { created: 0 } })}
+        parts={parts()}
+        textForPart={(part) =>
+          part.type === 'text' || part.type === 'reasoning' ? part.text : null
+        }
+        claimItemReveal={(_messageId, renderKey) => {
+          if (claimedKeys.has(renderKey)) return false;
+          claimedKeys.add(renderKey);
+          return true;
+        }}
+      />
+    );
+
+    cleanup = render(renderContent, container!);
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+    expect(claimedKeys).toContain('activity-group:read-existing');
+
+    cleanup();
+    setParts([first, second]);
+    cleanup = render(renderContent, container!);
+
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file, 1 search'
+    );
+    expect(container?.querySelector('.assistant-activity-group-settling')).toBeNull();
+  });
+
   it('keeps active and briefly completed tools together in one bounded tray', () => {
     const runningSearch = toolPart('search-running', 'grep', { pattern: 'activity' });
     runningSearch.state = {

@@ -95,6 +95,32 @@ input:focus-visible {
   display: flex;
   flex: 1;
   flex-direction: column;
+  position: relative;
+}
+
+.chat-main-column-shell.active-session-reselected::after {
+  content: '';
+  position: absolute;
+  z-index: var(--z-chrome);
+  inset: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--chat-radius-card);
+  pointer-events: none;
+  animation: active-session-reselected 620ms ease-out;
+}
+
+@keyframes active-session-reselected {
+  0% {
+    border-color: color-mix(in srgb, var(--color-vscode-accent) 72%, transparent);
+    box-shadow:
+      inset 0 0 20px color-mix(in srgb, var(--color-vscode-accent) 10%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--color-vscode-accent) 8%, transparent);
+  }
+
+  100% {
+    border-color: transparent;
+    box-shadow: none;
+  }
 }
 
 .chat-workspace {

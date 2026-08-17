@@ -47,7 +47,7 @@ type AssistantRenderEntry = {
 };
 
 function getActivityGroupRevealTrackingKey(parts: readonly AssistantActivityPart[]) {
-  return `activity-group:${parts[0]!.id}:${parts[parts.length - 1]!.id}`;
+  return `activity-group:${parts[0]!.id}`;
 }
 
 // File-edit stacks rekey on every appended edit, so track their reveal by the
