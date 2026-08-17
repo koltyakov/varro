@@ -331,6 +331,7 @@
 
 .model-picker-search {
   padding: 0;
+  border-bottom-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   background: var(--color-vscode-surface-raised);
 }
 
@@ -546,6 +547,7 @@ body.vscode-high-contrast-light .model-picker-item.selected {
 }
 
 .model-picker-menu .dropdown-footer {
+  border-top-color: color-mix(in srgb, var(--color-vscode-fg) 10%, transparent);
   background: var(--color-vscode-surface-raised);
 }
 
