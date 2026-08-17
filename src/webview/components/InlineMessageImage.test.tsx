@@ -1,17 +1,18 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
-import { InlineMessageImage, getInlineImagePresentation } from './InlineMessageImage';
+import {
+  InlineMessageImage,
+  getInlineImagePresentation,
+  preloadInlineImageDimensions,
+} from './InlineMessageImage';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 
-function renderImage() {
+function renderImage(src = 'https://example.test/image.png') {
   container = document.createElement('div');
   document.body.appendChild(container);
-  cleanup = render(
-    () => <InlineMessageImage src="https://example.test/image.png" alt="diagram.png" />,
-    container!
-  );
+  cleanup = render(() => <InlineMessageImage src={src} alt="diagram.png" />, container!);
   return container.querySelector<HTMLImageElement>('.chat-image-img')!;
 }
 
@@ -29,6 +30,8 @@ afterEach(() => {
   cleanup = undefined;
   container?.remove();
   container = null;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('InlineMessageImage', () => {
@@ -51,6 +54,58 @@ describe('InlineMessageImage', () => {
     expect(ambient?.getAttribute('src')).toBe('https://example.test/image.png');
     expect(ambient?.getAttribute('alt')).toBe('');
     expect(ambient?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('preserves the presentation when a reconciled image remounts with the same source', () => {
+    const src = 'https://example.test/reconciled-image.png';
+    const image = renderImage(src);
+    loadImage(image, 1080, 1920);
+    expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
+
+    cleanup?.();
+    container?.remove();
+    cleanup = undefined;
+    container = null;
+
+    const reconciledImage = renderImage(src);
+
+    expect(reconciledImage.classList.contains('chat-image-img-ambient')).toBe(true);
+    expect(reconciledImage.parentElement?.querySelector('.chat-image-ambient')).toBeInstanceOf(
+      HTMLImageElement
+    );
+  });
+
+  it('uses decoded dimensions before painting an existing-session image', () => {
+    vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(1080);
+    vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(1920);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 640, 360)
+    );
+
+    const image = renderImage('https://example.test/existing-session-image.png');
+
+    expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
+    expect(image.parentElement?.querySelector('.chat-image-ambient')).toBeInstanceOf(
+      HTMLImageElement
+    );
+  });
+
+  it('uses dimensions decoded by the composer before mounting the sent image', async () => {
+    class DecodedImage {
+      src = '';
+      naturalWidth = 1080;
+      naturalHeight = 1920;
+
+      async decode() {}
+    }
+    vi.stubGlobal('Image', DecodedImage);
+    const src = 'data:image/png;base64,composer-handoff';
+
+    await preloadInlineImageDimensions(src);
+    const image = renderImage(src);
+
+    expect(image.classList.contains('chat-image-img-ambient')).toBe(true);
   });
 
   it('keeps small landscape images contained instead of upscaling them to cover', () => {

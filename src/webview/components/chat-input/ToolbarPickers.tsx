@@ -106,13 +106,23 @@ export function PermissionModePicker(props: {
   onToggle: () => void;
   onSelect: (mode: PermissionMode) => void;
 }) {
-  const options: Array<{ mode: PermissionMode; label: string }> = [
-    { mode: 'default', label: 'Default' },
-    { mode: 'auto', label: 'Auto approve' },
-    { mode: 'full', label: 'Full access' },
+  const options: Array<{ mode: PermissionMode; label: string; detail: string }> = [
+    { mode: 'default', label: 'Default', detail: 'Ask before commands and file changes' },
+    {
+      mode: 'edits',
+      label: 'Auto-accept edits',
+      detail: 'Auto-approve edits, ask before other actions',
+    },
+    {
+      mode: 'auto',
+      label: 'Auto approve',
+      detail: 'AI reviewer approves routine actions; risky ones still ask',
+    },
+    { mode: 'full', label: 'Full access', detail: 'Allow commands and edits without prompts' },
   ];
   const title = () => {
     if (props.mode === 'full') return 'Full access permissions';
+    if (props.mode === 'edits') return 'Auto-accept edits permissions';
     if (props.mode === 'auto') {
       const model = props.judgeModel;
       return model
@@ -123,6 +133,7 @@ export function PermissionModePicker(props: {
   };
   const buttonLabel = () => {
     if (props.mode === 'full') return 'Full access';
+    if (props.mode === 'edits') return 'Auto-accept edits';
     if (props.mode === 'auto') return 'Auto approve';
     return 'Default';
   };
@@ -182,7 +193,11 @@ export function PermissionModePicker(props: {
         </span>
       </Show>
       <Show when={props.showPicker}>
-        <div ref={setPopoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={setPopoverRef}
+          class="toolbar-popover permission-mode-popover"
+          onClick={(e) => e.stopPropagation()}
+        >
           <div class="toolbar-popover-header">Permissions</div>
           <For each={options}>
             {(option) => (
@@ -191,7 +206,15 @@ export function PermissionModePicker(props: {
                 onClick={() => props.onSelect(option.mode)}
               >
                 <PermissionModeIcon mode={option.mode} />
-                <span class="min-w-0">{option.label}</span>
+                <span class="permission-mode-option-copy">
+                  <span>
+                    {option.label}
+                    <Show when={option.mode === 'default'}>
+                      <span class="permission-mode-option-note"> (OpenCode config-based)</span>
+                    </Show>
+                  </span>
+                  <span>{option.detail}</span>
+                </span>
               </button>
             )}
           </For>

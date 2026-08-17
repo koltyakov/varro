@@ -14,12 +14,13 @@ proof that the command started, and hiding a prompt is not the same as resolving
 
 ## Mode Semantics
 
-The protocol values are `default`, `auto`, and `full`. The UI labels them `Default`, `Auto approve`,
-and `Full access`.
+The protocol values are `default`, `edits`, `auto`, and `full`. The UI labels them `Default`,
+`Auto-accept edits`, `Auto`, and `Full access`.
 
 | Mode | OpenCode session rules | Varro behavior for an ask |
 | --- | --- | --- |
 | `default` | No Varro session override; use OpenCode configuration and agent rules | Show requests OpenCode asks about as actionable prompts |
+| `edits` | Ask by default with edit, known read-only, and subagent-launch allowances | Reply `once` to an edit request already pending during a mode change; show other asks |
 | `auto` | Ask by default with known read-only and subagent-launch allowances | Hide briefly while Varro judges; reply or fall back to a prompt |
 | `full` | Allow every permission, including unknown permission names | Reply `always` to any already-pending request and resync |
 
@@ -27,7 +28,7 @@ and `Full access`.
 switching an existing session to default clears Varro's prior auto/full override. OpenCode's global,
 project, and agent configuration then determines whether an action is allowed, denied, or asked.
 
-`Auto approve` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
+`Auto` is not a broader OpenCode rule set. OpenCode must still emit an ask so Varro has a
 specific request ID and complete action context to judge. Giving `auto` allow-all rules would bypass
 the judge and silently turn it into `full`.
 
@@ -42,6 +43,7 @@ OpenCode uses the last matching permission rule.
 - Default contributes no Varro rules; OpenCode configuration and selected-agent rules remain in
   control.
 - Auto rules start with `* -> ask`, then place known read-only allowances after it.
+- Auto-accept edits rules add the `edit` allowance while retaining auto's read-only and subagent-launch allowances.
 - Current direct allowances are read-only permissions (`read`, `glob`, `grep`, `list`, `codesearch`,
   and `lsp`) plus `task`, which only launches a child whose actions remain permission-checked.
 - Mutating, executable, external, and interactive permissions remain `ask` in auto mode. Default mode
@@ -94,8 +96,8 @@ The normal lifecycle is:
    `permission.updated` event.
 2. Both layers normalize the payload and retain the request ID and owning session ID.
 3. The webview resolves the effective mode for the request's session tree.
-4. Default reveals it, auto starts a bounded judge attempt, and full starts an automatic `always`
-   response.
+4. Default reveals it, auto-accept edits replies `once` to edits and reveals other asks, auto starts
+   a bounded judge attempt, and full starts an automatic `always` response.
 5. Varro sends `once`, `always`, or `reject` to OpenCode's permission reply route.
 6. Local UI is removed only after the reply is acknowledged, an authoritative reply event arrives,
    or a race-safe pending snapshot proves that the request no longer exists.
@@ -346,6 +348,8 @@ Mode updates patch OpenCode session rules and update Varro's workspace/session p
 for one session are serialized, and stale successes or failures must not overwrite the latest user
 selection.
 
+- Switching to auto-accept edits installs its edit allowance and syncs pending requests so queued edits
+  are accepted and other requests remain visible.
 - Switching to auto installs Varro's ask-based auto rules, invalidates the authority of older mode
   work, and syncs pending requests into the judge flow.
 - Switching to default clears Varro's session override so OpenCode configuration applies. Any

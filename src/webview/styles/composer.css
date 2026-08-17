@@ -960,6 +960,10 @@
   color: var(--vscode-charts-blue, #3794ff);
 }
 
+.permission-mode-icon.edits {
+  color: var(--vscode-charts-blue, #3794ff);
+}
+
 .toolbar-popover {
   position: absolute;
   bottom: 100%;
@@ -984,6 +988,20 @@
 
 .toolbar-popover.variant-popover {
   max-height: 240px;
+}
+
+.toolbar-popover.permission-mode-popover {
+  max-height: 260px;
+}
+
+.permission-mode-popover .toolbar-popover-item {
+  gap: 7px;
+}
+
+.permission-mode-popover .permission-mode-icon {
+  align-self: center;
+  flex-shrink: 0;
+  margin-right: 0;
 }
 
 .toolbar-popover.agent-popover {
@@ -1030,6 +1048,24 @@
     center / contain no-repeat;
   mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z'/></svg>")
     center / contain no-repeat;
+}
+
+.permission-mode-option-copy {
+  display: flex;
+  min-width: 240px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permission-mode-option-copy > :last-child {
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.permission-mode-option-note {
+  color: var(--color-vscode-muted);
+  font-weight: 400;
 }
 
 .toolbar-popover-header {

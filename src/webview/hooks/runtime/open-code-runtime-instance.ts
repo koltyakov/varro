@@ -66,7 +66,7 @@ import {
   postFocusStateWithDependencies,
   registerFocusStateTracking,
 } from '../mount-bridge';
-import { getSessionPermissionRulesForMode } from '../permission-rules';
+import { getSessionPermissionRulesForMode, isEditPermission } from '../permission-rules';
 import {
   deriveSelectedAgentFromMessages,
   deriveSelectedModelFromMessages,
@@ -1346,6 +1346,22 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
           else pendingPermissionHandlers.push(judgeAndRespondPermission(permission));
           continue;
         }
+        if (mode === 'edits' && isEditPermission(permission.type)) {
+          pendingPermissionHandlers.push(
+            sessionApprovalOperations
+              .respondPermission(permission.sessionID, permission.id, 'once', { rethrow: true })
+              .catch(() => {
+                if (isCurrent()) {
+                  permissionsStore.addPermission(permission);
+                  postMessage({
+                    type: 'permission/reveal',
+                    payload: { permissionId: permission.id },
+                  });
+                }
+              })
+          );
+          continue;
+        }
         visiblePermissions.push(permission);
         postMessage({ type: 'permission/reveal', payload: { permissionId: permission.id } });
       }
@@ -1463,8 +1479,10 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
     const mode = permissionsStore.getPermissionModeForSession(permission.sessionID);
     if (mode !== 'auto') {
       if (!wasVisible) {
-        attempt.status = mode === 'default' ? 'visible' : 'responded';
-        if (mode === 'default') showPermissionAfterJudge(attempt);
+        const shouldShow =
+          mode === 'default' || (mode === 'edits' && !isEditPermission(permission.type));
+        attempt.status = shouldShow ? 'visible' : 'responded';
+        if (shouldShow) showPermissionAfterJudge(attempt);
       }
       finishPermissionJudgeAttempt(attempt);
       finishAutoApproveActivity(permission, 'auto-review-failed', 'Automatic review was stopped.');

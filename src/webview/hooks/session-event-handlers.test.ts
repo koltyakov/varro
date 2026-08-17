@@ -332,6 +332,44 @@ describe('registerSessionEventHandlers', () => {
     expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-auto' }));
   });
 
+  it('auto-accepts edit permissions while leaving other requests supervised', async () => {
+    addPermission.mockClear();
+    const handlers = installHandlers();
+    const respondPermission = vi.fn().mockResolvedValue(undefined);
+
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        shouldAutoApproveEdit: (permission) => permission.type === 'edit',
+        respondPermission,
+      })
+    );
+
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-edit',
+        sessionID: 'session-1',
+        permission: 'edit',
+        title: 'Edit file',
+      },
+    });
+    handlers.get('permission.asked')?.({
+      properties: {
+        id: 'perm-bash',
+        sessionID: 'session-1',
+        permission: 'bash',
+        title: 'Run command',
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(respondPermission).toHaveBeenCalledWith('session-1', 'perm-edit', 'once', {
+        rethrow: true,
+      });
+    });
+    expect(addPermission).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-edit' }));
+    expect(addPermission).toHaveBeenCalledWith(expect.objectContaining({ id: 'perm-bash' }));
+  });
+
   it('shows auto-approve permissions when judging fails', async () => {
     addPermission.mockClear();
     const handlers = installHandlers();

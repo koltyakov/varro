@@ -103,6 +103,7 @@ export async function selectSessionWithDependencies(
 
     deps.resetTodoSync();
     deps.clearMessages();
+    deps.setMessagesLoading?.(true);
   });
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
@@ -117,7 +118,6 @@ export async function selectSessionWithDependencies(
     }
   };
 
-  deps.setMessagesLoading?.(true);
   let loaded: { session: Session; messages: MessageEntry[] };
   try {
     loaded = await deps.loadSession(id, isCurrentSelection);
@@ -146,9 +146,7 @@ export async function selectSessionWithDependencies(
     deps.setMessagesIncremental(messages);
     return deps.syncTodosForSession(id, messages).catch(() => {});
   });
-  clearMessagesLoadingIfOwned();
   deps.syncFailedSessionsFromMessages(messages);
-  deps.requestMessageListScrollToBottom();
 
   if (!persistedAgent) {
     const inferredAgent = deps.deriveSelectedAgentFromMessages(messages);
@@ -165,6 +163,11 @@ export async function selectSessionWithDependencies(
   if (loadedModel) {
     deps.applySelectedModel(loadedModel, id);
   }
+
+  await todoSync;
+  if (!isCurrentSelection()) return;
+  clearMessagesLoadingIfOwned();
+  deps.requestMessageListScrollToBottom();
 
   const statuses = await statusSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
@@ -184,8 +187,6 @@ export async function selectSessionWithDependencies(
   }
 
   await mcpSync;
-  if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
-  await todoSync;
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;
   await deps.loadQuestions().catch(() => {});
   if (!deps.isCurrentSelectionGeneration(generation) || deps.getActiveSessionId() !== id) return;

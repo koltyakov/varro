@@ -797,7 +797,7 @@ function UserMessageTextContent(props: {
         segment.type === 'code' ? (
           <UserMessageCodeBlock content={segment.content} language={segment.language} />
         ) : segment.type === 'markup' ? (
-          <p class="user-message-text">
+          <p class="user-message-text user-message-format-chip-row">
             <UserMessageMarkupChip content={segment.content} format={segment.format} />
           </p>
         ) : (

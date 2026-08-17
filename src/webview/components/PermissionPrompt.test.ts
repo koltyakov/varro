@@ -4,7 +4,7 @@ import type { Permission } from '../types';
 
 const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
-  permissionMode: 'default' as 'default' | 'auto' | 'full',
+  permissionMode: 'default' as 'default' | 'edits' | 'auto' | 'full',
 }));
 
 vi.mock('../hooks/useOpenCode', () => ({

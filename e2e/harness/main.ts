@@ -147,7 +147,7 @@ type ScenarioState = {
   storedState: {
     sessionSelectedAgents?: Record<string, string>;
     sessionSelectedMcps?: Record<string, string[]>;
-    sessionPermissionModes?: Record<string, 'default' | 'auto' | 'full'>;
+    sessionPermissionModes?: Record<string, 'default' | 'edits' | 'auto' | 'full'>;
     lastSeenSessions?: Record<string, number>;
     lastOpenedView?:
       | { type: 'new-session'; timestamp: number }

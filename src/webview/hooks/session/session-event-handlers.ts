@@ -2,6 +2,7 @@ import {
   isAbortedAssistantError,
   isTransientProviderConnectionError,
 } from '../../../shared/error-classification';
+import { isEditPermission } from '../../../shared/permission-rules';
 import type { ServerEvent } from '../../../shared/protocol';
 import { serverEvents } from '../../lib/client';
 import {
@@ -124,6 +125,7 @@ type EventHandlerDependencies = {
   syncTodosFromMessages(messages?: MessageEntry[], latestEventPayload?: unknown): void;
   syncTodosForSession?(sessionId: string, messages?: MessageEntry[]): Promise<void>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
+  shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
   syncPermissionSession?(sessionId: string): Promise<void>;
@@ -228,6 +230,9 @@ export class SessionEventHandlerOperations {
       syncTodosForSession: this.deps.todoSyncOperations.syncTodosForSession,
       shouldAutoApprovePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'full',
+      shouldAutoApproveEdit: (permission) =>
+        permissionsStore.getPermissionModeForSession(permission.sessionID) === 'edits' &&
+        isEditPermission(permission.type),
       shouldAutoJudgePermissions: (sessionId) =>
         permissionsStore.getPermissionModeForSession(sessionId) === 'auto',
       isPermissionSessionKnown: this.deps.sessionApprovalOperations.isPermissionSessionKnown,

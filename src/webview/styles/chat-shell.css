@@ -160,6 +160,10 @@ input:focus-visible {
   scrollbar-color: var(--color-vscode-chat-scrollbar-thumb-desktop) transparent;
 }
 
+.interactive-list.is-session-hydrating {
+  visibility: hidden;
+}
+
 .interactive-list.managed-scroll-anchor,
 .interactive-list.editing-message {
   overflow-anchor: none;

@@ -176,6 +176,7 @@ describe('UserMessageContent', () => {
     expect(messageText).toHaveLength(2);
     expect(messageText?.[0]?.textContent).toBe('In input, change the agent chip icon to');
     expect(messageText?.[1]?.textContent).toBe('SVG143 B');
+    expect(messageText?.[1]?.classList).toContain('user-message-format-chip-row');
     expect(
       container?.querySelector('.user-message-format-chip')?.getAttribute('data-copy-marker')
     ).toBe(prompt.slice(prompt.indexOf('<?xml')));

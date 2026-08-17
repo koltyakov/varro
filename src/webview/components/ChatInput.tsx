@@ -143,6 +143,7 @@ import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/dif
 import { TodoList } from './TodoList';
 import { ChangedFilesList } from './ChangedFilesList';
 import { ImagePreviewOverlay, createImagePreviewEffect, type PreviewImage } from './ImagePreview';
+import { preloadInlineImageDimensions } from './InlineMessageImage';
 import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 import { AttachmentStrip } from './chat-input/AttachmentStrip';
 import { ChatInputMainToolbar, ChatInputMetaToolbar } from './chat-input/ChatInputToolbar';
@@ -2475,8 +2476,10 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     void Promise.all(
       imageFiles.map(async (file) => {
         try {
+          const url = await readFileAsDataUrl(file);
+          await preloadInlineImageDimensions(url);
           return {
-            url: await readFileAsDataUrl(file),
+            url,
             mime: file.type || 'image/png',
             size: file.size,
           };

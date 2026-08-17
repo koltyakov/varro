@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { PermissionMode } from '../../shared/protocol';
 import type { Permission, QuestionRequest, Session } from '../types';
 import {
   autoApprovePermissionsForSessionWithDependencies,
@@ -354,8 +355,8 @@ describe('session-approvals helpers', () => {
   it('serializes full then auto PATCHes and applies only the latest success', async () => {
     const fullUpdate = deferred<Session>();
     const autoUpdate = deferred<Session>();
-    let sessionMode: 'default' | 'auto' | 'full' = 'default';
-    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    let sessionMode: PermissionMode = 'default';
+    let draftMode: PermissionMode = 'default';
     const upsertSession = vi.fn();
     const autoApprovePermissionsForSession = vi.fn(async () => {});
     const syncPendingPermissions = vi.fn(async () => {});
@@ -422,8 +423,8 @@ describe('session-approvals helpers', () => {
   it('rolls full then auto failures back to the last confirmed mode', async () => {
     const fullUpdate = deferred<Session>();
     const autoUpdate = deferred<Session>();
-    let sessionMode: 'default' | 'auto' | 'full' = 'default';
-    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    let sessionMode: PermissionMode = 'default';
+    let draftMode: PermissionMode = 'default';
     const setPermissionModeForSession = vi.fn((_sessionId, mode) => {
       sessionMode = mode;
     });
@@ -493,8 +494,8 @@ describe('session-approvals helpers', () => {
   it('rolls a failed latest auto selection back to a confirmed full selection', async () => {
     const fullUpdate = deferred<Session>();
     const autoUpdate = deferred<Session>();
-    let sessionMode: 'default' | 'auto' | 'full' = 'default';
-    let draftMode: 'default' | 'auto' | 'full' = 'default';
+    let sessionMode: PermissionMode = 'default';
+    let draftMode: PermissionMode = 'default';
     const saveProjectPermissionMode = vi.fn();
     const updateSessionPermission = vi
       .fn()
@@ -600,34 +601,37 @@ describe('session-approvals helpers', () => {
     expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
   });
 
-  it('syncs pending permissions when switching to auto mode', async () => {
-    const autoApprovePermissionsForSession = vi.fn(async () => {});
-    const getPermissionsForSession = vi.fn(() => [permission('perm-1')]);
-    const syncPendingPermissions = vi.fn(async () => {});
+  it.each(['auto', 'edits'] as const)(
+    'syncs pending permissions when switching to %s mode',
+    async (mode) => {
+      const autoApprovePermissionsForSession = vi.fn(async () => {});
+      const getPermissionsForSession = vi.fn(() => [permission('perm-1')]);
+      const syncPendingPermissions = vi.fn(async () => {});
 
-    await updatePermissionModeForSessionWithDependencies(
-      {
-        getPermissionModeForSession: () => 'default',
-        getDraftPermissionMode: () => 'default',
-        setPermissionModeForSession: vi.fn(),
-        setDraftPermissionMode: vi.fn(),
-        saveProjectPermissionMode: vi.fn(),
-        updateSessionPermission: vi.fn(async () => session('session-1')),
-        upsertSession: vi.fn(),
-        setError: vi.fn(),
-        getPermissionsForSession,
-        autoApprovePermissionsForSession,
-        syncPendingPermissions,
-      },
-      'auto',
-      [{ permission: 'bash', pattern: '*', action: 'ask' }],
-      'session-1'
-    );
+      await updatePermissionModeForSessionWithDependencies(
+        {
+          getPermissionModeForSession: () => 'default',
+          getDraftPermissionMode: () => 'default',
+          setPermissionModeForSession: vi.fn(),
+          setDraftPermissionMode: vi.fn(),
+          saveProjectPermissionMode: vi.fn(),
+          updateSessionPermission: vi.fn(async () => session('session-1')),
+          upsertSession: vi.fn(),
+          setError: vi.fn(),
+          getPermissionsForSession,
+          autoApprovePermissionsForSession,
+          syncPendingPermissions,
+        },
+        mode,
+        [{ permission: 'bash', pattern: '*', action: 'ask' }],
+        'session-1'
+      );
 
-    expect(getPermissionsForSession).not.toHaveBeenCalled();
-    expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
-    expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
-  });
+      expect(getPermissionsForSession).not.toHaveBeenCalled();
+      expect(autoApprovePermissionsForSession).not.toHaveBeenCalled();
+      expect(syncPendingPermissions).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('uses the generic update error for non-Error failures', async () => {
     const setError = vi.fn();

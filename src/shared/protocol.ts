@@ -63,7 +63,7 @@ export interface WorkspaceFilePick {
   workspaceDirectory: string | null;
 }
 
-export type PermissionMode = 'default' | 'auto' | 'full';
+export type PermissionMode = 'default' | 'edits' | 'auto' | 'full';
 
 export type ChatModelSelection = {
   providerID: string;
@@ -72,7 +72,7 @@ export type ChatModelSelection = {
 };
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'default' || value === 'auto' || value === 'full';
+  return value === 'default' || value === 'edits' || value === 'auto' || value === 'full';
 }
 
 export type AutoApproveJudgeDecision = 'allow' | 'reject' | 'ask';

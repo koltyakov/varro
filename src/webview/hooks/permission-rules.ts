@@ -1,1 +1,1 @@
-export { getSessionPermissionRulesForMode } from '../../shared/permission-rules';
+export { getSessionPermissionRulesForMode, isEditPermission } from '../../shared/permission-rules';

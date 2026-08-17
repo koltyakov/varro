@@ -2534,7 +2534,7 @@ test('sticky and visible-row geometry survive inline-file-change values and widt
         window as Window & {
           __initialWebviewState?: {
             desktopSessionPaneSide?: 'left' | 'right';
-            defaultPermissionMode?: 'default' | 'auto' | 'full';
+            defaultPermissionMode?: 'default' | 'edits' | 'auto' | 'full';
           };
         }
       ).__initialWebviewState;

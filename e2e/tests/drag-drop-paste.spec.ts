@@ -176,6 +176,72 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
 });
 
+test('paints a sent portrait carousel at its final presentation without blinking', async ({
+  page,
+}) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByText('GPT-4.1', { exact: true }).click();
+
+  const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
+  await composer.click();
+  await composer.evaluate((node) => {
+    const dataTransfer = new DataTransfer();
+    for (const [name, color] of [
+      ['first.svg', '#2563eb'],
+      ['second.svg', '#16a34a'],
+    ] as const) {
+      dataTransfer.items.add(
+        new File(
+          [
+            `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="320"><rect width="180" height="320" fill="${color}"/></svg>`,
+          ],
+          name,
+          { type: 'image/svg+xml' }
+        )
+      );
+    }
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+    node.dispatchEvent(event);
+  });
+  await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(2);
+
+  const prompt = 'Compare these portrait images';
+  await composer.fill(prompt);
+  await page.evaluate((promptText) => {
+    const samples: string[] = [];
+    Object.assign(window, { sentImagePresentationSamples: samples });
+    new MutationObserver(() => {
+      const card = [...document.querySelectorAll<HTMLElement>('.user-message-card')].findLast(
+        (candidate) => candidate.textContent?.includes(promptText)
+      );
+      const image = card?.querySelector<HTMLElement>('.chat-image-img');
+      if (image) samples.push(image.className);
+    }).observe(document.body, { childList: true, subtree: true, attributes: true });
+  }, prompt);
+
+  await page.getByTitle('Send (Enter)').click();
+  await expect(page.locator('.user-message-card').filter({ hasText: prompt })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { sentImagePresentationSamples?: string[] })
+            .sentImagePresentationSamples?.length ?? 0
+      )
+    )
+    .toBeGreaterThan(0);
+
+  const samples = await page.evaluate(
+    () =>
+      (window as Window & { sentImagePresentationSamples?: string[] })
+        .sentImagePresentationSamples ?? []
+  );
+  expect(samples[0]).toContain('chat-image-img-ambient');
+  expect(samples.every((sample) => sample.includes('chat-image-img-ambient'))).toBe(true);
+});
+
 test('reloads and inline-edits an image prompt without losing its attachment', async ({ page }) => {
   const sessionId = 'session-reload-persistence';
   const initialText = 'Describe the persisted architecture diagram';

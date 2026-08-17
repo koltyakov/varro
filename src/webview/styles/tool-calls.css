@@ -2665,6 +2665,15 @@ kbd {
   .interactive-item-container.interactive-request
   .chat-turn-card
   > .rendered-markdown
+  p.user-message-text
+  + p.user-message-format-chip-row {
+  margin-top: -10px;
+}
+
+.interactive-session
+  .interactive-item-container.interactive-request
+  .chat-turn-card
+  > .rendered-markdown
   .user-message-text
   > .inline-chip {
   padding: 1px 5px;

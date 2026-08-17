@@ -286,11 +286,12 @@
           "type": "string",
           "enum": [
             "default",
+            "edits",
             "auto",
             "full"
           ],
           "default": "auto",
-          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
+          "markdownDescription": "Permission mode selected when no project or global Varro permission-mode selection has been saved. `default` follows OpenCode permission settings and shows requests OpenCode asks about, `edits` accepts file edits while asking before other actions, `auto` judges eligible requests automatically, and `full` grants unrestricted access."
         },
         "varro.chat.autoApproveModel": {
           "type": "string",

@@ -4,7 +4,7 @@ import { isPermissionMode, parseServerEvent, type ExtensionMessage } from './pro
 
 describe('protocol parsers', () => {
   it('recognizes only supported permission modes', () => {
-    expect(['default', 'auto', 'full'].every(isPermissionMode)).toBe(true);
+    expect(['default', 'edits', 'auto', 'full'].every(isPermissionMode)).toBe(true);
     expect(['', 'Default', 'ask', null, undefined].some(isPermissionMode)).toBe(false);
   });
 

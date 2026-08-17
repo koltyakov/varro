@@ -48,6 +48,17 @@ describe('getSessionPermissionRulesForMode', () => {
     expect(byPermission.get('websearch')).toMatchObject({ pattern: '*', action: 'ask' });
   });
 
+  it('allows edits while asking before other actions in auto-accept edits mode', () => {
+    const rules = getSessionPermissionRulesForMode('edits', 'create');
+
+    expect(resolvePermissionAction(rules, 'read')).toBe('allow');
+    expect(resolvePermissionAction(rules, 'task')).toBe('allow');
+    expect(resolvePermissionAction(rules, 'edit')).toBe('allow');
+    expect(resolvePermissionAction(rules, 'bash')).toBe('ask');
+    expect(resolvePermissionAction(rules, 'external_directory')).toBe('ask');
+    expect(resolvePermissionAction(rules, 'mcp_dynamic_tool')).toBe('ask');
+  });
+
   it('makes auto mode override agent allow-all while preserving read-only allowances', () => {
     const rules = [
       { permission: '*', pattern: '*', action: 'allow' as const },
@@ -77,6 +88,9 @@ describe('getSessionPermissionRulesForMode', () => {
     );
     expect(getSessionPermissionRulesForMode('auto', 'update')).toEqual(
       getSessionPermissionRulesForMode('auto', 'create')
+    );
+    expect(getSessionPermissionRulesForMode('edits', 'update')).toEqual(
+      getSessionPermissionRulesForMode('edits', 'create')
     );
   });
 });

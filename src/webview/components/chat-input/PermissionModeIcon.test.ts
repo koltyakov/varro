@@ -22,20 +22,21 @@ describe('PermissionModeIcon', () => {
     cleanup = render(
       () => [
         PermissionModeIcon({ mode: 'default' }),
+        PermissionModeIcon({ mode: 'edits' }),
         PermissionModeIcon({ mode: 'auto' }),
         PermissionModeIcon({ mode: 'full' }),
       ],
       container!
     );
 
-    const icons = ['default', 'auto', 'full'].map((mode) =>
+    const icons = ['default', 'edits', 'auto', 'full'].map((mode) =>
       container?.querySelector(`.permission-mode-icon.${mode}`)
     );
     const pathData = icons.map((icon) => icon?.querySelector('path')?.getAttribute('d'));
 
-    expect(container?.querySelectorAll('.permission-mode-icon')).toHaveLength(3);
+    expect(container?.querySelectorAll('.permission-mode-icon')).toHaveLength(4);
     expect(icons.every((icon) => icon?.querySelector('svg') instanceof SVGSVGElement)).toBe(true);
     expect(pathData.every(Boolean)).toBe(true);
-    expect(new Set(pathData).size).toBe(3);
+    expect(new Set(pathData).size).toBe(4);
   });
 });

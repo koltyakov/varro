@@ -223,7 +223,7 @@ describe('session-selection helpers', () => {
     expect(stopLoading).not.toHaveBeenCalled();
   });
 
-  it('flags messages as loading until the session messages are applied', async () => {
+  it('flags messages as loading until the session messages and todos are applied', async () => {
     let resolveLoad!: (value: {
       session: {
         id: string;
@@ -240,6 +240,8 @@ describe('session-selection helpers', () => {
     });
     const setMessagesLoading = vi.fn();
     const setMessagesIncremental = vi.fn();
+    const todos = deferred<void>();
+    const requestMessageListScrollToBottom = vi.fn();
 
     const selection = selectSessionWithDependencies(
       {
@@ -269,10 +271,10 @@ describe('session-selection helpers', () => {
         upsertSession: vi.fn(),
         setMessagesIncremental,
         syncFailedSessionsFromMessages: vi.fn(),
-        requestMessageListScrollToBottom: vi.fn(),
+        requestMessageListScrollToBottom,
         deriveSelectedAgentFromMessages: () => null,
         deriveSelectedModelFromMessages: () => null,
-        syncTodosForSession: vi.fn(async () => {}),
+        syncTodosForSession: vi.fn(() => todos.promise),
         loadQuestions: vi.fn(async () => {}),
         loadSessionStatuses: vi.fn(async () => ({})),
         mergeSessionStatuses: vi.fn(),
@@ -299,15 +301,27 @@ describe('session-selection helpers', () => {
       },
       messages: [{ info: assistantMessage('assistant-1'), parts: [] }],
     });
+    await vi.waitFor(() => expect(setMessagesIncremental).toHaveBeenCalledTimes(1));
+
+    expect(setMessagesLoading).not.toHaveBeenCalledWith(false);
+    expect(requestMessageListScrollToBottom).not.toHaveBeenCalled();
+
+    todos.resolve();
     await selection;
 
     expect(setMessagesLoading.mock.lastCall).toEqual([false]);
     const loadingCompleteCallOrder = setMessagesLoading.mock.invocationCallOrder[1];
     const messagesAppliedCallOrder = setMessagesIncremental.mock.invocationCallOrder[0];
-    if (loadingCompleteCallOrder === undefined || messagesAppliedCallOrder === undefined) {
-      throw new Error('Expected messages to be applied before loading completed');
+    const initialScrollCallOrder = requestMessageListScrollToBottom.mock.invocationCallOrder[0];
+    if (
+      loadingCompleteCallOrder === undefined ||
+      messagesAppliedCallOrder === undefined ||
+      initialScrollCallOrder === undefined
+    ) {
+      throw new Error('Expected messages and todos to be applied before loading completed');
     }
     expect(loadingCompleteCallOrder).toBeGreaterThan(messagesAppliedCallOrder);
+    expect(initialScrollCallOrder).toBeGreaterThan(loadingCompleteCallOrder);
   });
 
   it('clears the loading flag and reports an error when the session load fails', async () => {

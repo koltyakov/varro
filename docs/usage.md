@@ -333,7 +333,7 @@ OpenCode approval flows stay inside the chat UI.
 
 - Permission requests appear inline and can be answered with `Reject`, `Once`, or `Always`.
 - Follow-up questions appear inline with selectable options and optional custom input.
-- Each session can run in `Default`, `Auto approve`, or `Full access` permission mode.
+- Each session can run in `Default`, `Auto-accept edits`, `Auto`, or `Full access` permission mode.
 - Use the permission control in the composer toolbar to switch the active session between those modes.
 
 Permissions from child and deeper sub-agent sessions inherit the nearest explicitly selected mode in
@@ -344,7 +344,10 @@ parent conversation while keeping the request owned by the child session.
 agent determine which actions are allowed, denied, or sent to Varro for manual approval. Varro does
 not add session-level permission rules in this mode.
 
-`Auto approve` is the first-run mode. Its deterministic rules allow known read-only permissions,
+`Auto-accept edits` allows file edits, known read-only permissions, and subagent launches. Commands,
+external access, interactive tools, and unknown permissions continue to ask for approval.
+
+`Auto` is the first-run mode. Its deterministic rules allow known read-only permissions,
 subagent launches, web searches, non-deleting edits whose canonical paths stay inside the
 permission-owning session's Git-backed workspace, and strictly parsed inspection commands. Web fetches
 and other requests not decided locally fall through to model or manual review. Actions inside a
@@ -355,7 +358,7 @@ Requests not decided by local rules may be sent, with their command, path, metad
 permission decisions, to the configured model in a temporary hidden judge session. The judge may
 allow the exact request once, reject it when materially equivalent to a prior rejection, or show the
 normal manual prompt. Allow and reject verdicts are cached briefly for identical permission context.
-Switching away from `Auto approve` prevents an unfinished judge request from granting permission.
+Switching away from `Auto` prevents an unfinished judge request from granting permission.
 
 When automatic review falls back to manual approval, the prompt shows a concise action summary when
 available, the full request metadata with copy actions, and the judge's reason under `AI check`.

@@ -6,6 +6,7 @@ import { getPermissionReplyId, getQuestionReplyId } from './session-event-utils'
 
 type ApprovalEventDependencies = {
   shouldAutoApprovePermissions(sessionId: string): boolean;
+  shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
   syncPermissionSession?(sessionId: string): Promise<void>;
@@ -36,6 +37,15 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
             permissionsStore.addPermission(permission);
             deps.permissionVisible?.(permission.id);
           }
+        });
+      return;
+    }
+    if (deps.shouldAutoApproveEdit?.(permission)) {
+      void deps
+        .respondPermission(permission.sessionID, permission.id, 'once', { rethrow: true })
+        .catch(() => {
+          permissionsStore.addPermission(permission);
+          deps.permissionVisible?.(permission.id);
         });
       return;
     }

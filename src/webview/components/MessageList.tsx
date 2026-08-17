@@ -6090,7 +6090,7 @@ export function MessageList() {
     <div class="interactive-list-shell min-h-0 flex-1">
       <div
         ref={containerRef}
-        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}`}
+        class={`interactive-list min-h-0 flex-1 overflow-y-auto${showModelPicker() ? ' showing-model-picker' : ''}${autoScroll() || shouldMeasureRows() || loadingOlderHistory() || exitingActivityPartKeys().size > 0 ? ' managed-scroll-anchor' : ''}${editingMessage() ? ' editing-message' : ''}${state.messagesLoading && messages().length > 0 ? ' is-session-hydrating' : ''}`}
         role="log"
         tabIndex={0}
         aria-live="polite"

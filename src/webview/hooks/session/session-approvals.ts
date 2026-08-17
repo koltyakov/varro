@@ -186,7 +186,7 @@ export async function updatePermissionModeForSessionWithDependencies(
     await deps.syncPendingPermissions?.();
     return;
   }
-  if (mode === 'auto') {
+  if (mode === 'auto' || mode === 'edits') {
     if (!freshness.isSessionCurrent()) return;
     await deps.syncPendingPermissions?.();
   }

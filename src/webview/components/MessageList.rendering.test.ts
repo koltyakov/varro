@@ -511,6 +511,7 @@ describe('MessageList loading states', () => {
     animationFrames.flush();
 
     expect(container?.querySelector('.permission-prompt')).toBeNull();
+    expect(list?.classList).toContain('is-session-hydrating');
     expect(scrollWrites).toBe(0);
 
     setState('messagesLoading', false);
@@ -518,6 +519,7 @@ describe('MessageList loading states', () => {
     animationFrames.flush();
 
     expect(container?.querySelector('.permission-prompt')).not.toBeNull();
+    expect(list?.classList).not.toContain('is-session-hydrating');
     expect(scrollTopValue).toBe(800);
     expect(scrollWrites).toBeGreaterThan(0);
     animationFrames.restore();
