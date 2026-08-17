@@ -381,7 +381,21 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   const listBounds = await list.boundingBox();
   await page.mouse.move(listBounds!.x + 20, listBounds!.y + listBounds!.height / 2);
   await page.mouse.wheel(0, target!.top - 9);
-  await page.waitForTimeout(100);
+  await expect
+    .poll(() =>
+      list.evaluate((element, anchorId) => {
+        const row = element.querySelector<HTMLElement>(
+          `[data-msg-id="${CSS.escape(anchorId)}"]`
+        );
+        const card = row?.querySelector<HTMLElement>('.user-message-card');
+        return card
+          ? Math.abs(
+              card.getBoundingClientRect().top - element.getBoundingClientRect().top - 9
+            )
+          : Number.POSITIVE_INFINITY;
+      }, target!.id)
+    )
+    .toBeLessThanOrEqual(3);
   const anchor = await list.evaluate((element, anchorId) => {
     const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
     const card = row?.querySelector<HTMLElement>('.user-message-card');
@@ -394,8 +408,7 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   }, target!.id);
   expect(anchor).not.toBeNull();
 
-  await page.setViewportSize({ width: 360, height: 786 });
-  const samples = await list.evaluate(async (element, anchorId) => {
+  const samplesPromise = list.evaluate(async (element, anchorId) => {
     const readTop = () => {
       const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
       const card = row?.querySelector<HTMLElement>('.user-message-card');
@@ -407,7 +420,7 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
           }
         : null;
     };
-    const values = [readTop()];
+    const values = [];
     for (let frame = 0; frame < 12; frame += 1) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       values.push(readTop());
@@ -416,10 +429,14 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
     values.push(readTop());
     return values;
   }, anchor!.id);
+  await page.setViewportSize({ width: 360, height: 786 });
+  const samples = await samplesPromise;
 
   expect(samples.every((top) => top !== null), JSON.stringify(samples)).toBe(true);
+  // The first test RAF can run before ResizeObserver corrects geometry in the same
+  // pre-paint turn. Every callback after that handoff represents corrected frames.
   expect(
-    Math.max(...samples.map((sample) => Math.abs(sample!.top - anchor!.top))),
+    Math.max(...samples.slice(1).map((sample) => Math.abs(sample!.top - anchor!.top))),
     JSON.stringify(samples)
   ).toBeLessThanOrEqual(3);
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);

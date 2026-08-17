@@ -670,6 +670,58 @@ describe('useOpenCode session state flows', () => {
     expect(messageWindow.getSessionHistoryCursor('session-a')).toBe('cursor-current');
   });
 
+  it('preserves exhausted older history after A -> B -> A reselection', async () => {
+    const latestA = [
+      userEntry('user-a-2', 'session-a'),
+      userEntry('user-a-3', 'session-a'),
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    latestA.nextCursor = 'cursor-older';
+    const olderA = [userEntry('user-a-1', 'session-a')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    const reopenedA = [
+      userEntry('user-a-2', 'session-a'),
+      userEntry('user-a-3', 'session-a'),
+    ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    const initialB = [userEntry('user-b', 'session-b')] as Awaited<
+      ReturnType<typeof clientMocks.sessionMessages>
+    >;
+    let latestALoads = 0;
+
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockImplementation(async (id, options) => {
+      if (id === 'session-a' && options?.before === 'cursor-older') return olderA;
+      if (id === 'session-a') {
+        latestALoads += 1;
+        return latestALoads === 1 ? latestA : reopenedA;
+      }
+      return initialB;
+    });
+    clientMocks.sessionStatus.mockResolvedValue({});
+    clientMocks.questionList.mockResolvedValue([]);
+
+    const { stateModule, hookModule } = await loadModules();
+    const messageWindow = await import('../lib/message-window');
+    await hookModule.selectSession('session-a');
+    await expect(hookModule.loadOlderSessionHistoryPage('session-a')).resolves.toBe(true);
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-a-1',
+      'user-a-2',
+      'user-a-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-a')).toBeUndefined();
+
+    await hookModule.selectSession('session-b');
+    await hookModule.selectSession('session-a');
+
+    expect(stateModule.state.messages.map((entry) => entry.info.id)).toEqual([
+      'user-a-1',
+      'user-a-2',
+      'user-a-3',
+    ]);
+    expect(messageWindow.getSessionHistoryCursor('session-a')).toBeUndefined();
+  });
+
   it('prefetches a user prompt behind an assistant-only history boundary', async () => {
     const latest = [{ info: assistantMessage('assistant-1', 'user-1'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>

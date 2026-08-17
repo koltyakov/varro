@@ -40,6 +40,7 @@ import {
   advanceSessionHistoryPromptCursor,
   cacheSessionHistoryPage,
   clearSessionMessageWindowState,
+  getCachedSessionMessages,
   getSessionMessageWindowRevision,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
@@ -50,6 +51,7 @@ import {
   mergeOlderHistory,
   mergeWindowedHistory,
   resetMessageWindowState,
+  setCachedSessionMessages,
   setSessionHistoryPrompts,
   setSessionHistoryPromptCursor,
   setSessionHistoryCursor,
@@ -527,6 +529,10 @@ function setSessionMessagesIncremental(
         entry.parts.some((part) => part.id === streamingPartId)
     );
   sessionStore.setMessagesIncremental(mergeSessionMessages(current, sessionId, messages), options);
+  setCachedSessionMessages(
+    sessionId,
+    appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId)
+  );
   if (
     preserveStreamingState &&
     appStore.state.messages.some((entry) => entry.parts.some((part) => part.id === streamingPartId))
@@ -540,11 +546,14 @@ function setSessionMessagesIncremental(
 
 async function fetchSessionMessages(
   sessionId: string,
-  options?: { resetHistoryWindow?: boolean; isCurrent?: () => boolean }
+  options?: { isCurrent?: () => boolean }
 ): Promise<MessageEntry[]> {
   const requestRevision = getSessionMessageWindowRevision(sessionId);
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
-  const current = appStore.state.messages.filter((entry) => entry.info.sessionID === sessionId);
+  const activeMessages = appStore.state.messages.filter(
+    (entry) => entry.info.sessionID === sessionId
+  );
+  const current = activeMessages.length > 0 ? activeMessages : getCachedSessionMessages(sessionId);
   if (
     options?.isCurrent?.() === false ||
     getSessionMessageWindowRevision(sessionId) !== requestRevision
@@ -559,7 +568,6 @@ async function fetchSessionMessages(
     incomingKeys.has(`${entry.info.sessionID}\u0000${entry.info.id}`)
   );
   const resetHistoryWindow =
-    !!options?.resetHistoryWindow ||
     isSessionMessageWindowResetPending(sessionId) ||
     current.length === 0 ||
     incoming.length === 0 ||
@@ -717,7 +725,6 @@ async function loadSessionWithMessages(
   messages: MessageEntry[];
 }> {
   const messagesPromise = fetchSessionMessages(sessionId, {
-    resetHistoryWindow: true,
     isCurrent,
   }).catch((err: unknown) => {
     if (isNotFoundError(err)) return [];

@@ -159,6 +159,7 @@ type ScenarioState = {
   messageCursorTargets: Map<string, { sessionId: string; end: number }>;
   messageCursorTokensByBoundary: Map<string, string>;
   nextMessageCursorSequence: number;
+  latestMessageRequestCounts: Record<string, number>;
   readyStatus?: ServerStatus;
   nextSequence: number;
   healthFailuresRemaining: number;
@@ -788,6 +789,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
     messageCursorTargets: new Map(),
     messageCursorTokensByBoundary: new Map(),
     nextMessageCursorSequence: 0,
+    latestMessageRequestCounts: {},
     readyStatus: { state: 'running', url: 'mock://opencode', eventStream: 'healthy' },
     nextSequence: 0,
     healthFailuresRemaining: 0,
@@ -3510,9 +3512,31 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       );
     }
 
-    state.sessions = [session];
+    const switchTarget = makeSession(
+      'session-cold-large-switch-target',
+      'History switch target',
+      BASE_TIME - 1_500
+    );
+    const switchUser = makeUserMessage(
+      switchTarget.id,
+      'message-cold-large-switch-user',
+      ['Keep this session available for a history reopen check.'],
+      BASE_TIME - 1_400
+    );
+    state.sessions = [session, switchTarget];
     state.sessionStatuses[session.id] = { type: 'idle' };
+    state.sessionStatuses[switchTarget.id] = { type: 'idle' };
     state.messagesBySessionId[session.id] = messages;
+    state.messagesBySessionId[switchTarget.id] = [
+      switchUser,
+      makeAssistantMessage(
+        switchTarget.id,
+        'message-cold-large-switch-assistant',
+        switchUser.info.id,
+        'The history switch target is ready.',
+        BASE_TIME - 1_399
+      ),
+    ];
     state.persistedActiveSessionId = session.id;
     return state;
   }
@@ -5056,6 +5080,10 @@ async function handleApiRequest(
     );
     const limit = Math.max(1, configuredPageSize || Number(url.searchParams.get('limit')) || 50);
     const before = url.searchParams.get('before');
+    if (before === null) {
+      state.latestMessageRequestCounts[sessionId] =
+        (state.latestMessageRequestCounts[sessionId] ?? 0) + 1;
+    }
     const requestedEnd =
       before === null ? messages.length : resolveMessageCursor(state, sessionId, before);
     if (
@@ -5066,9 +5094,15 @@ async function handleApiRequest(
     }
     const end = Math.max(0, Math.min(messages.length, requestedEnd));
     const start = Math.max(0, end - limit);
+    const omitLatestCursor =
+      before === null &&
+      new URLSearchParams(window.location.search).get('omitReopenedLatestCursor') === '1' &&
+      (state.latestMessageRequestCounts[sessionId] ?? 0) > 1;
     return {
       items: messages.slice(start, end),
-      ...(start > 0 ? { nextCursor: getMessageCursor(state, sessionId, start) } : {}),
+      ...(start > 0 && !omitLatestCursor
+        ? { nextCursor: getMessageCursor(state, sessionId, start) }
+        : {}),
     };
   }
 

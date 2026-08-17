@@ -2108,7 +2108,7 @@ test.describe('auto-scroll', () => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 486, height: 800 });
     await page.goto(
-      '/e2e/harness/index.html?scenario=cold-large-history&windowed=1&deferHistory=1'
+      '/e2e/harness/index.html?scenario=cold-large-history&windowed=1&deferHistory=1&omitReopenedLatestCursor=1'
     );
     const list = page.locator('.interactive-list');
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -2289,6 +2289,46 @@ test.describe('auto-scroll', () => {
     expect(result.finalScrollTop).toBeLessThan(2);
     expect(result.peakMountedRows).toBeLessThan(100);
     expect(result.pinnedGapMounts).toBeGreaterThanOrEqual(2);
+
+    await page.getByTitle('Back to sessions').click();
+    await page.locator('.session-item').filter({ hasText: 'History switch target' }).click();
+    await expect(page.getByText('The history switch target is ready.', { exact: true })).toBeVisible();
+    await page.getByTitle('Back to sessions').click();
+    await page
+      .locator('.session-item')
+      .filter({ hasText: 'Cold large paginated history' })
+      .click();
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await list.evaluate(async (element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event('scroll'));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+    });
+
+    await expect(page.getByText(/^Review cold-session history section 0\./).first()).toBeVisible();
+    await expect(page.locator('.message-history-banner')).toHaveCount(0);
+    const reopenedHistoryRequests = await page.evaluate(() => {
+      const harness = window as Window & {
+        __varroE2E?: { requests?: Array<{ path: string }> };
+      };
+      return (harness.__varroE2E?.requests ?? [])
+        .filter((request) =>
+          request.path.includes('/session/session-cold-large-history/message')
+        )
+        .map((request) => {
+          const params = new URL(request.path, 'https://example.test').searchParams;
+          return { before: params.get('before'), limit: params.get('limit') };
+        });
+    });
+    expect(reopenedHistoryRequests).toEqual([
+      { before: null, limit: '200' },
+      { before: 'msg_cursor_0001', limit: '200' },
+      { before: 'msg_cursor_0002', limit: '200' },
+      { before: null, limit: '200' },
+    ]);
   });
 
   test('preserves the same row through exact 200 plus 200 plus final pagination', async ({

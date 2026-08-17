@@ -4,6 +4,7 @@ import type { MessageEntry } from '../types';
 export const MESSAGE_HISTORY_WINDOW = 200;
 export const MESSAGE_HISTORY_CACHE_SESSION_LIMIT = 20;
 export const MESSAGE_HISTORY_PAGE_CACHE_LIMIT = 20;
+const LOADED_MESSAGE_CACHE_SESSION_LIMIT = 3;
 
 type HistoryPage = MessageEntry[] & { nextCursor?: string };
 
@@ -26,6 +27,7 @@ const [messageWindowStateVersion, setMessageWindowStateVersion] = createSignal(0
 let defaultMessageWindowStateVersion = 0;
 let nextMessageWindowStateVersion = 0;
 const prefetchedHistoryPages = new Map<string, Map<string, HistoryPage>>();
+const loadedMessagesBySession = new Map<string, MessageEntry[]>();
 const historySessionRecency = new Map<string, true>();
 const historyPageRecency = new Map<string, { sessionId: string; beforeCursor: string }>();
 const [prefetchedHistoryVersion, setPrefetchedHistoryVersion] = createSignal(0);
@@ -102,6 +104,31 @@ export function getPrefetchedSessionHistory(sessionId: string | null | undefined
   let history: MessageEntry[] = [];
   for (const page of pages.values()) history = mergeOlderHistory(history, page);
   return history;
+}
+
+export function getCachedSessionMessages(sessionId: string): MessageEntry[] {
+  const messages = loadedMessagesBySession.get(sessionId) ?? [];
+  if (messages.length > 0) {
+    loadedMessagesBySession.delete(sessionId);
+    loadedMessagesBySession.set(sessionId, messages);
+    touchHistorySession(sessionId);
+  }
+  return messages;
+}
+
+export function setCachedSessionMessages(sessionId: string, messages: MessageEntry[]) {
+  if (messages.length > 0) {
+    loadedMessagesBySession.delete(sessionId);
+    loadedMessagesBySession.set(sessionId, messages);
+    while (loadedMessagesBySession.size > LOADED_MESSAGE_CACHE_SESSION_LIMIT) {
+      const oldestSessionId = loadedMessagesBySession.keys().next().value;
+      if (!oldestSessionId) break;
+      loadedMessagesBySession.delete(oldestSessionId);
+    }
+    touchHistorySession(sessionId);
+  } else {
+    loadedMessagesBySession.delete(sessionId);
+  }
 }
 
 export function takeCachedSessionHistoryPage(
@@ -228,6 +255,7 @@ export function resetMessageWindowState() {
   defaultMessageWindowStateVersion = ++nextMessageWindowStateVersion;
   setMessageWindowStateVersion((version) => version + 1);
   prefetchedHistoryPages.clear();
+  loadedMessagesBySession.clear();
   historySessionRecency.clear();
   historyPageRecency.clear();
   setPrefetchedHistoryVersion(0);
@@ -241,6 +269,7 @@ function touchExistingHistorySession(sessionId: string) {
     historyCursors.has(sessionId) ||
     historyPromptCursors.has(sessionId) ||
     prefetchedHistoryPages.has(sessionId) ||
+    loadedMessagesBySession.has(sessionId) ||
     historyPromptsBySession().has(sessionId) ||
     truncatedSessionIds().has(sessionId) ||
     historyLoadFailedSessionIds().has(sessionId)
@@ -289,6 +318,7 @@ function clearSessionMessageWindowStateInternal(sessionId: string) {
   pendingMessageWindowResets.delete(sessionId);
   historySessionRecency.delete(sessionId);
   const removedPages = prefetchedHistoryPages.delete(sessionId);
+  loadedMessagesBySession.delete(sessionId);
   clearHistoryPageRecency(sessionId);
 
   const prompts = historyPromptsBySession();

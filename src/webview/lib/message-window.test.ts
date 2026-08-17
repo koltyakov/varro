@@ -5,6 +5,7 @@ import {
   advanceSessionHistoryPromptCursor,
   cacheSessionHistoryPage,
   clearSessionMessageWindowState,
+  getCachedSessionMessages,
   getPrefetchedSessionHistory,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
@@ -21,6 +22,7 @@ import {
   setSessionHistoryCursor,
   setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
+  setCachedSessionMessages,
   takeCachedSessionHistoryPage,
 } from './message-window';
 
@@ -137,6 +139,19 @@ describe('history window state', () => {
 
     expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBe(page);
     expect(takeCachedSessionHistoryPage('session-1', 'cursor-1')).toBeUndefined();
+  });
+
+  it('keeps a bounded cache of loaded session windows', () => {
+    for (let index = 1; index <= 4; index += 1) {
+      setCachedSessionMessages(`session-${index}`, [entry(`message-${index}`, `session-${index}`)]);
+    }
+
+    expect(getCachedSessionMessages('session-1')).toEqual([]);
+    expect(getCachedSessionMessages('session-2').map((item) => item.info.id)).toEqual([
+      'message-2',
+    ]);
+    clearSessionMessageWindowState('session-2');
+    expect(getCachedSessionMessages('session-2')).toEqual([]);
   });
 
   it('returns prefetched pages in chronological order', () => {
