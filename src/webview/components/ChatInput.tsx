@@ -3332,7 +3332,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   return (
     <div
-      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() || showMcpPicker() ? 'model-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
     >
       <Show when={isDraggingOver()}>
         <DropOverlay />

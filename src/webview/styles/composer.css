@@ -1311,7 +1311,7 @@
   overflow: hidden;
 }
 
-.interactive-input-part:is(.model-picker-open, .mention-completion-open)
+.interactive-input-part:is(.mcp-picker-open, .mention-completion-open)
   > :is(.chat-queue-container, .todo-block) {
   visibility: hidden;
 }

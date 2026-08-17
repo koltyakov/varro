@@ -299,7 +299,7 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
   await expect(page.getByText(text, { exact: true })).toHaveCount(1);
 });
 
-test('keeps pre-input panel space reserved while model and MCP pickers are open', async ({
+test('keeps pre-input panels visible for model picker and reserved for MCP picker', async ({
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=todo-queue');
@@ -325,8 +325,8 @@ test('keeps pre-input panel space reserved while model and MCP pickers are open'
 
   await page.locator('.model-picker-btn').click();
   await expect(page.locator('.dropdown-menu')).toBeVisible();
-  await expect(queue).toBeHidden();
-  await expect(todo).toBeHidden();
+  await expect(queue).toBeVisible();
+  await expect(todo).toBeVisible();
   await expect(queue).toHaveCount(1);
   await expect(todo).toHaveCount(1);
 

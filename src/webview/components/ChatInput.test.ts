@@ -1774,7 +1774,7 @@ describe('ChatInput', () => {
     await waitForDropdown();
   });
 
-  it('keeps queue, todo, and file panels mounted while model and MCP pickers are open', () => {
+  it('uses distinct panel visibility modifiers for model and MCP pickers', () => {
     setupModelState();
     setShowChangedFiles(true);
     setState('activeSessionId', 'session-1');
@@ -1809,6 +1809,7 @@ describe('ChatInput', () => {
     setShowModelPicker(true);
 
     expect(inputPart?.classList.contains('model-picker-open')).toBe(true);
+    expect(inputPart?.classList.contains('mcp-picker-open')).toBe(false);
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);
     expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
     expect(container?.querySelector('.changed-files-block')).toBe(files);
@@ -1817,7 +1818,8 @@ describe('ChatInput', () => {
     setState('mcpStatus', { docs: { status: 'connected' } });
     container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count')?.click();
 
-    expect(inputPart?.classList.contains('model-picker-open')).toBe(true);
+    expect(inputPart?.classList.contains('model-picker-open')).toBe(false);
+    expect(inputPart?.classList.contains('mcp-picker-open')).toBe(true);
     expect(container?.querySelector('.chat-queue-container')).toBe(queue);
     expect(container?.querySelector('.todo-block:not(.changed-files-block)')).toBe(todo);
     expect(container?.querySelector('.changed-files-block')).toBe(files);
