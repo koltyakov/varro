@@ -273,6 +273,39 @@ describe('UserMessageContent', () => {
     expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
   });
 
+  it('expands a terminal selection below other attachments when there is no message or image', () => {
+    renderUserContent([
+      textPart('text-file', 'package.json'),
+      textPart(
+        'text-terminal-selection',
+        '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+      ),
+    ]);
+
+    const attachments = container?.querySelector('.message-attachments');
+    expect(attachments?.classList).toContain('message-attachments-leading');
+    expect(attachments?.querySelectorAll('.message-attachment-chip')).toHaveLength(1);
+    expect(attachments?.textContent).toContain('package.json');
+    expect(attachments?.textContent).not.toContain('zsh');
+    expect(container?.querySelector('.user-message-terminal-code-block')).toBeInstanceOf(
+      HTMLDivElement
+    );
+  });
+
+  it('keeps a terminal compact when an image is attached', () => {
+    renderUserContent([
+      textPart(
+        'text-terminal-selection',
+        '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+      ),
+      imageFilePart('image-1', 'diagram.png'),
+    ]);
+
+    expect(container?.querySelector('.user-message-terminal-code-block')).toBeNull();
+    expect(container?.querySelector('.message-attachment-chip')?.textContent).toContain('zsh');
+    expect(container?.querySelector('.chat-image-figure')).toBeInstanceOf(HTMLElement);
+  });
+
   it('opens a mixed terminal selection chip as shellscript text', () => {
     const send = installSendToExtension();
     renderUserContent([

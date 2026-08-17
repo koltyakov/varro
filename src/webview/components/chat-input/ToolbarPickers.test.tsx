@@ -275,6 +275,50 @@ describe('ToolbarPickers', () => {
     expect(toggleButton?.textContent).not.toContain('OpenCode config-based');
   });
 
+  it('limits the permission popover to the input frame', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(600);
+    let boundary: HTMLDivElement | undefined;
+    cleanup = render(
+      () => (
+        <div
+          ref={(el) => {
+            boundary = el;
+          }}
+          class="chat-input-frame"
+        >
+          <PermissionModePicker
+            boundaryRef={boundary}
+            mode="default"
+            showPicker={true}
+            showLabel={true}
+            onToggle={vi.fn()}
+            onSelect={vi.fn()}
+          />
+        </div>
+      ),
+      container!
+    );
+    const popup = container?.querySelector<HTMLElement>('.permission-mode-popover');
+    const parent = popup?.parentElement;
+    vi.spyOn(popup!, 'offsetParent', 'get').mockReturnValue(parent ?? null);
+    vi.spyOn(boundary!, 'getBoundingClientRect').mockReturnValue({
+      ...boundary!.getBoundingClientRect(),
+      left: 100,
+      right: 350,
+    });
+    vi.spyOn(parent!, 'getBoundingClientRect').mockReturnValue({
+      ...parent!.getBoundingClientRect(),
+      left: 300,
+      right: 340,
+    });
+    vi.spyOn(popup!, 'scrollWidth', 'get').mockReturnValue(320);
+    window.dispatchEvent(new Event('resize'));
+    await flushMicrotasks();
+
+    expect(popup?.style.width).toBe('250px');
+    expect(popup?.style.left).toBe('-200px');
+  });
+
   it('renders the agent picker state and forwards hover and selection', () => {
     const onToggle = vi.fn();
     const onSelect = vi.fn();

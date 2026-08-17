@@ -522,21 +522,24 @@ export function UserMessageContent(props: { parts: Part[] }) {
   const inlineAttachmentIds = createMemo(() =>
     getInlineAttachmentIds(parsed().messageTexts, indexedAttachments())
   );
-  const standaloneTerminalAttachment = createMemo(() => {
+  const expandedTerminalAttachment = createMemo(() => {
     if (
       parsed().messageTexts.length !== 0 ||
-      parsed().fileParts.length !== 0 ||
-      parsed().attachments.length !== 1
+      parsed().fileParts.some((part) => part.mime.startsWith('image/'))
     ) {
       return null;
     }
-    const attachment = parsed().attachments[0];
-    return attachment?.type === 'terminal-selection' && attachment.text ? attachment : null;
+    const terminals = parsed().attachments.filter(
+      (attachment) => attachment.type === 'terminal-selection' && attachment.text
+    );
+    return terminals.length === 1 && terminals[0]?.type === 'terminal-selection'
+      ? terminals[0]
+      : null;
   });
   const visibleAttachments = createMemo(() =>
     indexedAttachments().filter(
       ({ id, attachment }) =>
-        !inlineAttachmentIds().has(id) && attachment !== standaloneTerminalAttachment()
+        !inlineAttachmentIds().has(id) && attachment !== expandedTerminalAttachment()
     )
   );
   const visibleAgentParts = createMemo(() =>
@@ -629,7 +632,10 @@ export function UserMessageContent(props: { parts: Part[] }) {
     parsed().attachments.length > 0 ||
     parsed().agentParts.length > 0;
   const hasTrailingAttachmentContent = () =>
-    parsed().messageTexts.length > 0 || imageParts().length > 0 || visibleAgentParts().length > 0;
+    parsed().messageTexts.length > 0 ||
+    imageParts().length > 0 ||
+    visibleAgentParts().length > 0 ||
+    !!expandedTerminalAttachment();
   const handleCopy = (event: ClipboardEvent) => {
     if (!event.clipboardData) return;
 
@@ -671,7 +677,7 @@ export function UserMessageContent(props: { parts: Part[] }) {
           <For each={visibleAgentParts()}>{(part) => <AgentChip part={part} />}</For>
         </div>
       </Show>
-      <Show when={standaloneTerminalAttachment()}>
+      <Show when={expandedTerminalAttachment()}>
         {(attachment) => <TerminalMessageCodeBlock attachment={attachment()} />}
       </Show>
       <Show when={parsed().messageTexts.length > 0}>

@@ -87,25 +87,6 @@ function getAcknowledgedOptimisticParts(optimisticEntry: MessageEntry, info: Mes
   });
 }
 
-function getOptimisticImageFilePartsForServerMessage(
-  optimisticEntry: MessageEntry | null,
-  info: Message
-): Part[] {
-  if (!optimisticEntry || info.role !== 'user') return [];
-
-  return optimisticEntry.parts.flatMap((part, index): Part[] => {
-    if (!isImageFilePart(part)) return [];
-    return [
-      {
-        ...cloneValue(part),
-        id: getOptimisticImagePartId(info.id, index),
-        sessionID: info.sessionID,
-        messageID: info.id,
-      },
-    ];
-  });
-}
-
 function isOptimisticUserMessage(entry: MessageEntry) {
   return (
     entry.info.role === 'user' &&
@@ -151,11 +132,16 @@ export function upsertPart(part: Part) {
         const idx = messageIndex.findMessageIndex(msgs, msgId);
         if (idx === -1) return;
         if (isOptimisticUserMessage(msgs[idx]!) && !isLocalOptimisticPartId(nextPart.id, msgId)) {
-          msgs[idx]!.parts = getOptimisticImageFilePartsForServerMessage(
-            msgs[idx]!,
-            msgs[idx]!.info
-          );
-          messageIndex.invalidate();
+          const optimisticPartIndex = findMatchingOptimisticPartIndex(msgs[idx]!, nextPart);
+          if (optimisticPartIndex !== -1) {
+            const currentPart = msgs[idx]!.parts[optimisticPartIndex];
+            msgs[idx]!.parts[optimisticPartIndex] = nextPart;
+            messageIndex.invalidate();
+            if (isPartRenderVisibilityChanged(currentPart, nextPart)) {
+              messageIndex.notifyPartContentChange();
+            }
+            return;
+          }
         }
         removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
@@ -184,6 +170,24 @@ export function upsertPart(part: Part) {
       setState('streamingText', '');
     }
   });
+}
+
+function findMatchingOptimisticPartIndex(entry: MessageEntry, incoming: Part) {
+  const optimisticIndexes = entry.parts.flatMap((part, index) =>
+    isLocalOptimisticPartId(part.id, entry.info.id) ? [index] : []
+  );
+  const exactIndex = optimisticIndexes.find((index) =>
+    areMatchingOptimisticParts(entry.parts[index]!, incoming)
+  );
+  if (exactIndex !== undefined) return exactIndex;
+
+  return optimisticIndexes.find((index) => entry.parts[index]!.type === incoming.type) ?? -1;
+}
+
+function areMatchingOptimisticParts(left: Part, right: Part) {
+  if (left.type === 'text' && right.type === 'text') return left.text === right.text;
+  if (left.type !== 'file' || right.type !== 'file') return false;
+  return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
 }
 
 function isPartRenderVisibilityChanged(previous: Part | undefined, current: Part) {
@@ -712,11 +716,21 @@ function mergeMessageEntry(
   }
 
   const incomingPartIds = new Set(next.parts.map((part) => part.id));
+  const matchedOptimisticPartIndexes = new Set<number>();
   for (const part of current.parts) {
     if (isOptimisticImageFilePart(part)) continue;
-    if (!incomingPartIds.has(part.id)) {
-      next.parts.push(cloneValue(part));
+    if (incomingPartIds.has(part.id)) continue;
+    if (current.info.role === 'user' && isLocalOptimisticPartId(part.id, current.info.id)) {
+      const matchIndex = next.parts.findIndex(
+        (incomingPart, index) =>
+          !matchedOptimisticPartIndexes.has(index) && areMatchingOptimisticParts(part, incomingPart)
+      );
+      if (matchIndex !== -1) {
+        matchedOptimisticPartIndexes.add(matchIndex);
+        continue;
+      }
     }
+    next.parts.push(cloneValue(part));
   }
 
   materializeStreamingTextInEntry(next, streamingSnapshot ?? null);

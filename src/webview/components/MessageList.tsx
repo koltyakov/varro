@@ -489,6 +489,8 @@ export function MessageList() {
   let activityExitBottomTarget: number | null = null;
   let activityExitSummaryAnchor: { sessionId: string; top: number } | null = null;
   let activityExitSummaryObserver: MutationObserver | null = null;
+  let activityExitSummarySettleRafId = 0;
+  let activityExitSummarySettleFrames = 0;
   let activityCollapseSettleRafId = 0;
   let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastUserScrollAt = Number.NEGATIVE_INFINITY;
@@ -3159,6 +3161,11 @@ export function MessageList() {
     if (reserve <= 0.5) return;
 
     preserveCurrentBottomTarget();
+    captureActivityExitSummaryAnchor();
+    if (activityExitSummaryAnchor) {
+      startActivityExitSummaryObserver(activityExitSummaryAnchor);
+      startActivityExitSummarySettle(activityExitSummaryAnchor);
+    }
     setActivityExitBottomReserve((current) => current + reserve);
     queueMicrotask(() => {
       lastAutoScrolledTrackHeight = trackRef?.getBoundingClientRect().height ?? lastTrackHeight;
@@ -3169,6 +3176,7 @@ export function MessageList() {
   function captureActivityExitSummaryAnchor() {
     const sessionId = state.activeSessionId;
     if (!containerRef || !sessionId) return;
+    if (activityExitSummaryAnchor?.sessionId === sessionId) return;
     const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
     const summary = summaries[summaries.length - 1];
     if (!summary) return;
@@ -3181,7 +3189,12 @@ export function MessageList() {
   function startActivityExitSummaryObserver(anchor: { sessionId: string; top: number }) {
     if (!trackRef || activityExitSummaryObserver) return;
     activityExitSummaryObserver = new MutationObserver(() => {
+      cancelAppendScrollTransition();
+      if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
+      initialScrollRafId = 0;
+      activeFollowLoopSessionId = null;
       restoreActivityExitSummaryAnchor(anchor);
+      startActivityExitSummarySettle(anchor);
     });
     activityExitSummaryObserver.observe(trackRef, {
       attributes: true,
@@ -3189,6 +3202,32 @@ export function MessageList() {
       childList: true,
       subtree: true,
     });
+  }
+
+  function startActivityExitSummarySettle(anchor: { sessionId: string; top: number }) {
+    activityExitSummarySettleFrames = Math.max(activityExitSummarySettleFrames, 30);
+    if (activityExitSummarySettleRafId) return;
+    const settle = () => {
+      activityExitSummarySettleRafId = 0;
+      if (
+        disposed ||
+        !containerRef ||
+        state.activeSessionId !== anchor.sessionId ||
+        activityExitSummaryAnchor !== anchor
+      ) {
+        return;
+      }
+      restoreActivityExitSummaryAnchor(anchor);
+      activityExitSummarySettleFrames = Math.max(0, activityExitSummarySettleFrames - 1);
+      if (
+        activityExitSummarySettleFrames > 0 ||
+        activityExitBottomTarget !== null ||
+        exitingActivityPartKeys().size > 0
+      ) {
+        activityExitSummarySettleRafId = requestAnimationFrame(settle);
+      }
+    };
+    activityExitSummarySettleRafId = requestAnimationFrame(settle);
   }
 
   function restoreActivityExitSummaryAnchor(anchor: { sessionId: string; top: number }) {
@@ -3218,8 +3257,15 @@ export function MessageList() {
 
   function clearActivityExitSummaryAnchor() {
     activityExitSummaryAnchor = null;
+    stopActivityExitSummaryObserver();
+  }
+
+  function stopActivityExitSummaryObserver() {
     activityExitSummaryObserver?.disconnect();
     activityExitSummaryObserver = null;
+    if (activityExitSummarySettleRafId) cancelAnimationFrame(activityExitSummarySettleRafId);
+    activityExitSummarySettleRafId = 0;
+    activityExitSummarySettleFrames = 0;
   }
 
   function reserveCollapsedActivityTraySpace(keys: ReadonlySet<string>) {
@@ -3295,6 +3341,10 @@ export function MessageList() {
     if (reserve <= 0.5) return;
 
     captureActivityExitSummaryAnchor();
+    if (activityExitSummaryAnchor) {
+      startActivityExitSummaryObserver(activityExitSummaryAnchor);
+      startActivityExitSummarySettle(activityExitSummaryAnchor);
+    }
     appendBottomReserveTarget = containerRef.scrollTop;
     setAppendBottomReserve((current) => current + reserve);
     activityExitBottomTarget = containerRef.scrollTop;
@@ -4988,6 +5038,11 @@ export function MessageList() {
 
   let prevLoading = isLoading();
   createEffect(() => {
+    const replacementStreaming = !!state.streamingPartId || state.streamingText.length > 0;
+    if (!replacementStreaming || exitingActivityPartKeys().size > 0) return;
+    clearActivityExitSummaryAnchor();
+  });
+  createEffect(() => {
     const loading = isLoading();
     if (!prevLoading && loading) {
       clearActivityExitSummaryAnchor();
@@ -5018,11 +5073,7 @@ export function MessageList() {
         if (activityReserveOwnsCompletion) {
           let attempts = 0;
           const settle = () => {
-            if (
-              disposed ||
-              !containerRef ||
-              state.activeSessionId !== sessionId
-            ) {
+            if (disposed || !containerRef || state.activeSessionId !== sessionId) {
               return;
             }
             const summaries = containerRef.querySelectorAll<HTMLElement>(

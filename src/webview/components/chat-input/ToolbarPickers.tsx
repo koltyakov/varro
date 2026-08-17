@@ -146,6 +146,17 @@ export function PermissionModePicker(props: {
       if (!popupEl) return;
       flipPopupDownIfNeeded(popupEl);
       if (props.boundaryRef) {
+        popupEl.style.width = '';
+        const viewportMargin = 8;
+        const boundaryBox = props.boundaryRef.getBoundingClientRect();
+        const boundaryLeft = Math.max(viewportMargin, boundaryBox.left);
+        const boundaryRight = Math.min(window.innerWidth - viewportMargin, boundaryBox.right);
+        const boundaryWidth = Math.max(0, boundaryRight - boundaryLeft);
+        const naturalWidth = Math.min(
+          288,
+          popupEl.scrollWidth || popupEl.getBoundingClientRect().width
+        );
+        popupEl.style.width = `${Math.min(naturalWidth, boundaryWidth)}px`;
         alignPopupToBoundary(popupEl, props.boundaryRef, props.alignTo ?? 'left');
       }
       clampPopupToViewport(popupEl);

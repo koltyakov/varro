@@ -1238,7 +1238,7 @@ test.describe('auto-scroll', () => {
     await expect(appendReserve).toHaveCount(0);
   });
 
-  test('keeps first-turn Explored fixed when completion follows an activity reserve transfer', async ({
+  test('keeps first-turn Explored fixed across mixed multi-activity exits', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 504, height: 800 });
@@ -1258,7 +1258,7 @@ test.describe('auto-scroll', () => {
         firstTurnActivityFixture?: {
           sessionId: string;
           info: Record<string, unknown>;
-          running: Record<string, unknown>;
+          running: Array<Record<string, unknown>>;
         };
       };
       const originalSend = harnessWindow.__sendToExtension;
@@ -1300,30 +1300,33 @@ test.describe('auto-scroll', () => {
             time: { start: Date.now() - 2, end: Date.now() - 1 },
           },
         };
-        const running = {
-          id: 'message-first-turn-activity-command',
+        const running = Array.from({ length: 3 }, (_, index) => ({
+          id: `message-first-turn-activity-command-${index}`,
           sessionID: sessionId,
           messageID: String(info.id),
           type: 'tool',
-          callID: 'message-first-turn-activity-command-call',
+          callID: `message-first-turn-activity-command-${index}-call`,
           tool: 'bash',
           state: {
             status: 'running',
-            input: { command: 'npm run test' },
-            title: 'npm run test',
-            time: { start: Date.now() },
+            input: { command: `npm run test:${index}` },
+            title: `npm run test:${index}`,
+            time: { start: Date.now() + index },
           },
-        };
+        }));
         harnessWindow.firstTurnActivityFixture = { sessionId, info, running };
         harnessWindow.__varroE2E?.updateSessionStatus?.(sessionId, { type: 'busy' });
         harnessWindow.__varroE2E?.updateMessageInfo?.(info);
         harnessWindow.__varroE2E?.updateMessagePart?.(completed);
-        harnessWindow.__varroE2E?.updateMessagePart?.(running);
+        for (const part of running) harnessWindow.__varroE2E?.updateMessagePart?.(part);
         for (const payload of [
           { type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } },
           { type: 'message.updated', properties: { info } },
           { type: 'message.part.updated', properties: { part: completed } },
-          { type: 'message.part.updated', properties: { part: running } },
+          ...running.map((part) => ({
+            type: 'message.part.updated',
+            properties: { part },
+          })),
         ]) {
           window.postMessage({ type: 'server/event', payload }, '*');
         }
@@ -1341,54 +1344,138 @@ test.describe('auto-scroll', () => {
 
     const list = page.locator('.interactive-list');
     const summary = page.locator('.assistant-activity-summary').last();
-    const activeItem = page.locator(
-      '[data-activity-part-id="message-first-turn-activity-command"]'
+    const activeItems = page.locator(
+      '[data-activity-part-id^="message-first-turn-activity-command-"]'
     );
     await expect(summary).toContainText('Explored: 1 file');
-    await expect(activeItem).toBeVisible();
-    await activeItem.evaluate(async (element) => {
+    await expect(activeItems).toHaveCount(3);
+    await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
     await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
-
-    await page.evaluate(() => {
-      const harnessWindow = window as typeof window & {
-        __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
-        firstTurnActivityFixture?: { running: Record<string, unknown> };
-      };
-      const fixture = harnessWindow.firstTurnActivityFixture;
-      if (!fixture) throw new Error('First-turn activity fixture is missing');
-      const previousState = fixture.running.state as Record<string, unknown>;
-      const completed = {
-        ...fixture.running,
-        state: {
-          status: 'completed',
-          input: previousState.input,
-          output: 'Passed',
-          title: previousState.title,
-          metadata: {},
-          time: { start: Date.now() - 1_000, end: Date.now() },
-        },
-      };
-      fixture.running = completed;
-      harnessWindow.__varroE2E?.updateMessagePart?.(completed);
-      window.postMessage(
-        {
-          type: 'server/event',
-          payload: { type: 'message.part.updated', properties: { part: completed } },
-        },
-        '*'
-      );
-    });
-
-    await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
-    const reserve = page.locator('.append-scroll-bottom-reserve');
-    await expect(reserve).toBeVisible();
     const before = await summary.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list');
       if (!container) throw new Error('Explored container is missing');
       return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
     });
+    const completeAndSample = (indexes: number[]) =>
+      list.evaluate(async (element, completedIndexes) => {
+        const harnessWindow = window as typeof window & {
+          __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+          firstTurnActivityFixture?: { running: Array<Record<string, unknown>> };
+        };
+        const fixture = harnessWindow.firstTurnActivityFixture;
+        if (!fixture) throw new Error('First-turn activity fixture is missing');
+        for (const index of completedIndexes) {
+          const running = fixture.running[index];
+          if (!running) throw new Error(`Running activity ${index} is missing`);
+          const previousState = running.state as Record<string, unknown>;
+          const completed = {
+            ...running,
+            state: {
+              status: 'completed',
+              input: previousState.input,
+              output: 'Passed',
+              title: previousState.title,
+              metadata: {},
+              time: { start: Date.now() - 1_000, end: Date.now() },
+            },
+          };
+          fixture.running[index] = completed;
+          harnessWindow.__varroE2E?.updateMessagePart?.(completed);
+          window.postMessage(
+            {
+              type: 'server/event',
+              payload: { type: 'message.part.updated', properties: { part: completed } },
+            },
+            '*'
+          );
+        }
+
+        const tops: Array<number | null> = [];
+        for (let frame = 0; frame < 150; frame += 1) {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => setTimeout(resolve, 0))
+          );
+          const summaries = element.querySelectorAll<HTMLElement>('.assistant-activity-summary');
+          const explored = summaries[summaries.length - 1];
+          tops.push(
+            explored
+              ? explored.getBoundingClientRect().top - element.getBoundingClientRect().top
+              : null
+          );
+        }
+        return tops;
+      }, indexes);
+
+    const shuffledSamples = await completeAndSample([2]);
+    expect(
+      shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      JSON.stringify({ before, shuffledSamples })
+    ).toBe(true);
+    await expect(activeItems).toHaveCount(2);
+
+    const groupedSamples = await completeAndSample([0, 1]);
+    expect(
+      groupedSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      JSON.stringify({ before, groupedSamples })
+    ).toBe(true);
+    await expect(activeItems).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+        firstTurnActivityFixture?: {
+          sessionId: string;
+          info: Record<string, unknown>;
+          running: Array<Record<string, unknown>>;
+        };
+      };
+      const fixture = harnessWindow.firstTurnActivityFixture;
+      if (!fixture) throw new Error('First-turn activity fixture is missing');
+      const next = Array.from({ length: 3 }, (_, offset) => {
+        const index = fixture.running.length + offset;
+        return {
+          id: `message-first-turn-activity-command-${index}`,
+          sessionID: fixture.sessionId,
+          messageID: String(fixture.info.id),
+          type: 'tool',
+          callID: `message-first-turn-activity-command-${index}-call`,
+          tool: 'bash',
+          state: {
+            status: 'running',
+            input: { command: `npm run test:${index}` },
+            title: `npm run test:${index}`,
+            time: { start: Date.now() + offset },
+          },
+        };
+      });
+      fixture.running.push(...next);
+      for (const part of next) {
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          },
+          '*'
+        );
+      }
+    });
+
+    await expect(activeItems).toHaveCount(3);
+    await activeItems.last().evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    const allAtOnceSamples = await completeAndSample([3, 4, 5]);
+    expect(
+      allAtOnceSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      JSON.stringify({ before, allAtOnceSamples })
+    ).toBe(true);
+    await expect(activeItems).toHaveCount(0);
+
+    const reserve = page.locator('.append-scroll-bottom-reserve');
+    await expect(reserve).toBeVisible();
 
     const samples = await list.evaluate(async (element) => {
       const harnessWindow = window as typeof window & {
@@ -1908,7 +1995,8 @@ test.describe('auto-scroll', () => {
       exploredSamples.every((top) => top !== null && Math.abs(top - exploredTop) <= 0.1),
       JSON.stringify({ exploredTop, exploredSamples, reserveHeight, sourceGeometry })
     ).toBe(true);
-    expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 0.5);
+    // Reconciliation may consume one whole CSS pixel while preserving the painted anchors above.
+    expect(reserveHeight).toBeGreaterThanOrEqual(sourceGeometry.rowHeight - 1);
   });
 
   test('keeps a bottom-pinned Explored summary fixed while it expands downward', async ({

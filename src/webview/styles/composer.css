@@ -991,6 +991,8 @@
 }
 
 .toolbar-popover.permission-mode-popover {
+  width: max-content;
+  max-width: 288px;
   max-height: 260px;
 }
 
@@ -1052,9 +1054,16 @@
 
 .permission-mode-option-copy {
   display: flex;
-  min-width: 240px;
+  min-width: 0;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
+}
+
+.permission-mode-option-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .permission-mode-option-copy > :last-child {

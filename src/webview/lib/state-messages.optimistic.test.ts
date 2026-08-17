@@ -199,6 +199,70 @@ describe('optimistic user message reconciliation', () => {
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
 
+  it('keeps attachment references and terminal selections visible while authoritative parts arrive', () => {
+    const terminalSelection =
+      '[Selection from terminal zsh]\n```text\nnpm run typecheck\nError: typecheck failed\n```';
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        textPart('msg-1-part-0', 'msg-1', 'Test message'),
+        textPart('msg-1-part-1', 'msg-1', '[Working directory: /repo]'),
+        textPart('msg-1-part-2', 'msg-1', 'package.json'),
+        textPart('msg-1-part-3', 'msg-1', terminalSelection),
+      ],
+    });
+    upsertMessageInfo(userMessage('msg-1'));
+
+    upsertPart(textPart('part-server-0', 'msg-1', 'Test message'));
+
+    expect(state.messages[0]!.parts.map((part) => (part.type === 'text' ? part.text : ''))).toEqual(
+      ['Test message', '[Working directory: /repo]', 'package.json', terminalSelection]
+    );
+
+    upsertPart(textPart('part-server-1', 'msg-1', '[Working directory: /repo]'));
+    upsertPart(textPart('part-server-2', 'msg-1', 'package.json'));
+
+    expect(state.messages[0]!.parts.at(-1)).toEqual(
+      textPart('msg-1-part-3', 'msg-1', terminalSelection)
+    );
+
+    upsertPart(textPart('part-server-3', 'msg-1', terminalSelection));
+
+    expect(partIds()).toEqual([
+      ['part-server-0', 'part-server-1', 'part-server-2', 'part-server-3'],
+    ]);
+  });
+
+  it('replaces optimistic part IDs during a preserving incremental sync', () => {
+    const info = userMessage('msg-1');
+    const workingDirectory = '[Working directory: /repo]';
+    const terminalSelection =
+      '[Selection from terminal zsh]\n```text\nnpm run typecheck\nError: typecheck failed\n```';
+    upsertMessage({
+      info,
+      parts: [
+        textPart('msg-1-part-0', 'msg-1', workingDirectory),
+        textPart('msg-1-part-1', 'msg-1', terminalSelection),
+      ],
+    });
+    upsertMessageInfo(info);
+
+    setMessagesIncremental(
+      [
+        {
+          info,
+          parts: [
+            textPart('server-part-0', 'msg-1', workingDirectory),
+            textPart('server-part-1', 'msg-1', terminalSelection),
+          ],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(partIds()).toEqual([['server-part-0', 'server-part-1']]);
+  });
+
   it('preserves an acknowledged optimistic row across a stale incremental refresh', () => {
     const previous = {
       info: userMessage('msg-previous'),
