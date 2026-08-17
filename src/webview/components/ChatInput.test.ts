@@ -2065,6 +2065,44 @@ describe('ChatInput', () => {
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
+  it('runs /stats from the completion menu on the first Enter', async () => {
+    const bridgeWindow = window as unknown as {
+      __sendToExtension?: (message: WebviewMessage) => void;
+    };
+    const originalSend = bridgeWindow.__sendToExtension;
+    const sent: WebviewMessage[] = [];
+    bridgeWindow.__sendToExtension = (message) => sent.push(message);
+    setInputText('/stat');
+
+    try {
+      cleanup = render(() => ChatInput(), container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      setCollapsedSelection(editor.firstChild, '/stat'.length);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 't', bubbles: true }));
+      await flushAsyncWork();
+
+      expect(container?.querySelector('.composer-completion-menu')).not.toBeNull();
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('');
+      expect(sent).toContainEqual({
+        type: 'usage/report',
+        payload: { includeAllTime: false },
+      });
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalSend) bridgeWindow.__sendToExtension = originalSend;
+      else delete bridgeWindow.__sendToExtension;
+    }
+  });
+
   it('selects a parameterized slash completion without running it', async () => {
     setState('commands', [
       {

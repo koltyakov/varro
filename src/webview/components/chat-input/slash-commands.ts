@@ -133,7 +133,6 @@ export function getSlashCommands(props: {
       name: 'stats',
       aliases: [],
       description: 'Generate a usage report; add all for all time',
-      acceptsArguments: true,
       action: (args) => {
         props.onGenerateStats(args.trim().toLowerCase() === 'all');
       },
