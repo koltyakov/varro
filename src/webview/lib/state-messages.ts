@@ -13,6 +13,7 @@ import {
 import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './message-entry-sync';
 import { markSessionResponseCompleted, markSessionSeen } from './state-session-lifecycle';
 import { flushPendingStreamingDeltasFor, shouldUseStreamingText } from './streaming-deltas';
+import { isTodoToolName, isTodoToolTitle } from './tool-normalization';
 
 const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<string, Array<MessageEntry<AssistantMessage>>>();
 const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
@@ -201,22 +202,9 @@ function isPartPotentiallyVisible(part: Part | undefined) {
     return part.text.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0;
   }
   if (part.type === 'tool') {
-    const toolName = part.tool.trim().toLowerCase();
-    if (
-      toolName.includes('todo') ||
-      toolName === 'update_plan' ||
-      toolName === 'updateplan' ||
-      toolName === 'todowrite'
-    ) {
-      return false;
-    }
+    if (isTodoToolName(part.tool)) return false;
     const title = 'title' in part.state ? part.state.title : undefined;
-    const normalizedTitle = title?.trim().toLowerCase() ?? '';
-    return (
-      !normalizedTitle.includes('todo') &&
-      normalizedTitle !== 'update plan' &&
-      normalizedTitle !== 'updating plan'
-    );
+    return !isTodoToolTitle(title);
   }
   return (
     part.type === 'agent' ||

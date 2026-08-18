@@ -1,6 +1,7 @@
 import type { Part, ToolPart } from '../types';
 import { getToolFileChange, getToolReadPath } from './tool-file-change';
 import { showThinking } from './state';
+import { isTodoToolName, isTodoToolTitle } from './tool-normalization';
 
 export function isWorkspaceDirectoryText(text: string) {
   return text.startsWith('[Working directory:');
@@ -29,26 +30,13 @@ export function isFileReadPart(part: Part): boolean {
 }
 
 export function isTodoToolPart(part: Extract<Part, { type: 'tool' }>) {
-  const toolName = part.tool.trim().toLowerCase();
-  if (
-    toolName.includes('todo') ||
-    toolName === 'update_plan' ||
-    toolName === 'updateplan' ||
-    toolName === 'todowrite'
-  ) {
-    return true;
-  }
+  if (isTodoToolName(part.tool)) return true;
 
   const title =
     (part.state.status === 'running' || part.state.status === 'completed'
       ? part.state.title
       : undefined) || '';
-  const normalizedTitle = title.trim().toLowerCase();
-  return (
-    normalizedTitle.includes('todo') ||
-    normalizedTitle === 'update plan' ||
-    normalizedTitle === 'updating plan'
-  );
+  return isTodoToolTitle(title);
 }
 
 export function shouldShowAssistantPartInline(part: Part, respectThinkingToggle = true) {

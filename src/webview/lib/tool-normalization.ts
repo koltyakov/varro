@@ -39,12 +39,24 @@ const EDIT_TOOL_NAMES = new Set([
   'file_move',
   'file_rename',
 ]);
-const TODO_TOOL_NAMES = new Set(['todowrite', 'todoread']);
+const TODO_TOOL_NAMES = new Set(['update_plan', 'updateplan']);
 const STRUCTURED_TOOL_NAMES = new Set(['task', 'apply_patch', 'webfetch']);
 
 export function normalizeToolName(toolName: string): string {
   const normalized = toolName.trim().toLowerCase();
   return normalized.split('.').at(-1) || normalized;
+}
+
+export function isTodoToolName(toolName: string): boolean {
+  const normalized = normalizeToolName(toolName);
+  return normalized.includes('todo') || TODO_TOOL_NAMES.has(normalized);
+}
+
+export function isTodoToolTitle(title: string | undefined): boolean {
+  const normalized = title?.trim().toLowerCase() ?? '';
+  return (
+    normalized.includes('todo') || normalized === 'update plan' || normalized === 'updating plan'
+  );
 }
 
 export function getToolKind(toolName: string): ToolKind {
@@ -54,7 +66,7 @@ export function getToolKind(toolName: string): ToolKind {
   if (READ_TOOL_NAMES.has(normalized)) return 'read';
   if (EDIT_TOOL_NAMES.has(normalized)) return 'edit';
   if (normalized === 'task') return 'task';
-  if (TODO_TOOL_NAMES.has(normalized)) return 'todo';
+  if (isTodoToolName(normalized)) return 'todo';
   if (normalized === 'question') return 'question';
   if (normalized === 'skill') return 'skill';
   if (normalized === 'webfetch' || normalized.includes('browser')) return 'web';

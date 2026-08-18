@@ -1,7 +1,7 @@
 import { appStore } from '../lib/stores/app-store';
+import { isTodoToolName } from '../lib/tool-normalization';
 import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
 
-const TODO_TOOL_NAMES = new Set(['todowrite', 'update_plan', 'updateplan']);
 type TodoSyncDependencies = {
   loadSessionTodos?(sessionId: string): Promise<unknown>;
 };
@@ -295,15 +295,6 @@ function statusRank(status: string) {
   if (status === 'in_progress') return 2;
   if (status === 'pending') return 1;
   return 0;
-}
-
-function isTodoToolName(name: string) {
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized.includes('todo')) return true;
-
-  const bareName = normalized.split('.').at(-1) ?? normalized;
-  return TODO_TOOL_NAMES.has(normalized) || TODO_TOOL_NAMES.has(bareName);
 }
 
 function extractTodosFromPart(part: Part): NormalizedTodo[] | null {

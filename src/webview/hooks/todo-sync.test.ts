@@ -115,6 +115,20 @@ describe('todo-sync', () => {
     ).toEqual(todos);
   });
 
+  it('derives todos from namespaced update_plan tool parts', () => {
+    const todos = [{ id: 'todo-1', content: 'ship it', status: 'pending', priority: 'high' }];
+    const part = todoToolPart(todos);
+    if (part.type !== 'tool') throw new Error('Expected a tool part');
+    part.tool = 'functions.update_plan';
+
+    expect(
+      deriveTodosFromMessages([
+        { info: userMessage('user-1'), parts: [] },
+        { info: assistantMessage('assistant-1'), parts: [part] },
+      ])
+    ).toEqual(todos);
+  });
+
   it('derives todos from update_plan entries inside parallel tool payloads', () => {
     const todos = [{ id: 'todo-1', content: 'ship it', status: 'pending', priority: 'high' }];
 

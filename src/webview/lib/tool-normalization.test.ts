@@ -3,6 +3,8 @@ import {
   getToolKind,
   isApplyPatchTool,
   isStructuredTool,
+  isTodoToolName,
+  isTodoToolTitle,
   normalizeToolName,
 } from './tool-normalization';
 
@@ -18,6 +20,7 @@ describe('tool normalization', () => {
     ['functions.file_write', 'edit'],
     ['functions.task', 'task'],
     ['functions.todowrite', 'todo'],
+    ['functions.update_plan', 'todo'],
     ['functions.webfetch', 'web'],
     ['mcp.browser_navigate', 'web'],
     ['functions.question', 'question'],
@@ -31,5 +34,14 @@ describe('tool normalization', () => {
     expect(isApplyPatchTool('functions.apply_patch')).toBe(true);
     expect(isStructuredTool('functions.apply_patch')).toBe(true);
     expect(isStructuredTool('functions.task')).toBe(true);
+  });
+
+  it('recognizes todo tool names and display titles consistently', () => {
+    expect(isTodoToolName(' Functions.Update_Plan ')).toBe(true);
+    expect(isTodoToolName('custom.todo_manager')).toBe(true);
+    expect(isTodoToolName('functions.read')).toBe(false);
+    expect(isTodoToolTitle('Updating Plan')).toBe(true);
+    expect(isTodoToolTitle('Todo List')).toBe(true);
+    expect(isTodoToolTitle(undefined)).toBe(false);
   });
 });

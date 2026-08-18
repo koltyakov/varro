@@ -54,6 +54,10 @@ function assertInertWithSafeAnchor(root: ParentNode) {
   expect(anchor?.getAttribute('data-external')).toBe('true');
 }
 
+function dispatchAnchorClick(anchor: HTMLAnchorElement | null | undefined) {
+  anchor?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+}
+
 beforeEach(() => {
   __resetMarkdownCachesForTests();
   document.body.className = '';
@@ -282,7 +286,7 @@ describe('MarkdownRenderer', () => {
     expect(badLink?.hasAttribute('href')).toBe(false);
     expect(badLink?.querySelector('.external-link-icon')).toBeNull();
 
-    docsLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(docsLink);
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
@@ -393,11 +397,11 @@ describe('MarkdownRenderer', () => {
       container!
     );
 
-    const link = container?.querySelector('a.file-path-link');
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
 
-    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(link);
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
@@ -436,7 +440,7 @@ describe('MarkdownRenderer', () => {
     expect(link?.textContent).toBe('go.mod (line 3)');
     expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
 
-    link?.click();
+    dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: { path: '/repo/go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
@@ -465,7 +469,7 @@ describe('MarkdownRenderer', () => {
     );
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
-    link?.click();
+    dispatchAnchorClick(link);
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
     window.dispatchEvent(
@@ -484,7 +488,7 @@ describe('MarkdownRenderer', () => {
       'warning'
     );
 
-    link?.click();
+    dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -507,7 +511,7 @@ describe('MarkdownRenderer', () => {
     expect(link).toBeInstanceOf(HTMLAnchorElement);
     link!.dataset.file = '{invalid';
 
-    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(link);
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith({
@@ -552,7 +556,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.textContent).toContain('session:ses_missing456');
     expect(container?.querySelector('code a')).toBeNull();
 
-    link?.click();
+    dispatchAnchorClick(link);
     expect(selectSessionMock).toHaveBeenCalledWith('ses_found123');
   });
 
@@ -592,7 +596,7 @@ describe('MarkdownRenderer', () => {
     const link = container?.querySelector('a');
     expect(link?.hasAttribute('href')).toBe(false);
 
-    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(link);
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -618,9 +622,9 @@ describe('MarkdownRenderer', () => {
     expect(insecure?.hasAttribute('href')).toBe(false);
     expect(insecure?.querySelector('.external-link-icon')).toBeNull();
 
-    insecure?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(insecure);
     expect(send).not.toHaveBeenCalled();
-    secure?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    dispatchAnchorClick(secure);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-external',
       payload: { url: 'https://example.test/docs' },
@@ -681,7 +685,7 @@ describe('MarkdownRenderer', () => {
     expect(container?.querySelector('pre a.file-path-link')).toBeNull();
     expect(container?.textContent).toContain('spotlight');
 
-    link?.click();
+    dispatchAnchorClick(link);
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
       payload: {
