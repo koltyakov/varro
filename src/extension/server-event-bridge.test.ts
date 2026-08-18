@@ -190,7 +190,7 @@ describe('ServerEventBridge', () => {
           sessionID: 'session-1',
           summary: {
             diffs: Array.from({ length: 101 }, (_, index) => ({
-              file: `node_modules/package-${index}/index.js`,
+              file: `vendor/package-${index}/index.js`,
               additions: 1,
               deletions: 2,
               before: 'large before content',
@@ -219,6 +219,35 @@ describe('ServerEventBridge', () => {
     expect(summary.diffsTruncated).toBe(true);
     expect(JSON.stringify(forwarded)).not.toContain('large before content');
     expect(post).toHaveBeenCalledWith({ type: 'server/event', payload: forwarded });
+  });
+
+  it('filters generated dependencies from live session diffs', () => {
+    useParsedEvents();
+    const { bridge, handlers, post } = createMocks();
+    const event = {
+      type: 'session.diff',
+      properties: {
+        sessionID: 'session-1',
+        diff: [
+          { file: 'src/index.ts', additions: 1, deletions: 0 },
+          { file: 'node_modules/pkg/index.js', additions: 10, deletions: 0 },
+        ],
+      },
+    } as ServerEvent;
+    bridge.attach();
+
+    handlers.event!(event);
+
+    expect(post).toHaveBeenCalledWith({
+      type: 'server/event',
+      payload: {
+        type: 'session.diff',
+        properties: {
+          sessionID: 'session-1',
+          diff: [{ file: 'src/index.ts', additions: 1, deletions: 0 }],
+        },
+      },
+    });
   });
 
   it('applies an event ID only once', () => {

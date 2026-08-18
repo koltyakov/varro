@@ -17,7 +17,7 @@ export type FileSearchResult = {
 
 const WORKSPACE_FILE_GLOB = '**/*';
 const WORKSPACE_FILE_EXCLUDE_GLOB =
-  '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}';
+  '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}';
 
 class WorkspaceFileCacheInvalidatedError extends Error {}
 

@@ -1219,10 +1219,7 @@ describe('RestProxy handleRequest', () => {
       }
       if (path === '/session/session-1/message') {
         messageAttempts += 1;
-        if (messageAttempts === 1) {
-          return Promise.reject(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
-        }
-        return Promise.resolve([]);
+        return Promise.reject(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
       }
       return Promise.resolve([]);
     });
@@ -1232,7 +1229,7 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(831, 'GET', '/varro/session/session-1/diff-summary'));
 
-    expect(messageAttempts).toBe(1);
+    expect(messageAttempts).toBe(2);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 831,
       data: expect.objectContaining({
@@ -1243,6 +1240,70 @@ describe('RestProxy handleRequest', () => {
         deletions: 0,
       }),
     });
+  });
+
+  it('recovers explicit file edits from an oversized message history', async () => {
+    let messageAttempts = 0;
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session?limit=1000000') {
+        return Promise.resolve([{ id: 'session-1' }]);
+      }
+      if (path.endsWith('/diff')) return Promise.resolve([]);
+      if (path === '/session/session-1/message') {
+        messageAttempts += 1;
+        if (messageAttempts === 1) {
+          return Promise.reject(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
+        }
+        return Promise.resolve([
+          {
+            info: {
+              role: 'user',
+              time: { created: 1 },
+              summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
+            },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'apply_patch',
+                state: {
+                  metadata: {
+                    files: [
+                      { relativePath: 'src/a.ts', additions: 4, deletions: 1 },
+                      { relativePath: 'src/b.ts', additions: 2, deletions: 0 },
+                      {
+                        relativePath: 'node_modules/pkg/index.js',
+                        additions: 100,
+                        deletions: 0,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(832, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 832,
+      data: expect.objectContaining({
+        files: 2,
+        additions: 6,
+        deletions: 1,
+      }),
+    });
+    const response = (callbacks.postApiResponse as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      data: Record<string, unknown>;
+    };
+    expect(response.data.filesTruncated).toBeUndefined();
+    expect(messageAttempts).toBe(2);
   });
 
   it('shares the session list across concurrent diff summaries', async () => {
@@ -1555,7 +1616,7 @@ describe('RestProxy handleRequest', () => {
 
   it('bounds diff details in paginated session summaries', async () => {
     const diffs = Array.from({ length: 101 }, (_, index) => ({
-      file: `node_modules/package-${index}/index.js`,
+      file: `vendor/package-${index}/index.js`,
       additions: 1,
       deletions: 2,
       before: 'large before content',
@@ -1846,11 +1907,31 @@ describe('RestProxy handleRequest', () => {
     expect(response.data[0]!.parts).toHaveLength(1);
   });
 
+  it('filters generated dependencies from direct session diffs', async () => {
+    const sourceDiff = { file: 'src/index.ts', additions: 1, deletions: 0 };
+    const serverRequest = vi.fn(() =>
+      Promise.resolve([
+        sourceDiff,
+        { file: 'node_modules/pkg/index.js', additions: 100, deletions: 0 },
+      ])
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(171, 'GET', '/session/s1/diff'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 171,
+      data: [sourceDiff],
+    });
+  });
+
   it('bounds diff details in message summaries', async () => {
     const message = makeSessionMessage('m1', 'p1');
     (message.info as Record<string, unknown>).summary = {
       diffs: Array.from({ length: 101 }, (_, index) => ({
-        file: `node_modules/package-${index}/index.js`,
+        file: `vendor/package-${index}/index.js`,
         additions: 1,
         deletions: 2,
         before: 'large before content',
@@ -1925,6 +2006,39 @@ describe('RestProxy handleRequest', () => {
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 118,
+      data: { items: messages, nextCursor: 'cursor-2' },
+    });
+  });
+
+  it('trims file summaries when the smaller message window is still oversized', async () => {
+    const messages = [makeSessionMessage('m1', 'p1')];
+    const serverRequest = vi
+      .fn()
+      .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
+      .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
+      .mockResolvedValueOnce({ data: messages, nextCursor: 'cursor-2' });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(
+      makePayload(119, 'GET', '/session/s1/message?limit=200&before=cursor-3')
+    );
+
+    expect(serverRequest).toHaveBeenNthCalledWith(
+      3,
+      'GET',
+      '/session/s1/message?limit=20&before=cursor-3',
+      undefined,
+      {
+        captureNextCursor: true,
+        maxResponseBytes: 256 * 1024 * 1024,
+        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        stripSummaryDiffs: true,
+      }
+    );
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 119,
       data: { items: messages, nextCursor: 'cursor-2' },
     });
   });

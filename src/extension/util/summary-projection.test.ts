@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   SUMMARY_DIFF_BYTE_BUDGET,
   SUMMARY_DIFF_COUNT_BUDGET,
+  projectFileDiffs,
+  projectPartFileLists,
   projectSummaryDiffs,
 } from './summary-projection';
 
@@ -66,6 +68,56 @@ describe('summary diff projection', () => {
       diffCount: 1,
       diffsOmitted: true,
       diffsTruncated: true,
+    });
+  });
+
+  it('filters generated dependencies and recalculates visible summary totals', () => {
+    const projected = projectSummaryDiffs({
+      summary: {
+        files: 3,
+        additions: 103,
+        deletions: 21,
+        diffs: [
+          { file: 'src/index.ts', additions: 3, deletions: 1 },
+          { file: 'node_modules/pkg/index.js', additions: 100, deletions: 20 },
+          { file: 'packages/api/.venv/lib/pkg.py', additions: 0, deletions: 0 },
+        ],
+      },
+    });
+
+    expect(projected.summary).toMatchObject({
+      files: 1,
+      additions: 3,
+      deletions: 1,
+      diffs: [{ file: 'src/index.ts', additions: 3, deletions: 1 }],
+    });
+  });
+
+  it('filters generated dependencies from direct diffs and part file lists', () => {
+    const sourceDiff = { file: 'src/index.ts', additions: 1, deletions: 0 };
+    expect(
+      projectFileDiffs([
+        sourceDiff,
+        { file: 'node_modules/pkg/index.js', additions: 1, deletions: 0 },
+      ])
+    ).toEqual([sourceDiff]);
+
+    expect(
+      projectPartFileLists({
+        type: 'patch',
+        files: ['src/index.ts', 'node_modules/pkg/index.js'],
+        state: {
+          metadata: {
+            files: [
+              { relativePath: 'src/index.ts' },
+              { filePath: 'C:\\repo\\node_modules\\pkg\\index.js' },
+            ],
+          },
+        },
+      })
+    ).toMatchObject({
+      files: ['src/index.ts'],
+      state: { metadata: { files: [{ relativePath: 'src/index.ts' }] } },
     });
   });
 });

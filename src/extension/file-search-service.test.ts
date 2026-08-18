@@ -175,7 +175,7 @@ describe('FileSearchService', () => {
     expect(vscodeMock.workspace.findFiles.mock.calls[0]).toHaveLength(3);
     expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
       '**/*',
-      '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
+      '{**/node_modules/**,**/.venv/**,**/venv/**,**/.tox/**,**/__pycache__/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/tmp/**,**/coverage/**}',
       4_000
     );
     expect(onResult).toHaveBeenCalledTimes(1);

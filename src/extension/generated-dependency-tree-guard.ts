@@ -6,12 +6,19 @@ const GIT_TIMEOUT_MS = 5_000;
 const GIT_MAX_BUFFER_BYTES = 256 * 1024;
 const SEND_ANYWAY = 'Send Anyway';
 const OPEN_SOURCE_CONTROL = 'Open Source Control';
+const GENERATED_DEPENDENCY_PATHS = [
+  ':(glob)**/node_modules/**',
+  ':(glob)**/.venv/**',
+  ':(glob)**/venv/**',
+  ':(glob)**/.tox/**',
+];
+const GENERATED_DEPENDENCY_SEGMENT = /^(.*?(?:^|\/)(?:node_modules|\.venv|venv|\.tox))(?:\/|$)/;
 
 export class GeneratedDependencyTreeGuard {
   private readonly approvedFingerprintByWorkspace = new Map<string, string>();
 
   async confirmPromptAdmission(workspacePath: string): Promise<boolean> {
-    const trees = await findUnignoredNodeModulesTrees(workspacePath);
+    const trees = await findUnignoredGeneratedDependencyTrees(workspacePath);
     if (trees.length === 0) return true;
 
     const fingerprint = trees.join('\0');
@@ -39,7 +46,9 @@ export class GeneratedDependencyTreeGuard {
   }
 }
 
-export async function findUnignoredNodeModulesTrees(workspacePath: string): Promise<string[]> {
+export async function findUnignoredGeneratedDependencyTrees(
+  workspacePath: string
+): Promise<string[]> {
   try {
     const stdout = await runGit(workspacePath, [
       'status',
@@ -48,13 +57,13 @@ export async function findUnignoredNodeModulesTrees(workspacePath: string): Prom
       '--untracked-files=normal',
       '--ignored=no',
       '--',
-      ':(glob)**/node_modules/**',
+      ...GENERATED_DEPENDENCY_PATHS,
     ]);
     const trees = new Set<string>();
     for (const record of stdout.split('\0')) {
       if (!record.startsWith('?? ')) continue;
       const path = record.slice(3).replace(/\\/g, '/').replace(/\/$/, '');
-      const match = path.match(/^(.*?(?:^|\/)node_modules)(?:\/|$)/);
+      const match = path.match(GENERATED_DEPENDENCY_SEGMENT);
       if (match?.[1]) trees.add(match[1]);
     }
     return [...trees].toSorted();

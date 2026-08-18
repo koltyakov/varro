@@ -607,14 +607,18 @@ class DiffArrayProjector {
 
   write(chunk: string): string {
     let output = '';
-    for (const char of chunk) {
+    let index = 0;
+    while (index < chunk.length) {
       if (this.stripping) {
-        if (this.consumeStrippedChar(char)) {
-          output += '[],"diffsOmitted":true,"diffsTruncated":true';
-        }
+        const nextIndex = this.consumeStrippedChunk(chunk, index);
+        if (nextIndex < 0) return output;
+        output += '[],"diffsOmitted":true,"diffsTruncated":true';
+        index = nextIndex;
         continue;
       }
 
+      const char = chunk[index]!;
+      index += 1;
       if (this.inString) {
         output += char;
         if (this.escaped) {
@@ -685,19 +689,23 @@ class DiffArrayProjector {
     return current?.type === 'object' ? current : undefined;
   }
 
-  private consumeStrippedChar(char: string): boolean {
-    if (this.stripInString) {
-      if (this.stripEscaped) this.stripEscaped = false;
-      else if (char === '\\') this.stripEscaped = true;
-      else if (char === '"') this.stripInString = false;
-      return false;
+  private consumeStrippedChunk(chunk: string, start: number): number {
+    for (let index = start; index < chunk.length; index += 1) {
+      const code = chunk.charCodeAt(index);
+      if (this.stripInString) {
+        if (this.stripEscaped) this.stripEscaped = false;
+        else if (code === 92) this.stripEscaped = true;
+        else if (code === 34) this.stripInString = false;
+        continue;
+      }
+      if (code === 34) this.stripInString = true;
+      else if (code === 91 || code === 123) this.stripDepth += 1;
+      else if (code === 93 || code === 125) this.stripDepth -= 1;
+      if (this.stripDepth !== 0) continue;
+      this.stripping = false;
+      return index + 1;
     }
-    if (char === '"') this.stripInString = true;
-    else if (char === '[' || char === '{') this.stripDepth += 1;
-    else if (char === ']' || char === '}') this.stripDepth -= 1;
-    if (this.stripDepth !== 0) return false;
-    this.stripping = false;
-    return true;
+    return -1;
   }
 }
 

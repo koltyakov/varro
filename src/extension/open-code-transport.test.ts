@@ -819,6 +819,46 @@ describe('OpenCodeTransport requests', () => {
       },
     ]);
   });
+
+  it('skips large escaped diff bodies while preserving the surrounding page', async () => {
+    const payload = [
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            diffs: [
+              {
+                file: 'node_modules/package/index.js',
+                before: 'quoted \\" [] {} \\\\'.repeat(1_000_000),
+              },
+            ],
+          },
+        },
+        parts: [{ type: 'text', text: 'Preserved prompt' }],
+      },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload))));
+
+    await expect(
+      createTransport().request('GET', '/session/session-1/message?limit=10', undefined, {
+        maxResponseBytes: 64 * 1024 * 1024,
+        maxProjectedResponseBytes: 1024,
+        stripSummaryDiffs: true,
+      })
+    ).resolves.toEqual([
+      {
+        info: {
+          id: 'message-1',
+          summary: {
+            diffs: [],
+            diffsOmitted: true,
+            diffsTruncated: true,
+          },
+        },
+        parts: [{ type: 'text', text: 'Preserved prompt' }],
+      },
+    ]);
+  });
 });
 
 describe('OpenCodeTransport request scoping', () => {

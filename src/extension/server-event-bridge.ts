@@ -8,7 +8,11 @@ import type { HiddenSessionManager } from './hidden-session-manager';
 import { logger } from './logger';
 import type { SessionStateManager } from './session-state-manager';
 import { getSessionIdsForEvent } from './sidebar-provider-utils';
-import { projectSummaryDiffs } from './util/summary-projection';
+import {
+  projectFileDiffs,
+  projectPartFileLists,
+  projectSummaryDiffs,
+} from './util/summary-projection';
 
 type PostMessage = (message: ExtensionMessage) => void;
 
@@ -243,11 +247,27 @@ export class ServerEventBridge {
 
 function projectEventSummaryDiffs(event: ServerEvent): ServerEvent {
   const properties = asRecord(event.properties);
-  const info = asRecord(properties?.info);
-  if (!properties || !info) return event;
-  const projectedInfo = projectSummaryDiffs(info);
-  if (projectedInfo === info) return event;
-  return { ...event, properties: { ...properties, info: projectedInfo } } as ServerEvent;
+  if (!properties) return event;
+
+  let projectedProperties = properties;
+  const info = asRecord(properties.info);
+  if (info) {
+    const projectedInfo = projectSummaryDiffs(info);
+    if (projectedInfo !== info)
+      projectedProperties = { ...projectedProperties, info: projectedInfo };
+  }
+  if (event.type === 'session.diff' && Array.isArray(properties.diff)) {
+    const diff = projectFileDiffs(properties.diff);
+    if (diff !== properties.diff) projectedProperties = { ...projectedProperties, diff };
+  }
+  const part = asRecord(properties.part);
+  if (part) {
+    const projectedPart = projectPartFileLists(part);
+    if (projectedPart !== part)
+      projectedProperties = { ...projectedProperties, part: projectedPart };
+  }
+  if (projectedProperties === properties) return event;
+  return { ...event, properties: projectedProperties } as ServerEvent;
 }
 
 function getCoalescableDelta(event: ServerEvent): CoalescableDelta | null {

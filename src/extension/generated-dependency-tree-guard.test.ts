@@ -18,7 +18,7 @@ vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 import {
   GeneratedDependencyTreeGuard,
-  findUnignoredNodeModulesTrees,
+  findUnignoredGeneratedDependencyTrees,
 } from './generated-dependency-tree-guard';
 
 const roots: string[] = [];
@@ -49,9 +49,22 @@ describe('generated dependency tree guard', () => {
     dependency(root);
     dependency(root, 'packages/app/node_modules/pkg/index.js');
 
-    await expect(findUnignoredNodeModulesTrees(root)).resolves.toEqual([
+    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual([
       'node_modules',
       'packages/app/node_modules',
+    ]);
+  });
+
+  it('detects common Python virtual environment trees', async () => {
+    const root = repository();
+    dependency(root, '.venv/lib/python3.12/site-packages/pkg/__init__.py');
+    dependency(root, 'packages/api/venv/lib/python3.12/site-packages/pkg/__init__.py');
+    dependency(root, '.tox/py312/lib/python3.12/site-packages/pkg/__init__.py');
+
+    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual([
+      '.tox',
+      '.venv',
+      'packages/api/venv',
     ]);
   });
 
@@ -60,7 +73,7 @@ describe('generated dependency tree guard', () => {
     writeFileSync(join(root, '.gitignore'), 'node_modules/\n');
     dependency(root);
 
-    await expect(findUnignoredNodeModulesTrees(root)).resolves.toEqual([]);
+    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual([]);
   });
 
   it('does not flag tracked dependency files', async () => {
@@ -68,7 +81,7 @@ describe('generated dependency tree guard', () => {
     dependency(root);
     execFileSync('git', ['-C', root, 'add', '--force', 'node_modules/pkg/index.js']);
 
-    await expect(findUnignoredNodeModulesTrees(root)).resolves.toEqual([]);
+    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual([]);
   });
 
   it('caches Send Anyway for an unchanged tree fingerprint', async () => {

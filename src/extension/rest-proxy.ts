@@ -47,7 +47,12 @@ import {
 } from './util/plan-file';
 import { getRelativePath } from './util/path';
 import { FULL_SESSION_LIST_LIMIT, FULL_SESSION_LIST_PATH } from './util/session-list';
-import { projectSummaryDiffs } from './util/summary-projection';
+import {
+  isGeneratedDependencyPath,
+  projectFileDiffs,
+  projectPartFileLists,
+  projectSummaryDiffs,
+} from './util/summary-projection';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
@@ -525,6 +530,7 @@ export class RestProxy {
   }
 
   private async requestPaginatedMessages(method: string, path: string, body: unknown) {
+    let recoveryPath = path;
     try {
       return await this.callbacks.server.request(method, path, body, {
         captureNextCursor: true,
@@ -539,15 +545,19 @@ export class RestProxy {
         requestedLimit > SESSION_MESSAGE_RECOVERY_PAGE_SIZE
       ) {
         url.searchParams.set('limit', String(SESSION_MESSAGE_RECOVERY_PAGE_SIZE));
-        const recoveryPath = `${url.pathname}${url.search}`;
+        recoveryPath = `${url.pathname}${url.search}`;
         logger.warn(`Retrying oversized message page with a smaller window: ${recoveryPath}`);
-        return this.callbacks.server.request(method, recoveryPath, body, {
-          captureNextCursor: true,
-          maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
-        });
+        try {
+          return await this.callbacks.server.request(method, recoveryPath, body, {
+            captureNextCursor: true,
+            maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+          });
+        } catch (recoveryError) {
+          if (!(recoveryError instanceof OpenCodeResponseTooLargeError)) throw recoveryError;
+        }
       }
-      logger.warn(`Trimming oversized file summaries while loading ${path}`);
-      return this.callbacks.server.request(method, path, body, {
+      logger.warn(`Trimming oversized file summaries while loading ${recoveryPath}`);
+      return this.callbacks.server.request(method, recoveryPath, body, {
         captureNextCursor: true,
         maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
         maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
@@ -628,11 +638,13 @@ export class RestProxy {
     ]);
     const diffStats = summarizeSessionDiff(diffs);
     const historyStatsUnavailable = hasOmittedMessageHistory(messages);
+    const messageEditStats = summarizeSessionMessageEdits(messages);
+    const editStats = hasSessionEdits(diffStats) ? diffStats : messageEditStats;
     const summary = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
     const tokenBreakdown = summary.tokenBreakdown;
     const model = summarizeSessionModel(messages);
     return {
-      ...(hasSessionEdits(diffStats) ? diffStats : summarizeSessionMessageEdits(messages)),
+      ...editStats,
       tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
       ...(historyStatsUnavailable ? { historyStatsUnavailable: true } : {}),
       ...(model ? { model } : {}),
@@ -686,20 +698,23 @@ export class RestProxy {
 
   private async requestSessionMessagesForSummary(path: string) {
     try {
-      return await this.callbacks.server.request('GET', path);
+      return projectMessageHistory(await this.callbacks.server.request('GET', path));
     } catch (err) {
       if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
-      logger.warn(`Skipping oversized message history while summarizing ${path}`);
-      return [
-        {
-          info: {
-            role: 'user',
-            time: { created: 0 },
-            summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
-          },
-          parts: [],
-        },
-      ];
+      logger.warn(`Trimming oversized file summaries while summarizing ${path}`);
+      try {
+        return projectMessageHistory(
+          await this.callbacks.server.request('GET', path, undefined, {
+            maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
+            maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+            stripSummaryDiffs: true,
+          })
+        );
+      } catch (recoveryError) {
+        if (!(recoveryError instanceof OpenCodeResponseTooLargeError)) throw recoveryError;
+        logger.warn(`Skipping oversized message history while summarizing ${path}`);
+        return omittedMessageHistory();
+      }
     }
   }
 
@@ -752,9 +767,10 @@ export class RestProxy {
       .request('GET', FULL_SESSION_LIST_PATH)
       .then((sessions) => {
         if (!Array.isArray(sessions)) return sessions;
-        this.observePermissionJudgeSessions(sessions);
+        const projectedSessions = sessions.map(projectSummaryDiffs);
+        this.observePermissionJudgeSessions(projectedSessions);
         return this.callbacks.hiddenSessions.filterVisibleSessions(
-          sessions.filter(
+          projectedSessions.filter(
             (session): session is { id: string } => typeof asRecord(session)?.id === 'string'
           )
         );
@@ -807,6 +823,9 @@ export class RestProxy {
       const sessions = data.map(projectSummaryDiffs);
       this.rememberSessionList(sessions);
       return this.filterVisibleSessions(sessions);
+    }
+    if (method === 'GET' && /^\/session\/[^/]+\/diff$/.test(url.pathname)) {
+      return projectFileDiffs(data);
     }
     if (
       method === 'GET' &&
@@ -1151,7 +1170,7 @@ export class RestProxy {
             continue;
           }
           seenPartIDs.add(partRecord.id);
-          parts.push(partRecord);
+          parts.push(projectPartFileLists(partRecord));
         }
       } else if (record?.parts !== undefined) {
         droppedParts += 1;
@@ -1834,7 +1853,9 @@ function summarizeSessionMessageEdits(
       const part = asRecord(partValue);
       if (part?.type === 'patch' && Array.isArray(part.files)) {
         for (const file of part.files) {
-          if (typeof file === 'string' && file) diffs.push({ file });
+          if (typeof file === 'string' && file && !isGeneratedDependencyPath(file)) {
+            diffs.push({ file });
+          }
         }
         continue;
       }
@@ -1846,7 +1867,7 @@ function summarizeSessionMessageEdits(
         for (const item of metadata.files) {
           const diff = asRecord(item);
           const file = diff && readFirstString(diff, ['relativePath', 'file', 'path', 'filePath']);
-          if (!diff || !file) continue;
+          if (!diff || !file || isGeneratedDependencyPath(file)) continue;
           diffs.push({ ...diff, file });
         }
         continue;
@@ -1864,7 +1885,7 @@ function summarizeSessionMessageEdits(
         'filepath',
         'filename',
       ]);
-      if (!file) continue;
+      if (!file || isGeneratedDependencyPath(file)) continue;
       diffs.push({
         file,
         additions: source.additions ?? source.linesAdded,
@@ -1872,7 +1893,11 @@ function summarizeSessionMessageEdits(
       });
     }
   }
-  return { ...summarizeSessionDiff(diffs), ...(filesTruncated ? { filesTruncated: true } : {}) };
+  const summary = summarizeSessionDiff(diffs);
+  return {
+    ...summary,
+    ...(filesTruncated && summary.files === 0 ? { filesTruncated: true } : {}),
+  };
 }
 
 function hasOmittedMessageHistory(value: unknown): boolean {
@@ -1881,6 +1906,32 @@ function hasOmittedMessageHistory(value: unknown): boolean {
     const info = asRecord(asRecord(entry)?.info);
     return asRecord(info?.summary)?.diffsOmitted === true;
   });
+}
+
+function projectMessageHistory(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    const message = asRecord(entry);
+    if (!message) return entry;
+    const info = projectSummaryDiffs(message.info);
+    const parts = Array.isArray(message.parts)
+      ? message.parts.map(projectPartFileLists)
+      : message.parts;
+    return info === message.info && parts === message.parts ? entry : { ...message, info, parts };
+  });
+}
+
+function omittedMessageHistory() {
+  return [
+    {
+      info: {
+        role: 'user',
+        time: { created: 0 },
+        summary: { diffs: [], diffsOmitted: true, diffsTruncated: true },
+      },
+      parts: [],
+    },
+  ];
 }
 
 function asDiffRecord(value: unknown): Record<string, unknown>[] {
