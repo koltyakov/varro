@@ -423,7 +423,7 @@ input:focus-visible {
 .jump-to-latest-button {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  bottom: 6px;
   transform: translateX(-50%);
   z-index: var(--z-chrome-raised);
   display: flex;
@@ -434,7 +434,7 @@ input:focus-visible {
   padding: 0;
   border-radius: var(--radius-pill);
   border: 1px solid color-mix(in srgb, var(--color-vscode-border) 55%, transparent);
-  background: var(--color-vscode-widget-bg);
+  background: color-mix(in srgb, var(--color-vscode-widget-bg) 78%, transparent);
   color: var(--color-vscode-fg);
   box-shadow: var(--chat-shadow-card);
   cursor: pointer;
@@ -526,11 +526,11 @@ input:focus-visible {
 
 .jump-to-latest-button:hover {
   background: color-mix(in srgb, var(--color-vscode-widget-bg) 80%, var(--color-vscode-fg) 8%);
-  border-color: color-mix(in srgb, var(--color-vscode-accent) 60%, transparent);
+  border-color: color-mix(in srgb, var(--color-vscode-fg) 45%, transparent);
 }
 
 .jump-to-latest-button:focus-visible {
-  outline: 1px solid var(--color-vscode-accent);
+  outline: 1px solid color-mix(in srgb, var(--color-vscode-fg) 60%, transparent);
   outline-offset: 1px;
 }
 
