@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
+import { createStore } from 'solid-js/store';
 import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
 import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, ReasoningPart } from '../types';
@@ -175,6 +176,72 @@ describe('MessagePart', () => {
     expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
       'true'
     );
+  });
+
+  it('follows streaming reasoning at the bottom until the user scrolls away', () => {
+    const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: () => 200,
+    });
+
+    try {
+      const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
+      cleanup = render(() => MessagePart({ part }), container!);
+
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      const content = container?.querySelector<HTMLDivElement>('.thinking-content');
+      expect(content?.scrollTop).toBe(500);
+
+      setPart('text', 'Step one\nStep two');
+      expect(content?.scrollTop).toBe(500);
+
+      content!.scrollTop = 100;
+      content?.dispatchEvent(new Event('scroll'));
+      setPart('text', 'Step one\nStep two\nStep three');
+      expect(content?.scrollTop).toBe(100);
+
+      setPart('time', 'end', 1000);
+      expect(content?.scrollTop).toBe(100);
+    } finally {
+      if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      if (clientHeight) Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeight);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    }
+  });
+
+  it('returns auto-followed reasoning to the top when streaming completes', () => {
+    const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 500,
+    });
+
+    try {
+      const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
+      cleanup = render(() => MessagePart({ part }), container!);
+
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      const content = container?.querySelector<HTMLDivElement>('.thinking-content');
+      expect(content?.scrollTop).toBe(500);
+
+      setPart('time', 'end', 1000);
+      expect(content?.scrollTop).toBe(0);
+
+      content!.scrollTop = 120;
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      expect(container?.querySelector<HTMLDivElement>('.thinking-content')?.scrollTop).toBe(0);
+    } finally {
+      if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+    }
   });
 
   it('keeps a reasoning summary but hides an empty HTML-comment body', () => {

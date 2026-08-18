@@ -115,9 +115,14 @@ function ReasoningBlock(props: {
   messageInfo?: AssistantMessage;
   streamedText?: string | null;
 }) {
+  const scrollBottomThreshold = 8;
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
+  let contentElement: HTMLDivElement | undefined;
+  let autoFollow = true;
+  let wasExpanded = false;
+  let wasStreaming = props.part.time.end === undefined;
   const [expanded, setExpanded] = createSignal(
     getMessageBlockExpanded(currentExpansionKey) ?? false
   );
@@ -135,8 +140,42 @@ function ReasoningBlock(props: {
     const nextExpansionKey = expansionKey();
     if (nextExpansionKey === currentExpansionKey) return;
     currentExpansionKey = nextExpansionKey;
+    wasExpanded = false;
+    autoFollow = true;
     setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? false);
   });
+
+  createEffect(() => {
+    const nextExpanded = expanded();
+    const nextStreaming = isStreaming();
+    reasoningBody();
+
+    if (!nextExpanded || !contentElement) {
+      wasExpanded = nextExpanded;
+      wasStreaming = nextStreaming;
+      return;
+    }
+
+    if (!wasExpanded) {
+      autoFollow = nextStreaming;
+      contentElement.scrollTop = nextStreaming ? contentElement.scrollHeight : 0;
+    } else if (wasStreaming && !nextStreaming) {
+      if (autoFollow) contentElement.scrollTop = 0;
+      autoFollow = false;
+    } else if (nextStreaming && autoFollow) {
+      contentElement.scrollTop = contentElement.scrollHeight;
+    }
+
+    wasExpanded = nextExpanded;
+    wasStreaming = nextStreaming;
+  });
+
+  const handleContentScroll = () => {
+    if (!contentElement || !isStreaming()) return;
+    const distanceFromBottom =
+      contentElement.scrollHeight - contentElement.clientHeight - contentElement.scrollTop;
+    autoFollow = distanceFromBottom <= scrollBottomThreshold;
+  };
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded();
@@ -178,7 +217,11 @@ function ReasoningBlock(props: {
         </Show>
       </button>
       <Show when={expanded() && hasBody()}>
-        <div class="thinking-content">
+        <div
+          class="thinking-content"
+          ref={(element) => (contentElement = element)}
+          onScroll={handleContentScroll}
+        >
           <div class="thinking-item">
             <div class="thinking-text">{bodyText()}</div>
           </div>
