@@ -139,6 +139,20 @@ describe('UserMessageContent', () => {
     expect(container?.querySelector('a.external-link')).toBeNull();
   });
 
+  it('trims blank lines around prose between fenced code blocks', () => {
+    renderUserContent([
+      textPart(
+        'text-1',
+        ['```', 'something', '```', '', 'Another text', '', '```', 'something else', '```'].join(
+          '\n'
+        )
+      ),
+    ]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.textContent).toBe('Another text');
+  });
+
   it('compacts standalone SVG markup into a chip that opens in an editor', () => {
     const send = installSendToExtension();
     const svg = '<svg viewBox="0 0 10 10">\n  <path d="M0 0h10v10z" />\n</svg>';

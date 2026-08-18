@@ -25,7 +25,10 @@ const clipboardState = vi.hoisted(() => ({
 
 // `realpath` resolves through `symlinks` so containment can be tested without
 // touching the filesystem; unmapped paths resolve to themselves.
-const fsState = vi.hoisted(() => ({ symlinks: new Map<string, string>() }));
+const fsState = vi.hoisted(() => ({
+  symlinks: new Map<string, string>(),
+  directories: new Map<string, Array<{ name: string; directory: boolean }>>(),
+}));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
@@ -38,7 +41,15 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     }
     return target;
   });
-  return { ...actual, realpath, default: { ...actual, realpath } };
+  const readdir = vi.fn(async (target: string, options?: { withFileTypes?: boolean }) => {
+    const entries = fsState.directories.get(target.replace(/\\/g, '/'));
+    if (!entries) return actual.readdir(target, options as never);
+    return entries.map((entry) => ({
+      name: entry.name,
+      isDirectory: () => entry.directory,
+    }));
+  });
+  return { ...actual, readdir, realpath, default: { ...actual, readdir, realpath } };
 });
 
 const vscodeMock = vi.hoisted(() => ({
@@ -69,7 +80,9 @@ const vscodeMock = vi.hoisted(() => ({
     getWorkspaceFolder: vi.fn(),
     fs: {
       stat: vi.fn(),
+      readDirectory: vi.fn(),
     },
+    findFiles: vi.fn(),
     openTextDocument: vi.fn(),
   },
   commands: {
@@ -106,6 +119,9 @@ const vscodeMock = vi.hoisted(() => ({
   },
   Uri: {
     file: vi.fn((fsPath: string) => ({ fsPath: fsPath.replace(/\\/g, '/') })),
+    joinPath: vi.fn((uri: { fsPath: string }, name: string) => ({
+      fsPath: `${uri.fsPath.replace(/\/$/, '')}/${name}`,
+    })),
   },
   FileType: {
     Directory: 2,
@@ -144,11 +160,16 @@ describe('ContextProvider', () => {
     clipboardState.deferWrite = null;
     clipboardState.deferCopy = null;
     fsState.symlinks.clear();
+    fsState.directories.clear();
     vscodeMock.window.activeTerminal = { name: 'Terminal 1' };
     vscodeMock.window.activeTextEditor = undefined;
     vscodeMock.window.tabGroups.activeTabGroup.activeTab = undefined;
     vscodeMock.workspace.getWorkspaceFolder.mockReset();
     vscodeMock.workspace.fs.stat.mockReset();
+    vscodeMock.workspace.fs.readDirectory.mockReset();
+    vscodeMock.workspace.fs.readDirectory.mockResolvedValue([]);
+    vscodeMock.workspace.findFiles.mockReset();
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
     vscodeMock.workspace.openTextDocument.mockReset();
     vscodeMock.workspace.asRelativePath.mockReset();
     vscodeMock.window.showTextDocument.mockReset();
@@ -930,6 +951,136 @@ describe('ContextProvider', () => {
 
       expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(uri);
       expect(vscodeMock.window.showTextDocument).toHaveBeenCalledWith(document, { preview: false });
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('opens a unique workspace file for a missing root-level basename reference', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const missingUri = { fsPath: '/repo/MarkdownRenderer.tsx' };
+    const matchedUri = { fsPath: '/repo/src/webview/components/MarkdownRenderer.tsx' };
+    const document = { uri: matchedUri };
+    const editor = {
+      selection: null,
+      revealRange: vi.fn(),
+    };
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === missingUri.fsPath) throw new Error('File not found');
+      return { type: 0 };
+    });
+    vscodeMock.workspace.findFiles.mockResolvedValue([matchedUri]);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue(document);
+    vscodeMock.window.showTextDocument.mockResolvedValue(editor);
+
+    try {
+      await provider.openPath('/repo/MarkdownRenderer.tsx', { kind: 'file', line: 1447 });
+
+      expect(vscodeMock.workspace.findFiles).toHaveBeenCalledWith(
+        '**/MarkdownRenderer.tsx',
+        null,
+        2
+      );
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(matchedUri);
+      expect(editor.selection).toEqual({
+        start: { line: 1446, character: 0 },
+        end: { line: 1446, character: 0 },
+      });
+      expect(editor.revealRange).toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('does not guess between duplicate basename matches', async () => {
+    const provider = new ContextProvider(vi.fn());
+
+    vscodeMock.workspace.workspaceFolders = [{ name: 'repo', uri: { fsPath: '/repo' } }];
+    vscodeMock.workspace.fs.stat.mockRejectedValue(new Error('File not found'));
+    vscodeMock.workspace.findFiles.mockResolvedValue([
+      { fsPath: '/repo/src/first/Shared.ts' },
+      { fsPath: '/repo/src/second/Shared.ts' },
+    ]);
+
+    try {
+      await provider.openPath('/repo/Shared.ts', { kind: 'file' });
+
+      expect(vscodeMock.workspace.openTextDocument).not.toHaveBeenCalled();
+      expect(vscodeMock.window.showTextDocument).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('walks the workspace when indexed basename search returns no results', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const matchedUri = { fsPath: '/repo/src/webview/components/MarkdownRenderer.tsx' };
+    const document = { uri: matchedUri };
+
+    vscodeMock.workspace.workspaceFolders = [];
+    vscodeMock.workspace.getWorkspaceFolder.mockReturnValue({ uri: { fsPath: '/repo' } });
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/MarkdownRenderer.tsx') throw new Error('File not found');
+      return { type: 0 };
+    });
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
+    const directories: Record<string, [string, number][]> = {
+      '/repo': [
+        ['node_modules', vscodeMock.FileType.Directory],
+        ['src', vscodeMock.FileType.Directory],
+      ],
+      '/repo/src': [['webview', vscodeMock.FileType.Directory]],
+      '/repo/src/webview': [['components', vscodeMock.FileType.Directory]],
+      '/repo/src/webview/components': [['MarkdownRenderer.tsx', 0]],
+    };
+    vscodeMock.workspace.fs.readDirectory.mockImplementation(
+      async (uri: { fsPath: string }) => directories[uri.fsPath] ?? []
+    );
+    vscodeMock.workspace.openTextDocument.mockResolvedValue(document);
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+
+    try {
+      await provider.openPath('/repo/MarkdownRenderer.tsx', { kind: 'file', line: 1447 });
+
+      expect(vscodeMock.workspace.fs.readDirectory).not.toHaveBeenCalledWith({
+        fsPath: '/repo/node_modules',
+      });
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(matchedUri);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('walks the local project when VS Code filesystem traversal is unavailable', async () => {
+    const provider = new ContextProvider(vi.fn());
+    const matchedUri = { fsPath: '/repo/src/webview/components/MarkdownRenderer.tsx' };
+
+    vscodeMock.workspace.workspaceFolders = [];
+    vscodeMock.workspace.fs.stat.mockImplementation(async (uri: { fsPath: string }) => {
+      if (uri.fsPath === '/repo/MarkdownRenderer.tsx') throw new Error('File not found');
+      return { type: 0 };
+    });
+    vscodeMock.workspace.findFiles.mockResolvedValue([]);
+    vscodeMock.workspace.fs.readDirectory.mockRejectedValue(new Error('Unavailable'));
+    fsState.directories.set('/repo', [
+      { name: 'node_modules', directory: true },
+      { name: 'src', directory: true },
+    ]);
+    fsState.directories.set('/repo/src', [{ name: 'webview', directory: true }]);
+    fsState.directories.set('/repo/src/webview', [{ name: 'components', directory: true }]);
+    fsState.directories.set('/repo/src/webview/components', [
+      { name: 'MarkdownRenderer.tsx', directory: false },
+    ]);
+    vscodeMock.workspace.openTextDocument.mockResolvedValue({ uri: matchedUri });
+    vscodeMock.window.showTextDocument.mockResolvedValue({});
+
+    try {
+      await provider.openPath('/repo/MarkdownRenderer.tsx', { kind: 'file', line: 1447 });
+
+      expect(vscodeMock.workspace.openTextDocument).toHaveBeenCalledWith(matchedUri);
     } finally {
       provider.dispose();
     }

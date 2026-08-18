@@ -62,6 +62,11 @@ const EXPECTATIONS = {
     '- Server status: error: OpenCode update required.',
     'The automatic update did not install a compatible CLI (found 1.15.0)',
   ],
+  'file-link-open': [
+    '- CLI version: 1.18.15',
+    '- Server status: running, event stream healthy',
+    '- Server health: healthy',
+  ],
   'healthy-first-run': [
     '- CLI version: 1.18.15',
     '- Server status: running, event stream healthy',
@@ -113,7 +118,10 @@ async function waitForLaunchCount(expected, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS)
 
 async function run() {
   const scenario = process.env.VARRO_SANDBOX_SCENARIO;
-  assert.ok(scenario && Object.hasOwn(EXPECTATIONS, scenario), `Unknown sandbox scenario: ${scenario}`);
+  assert.ok(
+    scenario && Object.hasOwn(EXPECTATIONS, scenario),
+    `Unknown sandbox scenario: ${scenario}`
+  );
   const expected = [...EXPECTATIONS[scenario]];
   if (scenario === 'port-conflict-fallback') {
     const originalPort = Number(process.env.VARRO_SANDBOX_PORT);
@@ -139,6 +147,25 @@ async function run() {
   }
   assert.match(about, /- VS Code: \d+\.\d+\.\d+/);
   assert.match(about, /- Platform: (darwin|linux|win32) /);
+  if (scenario === 'file-link-open') {
+    const root = process.env.VARRO_SANDBOX_FILE_LINK_ROOT;
+    const target = process.env.VARRO_SANDBOX_FILE_LINK_TARGET;
+    assert.ok(root && target, 'File-link sandbox paths were not provided');
+    await vscode.commands.executeCommand(
+      'varro.test.openPath',
+      `${root}/MarkdownRenderer.tsx`,
+      1447
+    );
+    const editor = vscode.window.activeTextEditor;
+    assert.equal(editor?.document.uri.fsPath, target, 'The unique nested file was not opened');
+    assert.equal(editor?.selection.active.line, 1446, 'The requested line was not selected');
+    const missingResult = await vscode.commands.executeCommand(
+      'varro.test.openPath',
+      `${root}/DefinitelyMissing.ts`,
+      12
+    );
+    assert.equal(missingResult, 'unavailable', 'A missing file did not report unavailable');
+  }
   process.stdout.write(`VS Code sandbox scenario passed: ${scenario}\n`);
 }
 

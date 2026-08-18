@@ -123,3 +123,130 @@ test('routes safe external markdown links through the extension bridge', async (
     )
     .toEqual(['https://example.com/varro/releases']);
 });
+
+test('renders real-session file variants as isolated canonical links', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=message-rendering');
+
+  const links = page.locator('.rendered-markdown a.file-path-link');
+  await expect(links).toHaveCount(11);
+  await expect(links).toHaveText([
+    'global.d.ts',
+    'README.md',
+    'LICENSE',
+    '.gitignore',
+    'Dockerfile',
+    'index.css',
+    'suite.cjs',
+    '.oxlintrc.json',
+    'architecture.md',
+    'MarkdownRenderer.tsx (line 1447)',
+    'missing-file.ts',
+  ]);
+  await expect(links.locator('code')).toHaveCount(0);
+  await expect(page.locator('.assistant-message-flow-item > .rendered-markdown')).not.toContainText(
+    '`'
+  );
+
+  const readme = page.getByRole('link', { name: 'README.md' });
+  const license = page.getByRole('link', { name: 'LICENSE' });
+  await expect(readme).toHaveAttribute('title', '/workspace/varro/README.md');
+  await readme.focus();
+  await expect
+    .poll(() => readme.evaluate((element) => getComputedStyle(element).outlineStyle))
+    .toBe('none');
+  await readme.click({ button: 'right' });
+  await expect
+    .poll(() => readme.evaluate((element) => getComputedStyle(element).outlineStyle))
+    .toBe('none');
+
+  const hoverTargets = ['suite.cjs', 'architecture.md', '.oxlintrc.json'];
+  for (const name of hoverTargets) {
+    await page.getByRole('link', { name }).hover();
+    await expect
+      .poll(() =>
+        links.evaluateAll((elements) =>
+          elements
+            .filter((element) => getComputedStyle(element).borderBottomColor !== 'rgba(0, 0, 0, 0)')
+            .map((element) => element.textContent)
+        )
+      )
+      .toEqual([name]);
+  }
+
+  await expect(license).toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
+
+  const missingLink = page.locator('a.file-path-link').filter({ hasText: 'missing-file.ts' });
+  await missingLink.click();
+  await expect(missingLink).toHaveClass(/is-unavailable/);
+  await expect(missingLink).toHaveAttribute('aria-disabled', 'true');
+  await expect(missingLink).not.toHaveAttribute('href', /.+/);
+  await expect(missingLink).toHaveCSS('cursor', 'default');
+  await expect(page.locator('.session-action-feedback.is-warning')).toContainText(
+    'File not found: missing-file.ts'
+  );
+  const openCountAfterFailure = await getE2EState(page, () => {
+    const value = (
+      window as Window & {
+        __varroE2E?: { openTargets?: Array<{ path: string }> };
+      }
+    ).__varroE2E;
+    return value?.openTargets?.length ?? 0;
+  });
+  await missingLink.click({ force: true });
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { openTargets?: Array<{ path: string }> };
+          }
+        ).__varroE2E;
+        return value?.openTargets?.length ?? 0;
+      })
+    )
+    .toBe(openCountAfterFailure);
+
+  const lineReference = page.getByRole('link', { name: 'MarkdownRenderer.tsx (line 1447)' });
+  await lineReference.click();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { openTargets?: Array<{ path: string; kind?: string; line?: number }> };
+          }
+        ).__varroE2E;
+        return value?.openTargets || [];
+      })
+    )
+    .toEqual([
+      { path: '/workspace/varro/missing-file.ts', kind: 'file' },
+      {
+        path: '/workspace/varro/MarkdownRenderer.tsx',
+        kind: 'file',
+        line: 1447,
+      },
+    ]);
+
+  await readme.click();
+  await expect
+    .poll(() =>
+      getE2EState(page, () => {
+        const value = (
+          window as Window & {
+            __varroE2E?: { openTargets?: Array<{ path: string; kind?: string; line?: number }> };
+          }
+        ).__varroE2E;
+        return value?.openTargets || [];
+      })
+    )
+    .toEqual([
+      { path: '/workspace/varro/missing-file.ts', kind: 'file' },
+      {
+        path: '/workspace/varro/MarkdownRenderer.tsx',
+        kind: 'file',
+        line: 1447,
+      },
+      { path: '/workspace/varro/README.md', kind: 'file' },
+    ]);
+});

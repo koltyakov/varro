@@ -442,6 +442,165 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   expect(await getRenderedMessageRowCount(page)).toBeLessThan(90);
 });
 
+test('viewport narrowing preserves an inner block in a viewport-tall markdown item', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  const heading = page.getByRole('heading', { name: 'Huge section 45' });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+  });
+  for (let step = 2; step < 19; step += 1) {
+    await list.evaluate((element, ratio) => {
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+      element.dispatchEvent(new Event('scroll'));
+    }, step / 20);
+    await waitForAnimationFrame(page);
+    if ((await heading.count()) > 0) break;
+  }
+  await expect(heading).toBeAttached();
+  await list.evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>('h2')]
+      .find((candidate) => candidate.innerText === 'Huge section 45')
+      ?.closest<HTMLElement>('[data-msg-id]');
+    if (!target) throw new Error('Tall Markdown target row is not mounted');
+    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top + 700;
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+  const listBounds = await list.boundingBox();
+  await page.mouse.move(listBounds!.x + 30, listBounds!.y + listBounds!.height / 2);
+  await page.mouse.wheel(0, 32);
+  await page.waitForTimeout(80);
+
+  const anchor = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const item = [
+      ...element.querySelectorAll<HTMLElement>('.rendered-markdown li'),
+    ].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.top >= bounds.top + 20 && rect.bottom < bounds.bottom;
+    });
+    if (!item) return null;
+    return {
+      text: item.innerText,
+      top: item.getBoundingClientRect().top - bounds.top,
+    };
+  });
+  expect(anchor).not.toBeNull();
+
+  const samples: Array<{ connected: boolean; top: number | null }> = [];
+  await page.setViewportSize({ width: 359, height: 808 });
+  for (let frame = 0; frame < 8; frame += 1) {
+    await waitForAnimationFrame(page);
+    samples.push(
+      await list.evaluate((element, text) => {
+        const item = [
+          ...element.querySelectorAll<HTMLElement>('.rendered-markdown li'),
+        ].find((candidate) => candidate.innerText === text);
+        return {
+          connected: !!item?.isConnected,
+          top: item
+            ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
+            : null,
+        };
+      }, anchor!.text)
+    );
+  }
+
+  expect(samples.every((sample) => sample.connected), JSON.stringify(samples)).toBe(true);
+  expect(
+    Math.max(...samples.map((sample) => Math.abs(sample.top! - anchor!.top))),
+    JSON.stringify({ anchor, samples })
+  ).toBeLessThanOrEqual(3);
+});
+
+test('viewport narrowing replaces a stale tall-row anchor after sticky navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  const heading = page.getByRole('heading', { name: 'Huge section 45' });
+  const source = page.locator('[data-msg-id="message-huge-user-45"] .user-message-card');
+  const sticky = page.locator('.latest-user-message-sticky');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+  });
+  for (let step = 2; step < 19; step += 1) {
+    await list.evaluate((element, ratio) => {
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+      element.dispatchEvent(new Event('scroll'));
+    }, step / 20);
+    await waitForAnimationFrame(page);
+    if ((await heading.count()) > 0) break;
+  }
+  await expect(heading).toBeAttached();
+  await list.evaluate((element) => {
+    const response = element.querySelector<HTMLElement>(
+      '[data-msg-id="message-huge-assistant-45"]'
+    );
+    if (!response) throw new Error('Tall response is not mounted');
+    element.scrollTop +=
+      response.getBoundingClientRect().top - element.getBoundingClientRect().top + 1_200;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  const listBounds = await list.boundingBox();
+  await page.mouse.move(listBounds!.x + 30, listBounds!.y + listBounds!.height / 2);
+  await page.mouse.wheel(0, 32);
+  await expect(sticky).toContainText('Review huge-content section 45.');
+
+  await sticky.click();
+  await expect(source).toBeVisible();
+  await expect
+    .poll(() =>
+      source.evaluate(
+        (element) =>
+          element.getBoundingClientRect().top -
+          document.querySelector('.interactive-list')!.getBoundingClientRect().top
+      )
+    )
+    .toBeLessThanOrEqual(50);
+  const anchorTop = await source.evaluate(
+    (element) =>
+      element.getBoundingClientRect().top -
+      document.querySelector('.interactive-list')!.getBoundingClientRect().top
+  );
+
+  const samplesPromise = list.evaluate(async (element, messageId) => {
+    const readTop = () => {
+      const card = element.querySelector<HTMLElement>(
+        `[data-msg-id="${CSS.escape(messageId)}"] .user-message-card`
+      );
+      return card
+        ? card.getBoundingClientRect().top - element.getBoundingClientRect().top
+        : null;
+    };
+    const values = [];
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      values.push(readTop());
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 180));
+    values.push(readTop());
+    return values;
+  }, 'message-huge-user-45');
+  await page.setViewportSize({ width: 360, height: 786 });
+  const samples = await samplesPromise;
+
+  expect(samples.every((top) => top !== null), JSON.stringify(samples)).toBe(true);
+  expect(
+    Math.max(...samples.slice(1).map((top) => Math.abs(top! - anchorTop))),
+    JSON.stringify({ anchorTop, samples })
+  ).toBeLessThanOrEqual(3);
+});
+
 test('width resizing preserves bottom follow and respects user detachment', async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=large-transcript');

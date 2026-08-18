@@ -127,7 +127,10 @@ function parseUserMessageSegments(text: string): UserMessageSegment[] {
   for (const match of normalized.matchAll(USER_CODE_FENCE_RE)) {
     const index = match.index ?? 0;
     if (index > lastIndex) {
-      const content = trimFenceBoundaryNewlines(normalized.slice(lastIndex, index), 'end');
+      const content = trimFenceBoundaryNewlines(
+        trimFenceBoundaryNewlines(normalized.slice(lastIndex, index), 'start'),
+        'end'
+      );
       if (content.length > 0) {
         segments.push({ type: 'text', content });
       }
@@ -1183,7 +1186,7 @@ function ExternalLink(props: { href: string }) {
     >
       <span class="link-leading-content">
         <ExternalLinkIcon />
-        {props.href.slice(0, 1)}
+        <span class="link-leading-label">{props.href.slice(0, 1)}</span>
       </span>
       {props.href.slice(1)}
     </a>
@@ -1208,7 +1211,7 @@ function SessionReferenceLink(props: { reference: SessionReference }) {
     >
       <span class="link-leading-content">
         <MaterialChipIcon kind="session" class="session-reference-icon" />
-        {firstWord}
+        <span class="link-leading-label">{firstWord}</span>
       </span>
       {props.reference.title.slice(firstWord.length)}
     </a>

@@ -1068,19 +1068,32 @@ describe('webview message validation', () => {
           line: 12,
           kind: 'file',
           view: 'diff',
+          requestId: 19,
           column: 7,
           selection: { startLine: 12, endLine: 14 },
         },
       })
     ).toEqual({
       type: 'vscode/open',
-      payload: { path: '/repo/src/app.ts', line: 12, kind: 'file', view: 'diff' },
+      payload: {
+        path: '/repo/src/app.ts',
+        line: 12,
+        kind: 'file',
+        view: 'diff',
+        requestId: 19,
+      },
     });
 
     expect(
       parseWebviewMessage({
         type: 'vscode/open',
         payload: { path: '/repo/src/app.ts', view: 'editor' },
+      })
+    ).toBeNull();
+    expect(
+      parseWebviewMessage({
+        type: 'vscode/open',
+        payload: { path: '/repo/src/app.ts', requestId: 'bad' },
       })
     ).toBeNull();
   });

@@ -25,9 +25,13 @@ declare global {
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 const selectSessionMock = vi.hoisted(() => vi.fn());
+const showSessionActionFeedbackMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../hooks/useOpenCode', () => ({
   selectSession: selectSessionMock,
+}));
+vi.mock('./chat/SessionActionFeedback', () => ({
+  showSessionActionFeedback: showSessionActionFeedbackMock,
 }));
 
 beforeAll(() => loadCodeHighlighter());
@@ -53,6 +57,7 @@ function assertInertWithSafeAnchor(root: ParentNode) {
 beforeEach(() => {
   __resetMarkdownCachesForTests();
   document.body.className = '';
+  showSessionActionFeedbackMock.mockReset();
   document.body.removeAttribute('style');
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -272,6 +277,7 @@ describe('MarkdownRenderer', () => {
     expect(docsLink?.firstElementChild?.firstElementChild?.classList).toContain(
       'external-link-icon'
     );
+    expect(docsLink?.querySelector('.link-leading-label')?.textContent).toBe('D');
     expect(docsLink?.querySelector('.external-link-icon')).toBeInstanceOf(HTMLImageElement);
     expect(badLink?.hasAttribute('href')).toBe(false);
     expect(badLink?.querySelector('.external-link-icon')).toBeNull();
@@ -389,13 +395,97 @@ describe('MarkdownRenderer', () => {
 
     const link = container?.querySelector('a.file-path-link');
     expect(link).toBeInstanceOf(HTMLAnchorElement);
+    expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
 
     link?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open',
-      payload: { path: '/repo/src/webview/App.tsx', kind: 'file', line: undefined },
+      payload: {
+        path: '/repo/src/webview/App.tsx',
+        kind: 'file',
+        line: undefined,
+        requestId: expect.any(Number),
+      },
     });
+    const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
+      .requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it('links file references with parenthesized line numbers', () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Review go.mod (line 3).', cacheByContent: true }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.textContent).toBe('go.mod (line 3)');
+    expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
+
+    link?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: { path: '/repo/go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
+    });
+    const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
+      .requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it('disables a missing file link and shows warning feedback', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    cleanup = render(
+      () => MarkdownRenderer({ content: '`missing-file.ts`', cacheByContent: true }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    link?.click();
+    const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
+      .requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'unavailable' } },
+      })
+    );
+    await Promise.resolve();
+
+    expect(link?.classList.contains('is-unavailable')).toBe(true);
+    expect(link?.getAttribute('aria-disabled')).toBe('true');
+    expect(link?.hasAttribute('href')).toBe(false);
+    expect(link?.title).toBe('File not found: missing-file.ts');
+    expect(showSessionActionFeedbackMock).toHaveBeenCalledWith(
+      'File not found: missing-file.ts',
+      'warning'
+    );
+
+    link?.click();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('warns when a file-path-link payload fails to parse', () => {
@@ -458,6 +548,7 @@ describe('MarkdownRenderer', () => {
     expect(link?.dataset.sessionId).toBe('ses_found123');
     expect(link?.querySelector('.session-reference-icon')).not.toBeNull();
     expect(link?.querySelector('.link-leading-content')?.textContent).toBe('Permission');
+    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('Permission');
     expect(container?.textContent).toContain('session:ses_missing456');
     expect(container?.querySelector('code a')).toBeNull();
 
@@ -559,18 +650,79 @@ describe('MarkdownRenderer', () => {
     expect(link?.getAttribute('data-file')).toContain('/repo/src/webview/App.tsx');
   });
 
-  it('does not linkify file-like text inside code blocks or inline code', async () => {
+  it('links file-only inline code but not ordinary inline or fenced code', async () => {
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
     cleanup = render(
       () =>
         MarkdownRenderer({
-          content: '`./src/webview/App.tsx`\n\n```txt\n./src/webview/App.tsx\n```',
+          content: '`spotlight` `src/shared/protocol.ts`\n\n```txt\nsrc/webview/App.tsx\n```',
+          cacheByContent: true,
         }),
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
-    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
-    expect(container?.querySelectorAll('code')).not.toHaveLength(0);
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
+    expect(link?.textContent).toBe('protocol.ts');
+    expect(link?.querySelector('code')).toBeNull();
+    expect(link?.title).toBe('/repo/src/shared/protocol.ts');
+    expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
+    expect(link?.firstElementChild?.classList).toContain('link-leading-content');
+    expect(link?.querySelector('.link-leading-label')?.textContent).toBe('protocol.ts');
+    expect(container?.querySelector('pre a.file-path-link')).toBeNull();
+    expect(container?.textContent).toContain('spotlight');
+
+    link?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open',
+      payload: {
+        path: '/repo/src/shared/protocol.ts',
+        line: undefined,
+        kind: 'file',
+        requestId: expect.any(Number),
+      },
+    });
+    const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
+      .requestId;
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'vscode/open-result', payload: { requestId, status: 'opened' } },
+      })
+    );
+  });
+
+  it('does not linkify dotted API identifiers as files', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content:
+            'Use workspace.fs, files.exclude, and search.exclude directly, including `workspace.fs` in code.',
+          cacheByContent: true,
+        }),
+      container!
+    );
+
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
+    expect(container?.textContent).toContain('workspace.fs');
+    expect(container?.textContent).toContain('files.exclude');
+    expect(container?.textContent).toContain('search.exclude');
+    expect(container?.querySelector('code')?.textContent).toBe('workspace.fs');
   });
 
   it('sanitizes copied code payloads before writing to the clipboard', async () => {
@@ -802,6 +954,197 @@ describe('MarkdownRenderer', () => {
     expect(stableLinks).toHaveLength(0);
     expect(tailLinks).toHaveLength(0);
     expect(container?.textContent).toContain('./src/webview/App.tsx');
+  });
+
+  it('linkifies mixed-text file references when streaming completes', async () => {
+    const [completed, setCompleted] = createSignal(false);
+    const content =
+      '- Core protocol: `src/shared/protocol.ts` - shared contracts\n- Start with `docs/onboarding-verification.md` for onboarding.';
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          get cacheByContent() {
+            return completed();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+    expect(links).toHaveLength(2);
+    expect(links?.[0]?.textContent).toBe('protocol.ts');
+    expect(links?.[0]?.title).toBe('/repo/src/shared/protocol.ts');
+    expect(links?.[1]?.textContent).toBe('onboarding-verification.md');
+    expect(links?.[1]?.title).toBe('/repo/docs/onboarding-verification.md');
+    expect(container?.querySelectorAll('.file-path-icon')).toHaveLength(2);
+  });
+
+  it('preserves stable markdown DOM when streaming completes', async () => {
+    const [completed, setCompleted] = createSignal(false);
+    const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          get cacheByContent() {
+            return completed();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const stableSegment = container?.querySelector<HTMLElement>('[data-markdown-segment="stable"]');
+    const stableParagraph = stableSegment?.firstElementChild;
+    expect(stableParagraph?.textContent).toBe('Stable paragraph.');
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(stableSegment?.firstElementChild).toBe(stableParagraph);
+    expect(stableSegment?.style.display).toBe('contents');
+    expect(container?.querySelector('a.file-path-link')?.textContent).toBe('protocol.ts');
+  });
+
+  it('does not revert final rendering when completion briefly regresses', async () => {
+    const [completed, setCompleted] = createSignal(false);
+    const content = 'Stable paragraph.\n\nReview `src/shared/protocol.ts`.';
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          content,
+          get cacheByContent() {
+            return completed();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('a.file-path-link')).toBeNull();
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    const finalLink = container?.querySelector('a.file-path-link');
+    expect(finalLink?.textContent).toBe('protocol.ts');
+
+    setCompleted(false);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('a.file-path-link')).toBe(finalLink);
+
+    setCompleted(true);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('a.file-path-link')).toBe(finalLink);
+  });
+
+  it('canonicalizes explicit path labels containing inline-code backticks', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: '[`src/shared/protocol.ts`](./src/shared/protocol.ts)',
+          cacheByContent: true,
+        }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.textContent).toBe('protocol.ts');
+    expect(link?.textContent).not.toContain('`');
+    expect(link?.querySelector('code')).toBeNull();
+    expect(link?.title).toBe('/repo/src/shared/protocol.ts');
+  });
+
+  it('renders the target session file formats as isolated canonical links', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const content = [
+      '- Type declaration: [`src/webview/global.d.ts`](src/webview/global.d.ts) - browser globals',
+      '- Main readme: [`README.md`](README.md) - project overview',
+      '- License file: `LICENSE` - repository license',
+      '- Git ignore rules → **`.gitignore`**',
+      '- Docker image recipe: [`scripts/opencode-compatibility/Dockerfile`](scripts/opencode-compatibility/Dockerfile)',
+      '- Main stylesheet: [`src/webview/index.css`](src/webview/index.css)',
+    ].join('\n');
+
+    cleanup = render(() => MarkdownRenderer({ content, cacheByContent: true }), container!);
+
+    const links = Array.from(
+      container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link') ?? []
+    );
+    expect(links.map((link) => link.textContent)).toEqual([
+      'global.d.ts',
+      'README.md',
+      'LICENSE',
+      '.gitignore',
+      'Dockerfile',
+      'index.css',
+    ]);
+    expect(links.every((link) => link.querySelector('code') === null)).toBe(true);
+    expect(links.every((link) => link.querySelector('.file-path-icon') !== null)).toBe(true);
+    expect(links.every((link) => link.querySelector('a') === null)).toBe(true);
+    expect(container?.textContent).not.toContain('`');
+  });
+
+  it('removes escaped backticks around plain file references', () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        MarkdownRenderer({
+          content: 'Type declaration: \\`src/webview/global.d.ts\\` - browser globals',
+          cacheByContent: true,
+        }),
+      container!
+    );
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.textContent).toBe('global.d.ts');
+    expect(container?.textContent).not.toContain('`');
+    expect(link?.title).toBe('/repo/src/webview/global.d.ts');
+    expect(link?.querySelector('.file-path-icon')).toBeInstanceOf(HTMLImageElement);
   });
 
   it('defers syntax highlighting for an unclosed streaming fence until the fence closes', async () => {

@@ -73,6 +73,24 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses VS Code open results', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'vscode/open-result',
+        payload: { requestId: 7, status: 'unavailable' },
+      })
+    ).toEqual({
+      type: 'vscode/open-result',
+      payload: { requestId: 7, status: 'unavailable' },
+    });
+    expect(
+      parseExtensionMessage({
+        type: 'vscode/open-result',
+        payload: { requestId: '7', status: 'missing' },
+      })
+    ).toBeNull();
+  });
+
   it('parses server/status and rejects malformed variants', () => {
     expect(
       parseExtensionMessage({

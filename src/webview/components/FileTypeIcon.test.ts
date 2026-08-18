@@ -18,4 +18,9 @@ describe('getFileTypeIcon', () => {
     );
     expect(getFileTypeIcon('unknown.custom-extension')).toBe(getFileTypeIcon(undefined));
   });
+
+  it('uses Go icons for Go module files', () => {
+    expect(getFileTypeIcon('go.mod')).toBe(getFileTypeIcon('main.go'));
+    expect(getFileTypeIcon('go.sum')).toBe(getFileTypeIcon('main.go'));
+  });
 });

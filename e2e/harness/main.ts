@@ -1691,7 +1691,9 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           filename: 'variant.svg',
           url:
             'data:image/svg+xml,' +
-            encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>'),
+            encodeURIComponent(
+              '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"/>'
+            ),
         });
       }
       if (variant.id === 'agent') {
@@ -3125,6 +3127,18 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         '4. Confirm the read mode dialog renders the same markdown content.',
         '5. Confirm closing read mode returns to the chat without losing content.',
         '6. Confirm the composer remains available after interacting with rendered content.',
+        '',
+        '- Type declaration: [`src/webview/global.d.ts`](src/webview/global.d.ts) - browser globals',
+        '- Main readme: [`README.md`](README.md) - project overview',
+        '- License file: `LICENSE` - repository license',
+        '- Git ignore rules: **`.gitignore`**',
+        '- Docker image recipe: [`scripts/opencode-compatibility/Dockerfile`](scripts/opencode-compatibility/Dockerfile)',
+        '- Main stylesheet: [`src/webview/index.css`](src/webview/index.css)',
+        '- CommonJS script: **`scripts/vscode-sandbox/suite.cjs`**',
+        '- Tool configuration: **`.oxlintrc.json`**',
+        '- Markdown guide: `docs/architecture.md`',
+        '- Review finding: `MarkdownRenderer.tsx (line 1447)`',
+        '- Missing reference: `missing-file.ts`',
       ].join('\n'),
       BASE_TIME - 4_000
     );
@@ -4080,7 +4094,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           Array.from(
             { length: 80 },
             (_, lineIndex) =>
-              `Line ${lineIndex} of section ${index}: virtual height estimation must account for large markdown content before this row is measured.`
+              `${index === 45 ? `${lineIndex + 1}. ` : ''}Line ${lineIndex} of section ${index}: virtual height estimation must account for large markdown content before this row is measured.`
           ).join('\n'),
           '',
           '```ts',
@@ -5641,6 +5655,20 @@ function installBridge(state: ScenarioState) {
             ? { kind: webviewMessage.payload.kind }
             : {}),
         });
+        if (typeof webviewMessage.payload.requestId === 'number') {
+          const status = webviewMessage.payload.path.endsWith('/missing-file.ts')
+            ? 'unavailable'
+            : 'opened';
+          queueMicrotask(() => {
+            window.postMessage(
+              {
+                type: 'vscode/open-result',
+                payload: { requestId: webviewMessage.payload.requestId, status },
+              },
+              '*'
+            );
+          });
+        }
         return;
       default:
         return;

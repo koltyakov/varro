@@ -63,7 +63,9 @@ function createActionFixture() {
     } | null,
     clearTerminalSelection: vi.fn(),
     readFile: vi.fn(() => Promise.resolve()),
-    openPath: vi.fn(() => Promise.resolve()),
+    openPath: vi.fn<SidebarProviderActionDeps['contextProvider']['openPath']>(() =>
+      Promise.resolve('opened')
+    ),
   };
   contextProvider.clearTerminalSelection.mockImplementation(() => {
     contextProvider.terminalSelection = null;
@@ -293,6 +295,18 @@ describe('createSidebarProviderActions', () => {
       'workbench.action.openSettings',
       '@ext:koltyakov.varro'
     );
+  });
+
+  it('posts the correlated file-open result', async () => {
+    const { actions, deps, contextProvider } = createActionFixture();
+    contextProvider.openPath.mockResolvedValueOnce('unavailable');
+
+    await actions.openPath({ path: '/repo/missing.ts', kind: 'file', requestId: 41 });
+
+    expect(deps.post).toHaveBeenCalledWith({
+      type: 'vscode/open-result',
+      payload: { requestId: 41, status: 'unavailable' },
+    });
   });
 
   it('opens the native folder picker', async () => {

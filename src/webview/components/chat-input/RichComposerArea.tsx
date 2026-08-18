@@ -518,6 +518,37 @@ export function RichComposerArea(props: {
     e.preventDefault();
   }
 
+  function handleBulletLineBreak(e: KeyboardEvent): boolean {
+    if (e.key !== 'Enter' || !e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) {
+      return false;
+    }
+
+    const selection = getSelectionOffsets();
+    if (!selection) return false;
+
+    const lineStart = props.value.lastIndexOf('\n', selection.start - 1) + 1;
+    const nextLineBreak = props.value.indexOf('\n', selection.end);
+    const lineEnd = nextLineBreak === -1 ? props.value.length : nextLineBreak;
+    const line = props.value.slice(lineStart, lineEnd);
+    const emptyBullet = line.match(/^\s*-\s*$/);
+
+    if (emptyBullet) {
+      e.preventDefault();
+      const nextValue = `${props.value.slice(0, lineStart)}${props.value.slice(lineEnd)}`;
+      props.onInput(nextValue, lineStart);
+      return true;
+    }
+
+    const bulletPrefix = line.match(/^(\s*-\s+)/)?.[1];
+    if (!bulletPrefix || selection.start < lineStart + bulletPrefix.length) return false;
+
+    e.preventDefault();
+    const insertion = `\n${bulletPrefix}`;
+    const nextValue = `${props.value.slice(0, selection.start)}${insertion}${props.value.slice(selection.end)}`;
+    props.onInput(nextValue, selection.start + insertion.length);
+    return true;
+  }
+
   function showImagePreview(target: EventTarget | null) {
     const chipElement = (target as HTMLElement | null)?.closest?.<HTMLElement>(
       '.inline-chip[data-preview-image]'
@@ -635,6 +666,7 @@ export function RichComposerArea(props: {
         onKeyDown={(e) => {
           if (!removeAtomicReference(e)) {
             props.onKeyDown(e);
+            if (!e.defaultPrevented) handleBulletLineBreak(e);
             const key = e.key.toLowerCase();
             historyHandledByKeydown =
               e.defaultPrevented &&
@@ -711,6 +743,11 @@ function appendTextWithLineBreaks(parent: Node, text: string) {
     if (i > 0) parent.appendChild(document.createElement('br'));
     if (lines[i]) parent.appendChild(document.createTextNode(lines[i]!));
   }
+  if (text.endsWith('\n')) {
+    const placeholder = document.createElement('br');
+    placeholder.dataset.caretPlaceholder = 'true';
+    parent.appendChild(placeholder);
+  }
 }
 
 export function extractText(el: HTMLElement): string {
@@ -722,6 +759,7 @@ export function extractText(el: HTMLElement): string {
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as HTMLElement;
       if (element.tagName === 'BR') {
+        if (element.dataset.caretPlaceholder) continue;
         if (topLevelNodes.length === 1 && index === 0) continue;
         result += '\n';
       } else if (element.dataset.chipMarker) {
@@ -769,6 +807,13 @@ export function findNodeAtOffset(
     } else if (child.nodeType === Node.ELEMENT_NODE) {
       const el = child as HTMLElement;
       if (el.tagName === 'BR') {
+        if (el.dataset.caretPlaceholder) {
+          if (remaining === 0) {
+            const idx = Array.from(root.childNodes).indexOf(child);
+            return { node: root, offset: idx };
+          }
+          continue;
+        }
         if (remaining === 0) {
           const idx = Array.from(root.childNodes).indexOf(child);
           return { node: root, offset: idx + 1 };
@@ -831,6 +876,7 @@ function getNodeTextLength(node: Node): number {
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return 0;
   const el = node as HTMLElement;
+  if (el.dataset.caretPlaceholder) return 0;
   if (el.tagName === 'BR') return 1;
   if (el.dataset.chipMarker) return el.dataset.chipMarker.length;
   let len = 0;

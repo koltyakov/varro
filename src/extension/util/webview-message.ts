@@ -397,7 +397,10 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const kind = payload?.kind;
       const view = payload?.view;
       const sessionID = getOptionalBoundedString(payload?.sessionID, 512);
+      const requestId =
+        payload?.requestId === undefined ? undefined : getSafeInteger(payload.requestId);
       if (!path || (payload?.line !== undefined && line === null)) return null;
+      if (payload?.requestId !== undefined && requestId === null) return null;
       if (payload?.sessionID !== undefined && !sessionID) return null;
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
@@ -410,6 +413,7 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           ...(kind ? { kind } : {}),
           ...(view ? { view } : {}),
           ...(sessionID ? { sessionID } : {}),
+          ...(requestId !== undefined && requestId !== null ? { requestId } : {}),
         },
       };
     }

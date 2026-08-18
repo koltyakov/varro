@@ -30,6 +30,7 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
   'files/search-results',
   'config/update',
   'theme/update',
+  'vscode/open-result',
   'api/response',
   'command/new-session',
   'command/focus-input',
@@ -201,6 +202,18 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (!payload || !isWebviewThemeKind(payload.theme)) return null;
       return { type, payload: { theme: payload.theme } };
+    }
+
+    case 'vscode/open-result': {
+      const payload = asRecord(record.payload);
+      if (
+        !payload ||
+        typeof payload.requestId !== 'number' ||
+        (payload.status !== 'opened' && payload.status !== 'unavailable')
+      ) {
+        return null;
+      }
+      return { type, payload: { requestId: payload.requestId, status: payload.status } };
     }
 
     case 'api/response': {

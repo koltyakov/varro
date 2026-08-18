@@ -88,6 +88,10 @@ what was omitted.
    real-editor interactions are ready to begin. Alternatively, open this repository in VS Code and press
    `F5` to start **VS Code Extension Development** when the current environment can reliably control the
    resulting window.
+   Reuse this host for the complete run. After rebuilding Varro, reload the same Extension Development
+   Host instead of running `npm run ai:vscode` again. Launch another isolated host only when a scenario
+   explicitly requires a fresh cold profile. Close the previous test host first unless simultaneous
+   hosts are strictly required by the scenario.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
    unrelated sessions or settings.
 3. Open the Varro view and explicitly select GPT Luna. Record the exact provider/model shown by Varro.
@@ -105,6 +109,9 @@ what was omitted.
    containing row or an adjacent card.
 7. Keep DevTools closed for the first pass because docking changes webview dimensions. Use it only for
    diagnosis or metric capture, and record that the run became instrumented.
+8. Record every test host PID, profile path, and debugging endpoint when it is launched. Before writing
+   the ledger or final report, terminate every Extension Development Host launched by the run and verify
+   that its process and debugging endpoint have stopped. Never leave persistent test hosts open.
 
 The existing F5 host can preserve extension state. For cold-load checks, close the Extension
 Development Host, start it again, and do not warm the target session by opening or scrolling it first.

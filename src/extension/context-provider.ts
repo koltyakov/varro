@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
-import { isAbsolute, join, relative, sep } from 'path';
+import { readdir, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute, join, parse, relative, sep } from 'path';
 import type { EditorContext, EditorTextContext } from '../shared/protocol';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
@@ -526,22 +526,53 @@ export class ContextProvider implements vscode.Disposable {
   async openPath(
     path: string,
     options?: { line?: number; kind?: 'auto' | 'file' | 'directory'; view?: 'diff' }
-  ) {
+  ): Promise<'opened' | 'unavailable'> {
     try {
-      const resolved = await this.resolveWorkspaceUri(path, {
+      let resolved = await this.resolveWorkspaceUri(path, {
         allowMissing: options?.view === 'diff',
       });
+      if (!resolved && options?.view !== 'diff') {
+        const input = path.trim();
+        const basenameOnly = !isAbsolute(input) && !/[\\/]/.test(input);
+        const missingAbsolute = isAbsolute(input);
+        const filename = basenameOnly
+          ? input
+          : missingAbsolute
+            ? input.split(/[\\/]/).at(-1) || ''
+            : '';
+        if (/^[\w.@+-]+$/.test(filename)) {
+          const matches = await vscode.workspace.findFiles(`**/${filename}`, null, 2);
+          const parentDirectory = missingAbsolute ? dirname(input) : '';
+          const searchRoots =
+            parentDirectory && parentDirectory !== parse(parentDirectory).root
+              ? [vscode.Uri.file(parentDirectory)]
+              : undefined;
+          let uri =
+            matches.length === 1
+              ? matches[0]
+              : matches.length === 0
+                ? await this.findUniqueWorkspaceFile(filename, searchRoots)
+                : undefined;
+          if (!uri && matches.length === 0 && parentDirectory) {
+            const localPath = await this.findUniqueLocalFile(parentDirectory, filename);
+            if (localPath) uri = vscode.Uri.file(localPath);
+          }
+          if (uri) {
+            resolved = { uri, workspaceFolder: vscode.workspace.getWorkspaceFolder(uri) };
+          }
+        }
+      }
       const uri = resolved?.uri;
       if (!uri) {
         logger.warn(`Could not resolve file path: ${path}`);
-        return;
+        return 'unavailable';
       }
 
       if (options?.view === 'diff') {
         if (await hasGitChange(uri)) {
           const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
           await vscode.commands.executeCommand('git.openChange', uri);
-          if (vscode.window.tabGroups.activeTabGroup.activeTab !== activeTab) return;
+          if (vscode.window.tabGroups.activeTabGroup.activeTab !== activeTab) return 'opened';
         }
       }
 
@@ -550,7 +581,7 @@ export class ContextProvider implements vscode.Disposable {
         options?.kind === 'directory' || Boolean(stat.type & vscode.FileType.Directory);
       if (shouldRevealDirectory) {
         await vscode.commands.executeCommand('revealInExplorer', uri);
-        return;
+        return 'opened';
       }
 
       const doc = await vscode.workspace.openTextDocument(uri);
@@ -563,9 +594,100 @@ export class ContextProvider implements vscode.Disposable {
           vscode.TextEditorRevealType.InCenter
         );
       }
+      return 'opened';
     } catch (err) {
       logger.error(`Failed to open file ${path}:`, err);
+      return 'unavailable';
     }
+  }
+
+  private async findUniqueWorkspaceFile(
+    filename: string,
+    searchRoots?: vscode.Uri[]
+  ): Promise<vscode.Uri | undefined> {
+    const ignoredDirectories = new Set([
+      '.git',
+      '.next',
+      '.turbo',
+      'build',
+      'coverage',
+      'dist',
+      'node_modules',
+      'out',
+    ]);
+    const pending =
+      searchRoots ?? (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri);
+    let match: vscode.Uri | undefined;
+    let visitedEntries = 0;
+
+    while (pending.length > 0) {
+      const directory = pending.shift()!;
+      let entries: [string, vscode.FileType][];
+      try {
+        entries = await vscode.workspace.fs.readDirectory(directory);
+      } catch {
+        continue;
+      }
+
+      visitedEntries += entries.length;
+      if (visitedEntries > 20_000) return undefined;
+      for (const [name, type] of entries) {
+        const uri = vscode.Uri.joinPath(directory, name);
+        if (type & vscode.FileType.Directory) {
+          if (!ignoredDirectories.has(name)) pending.push(uri);
+          continue;
+        }
+        if (name !== filename) continue;
+        if (match) return undefined;
+        match = uri;
+      }
+    }
+
+    return match;
+  }
+
+  private async findUniqueLocalFile(
+    rootDirectory: string,
+    filename: string
+  ): Promise<string | undefined> {
+    const ignoredDirectories = new Set([
+      '.git',
+      '.next',
+      '.turbo',
+      'build',
+      'coverage',
+      'dist',
+      'node_modules',
+      'out',
+    ]);
+    const pending = [rootDirectory];
+    let match: string | undefined;
+    let visitedEntries = 0;
+
+    while (pending.length > 0) {
+      const directory = pending.shift()!;
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      visitedEntries += entries.length;
+      if (visitedEntries > 20_000) return undefined;
+      for (const entry of entries) {
+        const entryPath = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          if (!ignoredDirectories.has(entry.name)) pending.push(entryPath);
+          continue;
+        }
+        if (entry.name !== filename) continue;
+        if (match) return undefined;
+        match = entryPath;
+      }
+    }
+
+    return match;
   }
 
   private async resolveWorkspaceUri(

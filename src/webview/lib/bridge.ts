@@ -8,6 +8,7 @@ export type SlowApiRequest = {
   path: string;
   startedAt: number;
 };
+export type OpenPathResult = 'opened' | 'unavailable';
 type SlowApiRequestHandler = (requests: readonly SlowApiRequest[]) => void;
 type ApiCallOptions = {
   timeoutMs?: number;
@@ -38,6 +39,11 @@ export function cleanupBridge() {
     p.reject(new Error('Bridge cleaned up'));
   }
   pending.clear();
+  for (const request of pendingOpenPaths.values()) {
+    clearTimeout(request.timer);
+    request.reject(new Error('Bridge cleaned up'));
+  }
+  pendingOpenPaths.clear();
   slowApiRequests.clear();
   notifySlowApiRequestsChanged();
   slowApiRequestHandlers.clear();
@@ -73,6 +79,15 @@ export function postMessage(msg: WebviewMessage): boolean {
 }
 
 let reqId = 0;
+let openPathRequestId = 0;
+const pendingOpenPaths = new Map<
+  number,
+  {
+    resolve(result: OpenPathResult): void;
+    reject(error: Error): void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
 const pending = new Map<
   number,
   {
@@ -95,6 +110,14 @@ const API_CALL_RETRY_DELAY_MS = 150;
 export const SLOW_API_REQUEST_THRESHOLD_MS = 15_000;
 
 onMessage((msg) => {
+  if (msg.type === 'vscode/open-result') {
+    const request = pendingOpenPaths.get(msg.payload.requestId);
+    if (!request) return;
+    clearTimeout(request.timer);
+    pendingOpenPaths.delete(msg.payload.requestId);
+    request.resolve(msg.payload.status);
+    return;
+  }
   if (msg.type === 'api/response') {
     const p = pending.get(msg.payload.id);
     if (!p) return;
@@ -103,6 +126,26 @@ onMessage((msg) => {
   }
 });
 bridgeWindow[BRIDGE_CLEANUP_KEY] = cleanupBridge;
+
+export function openPathWithResult(payload: {
+  path: string;
+  line?: number;
+  kind?: 'auto' | 'file' | 'directory';
+}): Promise<OpenPathResult> {
+  const requestId = ++openPathRequestId;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingOpenPaths.delete(requestId);
+      reject(new Error('Timed out opening file'));
+    }, 10_000);
+    pendingOpenPaths.set(requestId, { resolve, reject, timer });
+    if (!postMessage({ type: 'vscode/open', payload: { ...payload, requestId } })) {
+      clearTimeout(timer);
+      pendingOpenPaths.delete(requestId);
+      reject(new Error('Extension bridge unavailable'));
+    }
+  });
+}
 
 export function apiCall<T = unknown>(
   method: string,

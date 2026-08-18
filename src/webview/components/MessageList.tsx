@@ -208,6 +208,7 @@ type VisibleScrollAnchor = {
   messageTop?: number;
   activityGroupKey?: string;
   renderKey?: string;
+  element?: HTMLElement;
 };
 
 function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
@@ -558,6 +559,9 @@ export function MessageList() {
   let pendingWidthStickyRefresh = false;
   let pendingWidthFollowCorrection = false;
   let widthResizeAnchor: VisibleScrollAnchor | null = null;
+  const [widthResizePinnedMessageId, setWidthResizePinnedMessageId] = createSignal<string | null>(
+    null
+  );
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
@@ -928,6 +932,11 @@ export function MessageList() {
     pendingWidthFollowCorrection = false;
     publishPendingWidthMeasurements();
     widthResizeAnchor = null;
+    queueMicrotask(() => {
+      if (epoch === widthResizeEpoch && !widthResizeActive) {
+        setWidthResizePinnedMessageId(null);
+      }
+    });
 
     if (refreshStickyPreview) {
       scheduleStickyPreviewGeometryRefresh({ force: true });
@@ -956,12 +965,20 @@ export function MessageList() {
         : null;
       const containerRect = containerRef?.getBoundingClientRect();
       const rememberedRect = rememberedElement?.getBoundingClientRect();
-      const rememberedAnchor =
-        lastDetachedVisibleAnchor &&
+      const directElementIsCurrent = !!(
+        lastDetachedVisibleAnchor?.element?.isConnected &&
+        containerRef?.contains(lastDetachedVisibleAnchor.element)
+      );
+      const rememberedElementIsVisible = !!(
         rememberedRect &&
         containerRect &&
         rememberedRect.bottom > containerRect.top &&
         rememberedRect.top < containerRect.bottom
+      );
+      const rememberedAnchor =
+        lastDetachedVisibleAnchor &&
+        (directElementIsCurrent ||
+          (!lastDetachedVisibleAnchor.element && rememberedElementIsVisible))
           ? lastDetachedVisibleAnchor
           : null;
       const virtualAnchor =
@@ -969,6 +986,8 @@ export function MessageList() {
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
           : null;
       widthResizeAnchor = rememberedAnchor ?? virtualAnchor ?? captureMountedVisibleScrollAnchor();
+      setWidthResizePinnedMessageId(widthResizeAnchor?.messageId ?? null);
+      restoreVisibleScrollAnchor(widthResizeAnchor);
     }
     widthResizeActive = true;
     widthResizeIncludesFontChange ||= !!options?.fontChanged;
@@ -1001,6 +1020,7 @@ export function MessageList() {
     pendingWidthStickyRefresh = false;
     pendingWidthFollowCorrection = false;
     widthResizeAnchor = null;
+    setWidthResizePinnedMessageId(null);
   }
 
   function finishWidthResizeNow() {
@@ -1688,12 +1708,15 @@ export function MessageList() {
         pendingStructuralScrollAnchor.ownershipEpoch === userScrollOwnershipEpoch
           ? pendingStructuralScrollAnchor.anchor
           : null;
+      const widthAnchorMessageId = widthResizePinnedMessageId();
       const anchorIndex =
         pendingAnchor && !pendingAnchor.invalidated && pendingAnchor.anchor
           ? messageIndexById().get(pendingAnchor.anchor.messageId)
           : structuralAnchor
             ? messageIndexById().get(structuralAnchor.messageId)
-            : undefined;
+            : widthAnchorMessageId
+              ? messageIndexById().get(widthAnchorMessageId)
+              : undefined;
       if (anchorIndex === undefined) return range;
 
       // A prepend can temporarily place the old viewport thousands of provisional pixels away.
@@ -2412,6 +2435,54 @@ export function MessageList() {
     return fallback;
   }
 
+  function refineTallRenderItemScrollAnchor(anchor: VisibleScrollAnchor | null) {
+    if (!containerRef || !anchor) return anchor;
+    const containerRect = containerRef.getBoundingClientRect();
+    const renderItem = getMountedScrollAnchorElement(
+      anchor.element ? { ...anchor, element: undefined } : anchor
+    );
+    if (!renderItem || renderItem.getBoundingClientRect().height <= containerRef.clientHeight * 2) {
+      return anchor;
+    }
+    for (const userCard of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
+      const rect = userCard.getBoundingClientRect();
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) return anchor;
+    }
+
+    const candidates = Array.from(
+      renderItem.querySelectorAll<HTMLElement>(
+        '.rendered-markdown :is(p, li, pre, table, blockquote, h1, h2, h3, h4, h5, h6)'
+      )
+    );
+    let low = 0;
+    let high = candidates.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (candidates[middle]!.getBoundingClientRect().bottom <= containerRect.top) low = middle + 1;
+      else high = middle;
+    }
+    let element = candidates[low];
+    if (!element) return anchor;
+    let rect = element.getBoundingClientRect();
+    while (rect.top < containerRect.top && candidates[low + 1]) {
+      const next = candidates[low + 1]!;
+      const nextRect = next.getBoundingClientRect();
+      if (nextRect.top >= containerRect.bottom) break;
+      low += 1;
+      element = next;
+      rect = nextRect;
+    }
+    if (rect.height <= 0 || rect.top >= containerRect.bottom) return anchor;
+
+    const row = mountedMessageRows.get(anchor.messageId);
+    return {
+      ...anchor,
+      element,
+      top: rect.top - containerRect.top,
+      ...(row ? { messageTop: row.getBoundingClientRect().top - containerRect.top } : {}),
+    };
+  }
+
   function genericStructuralAnchorCanOwnScroll(sessionId: string | null) {
     return !(
       disposed ||
@@ -2583,6 +2654,7 @@ export function MessageList() {
 
   function getMountedScrollAnchorElement(anchor: VisibleScrollAnchor) {
     if (!containerRef) return null;
+    if (anchor.element?.isConnected && containerRef.contains(anchor.element)) return anchor.element;
     const row =
       mountedMessageRows.get(anchor.messageId) ??
       containerRef.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchor.messageId)}"]`);
@@ -3942,13 +4014,14 @@ export function MessageList() {
       if (widthResizeActive || stickyNavigationOwnsScroll() || editingMessage()) return null;
       if (directMovementAnchor) {
         const movement = directMovementAnchor.scrollTop - top;
-        const anchor = {
+        const movedAnchor = {
           ...directMovementAnchor.anchor,
           top: directMovementAnchor.anchor.top + movement,
           ...(directMovementAnchor.anchor.messageTop !== undefined
             ? { messageTop: directMovementAnchor.anchor.messageTop + movement }
             : {}),
         };
+        const anchor = refineTallRenderItemScrollAnchor(movedAnchor) ?? movedAnchor;
         directMovementAnchor = { anchor, scrollTop: top };
         return anchor;
       }
@@ -4176,7 +4249,9 @@ export function MessageList() {
             scrollTop: getVirtualScrollTop(containerRef.scrollTop),
           })
         : null;
-      const anchor = index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index);
+      const anchor = refineTallRenderItemScrollAnchor(
+        index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
+      );
       if (anchor) {
         directMovementAnchor = {
           anchor,
@@ -4540,6 +4615,9 @@ export function MessageList() {
     lastHostViewportWidth = window.innerWidth;
     lastHostViewportHeight = window.innerHeight;
     const handleHostViewportResize = () => {
+      if (window.innerWidth !== lastHostViewportWidth && lastDetachedVisibleAnchor?.element) {
+        beginWidthResize();
+      }
       lastHostViewportWidth = window.innerWidth;
       lastHostViewportHeight = window.innerHeight;
       hostViewportResizeActiveUntil = performance.now() + WIDTH_RESIZE_SETTLE_MS;
@@ -5806,7 +5884,23 @@ export function MessageList() {
   function navigateToMountedMessage(preview: StickyUserMessagePreview): boolean {
     disengageBottomFollow();
     const aligned = alignMountedMessage(preview);
-    if (aligned) animateTurnNavigationDestination(preview.id);
+    if (aligned) {
+      directMovementAnchor = null;
+      const target = getStickyUserMessageSourceElement(preview.id);
+      const row = mountedMessageRows.get(preview.id);
+      const containerRect = containerRef?.getBoundingClientRect();
+      lastDetachedVisibleAnchor =
+        target && row && containerRect
+          ? {
+              messageId: preview.id,
+              element: target,
+              top: target.getBoundingClientRect().top - containerRect.top,
+              messageTop: row.getBoundingClientRect().top - containerRect.top,
+              topPad: visibleRange().topPad,
+            }
+          : captureMessageScrollAnchor(preview.id);
+      animateTurnNavigationDestination(preview.id);
+    }
     const currentPreview = untrack(stickyUserMessagePreview);
     if (aligned && currentPreview?.id === preview.id) {
       setStickyUserMessagePreview(null);

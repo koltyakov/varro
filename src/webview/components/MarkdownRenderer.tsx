@@ -4,7 +4,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 import { writeClipboard } from '../lib/write-clipboard';
-import { postMessage } from '../lib/bridge';
+import { openPathWithResult, postMessage } from '../lib/bridge';
 import { logWarn } from '../lib/log';
 import {
   codeHighlighterVersion,
@@ -13,7 +13,7 @@ import {
   resolveCodeLanguage,
 } from '../lib/code-highlighter';
 import { state, theme } from '../lib/state';
-import { formatDisplayPath, normalizePath } from '../lib/path-display';
+import { getLeafPathName, normalizePath } from '../lib/path-display';
 import { formatCommandDisplay } from '../lib/command-display';
 import { getSessionReferenceContextKey, splitSessionReferenceText } from '../lib/session-reference';
 import { selectSession } from '../hooks/useOpenCode';
@@ -21,7 +21,9 @@ import { trapModalFocus } from '../lib/modal-focus';
 import { mixRgb, parseThemeColor } from '../lib/theme';
 import { isSafeExternalHref } from '../lib/external-link';
 import { createExternalLinkIconElement } from './ExternalLinkIcon';
+import { createFileTypeIconElement, hasRecognizedFileType } from './FileTypeIcon';
 import { createMaterialChipIconElement } from './MaterialChipIcon';
+import { showSessionActionFeedback } from './chat/SessionActionFeedback';
 
 interface MarkdownProps {
   content: string;
@@ -67,6 +69,7 @@ type MarkdownHydrationFlags = {
 };
 
 type RenderMarkdownContext = {
+  disablePathLinkify: boolean;
   disableCodeHighlighting: boolean;
   disableCache: boolean;
   allowMermaidHydration: boolean;
@@ -400,13 +403,22 @@ function splitPathReference(
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  const match = trimmed.match(/^(.*):(\d+(?:-\d+)?)$/);
-  if (!match) return { path: trimmed };
+  const match = trimmed.match(/^(.*?)\s+\(line (\d+(?:-\d+)?)\)$/i);
+  if (match) {
+    return {
+      path: match[1]!,
+      line: parseInt(match[2]!, 10),
+      lineSuffix: ` (line ${match[2]})`,
+    };
+  }
+
+  const colonMatch = trimmed.match(/^(.*):(\d+(?:-\d+)?)$/);
+  if (!colonMatch) return { path: trimmed };
 
   return {
-    path: match[1]!,
-    line: parseInt(match[2]!, 10),
-    lineSuffix: match[2],
+    path: colonMatch[1]!,
+    line: parseInt(colonMatch[2]!, 10),
+    lineSuffix: ` (line ${colonMatch[2]})`,
   };
 }
 
@@ -425,21 +437,25 @@ function buildFileLink(raw: string, label?: string) {
   if (!parsed) return null;
 
   const absolutePath = toAbsolutePath(parsed.path);
-  const displayBase = formatDisplayPath(absolutePath, state.editorContext.workspacePath);
-  const displayPath = parsed.lineSuffix ? `${displayBase}:${parsed.lineSuffix}` : displayBase;
+  const canonicalPath = `${getLeafPathName(parsed.path)}${parsed.lineSuffix ?? ''}`;
+  const plainLabel = label
+    ?.trim()
+    .replace(/^<code>([\s\S]*)<\/code>$/i, '$1')
+    .replace(/^`+|`+$/g, '')
+    .trim();
   const visibleLabel =
-    !label || label.trim() === '' || normalizePath(label.trim()) === normalizePath(raw.trim())
-      ? displayPath
-      : label.trim();
+    !plainLabel || FILE_PATH_REFERENCE_RE.test(plainLabel) ? canonicalPath : label!.trim();
   const payload = JSON.stringify(
     parsed.line != null ? { path: absolutePath, line: parsed.line } : { path: absolutePath }
   );
   const href = parsed.line != null ? `${absolutePath}:${parsed.line}` : absolutePath;
+  const title = `${absolutePath}${parsed.lineSuffix ?? ''}`;
 
   return {
     href: escapeHtml(href),
     payload: escapeHtml(payload),
     label: escapeHtml(visibleLabel),
+    title: escapeHtml(title),
   };
 }
 
@@ -478,6 +494,17 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   });
 };
 
+renderer.codespan = function ({ text }: { text: string }) {
+  if (!renderMarkdownContext?.disablePathLinkify && isLikelyFilePathReference(text)) {
+    const link = buildFileLink(text);
+    if (link) {
+      return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}" title="${link.title}">${link.label}</a>`;
+    }
+  }
+
+  return `<code>${escapeHtml(text)}</code>`;
+};
+
 renderer.link = function ({
   href,
   text,
@@ -490,7 +517,7 @@ renderer.link = function ({
   if (isLocalFileHref(href)) {
     const link = buildFileLink(href, text);
     if (link) {
-      const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+      const titleAttr = ` title="${title ? escapeHtml(title) : link.title}"`;
       return `<a href="${link.href}" class="file-path-link" data-file="${link.payload}"${titleAttr}>${link.label}</a>`;
     }
   }
@@ -506,8 +533,18 @@ marked.setOptions({
 });
 
 const FILE_PATH_RE =
-  /(?:^|[\s(])(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?)?)(?=[\s),.]|$)/g;
+  /(?:^|[\s(])(`?)(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?|\s+\(line \d+(?:-\d+)?\))?)(`?)(?=[\s),.]|$)/gi;
+const FILE_PATH_REFERENCE_RE =
+  /^\.?\/?(?:[\w.-]+\/)*(?:[\w.-]+\.[\w]+|dockerfile|license|makefile|\.(?:gitignore|npmrc|nvmrc))(?::\d+(?:-\d+)?|\s+\(line \d+(?:-\d+)?\))?$/i;
 const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
+const SPECIAL_FILE_NAMES = new Set([
+  '.gitignore',
+  '.npmrc',
+  '.nvmrc',
+  'dockerfile',
+  'license',
+  'makefile',
+]);
 const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
 const MARKDOWN_FENCE_INFO_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
@@ -546,18 +583,35 @@ function isLocalFileHref(href: string | null): boolean {
     href.startsWith('/') ||
     href.startsWith('./') ||
     href.startsWith('../') ||
-    /^[A-Za-z]:[/\\]/.test(href)
+    /^[A-Za-z]:[/\\]/.test(href) ||
+    FILE_PATH_REFERENCE_RE.test(href)
   );
+}
+
+function isLikelyFilePathReference(raw: string): boolean {
+  const parsed = splitPathReference(raw);
+  if (!parsed || !FILE_PATH_REFERENCE_RE.test(raw.trim())) return false;
+
+  const path = normalizePath(parsed.path);
+  if (path.includes('/') || isAbsolutePath(path)) return true;
+
+  const filename = getLeafPathName(path).toLowerCase();
+  return SPECIAL_FILE_NAMES.has(filename) || hasRecognizedFileType(filename);
 }
 
 function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.classList.remove('external-link');
-  for (const icon of Array.from(anchor.querySelectorAll('.external-link-icon'))) icon.remove();
+  for (const icon of Array.from(anchor.querySelectorAll('.external-link-icon, .file-path-icon'))) {
+    icon.remove();
+  }
 
   const href = anchor.getAttribute('href')?.trim() || '';
   if (isLocalFileHref(href)) {
     anchor.setAttribute('href', href);
     anchor.removeAttribute('data-external');
+    if (anchor.classList.contains('file-path-link')) {
+      prependLinkIcon(anchor, createFileTypeIconElement(splitPathReference(href)?.path), true);
+    }
     return;
   }
 
@@ -573,7 +627,7 @@ function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
   anchor.removeAttribute('data-external');
 }
 
-function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement) {
+function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement, keepFirstWord = false) {
   anchor.setAttribute('aria-label', anchor.textContent ?? '');
   const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
   let firstText = walker.nextNode();
@@ -583,16 +637,21 @@ function prependLinkIcon(anchor: HTMLAnchorElement, icon: HTMLElement) {
     return;
   }
 
-  const firstCharacter = Array.from(firstText.data)[0];
-  if (!firstCharacter) {
+  const leadingText = keepFirstWord
+    ? (firstText.data.match(/^\S+/)?.[0] ?? '')
+    : (Array.from(firstText.data)[0] ?? '');
+  if (!leadingText) {
     anchor.prepend(icon);
     return;
   }
 
-  firstText.data = firstText.data.slice(firstCharacter.length);
+  firstText.data = firstText.data.slice(leadingText.length);
   const leadingContent = document.createElement('span');
   leadingContent.className = 'link-leading-content';
-  leadingContent.append(icon, firstCharacter);
+  const leadingLabel = document.createElement('span');
+  leadingLabel.className = 'link-leading-label';
+  leadingLabel.textContent = leadingText;
+  leadingContent.append(icon, leadingLabel);
   anchor.prepend(leadingContent);
 }
 
@@ -628,7 +687,10 @@ function linkifySessionReferences(fragment: DocumentFragment) {
       const firstWord = segment.reference.title.match(/^\S+/)?.[0] ?? '';
       const leadingContent = document.createElement('span');
       leadingContent.className = 'link-leading-content';
-      leadingContent.append(icon, firstWord);
+      const leadingLabel = document.createElement('span');
+      leadingLabel.className = 'link-leading-label';
+      leadingLabel.textContent = firstWord;
+      leadingContent.append(icon, leadingLabel);
       label.textContent = segment.reference.title.slice(firstWord.length);
       anchor.append(leadingContent, label);
       replacement.append(anchor);
@@ -679,6 +741,7 @@ function renderMarkdownHtml(
 ): string {
   const previousRenderMarkdownContext = renderMarkdownContext;
   renderMarkdownContext = {
+    disablePathLinkify: options?.disablePathLinkify === true,
     disableCodeHighlighting: options?.disableCodeHighlighting === true,
     disableCache: options?.disableCache === true,
     allowMermaidHydration: options?.allowMermaidHydration === true,
@@ -953,14 +1016,18 @@ function linkifyPaths(html: string): string {
   protect(PRE_RE);
   protect(INLINE_CODE_RE);
 
-  html = html.replace(FILE_PATH_RE, (full, path: string) => {
-    const link = buildFileLink(path);
-    if (!link) return full;
-    return full.replace(
-      path,
-      `<a href="${link.href}" class="file-path-link" data-file="${link.payload}">${link.label}</a>`
-    );
-  });
+  html = html.replace(
+    FILE_PATH_RE,
+    (full, openingTick: string, path: string, closingTick: string) => {
+      if (!isLikelyFilePathReference(path)) return full;
+      const link = buildFileLink(path);
+      if (!link) return full;
+      return full.replace(
+        `${openingTick}${path}${closingTick}`,
+        `<a href="${link.href}" class="file-path-link" data-file="${link.payload}" title="${link.title}">${link.label}</a>`
+      );
+    }
+  );
 
   return html.replace(
     PRESERVED_HTML_PLACEHOLDER_RE,
@@ -1332,6 +1399,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
   let hasProcessedStreamingUpdate = false;
   const initialSegments = getMarkdownRenderSegments(props.content || '', !!props.cacheByContent);
   let lastAppliedScanState = initialSegments.scanState;
+  let lastAppliedCacheByContent = !!props.cacheByContent;
+  let lastAppliedLightweight = lw();
   let lastAppliedWorkspacePath = state.editorContext.workspacePath || '';
   let lastAppliedSessionContextKey = getSessionReferenceContextKey(props.content || '');
   let lastAppliedCodeHighlighterVersion = codeHighlighterVersion();
@@ -1397,11 +1466,15 @@ export function MarkdownRenderer(props: MarkdownProps) {
       cancelIdleWork(idleHighlightId);
       idleHighlightId = null;
       const isLightweight = lw();
-      const segments = getMarkdownRenderSegments(
-        content,
-        !!props.cacheByContent,
-        lastAppliedScanState
-      );
+      // Completion can briefly regress while the final message events reconcile.
+      // Keep final rendering enabled once observed so links and highlighting do not flicker.
+      const cacheByContent = lastAppliedCacheByContent || !!props.cacheByContent;
+      const renderModeChanged =
+        cacheByContent !== lastAppliedCacheByContent || isLightweight !== lastAppliedLightweight;
+      const preserveStreamingSegments = cacheByContent && lastAppliedScanState !== null;
+      const segments = preserveStreamingSegments
+        ? getStreamingMarkdownSegments(content, lastAppliedScanState)
+        : getMarkdownRenderSegments(content, cacheByContent, lastAppliedScanState);
       const workspacePath = state.editorContext.workspacePath || '';
       const sessionContextKey = getSessionReferenceContextKey(content);
       const currentCodeHighlighterVersion = codeHighlighterVersion();
@@ -1411,13 +1484,16 @@ export function MarkdownRenderer(props: MarkdownProps) {
         workspacePath !== lastAppliedWorkspacePath ||
         sessionContextKey !== lastAppliedSessionContextKey ||
         segments.stableContent !== lastAppliedStableContent ||
+        renderModeChanged ||
         codeHighlighterChanged;
       const tailContentChanged =
         workspacePath !== lastAppliedWorkspacePath ||
         sessionContextKey !== lastAppliedSessionContextKey ||
         segments.tailContent !== lastAppliedTailContent ||
+        renderModeChanged ||
         codeHighlighterChanged;
       const appendOnlyStableDelta =
+        !renderModeChanged &&
         workspacePath === lastAppliedWorkspacePath &&
         sessionContextKey === lastAppliedSessionContextKey
           ? getAppendOnlyStableDelta(
@@ -1448,13 +1524,13 @@ export function MarkdownRenderer(props: MarkdownProps) {
         !isLightweight &&
         hasProcessedStreamingUpdate &&
         tailContentChanged &&
-        !props.cacheByContent &&
+        !cacheByContent &&
         !segments.hasUnclosedFence &&
         hasCompletedHighlightableFence(segments.tailContent);
       const nextTailHtml = tailContentChanged
         ? parseMarkdown(segments.tailContent, {
-            cacheByContent: segments.stableContent.length === 0 && !!props.cacheByContent,
-            disablePathLinkify: !props.cacheByContent || isLightweight,
+            cacheByContent: segments.stableContent.length === 0 && cacheByContent,
+            disablePathLinkify: !cacheByContent || isLightweight,
             disableCodeHighlighting:
               segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
             allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
@@ -1489,6 +1565,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
       lastAppliedSessionContextKey = sessionContextKey;
       lastAppliedCodeHighlighterVersion = currentCodeHighlighterVersion;
       lastAppliedScanState = segments.scanState;
+      lastAppliedCacheByContent = cacheByContent;
+      lastAppliedLightweight = isLightweight;
       hasProcessedStreamingUpdate = true;
 
       if (shouldDeferTailHighlight) {
@@ -1508,6 +1586,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
 
   createEffect(() => {
     const content = props.content || '';
+    const cacheByContent = !!props.cacheByContent;
+    const isLightweight = lw();
     const workspacePath = state.editorContext.workspacePath;
     const sessionContextKey = getSessionReferenceContextKey(content);
     const highlighterVersion = codeHighlighterVersion();
@@ -1520,6 +1600,8 @@ export function MarkdownRenderer(props: MarkdownProps) {
     void workspacePath;
     void sessionContextKey;
     void highlighterVersion;
+    void cacheByContent;
+    void isLightweight;
   });
 
   createEffect(() => {
@@ -1605,12 +1687,21 @@ export function MarkdownRenderer(props: MarkdownProps) {
     const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.file-path-link');
     if (link) {
       e.preventDefault();
+      if (link.classList.contains('is-unavailable')) return;
       try {
         const payload = JSON.parse(link.dataset.file || '{}');
-        postMessage({
-          type: 'vscode/open',
-          payload: { path: payload.path, line: payload.line, kind: 'file' },
-        });
+        void openPathWithResult({ path: payload.path, line: payload.line, kind: 'file' })
+          .then((status) => {
+            if (status === 'opened') return;
+            link.classList.add('is-unavailable');
+            link.setAttribute('aria-disabled', 'true');
+            link.removeAttribute('href');
+            const label = link.getAttribute('aria-label') || link.textContent || 'file';
+            const message = `File not found: ${label}`;
+            link.title = message;
+            showSessionActionFeedback(message, 'warning');
+          })
+          .catch(() => showSessionActionFeedback('Could not open file', 'warning'));
       } catch (err) {
         logWarn('markdown file-path-link payload parse', err);
       }
@@ -1640,10 +1731,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       e.preventDefault();
       const payload = splitPathReference(anchor.getAttribute('href') || '');
       if (payload?.path) {
-        postMessage({
-          type: 'vscode/open',
-          payload: { path: payload.path, line: payload.line, kind: 'file' },
-        });
+        void openPathWithResult({ path: payload.path, line: payload.line, kind: 'file' });
       }
     }
   }

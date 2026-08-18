@@ -175,6 +175,7 @@ input:focus-visible {
 
 .interactive-list {
   overflow: hidden;
+  outline: none;
   position: relative;
   flex: 1;
   min-height: 0;

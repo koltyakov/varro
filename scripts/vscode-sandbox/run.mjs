@@ -26,6 +26,7 @@ const SCENARIOS = [
   'required-update-disabled',
   'required-update-failure',
   'required-update-no-change',
+  'file-link-open',
   'healthy-first-run',
 ];
 
@@ -283,11 +284,25 @@ async function runScenario(scenario, vscodeExecutable) {
     await mkdir(userData);
     await mkdir(extensions);
     await mkdir(path.join(root, 'home'));
+    let fileLinkRoot = '';
+    let fileLinkTarget = '';
+    if (scenario === 'file-link-open') {
+      fileLinkRoot = path.join(root, 'project');
+      fileLinkTarget = path.join(fileLinkRoot, 'src/webview/components/MarkdownRenderer.tsx');
+      await mkdir(path.dirname(fileLinkTarget), { recursive: true });
+      await writeFile(
+        fileLinkTarget,
+        `${Array.from({ length: 1_500 }, (_, index) => `// line ${String(index + 1)}`).join('\n')}\n`
+      );
+    }
     const port = await reservePort();
     const fakeCommand = await createFakeCliLauncher(root);
     const missingCommand = path.join(root, 'missing-opencode');
     const settings = getScenarioSettings(scenario, port, fakeCommand, missingCommand);
-    await writeFile(path.join(settingsDirectory, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
+    await writeFile(
+      path.join(settingsDirectory, 'settings.json'),
+      `${JSON.stringify(settings, null, 2)}\n`
+    );
 
     if (scenario === 'port-conflict-fallback') conflictServer = await occupyPort(port);
 
@@ -321,6 +336,8 @@ async function runScenario(scenario, vscodeExecutable) {
         VARRO_SANDBOX_PID_FILE: pidFile,
         VARRO_SANDBOX_PORT: String(port),
         VARRO_SANDBOX_SCENARIO: scenario,
+        VARRO_SANDBOX_FILE_LINK_ROOT: fileLinkRoot,
+        VARRO_SANDBOX_FILE_LINK_TARGET: fileLinkTarget,
       },
       {
         metadataPath: path.join(root, 'launch.json'),

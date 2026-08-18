@@ -443,6 +443,66 @@ describe('RichComposerArea', () => {
     });
   });
 
+  it('continues a hyphen bullet on Shift+Enter', () => {
+    const onInput = vi.fn();
+    const value = '- Bullet item 1';
+    renderComposer({ value, cursorOffset: value.length, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    setCollapsedSelection(editor.firstChild, value.length);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith('- Bullet item 1\n- ', '- Bullet item 1\n- '.length);
+  });
+
+  it('removes an empty hyphen bullet on Shift+Enter', () => {
+    const onInput = vi.fn();
+    const value = '- Bullet item 1\n- Bullet item 2\n- ';
+    renderComposer({ value, cursorOffset: value.length, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const target = findNodeAtOffset(editor, value.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+
+    const expected = '- Bullet item 1\n- Bullet item 2\n';
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith(expected, expected.length);
+  });
+
+  it('renders a trailing newline with a stable blank-line caret position', () => {
+    const value = '- Bullet item 1\n- Bullet item 2\n';
+    renderComposer({ value, cursorOffset: value.length, chips: [] });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const placeholder = editor.querySelector<HTMLElement>('[data-caret-placeholder]');
+    const target = findNodeAtOffset(editor, value.length);
+
+    expect(extractText(editor)).toBe(value);
+    expect(placeholder).toBeInstanceOf(HTMLBRElement);
+    expect(target).toEqual({
+      node: editor,
+      offset: Array.from(editor.childNodes).indexOf(placeholder!),
+    });
+  });
+
   it('replaces a selection spanning a session reference when pasting', () => {
     const onInput = vi.fn();
     const marker = 'session:ses_auth';

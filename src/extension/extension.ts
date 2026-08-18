@@ -182,6 +182,13 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     })();
   }, context.workspaceState);
+  if (process.env.VARRO_SANDBOX_SCENARIO === 'file-link-open') {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('varro.test.openPath', (path: string, line?: number) =>
+        contextProvider?.openPath(path, { kind: 'file', line })
+      )
+    );
+  }
 
   sidebarProvider = new SidebarProvider(
     context.extensionUri,

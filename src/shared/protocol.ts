@@ -590,6 +590,10 @@ export type ExtensionMessage =
       payload: WebviewConfigUpdatePayload;
     }
   | { type: 'theme/update'; payload: { theme: WebviewThemeKind } }
+  | {
+      type: 'vscode/open-result';
+      payload: { requestId: number; status: 'opened' | 'unavailable' };
+    }
   | { type: 'api/response'; payload: { id: number; data?: unknown; error?: string } }
   | { type: 'command/new-session'; payload?: { prefill: string } }
   | { type: 'command/focus-input' }
@@ -658,6 +662,7 @@ export type WebviewMessage =
         kind?: 'auto' | 'file' | 'directory';
         view?: 'diff';
         sessionID?: string;
+        requestId?: number;
       };
     }
   | { type: 'vscode/open-external'; payload: { url: string } }

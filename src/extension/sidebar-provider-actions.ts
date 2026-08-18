@@ -154,13 +154,25 @@ export function createSidebarProviderActions(
         payload.sessionID &&
         (await deps.sessionDiffProvider.open(payload.sessionID, payload.path))
       ) {
+        if (payload.requestId !== undefined) {
+          deps.post({
+            type: 'vscode/open-result',
+            payload: { requestId: payload.requestId, status: 'opened' },
+          });
+        }
         return;
       }
-      await deps.contextProvider.openPath(payload.path, {
+      const status = await deps.contextProvider.openPath(payload.path, {
         line: payload.line,
         kind: payload.kind,
         view: payload.view,
       });
+      if (payload.requestId !== undefined) {
+        deps.post({
+          type: 'vscode/open-result',
+          payload: { requestId: payload.requestId, status },
+        });
+      }
     },
     openText: async (payload) => {
       await deps.toolOutputProvider.open(payload);

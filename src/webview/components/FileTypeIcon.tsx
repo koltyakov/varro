@@ -53,6 +53,8 @@ const FILE_NAME_ICONS: Record<string, string> = {
   '.gitattributes': gitIcon,
   '.gitignore': gitIcon,
   dockerfile: dockerIcon,
+  'go.mod': goIcon,
+  'go.sum': goIcon,
   license: licenseIcon,
   makefile: makefileIcon,
   'package-lock.json': lockIcon,
@@ -138,6 +140,14 @@ const FILE_EXTENSION_ICONS: Record<string, string> = {
   zip: zipIcon,
 };
 
+export function hasRecognizedFileType(path: string): boolean {
+  const filename = getLeafPathName(path).toLowerCase();
+  if (filename in FILE_NAME_ICONS) return true;
+
+  const dotIndex = filename.lastIndexOf('.');
+  return dotIndex >= 0 && filename.slice(dotIndex + 1) in FILE_EXTENSION_ICONS;
+}
+
 export function getFileTypeIcon(path: string | undefined): string {
   if (!path) return fileIcon;
 
@@ -148,6 +158,19 @@ export function getFileTypeIcon(path: string | undefined): string {
   const dotIndex = filename.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === filename.length - 1) return fileIcon;
   return FILE_EXTENSION_ICONS[filename.slice(dotIndex + 1)] ?? fileIcon;
+}
+
+export function createFileTypeIconElement(
+  path: string | undefined,
+  className = 'file-path-icon'
+): HTMLImageElement {
+  const icon = document.createElement('img');
+  icon.className = `file-type-icon ${className}`;
+  icon.src = getFileTypeIcon(path);
+  icon.alt = '';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.draggable = false;
+  return icon;
 }
 
 export function FileTypeIcon(props: { path?: string; class?: string }) {
