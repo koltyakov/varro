@@ -1042,7 +1042,16 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest.mock.calls).toEqual([
       ['GET', '/session/session-1/diff'],
-      ['GET', '/session/session-1/message'],
+      [
+        'GET',
+        '/session/session-1/message',
+        undefined,
+        {
+          maxResponseBytes: 256 * 1024 * 1024,
+          maxProjectedResponseBytes: 16 * 1024 * 1024,
+          stripSummaryDiffs: true,
+        },
+      ],
       ['GET', '/session?limit=1000000'],
       ['GET', '/session/child-1/message'],
       ['GET', '/session/grandchild-1/message'],
@@ -1229,7 +1238,7 @@ describe('RestProxy handleRequest', () => {
 
     await proxy.handleRequest(makePayload(831, 'GET', '/varro/session/session-1/diff-summary'));
 
-    expect(messageAttempts).toBe(2);
+    expect(messageAttempts).toBe(1);
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 831,
       data: expect.objectContaining({
@@ -1251,9 +1260,6 @@ describe('RestProxy handleRequest', () => {
       if (path.endsWith('/diff')) return Promise.resolve([]);
       if (path === '/session/session-1/message') {
         messageAttempts += 1;
-        if (messageAttempts === 1) {
-          return Promise.reject(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
-        }
         return Promise.resolve([
           {
             info: {
@@ -1303,7 +1309,7 @@ describe('RestProxy handleRequest', () => {
       data: Record<string, unknown>;
     };
     expect(response.data.filesTruncated).toBeUndefined();
-    expect(messageAttempts).toBe(2);
+    expect(messageAttempts).toBe(1);
   });
 
   it('shares the session list across concurrent diff summaries', async () => {
@@ -1974,7 +1980,9 @@ describe('RestProxy handleRequest', () => {
 
     expect(serverRequest).toHaveBeenCalledWith('GET', '/session/s1/message?limit=200', undefined, {
       captureNextCursor: true,
-      maxResponseBytes: 16 * 1024 * 1024,
+      maxResponseBytes: 256 * 1024 * 1024,
+      maxProjectedResponseBytes: 16 * 1024 * 1024,
+      stripSummaryDiffs: true,
     });
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 117,
@@ -2001,7 +2009,9 @@ describe('RestProxy handleRequest', () => {
       undefined,
       {
         captureNextCursor: true,
-        maxResponseBytes: 16 * 1024 * 1024,
+        maxResponseBytes: 256 * 1024 * 1024,
+        maxProjectedResponseBytes: 16 * 1024 * 1024,
+        stripSummaryDiffs: true,
       }
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
@@ -2010,13 +2020,11 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
-  it('trims file summaries when the smaller message window is still oversized', async () => {
-    const messages = [makeSessionMessage('m1', 'p1')];
+  it('fails when the smaller projected message window is still oversized', async () => {
     const serverRequest = vi
       .fn()
       .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
-      .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024))
-      .mockResolvedValueOnce({ data: messages, nextCursor: 'cursor-2' });
+      .mockRejectedValueOnce(new OpenCodeResponseTooLargeError(16 * 1024 * 1024));
     const { proxy, callbacks } = createProxy({
       server: { ...createCallbacks().server, request: serverRequest } as never,
     });
@@ -2026,7 +2034,7 @@ describe('RestProxy handleRequest', () => {
     );
 
     expect(serverRequest).toHaveBeenNthCalledWith(
-      3,
+      2,
       'GET',
       '/session/s1/message?limit=20&before=cursor-3',
       undefined,
@@ -2039,7 +2047,7 @@ describe('RestProxy handleRequest', () => {
     );
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 119,
-      data: { items: messages, nextCursor: 'cursor-2' },
+      error: 'OpenCode response exceeded the 16777216-byte safety limit',
     });
   });
 

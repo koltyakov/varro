@@ -530,12 +530,14 @@ export class RestProxy {
   }
 
   private async requestPaginatedMessages(method: string, path: string, body: unknown) {
-    let recoveryPath = path;
+    const options = {
+      captureNextCursor: true,
+      maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
+      maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+      stripSummaryDiffs: true,
+    } as const;
     try {
-      return await this.callbacks.server.request(method, path, body, {
-        captureNextCursor: true,
-        maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
-      });
+      return await this.callbacks.server.request(method, path, body, options);
     } catch (err) {
       if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
       const url = new URL(path, 'http://localhost');
@@ -545,24 +547,11 @@ export class RestProxy {
         requestedLimit > SESSION_MESSAGE_RECOVERY_PAGE_SIZE
       ) {
         url.searchParams.set('limit', String(SESSION_MESSAGE_RECOVERY_PAGE_SIZE));
-        recoveryPath = `${url.pathname}${url.search}`;
+        const recoveryPath = `${url.pathname}${url.search}`;
         logger.warn(`Retrying oversized message page with a smaller window: ${recoveryPath}`);
-        try {
-          return await this.callbacks.server.request(method, recoveryPath, body, {
-            captureNextCursor: true,
-            maxResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
-          });
-        } catch (recoveryError) {
-          if (!(recoveryError instanceof OpenCodeResponseTooLargeError)) throw recoveryError;
-        }
+        return this.callbacks.server.request(method, recoveryPath, body, options);
       }
-      logger.warn(`Trimming oversized file summaries while loading ${recoveryPath}`);
-      return this.callbacks.server.request(method, recoveryPath, body, {
-        captureNextCursor: true,
-        maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
-        maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
-        stripSummaryDiffs: true,
-      });
+      throw err;
     }
   }
 
@@ -698,23 +687,17 @@ export class RestProxy {
 
   private async requestSessionMessagesForSummary(path: string) {
     try {
-      return projectMessageHistory(await this.callbacks.server.request('GET', path));
+      return projectMessageHistory(
+        await this.callbacks.server.request('GET', path, undefined, {
+          maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
+          maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
+          stripSummaryDiffs: true,
+        })
+      );
     } catch (err) {
       if (!(err instanceof OpenCodeResponseTooLargeError)) throw err;
-      logger.warn(`Trimming oversized file summaries while summarizing ${path}`);
-      try {
-        return projectMessageHistory(
-          await this.callbacks.server.request('GET', path, undefined, {
-            maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
-            maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
-            stripSummaryDiffs: true,
-          })
-        );
-      } catch (recoveryError) {
-        if (!(recoveryError instanceof OpenCodeResponseTooLargeError)) throw recoveryError;
-        logger.warn(`Skipping oversized message history while summarizing ${path}`);
-        return omittedMessageHistory();
-      }
+      logger.warn(`Skipping oversized message history while summarizing ${path}`);
+      return omittedMessageHistory();
     }
   }
 
