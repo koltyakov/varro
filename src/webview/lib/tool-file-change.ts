@@ -937,14 +937,9 @@ function diffKind(diff: FileDiff): FileChangeKind {
 export function getDiffFileChanges(diffs: readonly FileDiff[]): FileChange[] {
   const byFile = new Map<string, FileChange>();
   for (const diff of diffs) {
-    if (!diff || typeof diff.file !== 'string' || diff.file === '') continue;
-    const change = withDedupeKey({
-      kind: diffKind(diff),
-      path: diff.file,
-      additions: diffCount(diff, 'additions', 'added'),
-      deletions: diffCount(diff, 'deletions', 'removed'),
-    });
-    const key = normalizePath(diff.file);
+    const change = getDiffFileChange(diff);
+    if (!change) continue;
+    const key = normalizePath(change.path);
     const existing = byFile.get(key);
     if (!existing) {
       byFile.set(key, change);
@@ -955,6 +950,16 @@ export function getDiffFileChanges(diffs: readonly FileDiff[]): FileChange[] {
     existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0);
   }
   return [...byFile.values()];
+}
+
+function getDiffFileChange(diff: FileDiff): FileChange | null {
+  if (!diff || typeof diff.file !== 'string' || diff.file === '') return null;
+  return withDedupeKey({
+    kind: diffKind(diff),
+    path: diff.file,
+    additions: diffCount(diff, 'additions', 'added'),
+    deletions: diffCount(diff, 'deletions', 'removed'),
+  });
 }
 
 // The same file is often reported twice - once by a tool (absolute path) and
@@ -997,14 +1002,16 @@ type SummaryMessage = {
  * (patch) path forms, line counts accumulate, and directory entries (no
  * extension and no line counts) are dropped.
  */
-export function getMessageFileChanges(
+function collectMessageFileChanges(
   messages: readonly SummaryMessage[],
-  workspacePath?: string | null
-): FileChange[] {
+  workspacePath: string | null | undefined,
+  maxChanges: number
+): { changes: FileChange[]; truncated: boolean } {
   const result: FileChange[] = [];
   const exactEntries = new Map<string, FileChange>();
   const relativeEntries = new Map<string, FileChange>();
   const absoluteAliases = new Map<string, FileChange>();
+  let truncated = false;
 
   const keyFor = (change: FileChange) => {
     const path = change.toPath || change.path;
@@ -1027,6 +1034,10 @@ export function getMessageFileChanges(
       existing = absoluteAliases.get(key);
     }
     if (!existing) {
+      if (result.length >= maxChanges) {
+        truncated = true;
+        return false;
+      }
       const entry = { ...change };
       result.push(entry);
       exactEntries.set(key, entry);
@@ -1037,7 +1048,7 @@ export function getMessageFileChanges(
       } else {
         relativeEntries.set(key, entry);
       }
-      return;
+      return true;
     }
     existing.kind = change.kind;
     // Prefer the shorter (workspace-relative) path for display.
@@ -1049,26 +1060,30 @@ export function getMessageFileChanges(
     existing.dedupeKey = change.dedupeKey;
     existing.additions = (existing.additions ?? 0) + (change.additions ?? 0);
     existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0);
+    return true;
   };
 
-  for (const message of messages) {
+  scanMessages: for (const message of messages) {
     const summary = message.info?.summary;
     const summaryDiffs =
       summary && typeof summary === 'object' && 'diffs' in summary && Array.isArray(summary.diffs)
         ? (summary.diffs as readonly FileDiff[])
         : [];
-    for (const change of getDiffFileChanges(summaryDiffs)) record(change);
+    for (const diff of summaryDiffs) {
+      const change = getDiffFileChange(diff);
+      if (change && !record(change)) break scanMessages;
+    }
 
     for (const part of message.parts) {
       if (part.type === 'tool') {
         for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
-          if (!change.isSummary) record(change);
+          if (!change.isSummary && !record(change)) break scanMessages;
         }
         continue;
       }
       if (part.type === 'patch') {
         for (const file of part.files) {
-          if (file) record(withDedupeKey({ kind: 'edited', path: file }));
+          if (file && !record(withDedupeKey({ kind: 'edited', path: file }))) break scanMessages;
         }
       }
     }
@@ -1086,10 +1101,26 @@ export function getMessageFileChanges(
       separator = key.indexOf('/', separator + 1);
     }
   }
-  return result.filter((change, index) => {
+  const changes = result.filter((change, index) => {
     const key = keys[index]!;
     if (ancestorKeys.has(key)) return false;
     const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
     return hasExtension(key) || hasCounts;
   });
+  return { changes, truncated };
+}
+
+export function getMessageFileChanges(
+  messages: readonly SummaryMessage[],
+  workspacePath?: string | null
+): FileChange[] {
+  return collectMessageFileChanges(messages, workspacePath, Number.POSITIVE_INFINITY).changes;
+}
+
+export function getBoundedMessageFileChanges(
+  messages: readonly SummaryMessage[],
+  maxChanges: number,
+  workspacePath?: string | null
+): { changes: FileChange[]; truncated: boolean } {
+  return collectMessageFileChanges(messages, workspacePath, Math.max(0, maxChanges));
 }

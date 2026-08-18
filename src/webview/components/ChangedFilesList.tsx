@@ -3,11 +3,11 @@ import { isActiveSessionWorking, showChangedFiles, state } from '../lib/state';
 import { postMessage } from '../lib/bridge';
 import {
   getDiffFileChanges,
-  getMessageFileChanges,
+  getBoundedMessageFileChanges,
   type FileChange,
   type FileChangeKind,
 } from '../lib/tool-file-change';
-import { getDiffSummaryStats, getMessageToolSummaryStats } from './chat/SessionListView';
+import { getDiffSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
 import { FileTypeIcon } from './FileTypeIcon';
@@ -27,7 +27,7 @@ function getActiveSession() {
 export function ChangedFilesList() {
   let cachedSessionId: string | null = null;
   let cachedChanges: FileChange[] = [];
-  let cachedSummaryStats: ReturnType<typeof getMessageToolSummaryStats> = null;
+  let cachedSummaryStats: ReturnType<typeof getDiffSummaryStats> = null;
   const activeMessages = createMemo(() => {
     const sessionId = state.activeSessionId;
     return sessionId ? state.messages.filter((entry) => entry.info.sessionID === sessionId) : [];
@@ -39,6 +39,13 @@ export function ChangedFilesList() {
     cachedChanges = [];
     cachedSummaryStats = null;
   };
+  const messageFileChanges = createMemo(() =>
+    getBoundedMessageFileChanges(
+      activeMessages(),
+      CHANGED_FILE_DISPLAY_LIMIT,
+      state.editorContext.workspacePath
+    )
+  );
 
   // The file rows reflect what THIS session's agent changed - the file-changing
   // tool calls and patch parts in its own messages. The backend session summary
@@ -51,10 +58,7 @@ export function ChangedFilesList() {
     resetCacheForSession(state.activeSessionId);
 
     const summaryDiffs = session?.summary?.diffs;
-    const messageChanges = getMessageFileChanges(
-      activeMessages(),
-      state.editorContext.workspacePath
-    );
+    const messageChanges = messageFileChanges().changes;
 
     if (summaryDiffs && summaryDiffs.length > 0 && messageChanges.length === 0) {
       if (isActiveSessionWorking()) {
@@ -81,7 +85,19 @@ export function ChangedFilesList() {
     resetCacheForSession(state.activeSessionId);
     if (!session) return null;
 
-    const messageStats = getMessageToolSummaryStats(activeMessages());
+    const messageResult = messageFileChanges();
+    const messageStats =
+      messageResult.changes.length === 0
+        ? null
+        : messageResult.changes.reduce(
+            (stats, change) => ({
+              files: stats.files + 1,
+              additions: stats.additions + (change.additions ?? 0),
+              deletions: stats.deletions + (change.deletions ?? 0),
+              ...(messageResult.truncated ? { filesTruncated: true } : {}),
+            }),
+            { files: 0, additions: 0, deletions: 0 }
+          );
     const summaryDiffs = session.summary?.diffs;
     const working = isActiveSessionWorking();
 
@@ -103,6 +119,7 @@ export function ChangedFilesList() {
   });
   const total = () => summaryStats()?.files ?? changes().length;
   const truncated = () => {
+    if (messageFileChanges().truncated) return true;
     if (total() > CHANGED_FILE_DISPLAY_LIMIT || changes().length > CHANGED_FILE_DISPLAY_LIMIT) {
       return true;
     }

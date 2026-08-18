@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Part, ToolPart, ToolState } from '../types';
 import {
+  getBoundedMessageFileChanges,
   getDiffFileChanges,
   getMessageFileChanges,
   getToolChangePath,
@@ -946,5 +947,24 @@ describe('tool file change helpers', () => {
     expect(changes).toHaveLength(10_000);
     expect(changes[9_999]?.path).toBe('node_modules/package-9999/index.js');
     expect(performance.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('stops bounded message scans after the first omitted unique file', () => {
+    const diffs = Array.from({ length: 1_000 }, (_, index) => ({
+      file: `generated/file-${index}.ts`,
+      additions: 1,
+      deletions: 0,
+    }));
+    Object.defineProperty(diffs, 101, {
+      get: () => {
+        throw new Error('bounded scan read beyond the truncation point');
+      },
+    });
+
+    const result = getBoundedMessageFileChanges([{ info: { summary: { diffs } }, parts: [] }], 100);
+
+    expect(result.truncated).toBe(true);
+    expect(result.changes).toHaveLength(100);
+    expect(result.changes.at(-1)?.path).toBe('generated/file-99.ts');
   });
 });
