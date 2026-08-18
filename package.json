@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.25.4",
+  "version": "0.25.5",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -71,21 +71,21 @@
     "@types/css.escape": "1.5.2",
     "@types/node": "26.2.0",
     "@types/vscode": "1.120.0",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "4.1.11",
     "@vscode/vsce": "3.9.2",
     "cross-spawn": "7.0.6",
     "css.escape": "1.5.1",
     "esbuild": "0.28.2",
     "jsdom": "30.0.1",
     "material-icon-theme": "^5.37.0",
-    "oxfmt": "0.63.0",
-    "oxlint": "1.78.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
     "rolldown": "1.2.4",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.2.1",
     "vite-plugin-solid": "2.11.14",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "contributes": {
     "viewsContainers": {

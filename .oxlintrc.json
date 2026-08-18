@@ -69,6 +69,9 @@
     "typescript/no-namespace": "error",
     "typescript/consistent-type-imports": "warn",
     "import/no-duplicates": "error",
+    "react/immutability": "off",
+    "react/purity": "off",
+    "react/refs": "off",
     "react/react-in-jsx-scope": "off",
     "react/jsx-key": "off",
     "react/jsx-no-duplicate-props": "error"
