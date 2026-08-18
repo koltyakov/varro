@@ -2866,6 +2866,11 @@ describe('usage-limit session status precedence', () => {
 
     expect(indicator?.classList.contains('is-failed')).toBe(true);
     expect(indicator?.getAttribute('aria-label')).toBe('Failed');
+
+    setState('lastSeenSessions', 'session-1', 500);
+
+    expect(container?.querySelector('.session-item .session-item-indicator.is-failed')).toBeNull();
+    expect(state.failedSessionIds).toEqual(['session-1']);
   });
 
   it('keeps a parent running when a previously failed sub-agent resumes work', () => {

@@ -1709,6 +1709,8 @@ function SessionListItem(props: {
   const hasUnreadCompletion = () =>
     props.isNewlyCompleted ||
     (props.isCompletedPlanSession && isSessionUnread(props.session.id, props.session.time.updated));
+  const hasUnreadFailure = () =>
+    props.isFailed && isSessionUnread(props.session.id, props.summaryUpdated);
   const hasPendingInput = () =>
     props.hasPermissionRequest || props.hasQuestionRequest || props.needsAttention;
   const hasSubagents = () => !!props.onOpenSubagents && props.subagentCount > 0;
@@ -1757,7 +1759,7 @@ function SessionListItem(props: {
   });
   const indicatorKind = () =>
     getSessionStatusIndicatorKind({
-      isFailed: props.isFailed,
+      isFailed: hasUnreadFailure(),
       hasPendingInput: hasPendingInput(),
       isRunning: props.isRunning,
       isPlanReady: props.isCompletedPlanSession && hasUnreadCompletion(),
