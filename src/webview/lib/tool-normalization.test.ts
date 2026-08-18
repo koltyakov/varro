@@ -39,6 +39,7 @@ describe('tool normalization', () => {
   it('recognizes todo tool names and display titles consistently', () => {
     expect(isTodoToolName(' Functions.Update_Plan ')).toBe(true);
     expect(isTodoToolName('custom.todo_manager')).toBe(true);
+    expect(isTodoToolName('mcp.todo.read')).toBe(true);
     expect(isTodoToolName('functions.read')).toBe(false);
     expect(isTodoToolTitle('Updating Plan')).toBe(true);
     expect(isTodoToolTitle('Todo List')).toBe(true);

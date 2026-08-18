@@ -271,7 +271,9 @@ function normalizeTodo(raw: unknown): NormalizedTodo | null {
       ? record.content.trim()
       : typeof record.title === 'string'
         ? record.title.trim()
-        : '';
+        : typeof record.step === 'string'
+          ? record.step.trim()
+          : '';
 
   if (!content) return null;
 

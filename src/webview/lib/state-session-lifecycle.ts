@@ -289,6 +289,18 @@ export function setRecycleBinEntries(entries: RecycleBinEntry[]) {
 }
 
 export function setSessionFailed(sessionId: string, failed: boolean) {
+  const wasFailed = state.failedSessionIds.includes(sessionId);
+  if (failed && !wasFailed) {
+    setState('failedSessionUpdatedAt', sessionId, Date.now());
+  } else if (!failed && state.failedSessionUpdatedAt[sessionId] !== undefined) {
+    setState(
+      'failedSessionUpdatedAt',
+      produce((updatedAt) => {
+        delete updatedAt[sessionId];
+      })
+    );
+  }
+
   setState(
     'failedSessionIds',
     produce((ids) => {
@@ -351,6 +363,7 @@ export function hasActiveUsageLimit(sessionId: string | null | undefined) {
 export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.messages) {
   const failedSessionIds = new Set<string>();
   const scopedSessionIds = new Set<string>();
+  const failedSessionUpdatedAt = { ...state.failedSessionUpdatedAt };
 
   const latestBySession = new Map<string, Message>();
   for (const entry of messages) {
@@ -364,8 +377,16 @@ export function syncFailedSessionsFromMessages(messages: MessageEntry[] = state.
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) continue;
     failedSessionIds.add(sessionId);
+    const previousFailedAt = failedSessionUpdatedAt[sessionId] ?? 0;
+    const failedAt = info.time.completed ?? (previousFailedAt || Date.now());
+    failedSessionUpdatedAt[sessionId] = Math.max(previousFailedAt, failedAt);
   }
 
+  for (const sessionId of scopedSessionIds) {
+    if (!failedSessionIds.has(sessionId)) delete failedSessionUpdatedAt[sessionId];
+  }
+
+  setState('failedSessionUpdatedAt', reconcile(failedSessionUpdatedAt));
   setState('failedSessionIds', [
     ...state.failedSessionIds.filter((sessionId) => !scopedSessionIds.has(sessionId)),
     ...failedSessionIds,

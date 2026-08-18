@@ -151,6 +151,7 @@ export interface AppState {
   failedQueuedMessageIds: string[];
   queuedMessageEdit: { id: string; sessionId: string } | null;
   failedSessionIds: string[];
+  failedSessionUpdatedAt: Record<string, number>;
   sessionMessageCounts: Record<string, number>;
   sessionUsageLimits: Record<string, UsageLimitNotice | null>;
   interruptedSessionIds: string[];
@@ -342,6 +343,7 @@ export function createAppState(): AppStateInstance {
     failedQueuedMessageIds: [],
     queuedMessageEdit: null,
     failedSessionIds: [],
+    failedSessionUpdatedAt: {},
     sessionMessageCounts: {},
     sessionUsageLimits: {},
     interruptedSessionIds: initialWebviewState.interruptedSessionIds ?? [],

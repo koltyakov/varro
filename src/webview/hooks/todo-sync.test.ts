@@ -129,6 +129,38 @@ describe('todo-sync', () => {
     ).toEqual(todos);
   });
 
+  it('derives todos from conventional update_plan step entries', () => {
+    const part = todoToolPart([]);
+    if (part.type !== 'tool') throw new Error('Expected a tool part');
+    part.tool = 'functions.update_plan';
+    part.state.input = {
+      plan: [
+        { step: 'inspect namespaced tools', status: 'completed' },
+        { step: 'finish report', status: 'in_progress' },
+      ],
+    };
+
+    expect(
+      deriveTodosFromMessages([
+        { info: userMessage('user-1'), parts: [] },
+        { info: assistantMessage('assistant-1'), parts: [part] },
+      ])
+    ).toEqual([
+      {
+        id: 'inspect namespaced tools',
+        content: 'inspect namespaced tools',
+        status: 'completed',
+        priority: 'medium',
+      },
+      {
+        id: 'finish report',
+        content: 'finish report',
+        status: 'in_progress',
+        priority: 'medium',
+      },
+    ]);
+  });
+
   it('derives todos from update_plan entries inside parallel tool payloads', () => {
     const todos = [{ id: 'todo-1', content: 'ship it', status: 'pending', priority: 'high' }];
 

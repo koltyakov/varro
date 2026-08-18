@@ -119,6 +119,7 @@ afterEach(() => {
   setState('sessionStatus', reconcile({}));
   setState('sessionUsageLimits', reconcile({}));
   setState('failedSessionIds', []);
+  setState('failedSessionUpdatedAt', {});
   setState('recycleBinEntries', []);
   setState('questions', []);
   setState('permissions', []);
@@ -2871,6 +2872,22 @@ describe('usage-limit session status precedence', () => {
 
     expect(container?.querySelector('.session-item .session-item-indicator.is-failed')).toBeNull();
     expect(state.failedSessionIds).toEqual(['session-1']);
+  });
+
+  it('renders a failure that arrives after the session was already seen', () => {
+    setState('sessions', [session('session-1', 500)]);
+    setState('lastSeenSessions', 'session-1', 500);
+    setSessionFailed('session-1', true);
+
+    cleanup = render(() => Chat(), container!);
+
+    expect(
+      container?.querySelector('.session-item .session-item-indicator.is-failed')
+    ).not.toBeNull();
+
+    setState('lastSeenSessions', 'session-1', state.failedSessionUpdatedAt['session-1']!);
+
+    expect(container?.querySelector('.session-item .session-item-indicator.is-failed')).toBeNull();
   });
 
   it('keeps a parent running when a previously failed sub-agent resumes work', () => {

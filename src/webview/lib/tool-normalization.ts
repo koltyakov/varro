@@ -48,8 +48,9 @@ export function normalizeToolName(toolName: string): string {
 }
 
 export function isTodoToolName(toolName: string): boolean {
+  const fullName = toolName.trim().toLowerCase();
   const normalized = normalizeToolName(toolName);
-  return normalized.includes('todo') || TODO_TOOL_NAMES.has(normalized);
+  return fullName.includes('todo') || TODO_TOOL_NAMES.has(normalized);
 }
 
 export function isTodoToolTitle(title: string | undefined): boolean {

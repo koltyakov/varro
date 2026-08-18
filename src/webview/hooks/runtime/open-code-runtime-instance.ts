@@ -841,6 +841,7 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('failedQueuedMessageIds', []);
     appStore.setState('queuedMessageEdit', null);
     appStore.setState('failedSessionIds', []);
+    appStore.setState('failedSessionUpdatedAt', {});
     appStore.setState('sessionMessageCounts', reconcile({}));
     appStore.setState('sessionUsageLimits', reconcile({}));
     appStore.setState('interruptedSessionIds', []);
