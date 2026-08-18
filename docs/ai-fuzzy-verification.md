@@ -201,8 +201,11 @@ blocks after section 40. Emit every section in order and end with VFZ-STREAM-END
 
 ```text
 [VFZ:<seed>:TOOLS] Inspect this repository for message-list virtualization risks. Use several separate
-read, grep, and test operations rather than one combined operation. Keep a todo list, explain findings
-between operations, and finish with a concise report containing VFZ-TOOLS-END. Do not edit files.
+read, grep, and test operations rather than one combined operation. When parallel tool calls are
+supported, begin with at least six independent read or grep operations in one assistant step so four
+or more activity items remain visible together, then run at least two tests separately. Keep a todo
+list, explain findings between operations, and finish with a concise report containing VFZ-TOOLS-END.
+Do not edit files.
 ```
 
 ### Long Session Preparation
@@ -355,11 +358,19 @@ Pass invariants:
 
 ### AI-07 Activity, Tools, And Sticky Streaming
 
-Precondition: the session is virtualized and the latest user prompt can become sticky.
+Precondition: the session is virtualized, the latest user prompt can become sticky, and the active
+tray contains a nested scroller that can consume wheel input in the intended direction. Before the
+timed actions, verify that the target has `scrollHeight > clientHeight`, computed `overflow-y` of
+`auto` or `scroll`, and available scroll range in that direction. If the first tool recipe does not
+produce enough simultaneously visible or retained activity, prompt Luna for at least six independent
+read/search operations in one assistant step when parallel tool calls are supported, then restart the
+scenario from its precondition. An expanded Explored disclosure is ordinary outer flow content and
+does not satisfy this precondition unless it independently passes the same nested-scroller checks.
 
 1. Send the tool and activity recipe using Luna.
 2. Keep the source prompt just above the viewport while reasoning text and tool cards appear.
-3. Expand the active tray or disclosure, scroll its nested content, and then move the outer transcript.
+3. Expand the active tray item when available, wheel the verified nested scroller while it has range,
+   and then move the pointer outside that scroller and wheel the outer transcript.
 4. Let at least two tool operations complete while detached from the bottom.
 5. Return to the bottom before the final tool completes and observe the transition into Explored or
    Worked.
@@ -377,9 +388,12 @@ Pass invariants:
 
 ### AI-08 Seeded Mixed-Ownership Fuzz
 
-Precondition: an active Luna stream in a virtualized session with at least one expandable disclosure.
+Precondition: an active Luna stream in a virtualized session with at least one expandable disclosure
+and a verified nested scroller using the AI-07 geometry and overflow checks.
 
-Perform 50 seeded actions. Ensure the generated sequence contains at least one of every category:
+Generate and record all 50 seeded actions before starting the stream. Reserve early positions for the
+session switch and nested-to-outer wheel handoff so Luna cannot normally finish before those actions.
+Perform exactly those 50 actions and ensure the sequence contains at least one of every category:
 
 - upward and downward wheel input
 - `PageDown`, `Space`, and `Shift+Space` on the transcript
@@ -389,6 +403,13 @@ Perform 50 seeded actions. Ensure the generated sequence contains at least one o
 - sticky click or jump-to-latest
 - session switch away and back
 - outer transcript movement after nested scrolling
+
+An unavailable or mis-targeted action does not count toward the 50. Do not treat sticky chrome, a
+message row, an expanded non-scrollable disclosure, or an element that merely differs by a few pixels
+of box-model rounding as a nested scroller. Recheck the target immediately before dispatch because
+streaming can remove its available range. If Luna settles before every required active-stream action,
+restart the scenario with the same seed and a fresh long stream rather than completing the sequence
+against settled content.
 
 Pass invariants:
 

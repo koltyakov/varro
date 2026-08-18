@@ -268,6 +268,57 @@ test('bounds active tools and eases completed tools into Explored', async ({ pag
   expect(settledGap).toBeLessThanOrEqual(14.5);
 });
 
+test('keeps active-tray wheel input local before outer transcript movement', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 320 });
+  await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1');
+  const list = page.locator('.interactive-list');
+  const trayItems = page.locator('.assistant-active-activity-items');
+  await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(12);
+  await trayItems.evaluate(async (element) => {
+    await Promise.all(
+      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap((item) =>
+        item.getAnimations().map((animation) => animation.finished)
+      )
+    );
+  });
+
+  const initial = await page.evaluate(() => {
+    const transcript = document.querySelector<HTMLElement>('.interactive-list')!;
+    const tray = document.querySelector<HTMLElement>('.assistant-active-activity-items')!;
+    return {
+      transcriptTop: transcript.scrollTop,
+      transcriptMax: transcript.scrollHeight - transcript.clientHeight,
+      trayTop: tray.scrollTop,
+      trayMax: tray.scrollHeight - tray.clientHeight,
+    };
+  });
+  expect(initial.transcriptMax).toBeGreaterThan(0);
+  expect(initial.trayMax).toBeGreaterThan(0);
+  expect(initial.trayTop).toBeGreaterThan(0);
+
+  await trayItems.hover();
+  await page.mouse.wheel(0, -96);
+  await expect
+    .poll(() => trayItems.evaluate((element) => element.scrollTop))
+    .toBeLessThan(initial.trayTop);
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(initial.transcriptTop);
+
+  const trayTopAfterNestedWheel = await trayItems.evaluate((element) => element.scrollTop);
+  const listBox = await list.boundingBox();
+  if (!listBox) throw new Error('Transcript bounds are unavailable');
+  await page.mouse.move(listBox.x + listBox.width - 3, listBox.y + listBox.height / 2);
+  const outerDelta = initial.transcriptTop > 1 ? -96 : 96;
+  await page.mouse.wheel(0, outerDelta);
+  await expect
+    .poll(() => list.evaluate((element) => element.scrollTop))
+    .not.toBe(initial.transcriptTop);
+  expect(await trayItems.evaluate((element) => element.scrollTop)).toBe(trayTopAfterNestedWheel);
+
+  const outerDestination = await list.evaluate((element) => element.scrollTop);
+  await page.waitForTimeout(250);
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(outerDestination);
+});
+
 test('keeps the active tool gap fixed through its entrance animation', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=tool-cards&activeTray=1&activeTrayCount=1');
   const activeTool = page.locator('.assistant-active-activity-item .chat-tool-invocation-part');
