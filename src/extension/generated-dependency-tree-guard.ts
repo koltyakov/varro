@@ -17,7 +17,10 @@ export class GeneratedDependencyTreeGuard {
     const fingerprint = trees.join('\0');
     if (this.approvedFingerprintByWorkspace.get(workspacePath) === fingerprint) return true;
 
-    const preview = trees.slice(0, 3).map((path) => `\`${path}\``).join(', ');
+    const preview = trees
+      .slice(0, 3)
+      .map((path) => `\`${path}\``)
+      .join(', ');
     const remaining = trees.length - 3;
     const choice = await vscode.window.showWarningMessage(
       `Unignored generated dependencies were found: ${preview}${remaining > 0 ? ` and ${remaining} more` : ''}. OpenCode snapshots may scan or attribute these files even when the agent did not create them. Add an appropriate Git ignore rule or remove the tree before continuing. Varro will not modify ignore files automatically.`,

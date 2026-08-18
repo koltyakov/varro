@@ -2788,6 +2788,9 @@ kbd {
   top: -32px;
   right: 0;
   bottom: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: calc(100vw - 28px);
   justify-content: flex-end;
 }
 
