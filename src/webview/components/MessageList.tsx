@@ -11,6 +11,7 @@ import {
 } from 'solid-js';
 import type { Setter } from 'solid-js';
 import {
+  isAbortedAssistantError,
   isPermissionRejectedToolError,
   isQuestionSkippedToolError,
 } from '../../shared/error-classification';
@@ -1547,8 +1548,22 @@ export function MessageList() {
     }
     return null;
   });
+  const structurallyTrailingInterruptedMessageId = createMemo(() => {
+    messageStructureVersion();
+    messageInfoVersion();
+
+    const entries = messages();
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.info.role === 'user') return null;
+      if (entry.info.mode === 'subagent') continue;
+      return isAbortedAssistantError(entry.info.error) ? entry.info.id : null;
+    }
+    return null;
+  });
   const trailingSummaryMessageId = createMemo(
     () =>
+      structurallyTrailingInterruptedMessageId() ??
       explicitTerminalFinalResponseMessageId() ??
       structurallyTrailingRejectedInteractionMessageId() ??
       trailingSummaryOwner()?.messageId ??

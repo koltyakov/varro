@@ -287,7 +287,9 @@ function AssistantDialogSummary(props: {
     <div class="model-change-indicator assistant-dialog-summary">
       <div class="assistant-dialog-summary-content">
         <span class="model-change-label">
-          {props.summary.collectingStats
+          {props.summary.interrupted
+            ? 'Interrupted'
+            : props.summary.collectingStats
             ? 'Collecting stats...'
             : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
         </span>

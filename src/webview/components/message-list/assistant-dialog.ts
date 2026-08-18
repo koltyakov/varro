@@ -1,4 +1,5 @@
 import {
+  isAbortedAssistantError,
   isPermissionRejectedToolError,
   isQuestionSkippedToolError,
 } from '../../../shared/error-classification';
@@ -17,6 +18,7 @@ export type AssistantDialogSummaryInfo = {
   inputTokens: number;
   outputTokens: number;
   agentCount: number;
+  interrupted?: boolean;
   permissionRejected?: boolean;
   questionSkipped?: boolean;
   collectingStats?: boolean;
@@ -59,7 +61,8 @@ export function getAssistantDialogSummaryMap(
     }
 
     const lastMessage = currentMessages[currentMessages.length - 1];
-    if (!lastMessage?.time.completed) {
+    const interrupted = isAbortedAssistantError(lastMessage?.error);
+    if (!lastMessage || (!lastMessage.time.completed && !interrupted)) {
       resetCurrentDialog();
       return;
     }
@@ -75,6 +78,7 @@ export function getAssistantDialogSummaryMap(
       ) ?? false;
     if (
       isContinuationAssistantFinish(lastMessage.finish) &&
+      !interrupted &&
       !permissionRejected &&
       !questionSkipped
     ) {
@@ -108,7 +112,10 @@ export function getAssistantDialogSummaryMap(
       args?.nextUserRequestCreated
     );
     const completedMessages = aggregateMessages.filter((message) => !!message.time.completed);
-    const end = Math.max(...completedMessages.map((message) => message.time.completed || 0));
+    const end =
+      completedMessages.length > 0
+        ? Math.max(...completedMessages.map((message) => message.time.completed || 0))
+        : lastMessage.time.created;
     const tokens = sumAssistantDialogTokens(
       aggregateMessages,
       currentMessages,
@@ -132,6 +139,7 @@ export function getAssistantDialogSummaryMap(
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
+      ...(interrupted ? { interrupted: true } : {}),
       ...(permissionRejected ? { permissionRejected: true } : {}),
       ...(questionSkipped ? { questionSkipped: true } : {}),
       collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,

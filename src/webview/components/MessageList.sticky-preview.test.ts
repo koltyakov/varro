@@ -1464,7 +1464,7 @@ describe('MessageList sticky prompt preview', () => {
     expect(summaries.get('assistant-1')).toMatchObject({ inputTokens: 100, outputTokens: 10 });
   });
 
-  it('keeps stopped assistant turns out of final answer formatting while preserving the summary', async () => {
+  it('shows interrupted assistant turns with the summary divider styling', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([
       {
@@ -1473,7 +1473,7 @@ describe('MessageList sticky prompt preview', () => {
       },
       {
         info: assistantMessage('assistant-1', {
-          time: { created: 2_000, completed: 11_000 },
+          time: { created: 2_000 },
           error: { name: 'aborted', data: { message: 'Aborted' } },
           tokens: { input: 12, output: 4, reasoning: 0, cache: { read: 0, write: 0 } },
         }),
@@ -1492,7 +1492,12 @@ describe('MessageList sticky prompt preview', () => {
     const response = container?.querySelector('[data-msg-id="assistant-1"] .chat-turn-content');
     expect(response?.className).toContain('assistant-turn-content-plain');
     expect(response?.className).not.toContain('assistant-turn-content-highlighted');
-    expect(container?.textContent).toContain('Worked for 10s - Tokens ↑ 12 ↓ 4');
+    const summary = container?.querySelector(
+      '.trailing-assistant-summary-row .assistant-dialog-summary'
+    );
+    expect(summary).toBeInstanceOf(HTMLDivElement);
+    expect(summary?.textContent).toContain('Interrupted');
+    expect(summary?.textContent).not.toContain('Worked for');
   });
 
   it('includes prefetched turn history in the Worked for summary', async () => {

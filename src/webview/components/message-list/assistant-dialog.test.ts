@@ -47,6 +47,17 @@ function assistantMessage(
   };
 }
 
+function incompleteAssistantMessage(
+  id: string,
+  sessionID: string,
+  parentID: string,
+  created: number
+): MessageEntry<AssistantMessage> {
+  const message = assistantMessage(id, sessionID, parentID, created, created);
+  delete message.info.time.completed;
+  return message;
+}
+
 describe('getAssistantDialogSummaryMap', () => {
   it('waits for a terminal assistant step before adding the worked summary', () => {
     const intermediate = assistantMessage(
@@ -124,5 +135,24 @@ describe('getAssistantDialogSummaryMap', () => {
         { primarySessionId: 'session-parent' }
       ).get('assistant-question')
     ).toMatchObject({ durationMs: 2_000, questionSkipped: true });
+  });
+
+  it('marks an aborted turn as interrupted', () => {
+    const interrupted = incompleteAssistantMessage(
+      'assistant-interrupted',
+      'session-parent',
+      'user-1',
+      2_000
+    );
+    interrupted.info.finish = 'tool-calls';
+    interrupted.info.error = { name: 'MessageAbortedError', data: { message: 'Aborted' } };
+
+    expect(
+      getAssistantDialogSummaryMap(
+        [userMessage('user-1', 'session-parent', 1_000), interrupted],
+        undefined,
+        { primarySessionId: 'session-parent' }
+      ).get('assistant-interrupted')
+    ).toMatchObject({ interrupted: true });
   });
 });
