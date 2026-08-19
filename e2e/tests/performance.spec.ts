@@ -408,6 +408,26 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   }, target!.id);
   expect(anchor).not.toBeNull();
 
+  // Attribute later movement to host reflow, not an unfinished wheel/virtualization handoff.
+  const preResizeTops = await list.evaluate(async (element, anchorId) => {
+    const values = [];
+    for (let frame = 0; frame < 3; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+      const card = row?.querySelector<HTMLElement>('.user-message-card');
+      values.push(
+        card ? card.getBoundingClientRect().top - element.getBoundingClientRect().top : null
+      );
+    }
+    return values;
+  }, anchor!.id);
+  expect(
+    Math.max(
+      ...preResizeTops.map((top) => Math.abs((top ?? Number.POSITIVE_INFINITY) - anchor!.top))
+    ),
+    JSON.stringify(preResizeTops)
+  ).toBeLessThanOrEqual(3);
+
   const samplesPromise = list.evaluate(async (element, anchorId) => {
     const readTop = () => {
       const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);

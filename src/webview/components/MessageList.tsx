@@ -566,6 +566,7 @@ export function MessageList() {
   );
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
+  let pendingWheelResizeAnchor: VisibleScrollAnchor | null = null;
   let detachedAnchorRefreshRafId = 0;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
@@ -963,6 +964,7 @@ export function MessageList() {
 
   function beginWidthResize(options?: { fontChanged?: boolean }) {
     if (!widthResizeAnchor && !autoScroll()) {
+      const wheelAnchor = pendingWheelResizeAnchor;
       const rememberedElement = lastDetachedVisibleAnchor
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
@@ -988,7 +990,8 @@ export function MessageList() {
         containerRef && shouldVirtualize()
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
           : null;
-      widthResizeAnchor = rememberedAnchor ?? virtualAnchor ?? captureMountedVisibleScrollAnchor();
+      widthResizeAnchor =
+        wheelAnchor ?? rememberedAnchor ?? virtualAnchor ?? captureMountedVisibleScrollAnchor();
       setWidthResizePinnedMessageId(widthResizeAnchor?.messageId ?? null);
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
@@ -2450,6 +2453,34 @@ export function MessageList() {
       row = row.nextElementSibling instanceof HTMLElement ? row.nextElementSibling : null;
     }
     return fallback;
+  }
+
+  function captureVisibleUserMessageScrollAnchor() {
+    if (!containerRef) return null;
+    const containerRect = containerRef.getBoundingClientRect();
+    for (const card of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
+      const row = card.closest<HTMLElement>('[data-msg-id]');
+      const messageId = row?.dataset.msgId;
+      if (!row || !messageId) continue;
+      const cardRect = card.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      if (
+        cardRect.bottom <= containerRect.top ||
+        cardRect.top >= containerRect.top + containerRef.clientHeight / 3 ||
+        cardRect.bottom <= rowRect.top ||
+        cardRect.top >= rowRect.bottom
+      ) {
+        continue;
+      }
+      return {
+        messageId,
+        element: card,
+        top: cardRect.top - containerRect.top,
+        messageTop: rowRect.top - containerRect.top,
+        topPad: 0,
+      };
+    }
+    return null;
   }
 
   function refineTallRenderItemScrollAnchor(
@@ -4278,6 +4309,7 @@ export function MessageList() {
     if (!autoScroll() && !widthResizeActive && !stickyNavigationOwnsScroll() && !editingMessage()) {
       if (mountedDetachedAnchor) {
         lastDetachedVisibleAnchor = mountedDetachedAnchor;
+        pendingWheelResizeAnchor = null;
       } else if (
         !lastDetachedVisibleAnchor ||
         !getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
@@ -4300,11 +4332,13 @@ export function MessageList() {
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
       widthResizeAnchor = null;
+      finishWidthResizeNow();
     }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     if (nestedScrollerWillConsumeWheel(event)) return;
     pendingExpansionScrollAnchor = null;
     directMovementAnchor = null;
+    pendingWheelResizeAnchor = null;
     // The container viewport rect cannot change while this handler runs, so read it at most
     // once instead of forcing layout again for the sticky handoff check below.
     let wheelContainerRect: DOMRect | null = null;
@@ -4320,19 +4354,42 @@ export function MessageList() {
             scrollTop: getVirtualScrollTop(containerRef.scrollTop),
           })
         : null;
-      const anchor = refineTallRenderItemScrollAnchor(
-        index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
-      );
+      const anchor =
+        captureVisibleUserMessageScrollAnchor() ??
+        refineTallRenderItemScrollAnchor(
+          index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
+        );
       if (anchor) {
         directMovementAnchor = {
           anchor,
           scrollTop: containerRef.scrollTop,
         };
+        lastDetachedVisibleAnchor = anchor;
       }
     }
     clearActivityExitReserve();
     historyAnchorSettleOwner = null;
     const deltaY = getWheelDeltaPixels(event);
+    if (
+      containerRef &&
+      directMovementAnchor?.anchor.element?.classList.contains('user-message-card')
+    ) {
+      const targetScrollTop = Math.min(
+        Math.max(0, containerRef.scrollHeight - containerRef.clientHeight),
+        Math.max(0, containerRef.scrollTop + deltaY)
+      );
+      const movement = targetScrollTop - containerRef.scrollTop;
+      pendingWheelResizeAnchor =
+        Math.abs(movement) > 1.5
+          ? {
+              ...directMovementAnchor.anchor,
+              top: directMovementAnchor.anchor.top - movement,
+              ...(directMovementAnchor.anchor.messageTop !== undefined
+                ? { messageTop: directMovementAnchor.anchor.messageTop - movement }
+                : {}),
+            }
+          : null;
+    }
     if (containerRef && deltaY < -0.5) {
       const currentStickyPreview = untrack(stickyUserMessagePreview);
       const currentStickySource = currentStickyPreview

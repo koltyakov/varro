@@ -761,6 +761,138 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('preserves the wheel destination when width reflow precedes the native scroll event', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    const observers: Array<{
+      callback: ResizeObserverCallback;
+      targets: Set<Element>;
+    }> = [];
+    class TestResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+      disconnect() {
+        this.targets.clear();
+      }
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+
+    const rowHeights = Array.from({ length: 60 }, () => 100);
+    const rowTop = (index: number) =>
+      rowHeights.slice(0, index).reduce((total, height) => total + height, 0);
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, 500, 786);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(
+            0,
+            0,
+            500,
+            rowHeights.reduce((total, height) => total + height, 0)
+          );
+        }
+        const row = this.dataset.msgId
+          ? this
+          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+        const messageId = row?.dataset.msgId;
+        if (messageId?.startsWith('user-') || messageId?.startsWith('assistant-')) {
+          const index = Number(messageId.slice(messageId.lastIndexOf('-') + 1));
+          const top = rowTop(index) - scrollTopValue;
+          return this.classList.contains('user-message-card')
+            ? new DOMRect(0, top + 6, 500, 40)
+            : new DOMRect(0, top, 500, rowHeights[index]);
+        }
+        return new DOMRect(0, 0, 500, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 60 }, (_, index) => {
+        const messageId = index === 20 ? `user-${index}` : `assistant-${index}`;
+        return {
+          info: index === 20 ? userMessage(messageId) : assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Message ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 786 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      get: () => rowHeights.reduce((total, height) => total + height, 0),
+    });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 1976;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    const precedingRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
+    const anchorRow = container?.querySelector('[data-msg-id="user-20"]') as HTMLDivElement;
+    const anchorCard = anchorRow.querySelector('.user-message-card') as HTMLDivElement;
+    const rowObserver = observers.find(
+      (observer) => observer.targets.has(precedingRow) && observer.targets.has(anchorRow)
+    );
+    expect(anchorCard.getBoundingClientRect().top).toBe(30);
+    expect(rowObserver).toBeDefined();
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 22 }));
+    scrollTopValue += 22;
+    expect(anchorCard.getBoundingClientRect().top).toBe(8);
+
+    rowHeights[19] = 122;
+    rowObserver!.callback(
+      [
+        {
+          target: precedingRow,
+          borderBoxSize: [{ blockSize: 122, inlineSize: 360 }],
+        } as unknown as ResizeObserverEntry,
+        {
+          target: anchorRow,
+          borderBoxSize: [{ blockSize: 100, inlineSize: 360 }],
+        } as unknown as ResizeObserverEntry,
+      ],
+      rowObserver as unknown as ResizeObserver
+    );
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+
+    expect(anchorCard.getBoundingClientRect().top).toBe(8);
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.restore();
+  });
+
   it('does not treat a visible row below pre-message chrome as above the viewport', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{
