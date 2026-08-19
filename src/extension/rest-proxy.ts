@@ -426,17 +426,17 @@ export class RestProxy {
         responsePromise = defaultModelRequest
           ? this.requestDefaultModel(request?.controller.signal)
           : paginatedMessages
-          ? this.requestPaginatedMessages(
-              method,
-              forwardedPath,
-              payload.body,
-              request?.controller.signal
-            )
-          : request
-            ? this.callbacks.server.request(method, forwardedPath, payload.body, {
-                signal: request.controller.signal,
-              })
-            : this.callbacks.server.request(method, forwardedPath, payload.body);
+            ? this.requestPaginatedMessages(
+                method,
+                forwardedPath,
+                payload.body,
+                request?.controller.signal
+              )
+            : request
+              ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+                  signal: request.controller.signal,
+                })
+              : this.callbacks.server.request(method, forwardedPath, payload.body);
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }

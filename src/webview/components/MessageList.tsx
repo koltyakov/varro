@@ -483,6 +483,7 @@ export function MessageList() {
   let lastContainerClientHeight = -1;
   let lastHostViewportWidth = -1;
   let lastHostViewportHeight = -1;
+  let lastHostDevicePixelRatio = -1;
   let hostViewportResizeActiveUntil = Number.NEGATIVE_INFINITY;
   let lastContainerFontSize = -1;
   let lastTrackInlineSize = -1;
@@ -4060,11 +4061,14 @@ export function MessageList() {
           break;
         }
       }
-      anchor = refineTallRenderItemScrollAnchor(
-        anchor ?? fallback,
-        containerRef.clientHeight / 3
-      );
-      if (anchor?.element) lastDetachedVisibleAnchor = anchor;
+      anchor = refineTallRenderItemScrollAnchor(anchor ?? fallback, containerRef.clientHeight / 3);
+      if (
+        anchor &&
+        window.innerWidth === lastHostViewportWidth &&
+        window.devicePixelRatio === lastHostDevicePixelRatio
+      ) {
+        lastDetachedVisibleAnchor = anchor;
+      }
     });
   }
 
@@ -4730,12 +4734,24 @@ export function MessageList() {
     lastContainerClientHeight = containerRef.clientHeight;
     lastHostViewportWidth = window.innerWidth;
     lastHostViewportHeight = window.innerHeight;
+    lastHostDevicePixelRatio = window.devicePixelRatio;
     const handleHostViewportResize = () => {
-      if (window.innerWidth !== lastHostViewportWidth && lastDetachedVisibleAnchor?.element) {
+      if (
+        (window.innerWidth !== lastHostViewportWidth ||
+          window.devicePixelRatio !== lastHostDevicePixelRatio) &&
+        lastDetachedVisibleAnchor
+      ) {
         beginWidthResize();
+        const anchor = widthResizeAnchor;
+        requestAnimationFrame(() => {
+          if (widthResizeActive && widthResizeAnchor === anchor) {
+            restoreVisibleScrollAnchor(anchor);
+          }
+        });
       }
       lastHostViewportWidth = window.innerWidth;
       lastHostViewportHeight = window.innerHeight;
+      lastHostDevicePixelRatio = window.devicePixelRatio;
       hostViewportResizeActiveUntil = performance.now() + WIDTH_RESIZE_SETTLE_MS;
     };
     window.addEventListener('resize', handleHostViewportResize);
