@@ -4455,19 +4455,26 @@ export function MessageList() {
       else if (event.key === 'End') nextScrollTop = maximumScrollTop;
       event.preventDefault();
       containerRef.scrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
-      const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
-      const destinationIndex = destinationMetrics
-        ? getFirstVisibleMessageIndexFromVirtualMetrics({
-            metrics: destinationMetrics,
-            scrollTop: getVirtualScrollTop(containerRef.scrollTop),
-          })
-        : null;
-      const anchor = refineTallRenderItemScrollAnchor(
-        destinationIndex === null
-          ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
-          : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex)
-      );
-      if (anchor) lastDetachedVisibleAnchor = anchor;
+      directMovementAnchor = null;
+      const sessionId = state.activeSessionId;
+      requestAnimationFrame(() => {
+        if (!containerRef || state.activeSessionId !== sessionId) return;
+        const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
+        const destinationIndex = destinationMetrics
+          ? getFirstVisibleMessageIndexFromVirtualMetrics({
+              metrics: destinationMetrics,
+              scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+            })
+          : null;
+        const anchor = refineTallRenderItemScrollAnchor(
+          destinationIndex === null
+            ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
+            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex)
+        );
+        if (!anchor) return;
+        directMovementAnchor = { anchor, scrollTop: containerRef.scrollTop };
+        lastDetachedVisibleAnchor = anchor;
+      });
     }
   }
 

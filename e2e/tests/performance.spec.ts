@@ -580,6 +580,90 @@ test('width reflow after PageDown preserves a painted block in a tall response',
   ).toBeLessThanOrEqual(3);
 });
 
+test('width reflow preserves the PageDown destination after crossing tall responses', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  const heading = page.getByRole('heading', { name: 'Huge section 45' });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+  });
+  for (let step = 2; step < 19; step += 1) {
+    await list.evaluate((element, ratio) => {
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+      element.dispatchEvent(new Event('scroll'));
+    }, step / 20);
+    await waitForAnimationFrame(page);
+    if ((await heading.count()) > 0) break;
+  }
+  await expect(heading).toBeAttached();
+  await list.evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>('h2')]
+      .find((candidate) => candidate.innerText === 'Huge section 45')
+      ?.closest<HTMLElement>('[data-msg-id]');
+    if (!target) throw new Error('Source tall response is not mounted');
+    const viewport = element.getBoundingClientRect();
+    element.scrollTop += target.getBoundingClientRect().bottom - viewport.bottom + 100;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await list.focus();
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(300);
+
+  const anchor = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown p')].find(
+      (candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return (
+          candidate.innerText.startsWith('Mixed paragraph') &&
+          rect.top >= bounds.top &&
+          rect.bottom <= bounds.bottom
+        );
+      }
+    );
+    return item
+      ? {
+          text: item.innerText,
+          top: item.getBoundingClientRect().top - bounds.top,
+        }
+      : null;
+  });
+  expect(anchor).not.toBeNull();
+
+  const samples = [];
+  for (const width of [360, 720]) {
+    await page.setViewportSize({ width, height: 808 });
+    for (let frame = 0; frame < 12; frame += 1) {
+      await waitForAnimationFrame(page);
+      samples.push({
+        width,
+        top: await list.evaluate((element, text) => {
+          const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown p')].find(
+            (candidate) => candidate.innerText === text
+          );
+          return item
+            ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
+            : null;
+        }, anchor!.text),
+      });
+    }
+  }
+
+  expect(
+    samples.every((entry) => entry.top !== null),
+    JSON.stringify({ anchor, samples })
+  ).toBe(true);
+  expect(
+    Math.max(...samples.slice(1).map((entry) => Math.abs(entry.top! - anchor!.top))),
+    JSON.stringify({ anchor, samples })
+  ).toBeLessThanOrEqual(3);
+});
+
 test('viewport narrowing replaces a stale tall-row anchor after sticky navigation', async ({
   page,
 }) => {

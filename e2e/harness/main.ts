@@ -4091,11 +4091,17 @@ function createScenarioState(name: ScenarioName): ScenarioState {
         [
           `## Huge section ${index}`,
           '',
-          Array.from(
-            { length: 80 },
-            (_, lineIndex) =>
-              `${index === 45 ? `${lineIndex + 1}. ` : ''}Line ${lineIndex} of section ${index}: virtual height estimation must account for large markdown content before this row is measured.`
-          ).join('\n'),
+          index === 46
+            ? Array.from({ length: 16 }, (_, paragraphIndex) =>
+                paragraphIndex % 2 === 0
+                  ? `Mixed paragraph ${paragraphIndex + 1} stays short.`
+                  : `Mixed paragraph ${paragraphIndex + 1}: ${'width reflow must preserve the same painted paragraph while earlier text wraps. '.repeat(12)}`
+              ).join('\n\n')
+            : Array.from(
+                { length: 80 },
+                (_, lineIndex) =>
+                  `${index === 45 ? `${lineIndex + 1}. ` : ''}Line ${lineIndex} of section ${index}: virtual height estimation must account for large markdown content before this row is measured.`
+              ).join('\n'),
           '',
           '```ts',
           `export const hugeSection${index} = true;`,
