@@ -420,9 +420,12 @@ export class RestProxy {
         forwardedPath = `${url.pathname}${url.search}`;
       }
       const paginatedMessages = this.isPaginatedMessagesRequest(method, payload.path);
+      const defaultModelRequest = method === 'GET' && payload.path === '/model/default';
       let responsePromise: Promise<unknown>;
       try {
-        responsePromise = paginatedMessages
+        responsePromise = defaultModelRequest
+          ? this.requestDefaultModel(request?.controller.signal)
+          : paginatedMessages
           ? this.requestPaginatedMessages(
               method,
               forwardedPath,
@@ -498,6 +501,36 @@ export class RestProxy {
       if (payload.cancelKey && this.activeRequests.get(payload.cancelKey) === request) {
         this.activeRequests.delete(payload.cancelKey);
       }
+    }
+  }
+
+  private async requestDefaultModel(signal?: AbortSignal): Promise<unknown> {
+    let response: unknown;
+    try {
+      response = signal
+        ? await this.callbacks.server.request('GET', '/model/default', undefined, { signal })
+        : await this.callbacks.server.request('GET', '/model/default');
+    } catch (err) {
+      if (signal?.aborted) throw err;
+    }
+
+    if (response === null) return null;
+    const endpointModel = asRecord(response);
+    const endpointModelID = endpointModel?.modelID ?? endpointModel?.id;
+    if (typeof endpointModel?.providerID === 'string' && typeof endpointModelID === 'string') {
+      return { providerID: endpointModel.providerID, modelID: endpointModelID };
+    }
+
+    try {
+      const config = asRecord(
+        signal
+          ? await this.callbacks.server.request('GET', '/config', undefined, { signal })
+          : await this.callbacks.server.request('GET', '/config')
+      );
+      return parseModelRoute(config?.model) ?? undefined;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      return undefined;
     }
   }
 

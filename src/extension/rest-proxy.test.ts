@@ -1478,6 +1478,48 @@ describe('RestProxy handleRequest', () => {
     });
   });
 
+  it('uses the effective OpenCode config when the default model endpoint is unsupported', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/model/default') return Promise.resolve('<!doctype html>');
+      if (path === '/config') {
+        return Promise.resolve({
+          model: 'openai/gpt-5.6-sol',
+          provider: { secret: { options: { apiKey: 'not-for-webview' } } },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(901, 'GET', '/model/default'));
+
+    expect(serverRequest).toHaveBeenNthCalledWith(1, 'GET', '/model/default');
+    expect(serverRequest).toHaveBeenNthCalledWith(2, 'GET', '/config');
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 901,
+      data: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+    });
+  });
+
+  it('keeps a supported exact default model response without loading config', async () => {
+    const serverRequest = vi.fn(() =>
+      Promise.resolve({ providerID: 'anthropic', id: 'claude-current' })
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(902, 'GET', '/model/default'));
+
+    expect(serverRequest).toHaveBeenCalledTimes(1);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 902,
+      data: { providerID: 'anthropic', modelID: 'claude-current' },
+    });
+  });
+
   it('returns 404 error for hidden session', async () => {
     const { proxy, callbacks } = createProxy({
       sessionTrash: {

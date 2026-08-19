@@ -519,6 +519,121 @@ test('viewport narrowing preserves an inner block in a viewport-tall markdown it
   ).toBeLessThanOrEqual(3);
 });
 
+test('cold scrollbar positioning preserves an inner block during width reflow', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  const precedingHeading = page.getByRole('heading', { name: 'Huge section 45' });
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -180 }));
+  });
+  for (let step = 2; step < 19; step += 1) {
+    await list.evaluate((element, ratio) => {
+      element.scrollTop = Math.floor((element.scrollHeight - element.clientHeight) * ratio);
+      element.dispatchEvent(new Event('scroll'));
+    }, step / 20);
+    await waitForAnimationFrame(page);
+    if ((await precedingHeading.count()) > 0) break;
+  }
+  await expect(precedingHeading).toBeAttached();
+  await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        buttons: 1,
+        clientX: bounds.right - 1,
+        clientY: bounds.top + bounds.height / 2,
+        pointerType: 'mouse',
+        isPrimary: true,
+      })
+    );
+    const preceding = element.querySelector<HTMLElement>(
+      '[data-msg-id="message-huge-assistant-45"]'
+    );
+    if (!preceding) throw new Error('Preceding tall Markdown row is not mounted');
+    element.scrollTop +=
+      preceding.getBoundingClientRect().bottom - element.getBoundingClientRect().top + 100;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await waitForAnimationFrame(page);
+  await expect(page.getByRole('heading', { name: 'Huge section 46' })).toBeAttached();
+  await list.evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>('h2')]
+      .find((candidate) => candidate.innerText === 'Huge section 46')
+      ?.closest<HTMLElement>('[data-msg-id]');
+    if (!target) throw new Error('Tall Markdown target row is not mounted');
+    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top + 1_300;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(80);
+  await list.evaluate(() => {
+    document.dispatchEvent(
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        button: 0,
+        pointerType: 'mouse',
+        isPrimary: true,
+      })
+    );
+  });
+
+  const anchor = await list.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown p')].find(
+      (candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return (
+          candidate.innerText.startsWith('Mixed paragraph') &&
+          rect.top >= bounds.top + 20 &&
+          rect.bottom < bounds.bottom
+        );
+      }
+    );
+    return item
+      ? {
+          text: item.innerText,
+          top: item.getBoundingClientRect().top - bounds.top,
+          scrollTop: element.scrollTop,
+        }
+      : null;
+  });
+  expect(anchor).not.toBeNull();
+
+  const samples: Array<{ connected: boolean; top: number | null; scrollTop: number }> = [];
+  await page.setViewportSize({ width: 720, height: 808 });
+  for (let frame = 0; frame < 12; frame += 1) {
+    await waitForAnimationFrame(page);
+    samples.push(
+      await list.evaluate((element, text) => {
+        const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown p')].find(
+          (candidate) => candidate.innerText === text
+        );
+        return {
+          connected: !!item?.isConnected,
+          top: item
+            ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
+            : null,
+          scrollTop: element.scrollTop,
+        };
+      }, anchor!.text)
+    );
+  }
+
+  expect(samples.every((sample) => sample.connected), JSON.stringify({ anchor, samples })).toBe(true);
+  expect(
+    Math.max(...samples.slice(1).map((sample) => Math.abs(sample.top! - anchor!.top))),
+    JSON.stringify({ anchor, samples })
+  ).toBeLessThanOrEqual(3);
+  expect(
+    Math.abs(samples.at(-1)!.scrollTop - anchor!.scrollTop),
+    JSON.stringify({ anchor, samples })
+  ).toBeGreaterThan(100);
+});
+
 test('width reflow after PageDown preserves a painted block in a tall response', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 808 });
   await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');

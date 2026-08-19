@@ -2107,6 +2107,23 @@ test.describe('auto-scroll', () => {
   }) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 486, height: 800 });
+    await page.addInitScript(() => {
+      const originalAddEventListener = EventTarget.prototype.addEventListener;
+      const listenerOptions: Array<{ passive: boolean; target: EventTarget }> = [];
+      Object.defineProperty(window, 'varroWheelListenerOptions', {
+        configurable: true,
+        value: listenerOptions,
+      });
+      EventTarget.prototype.addEventListener = function (type, listener, options) {
+        if (type === 'wheel') {
+          listenerOptions.push({
+            passive: typeof options === 'object' && options !== null && options.passive === true,
+            target: this,
+          });
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+      };
+    });
     await page.goto(
       '/e2e/harness/index.html?scenario=cold-large-history&windowed=1&deferHistory=1&omitReopenedLatestCursor=1'
     );
@@ -2299,6 +2316,32 @@ test.describe('auto-scroll', () => {
       .filter({ hasText: 'Cold large paginated history' })
       .click();
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    const wheelListenerOptions = await page.evaluate(() => {
+      const instrumentedWindow = window as Window & {
+        varroWheelListenerOptions?: Array<{ passive: boolean; target: EventTarget }>;
+      };
+      return (instrumentedWindow.varroWheelListenerOptions ?? [])
+        .filter(
+          (entry) =>
+            entry.target instanceof HTMLElement &&
+            entry.target.classList.contains('interactive-list')
+        )
+        .map(({ passive }) => ({ passive }));
+    });
+    expect(wheelListenerOptions.at(-1), JSON.stringify(wheelListenerOptions)).toEqual({
+      passive: true,
+    });
+    const reopenedScrollTop = await list.evaluate((element) => element.scrollTop);
+    const listBounds = await list.boundingBox();
+    await page.mouse.move(listBounds!.x + 30, listBounds!.y + listBounds!.height / 2);
+    const wheelCompleted = await Promise.race([
+      page.mouse.wheel(0, -180).then(() => true),
+      page.waitForTimeout(1_000).then(() => false),
+    ]);
+    expect(wheelCompleted).toBe(true);
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeLessThan(
+      reopenedScrollTop - 1
+    );
     await list.evaluate(async (element) => {
       element.dispatchEvent(new WheelEvent('wheel', { deltaY: -96, bubbles: true }));
       element.scrollTop = 0;

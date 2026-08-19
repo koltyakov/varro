@@ -565,6 +565,7 @@ export function MessageList() {
   );
   let lastDetachedVisibleAnchor: VisibleScrollAnchor | null = null;
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
+  let detachedAnchorRefreshRafId = 0;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
@@ -2450,9 +2451,16 @@ export function MessageList() {
     return fallback;
   }
 
-  function refineTallRenderItemScrollAnchor(anchor: VisibleScrollAnchor | null) {
+  function refineTallRenderItemScrollAnchor(
+    anchor: VisibleScrollAnchor | null,
+    preferredViewportOffset = 0
+  ) {
     if (!containerRef || !anchor) return anchor;
     const containerRect = containerRef.getBoundingClientRect();
+    const preferredTop = Math.min(
+      containerRect.bottom - 1,
+      containerRect.top + Math.max(0, preferredViewportOffset)
+    );
     const renderItem = getMountedScrollAnchorElement(
       anchor.element ? { ...anchor, element: undefined } : anchor
     );
@@ -2473,13 +2481,13 @@ export function MessageList() {
     let high = candidates.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (candidates[middle]!.getBoundingClientRect().bottom <= containerRect.top) low = middle + 1;
+      if (candidates[middle]!.getBoundingClientRect().bottom <= preferredTop) low = middle + 1;
       else high = middle;
     }
     let element = candidates[low];
     if (!element) return anchor;
     let rect = element.getBoundingClientRect();
-    while (rect.top < containerRect.top && candidates[low + 1]) {
+    while (rect.top < preferredTop && candidates[low + 1]) {
       const next = candidates[low + 1]!;
       const nextRect = next.getBoundingClientRect();
       if (nextRect.top >= containerRect.bottom) break;
@@ -4017,6 +4025,49 @@ export function MessageList() {
     return top;
   }
 
+  function scheduleDetachedVisibleAnchorRefresh() {
+    if (detachedAnchorRefreshRafId || !containerRef) return;
+    const sessionId = state.activeSessionId;
+    detachedAnchorRefreshRafId = requestAnimationFrame(() => {
+      detachedAnchorRefreshRafId = 0;
+      if (
+        !containerRef ||
+        directMovementAnchor ||
+        state.activeSessionId !== sessionId ||
+        autoScroll() ||
+        widthResizeActive ||
+        stickyNavigationOwnsScroll() ||
+        editingMessage()
+      ) {
+        return;
+      }
+      const containerRect = containerRef.getBoundingClientRect();
+      let fallback: VisibleScrollAnchor | null = null;
+      let anchor: VisibleScrollAnchor | null = null;
+      for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
+        const messageId = row.dataset.msgId;
+        if (!messageId) continue;
+        const candidate = {
+          messageId,
+          top: rect.top - containerRect.top,
+          topPad: 0,
+        };
+        fallback ??= candidate;
+        if (rect.top >= containerRect.top - 0.5) {
+          anchor = candidate;
+          break;
+        }
+      }
+      anchor = refineTallRenderItemScrollAnchor(
+        anchor ?? fallback,
+        containerRef.clientHeight / 3
+      );
+      if (anchor?.element) lastDetachedVisibleAnchor = anchor;
+    });
+  }
+
   function onScroll() {
     if (!containerRef) return;
     const autoScrollEnabled = autoScroll();
@@ -4056,7 +4107,7 @@ export function MessageList() {
           };
         }
       }
-      return captureMountedVisibleScrollAnchor();
+      return refineTallRenderItemScrollAnchor(captureMountedVisibleScrollAnchor());
     })();
     const distance = distanceFromBottom();
     const bottomTargetStable = Math.abs(bottomScrollTop() - lastAutoScrolledBottomScrollTop) <= 1;
@@ -4229,6 +4280,7 @@ export function MessageList() {
       ) {
         lastDetachedVisibleAnchor = captureDetachedVisibleScrollAnchor(top);
       }
+      scheduleDetachedVisibleAnchorRefresh();
     }
     if (
       top <= 24 &&
@@ -4439,7 +4491,10 @@ export function MessageList() {
       index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
     );
     directMovementAnchor = inputAnchor
-      ? { anchor: inputAnchor, scrollTop: containerRef.scrollTop }
+      ? {
+          anchor: inputAnchor,
+          scrollTop: containerRef.scrollTop,
+        }
       : null;
     if (target === containerRef) {
       const pageSize = containerRef.clientHeight;
@@ -4472,7 +4527,10 @@ export function MessageList() {
             : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex)
         );
         if (!anchor) return;
-        directMovementAnchor = { anchor, scrollTop: containerRef.scrollTop };
+        directMovementAnchor = {
+          anchor,
+          scrollTop: containerRef.scrollTop,
+        };
         lastDetachedVisibleAnchor = anchor;
       });
     }
@@ -4506,6 +4564,7 @@ export function MessageList() {
       return;
     }
     pendingExpansionScrollAnchor = null;
+    directMovementAnchor = null;
     if (event.pointerType !== 'touch') {
       if (event.target !== containerRef) return;
 
@@ -4638,6 +4697,15 @@ export function MessageList() {
     appendBottomReserveTarget = bottomScrollTop();
     setAppendBottomReserve((reserve) => reserve + collapseHeight);
   }
+
+  createEffect(() => {
+    const container = containerRef;
+    if (!container) return;
+
+    const options: AddEventListenerOptions = { passive: !editingMessage() };
+    container.addEventListener('wheel', onWheel, options);
+    onCleanup(() => container.removeEventListener('wheel', onWheel, options));
+  });
 
   onMount(() => {
     if (!containerRef) return;
@@ -4823,6 +4891,7 @@ export function MessageList() {
       clearLoadingRowReappearTimer();
       clearLoadingRowReserveReleaseTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
+      if (detachedAnchorRefreshRafId) cancelAnimationFrame(detachedAnchorRefreshRafId);
       cancelScheduledMeasurement();
       cancelScheduledStickyPreviewFrame();
       cancelWidthResize();
@@ -6395,7 +6464,6 @@ export function MessageList() {
         tabIndex={0}
         aria-live="polite"
         aria-label="Chat messages"
-        onWheel={onWheel}
         onScroll={onScroll}
       >
         <div

@@ -51,7 +51,8 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
    a failure.
 5. Save a run ledger under `artifacts/ai-fuzzy/<timestamp>-<seed>.md`. `artifacts/` is intentionally
    ignored by Git.
-6. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
+6. Delete every temporary session created by the run, following the cleanup contract below.
+7. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
    VS Code version, viewport/layout, seed, and artifact paths.
 
 ### Controller Session Safety
@@ -76,6 +77,21 @@ If any check cannot be completed, leave the session running, mark the affected s
 and continue with cleanup that targets only the recorded dedicated host PID. Never infer an abort
 target from the currently active session, a recent transcript, or a session ID copied from the
 controller UI.
+
+### Temporary Session Cleanup
+
+Track the exact ID of every root or child session created while preparing or running the test. Before
+writing the final ledger or report, delete every session created by the run, including failed setup,
+reproduction, recovery, and generated child sessions. Perform this cleanup for `PASS`, `FAIL`, and
+`BLOCKED` runs, and verify that the recorded IDs no longer appear in the active session list.
+
+Apply the controller-session identity checks above before every deletion. Delete only IDs recorded as
+created by the current run whose root title starts with the current run's exact `VFZ <seed>` prefix.
+Never delete the controller session, a reused prepared session, or any unrecorded session. Do not use a
+bulk delete or empty-trash operation because the trash may contain unrelated user sessions. If session
+deletion is soft, permanently delete only the individually identified run-created roots from the
+trash. Record deleted IDs, verification, and any cleanup failure in the ledger. A cleanup failure does
+not change scenario evidence, but it must be reported prominently with the remaining session IDs.
 
 If credentials, a GUI, or Luna are unavailable, continue with every feasible automated check and mark
 the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn a
@@ -134,7 +150,8 @@ what was omitted.
    diagnosis or metric capture, and record that the run became instrumented.
 8. Record every test host PID, profile path, and debugging endpoint when it is launched. Before writing
    the ledger or final report, terminate every Extension Development Host launched by the run and verify
-   that its process and debugging endpoint have stopped. Never leave persistent test hosts open.
+   that its process and debugging endpoint have stopped. Delete run-created temporary sessions before
+   terminating the final host. Never leave persistent test hosts open.
 
 The existing F5 host can preserve extension state. For cold-load checks, close the Extension
 Development Host, start it again, and do not warm the target session by opening or scrolling it first.
@@ -514,6 +531,7 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - Window and webview dimensions:
 - Zoom, theme, sidebar side, panel state:
 - Session title/ID and prepared turn count:
+- Run-created session IDs and deletion verification:
 - Observation method and optional screenshots:
 
 ## Preflight
