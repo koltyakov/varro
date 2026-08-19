@@ -11,8 +11,10 @@ const GENERATED_DEPENDENCY_PATHS = [
   ':(glob)**/.venv/**',
   ':(glob)**/venv/**',
   ':(glob)**/.tox/**',
+  ':(glob)**/__pycache__/**',
 ];
-const GENERATED_DEPENDENCY_SEGMENT = /^(.*?(?:^|\/)(?:node_modules|\.venv|venv|\.tox))(?:\/|$)/;
+const GENERATED_DEPENDENCY_SEGMENT =
+  /^(.*?(?:^|\/)(?:node_modules|\.venv|venv|\.tox|__pycache__))(?:\/|$)/;
 
 export class GeneratedDependencyTreeGuard {
   private readonly approvedFingerprintByWorkspace = new Map<string, string>();

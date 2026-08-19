@@ -37,6 +37,7 @@ export type MessageRowSharedProps = {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  groupedActiveActivityPartKeys?: ReadonlySet<string>;
   hasBuildAgent: boolean;
   latestPlanImplementationMessageId: string | null;
   claimMessageEntrance?: (messageId: string) => boolean;
@@ -198,6 +199,7 @@ export function MessageRow(
             retainedActivityPartKeys={props.retainedActivityPartKeys}
             exitingActivityPartKeys={props.exitingActivityPartKeys}
             visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+            groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
           />
         </Show>
         <Show when={summary()}>

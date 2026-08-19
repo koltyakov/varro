@@ -520,7 +520,18 @@ test.describe('auto-scroll', () => {
       JSON.stringify({ beforeTop, samples })
     ).toBe(true);
     await expect(activeReasoning).toHaveCount(0);
-    await expect(page.locator('.assistant-activity-summary').last()).toContainText('Explored');
+    const explored = page.locator('.assistant-activity-summary').last();
+    await expect(explored).toContainText('Explored');
+    await explored.click();
+    const hiddenReasoning = page
+      .locator('.assistant-activity-details')
+      .last()
+      .locator('.chat-thinking-box');
+    await expect(hiddenReasoning).toBeVisible();
+    await hiddenReasoning.locator('.thinking-header').click();
+    await expect(hiddenReasoning.locator('.thinking-content')).toContainText(
+      'Preparing the streamed response.'
+    );
   });
 
   test('does not push a full transcript backward when send-time panels collapse', async ({
@@ -1236,6 +1247,79 @@ test.describe('auto-scroll', () => {
     });
 
     await expect(appendReserve).toHaveCount(0);
+  });
+
+  test('resumes bottom follow after the trailing activity settle window', async ({ page }) => {
+    await page.goto(
+      '/e2e/harness/index.html?scenario=tool-cards-large-transcript&activeTray=1&activeTrayIndex=69'
+    );
+    const activeItem = page.locator(
+      '[data-activity-part-id="message-tool-cards-assistant-69-tool"]'
+    );
+    await expect(activeItem).toBeVisible();
+    await activeItem.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await page.waitForTimeout(1_250);
+
+    await page.evaluate(() => {
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          getSessionMessages?: (id: string) => Array<{ parts: Array<Record<string, unknown>> }>;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const part = harnessWindow.__varroE2E
+        ?.getSessionMessages?.('session-tool-cards-large-transcript')
+        .flatMap((message) => message.parts)
+        .find((candidate) => candidate.id === 'message-tool-cards-assistant-69-tool');
+      if (!part) throw new Error('Trailing active tool fixture is missing');
+      const previousState = part.state as Record<string, unknown>;
+      part.state = {
+        status: 'completed',
+        input: previousState.input,
+        output: 'Found matches',
+        title: 'Search virtualized activity',
+        metadata: {},
+        time: { start: Date.now() - 1_000, end: Date.now() },
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+    });
+
+    await expect(activeItem).toHaveCount(0, { timeout: 5_000 });
+    await waitForAnimationFrames(page, 40);
+    await page.evaluate(() => {
+      const part = {
+        id: 'message-tool-cards-assistant-69-committed-text',
+        sessionID: 'session-tool-cards-large-transcript',
+        messageID: 'message-tool-cards-assistant-69',
+        type: 'text' as const,
+        text: Array.from(
+          { length: 24 },
+          (_, index) => `Committed follow-up line ${index + 1} expands after activity settles.`
+        ).join('\n\n'),
+      };
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateMessagePart?: (updatedPart: unknown) => void };
+      };
+      harnessWindow.__varroE2E?.updateMessagePart?.(part);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.part.updated', properties: { part } },
+        },
+        '*'
+      );
+    });
+
+    await expect(
+      page.getByText('Committed follow-up line 24 expands after activity settles.')
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
   });
 
   test('keeps first-turn Explored fixed across mixed multi-activity exits', async ({

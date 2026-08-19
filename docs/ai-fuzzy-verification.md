@@ -2,9 +2,9 @@
 
 > [!IMPORTANT]
 > An AI test run passes only when the requested scenarios run in a real, interactable VS Code
-> Extension Development Host. If VS Code cannot be launched or controlled, GPT Luna cannot be used,
-> required sessions cannot be prepared, or any real-editor scenario cannot reach its precondition, the
-> **overall AI test result is `FAIL`**. Automated preflight results may still be reported as supporting
+> Extension Development Host. If VS Code cannot be launched or controlled, GPT Luna or Terra cannot be
+> used, required sessions cannot be prepared, or any real-editor scenario cannot reach its precondition,
+> the **overall AI test result is `FAIL`**. Automated preflight results may still be reported as supporting
 > evidence, but they cannot make the AI test pass. Put this overall result at the top of the run ledger
 > and final report.
 
@@ -44,16 +44,22 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 1. Check the worktree and record the tested commit plus existing uncommitted changes. Do not discard
    or modify unrelated changes.
 2. Run the automated preflight and the standard real-editor scenarios `AI-01` through `AI-08`.
-3. Use `openai/gpt-5.6-luna` for generated content and live streaming. If it is unavailable, use the
-   available GPT Luna route and record the exact provider/model. Do not silently substitute a larger
-   model because output length and timing are test inputs.
+3. Use `openai/gpt-5.6-luna` for repeatable synthetic height streams and GPT-5.6 Luna or GPT-5.6 Terra
+   for realistic reasoning, tool, and edit workflows. Terra is explicitly allowed and preferred when
+   it produces more representative multi-step repository work. Record the exact provider/model for
+   every scenario and do not silently change models during a reproduction because output length,
+   reasoning cadence, tool concurrency, and timing are test inputs.
 4. Use a fresh run seed and record it before taking any actions. Reuse the same seed when reproducing
    a failure.
 5. Save a run ledger under `artifacts/ai-fuzzy/<timestamp>-<seed>.md`. `artifacts/` is intentionally
    ignored by Git.
-6. Delete every temporary session created by the run, following the cleanup contract below.
-7. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
+6. Roll back and verify every run-created change in `tmp/opencode` using the fixture cleanup contract.
+7. Delete every temporary session created by the run, following the cleanup contract below.
+8. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
    VS Code version, viewport/layout, seed, and artifact paths.
+9. A standard run is incomplete if it streams only synthetic prose or Markdown. It must include a
+   realistic repository task in `tmp/opencode` that produces reasoning, separate tool calls, file edits,
+   test output, diffs, and final response text while the UI is observed for frame-level flicker.
 
 ### Controller Session Safety
 
@@ -93,9 +99,51 @@ deletion is soft, permanently delete only the individually identified run-create
 trash. Record deleted IDs, verification, and any cleanup failure in the ledger. A cleanup failure does
 not change scenario evidence, but it must be reported prominently with the remaining session IDs.
 
-If credentials, a GUI, or Luna are unavailable, continue with every feasible automated check and mark
-the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn a
-blocked visual check into a pass or describe an automated-only run as a successful AI test.
+### Repository Fixture Safety
+
+Realistic tool and edit scenarios run against the OpenCode fixture at `<varro-root>/tmp/opencode`,
+never against the Varro source worktree. The model may inspect, edit, and test OpenCode so Varro renders
+real reasoning, tools, patches, changed-file summaries, and command output without risking the code
+under test.
+
+1. From the Varro root, prepare the fixture before launching the host:
+
+   ```sh
+   test -d tmp/opencode/.git || git clone https://github.com/anomalyco/opencode.git tmp/opencode
+   git -C tmp/opencode status --short
+   git -C tmp/opencode rev-parse HEAD
+   ```
+
+2. Require a clean fixture before a model is allowed to edit. If `tmp/opencode` has pre-existing tracked,
+   staged, or untracked changes, do not reset, clean, stash, overwrite, or include them in the test. Ask
+   the user to preserve them or provide a clean fixture, then mark realistic edit scenarios `BLOCKED`
+   if a clean baseline cannot be obtained.
+3. Record the baseline commit and every path created, modified, renamed, or deleted by the run. Prompts
+   must forbid commits, branch changes, dependency upgrades, generated dependency trees, and edits
+   outside the fixture.
+4. Launch the Extension Development Host with the fixture as its workspace while loading Varro from
+   the Varro source tree:
+
+   ```sh
+   VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode
+   ```
+
+   The printed launch metadata must show `tmp/opencode` as `workspace`. Opening Varro itself as the
+   editable workspace does not satisfy realistic edit scenarios.
+5. After the last scenario and before final session/host cleanup, roll back only paths recorded as
+   changed by the run. Restore tracked paths from the recorded baseline and remove only run-created
+   untracked paths. Never use `git reset --hard`, `git clean`, bulk deletion, or a broad restore that
+   could erase unrelated work.
+   A path-scoped cleanup may use `git restore --source=<baseline> --staged --worktree -- <recorded-paths>`
+   for tracked paths, followed by individual removal of exact run-created untracked paths.
+6. Verify `HEAD` still equals the recorded baseline and `git status --short` is empty. A model commit,
+   an unknown changed path, or any residual change is a cleanup failure and must be reported prominently;
+   do not guess at recovery. Also verify that the AI run created no changes in the Varro source worktree;
+   never revert unrelated Varro changes made by the user or another agent.
+
+If credentials, a GUI, or Luna/Terra are unavailable, continue with every feasible automated check and
+mark the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn
+a blocked visual check into a pass or describe an automated-only run as a successful AI test.
 
 ## Automated Preflight
 
@@ -120,20 +168,23 @@ what was omitted.
 
 ## Real Editor Setup
 
-1. Run `npm run ai:vscode` to build Varro and launch a persistent, isolated Extension Development
-   Host. Use the printed profile path in the ledger. This avoids reusing a normal VS Code singleton and
-   uses a short temporary profile path that stays below the macOS IPC socket-path limit. On macOS the
-   host starts hidden in the background so launch and setup do not steal focus; reveal it only when the
-   real-editor interactions are ready to begin. Alternatively, open this repository in VS Code and press
-   `F5` to start **VS Code Extension Development** when the current environment can reliably control the
-   resulting window.
+1. Prepare the clean `tmp/opencode` fixture under Repository Fixture Safety, then run
+   `VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode` to build Varro and launch a persistent,
+   isolated Extension Development Host. Use the printed profile and workspace paths in the ledger. This
+   avoids reusing a normal VS Code singleton and uses a short temporary profile path that stays below
+   the macOS IPC socket-path limit. On macOS the host starts hidden in the background so launch and setup
+   do not steal focus; reveal it only when the real-editor interactions are ready to begin. A manually
+   launched **VS Code Extension Development** window is acceptable only when its editable workspace is
+   the clean `tmp/opencode` fixture and the current environment can reliably control it. Opening Varro
+   itself in the test host does not satisfy AI-07 or AI-08.
    Reuse this host for the complete run. After rebuilding Varro, reload the same Extension Development
    Host instead of running `npm run ai:vscode` again. Launch another isolated host only when a scenario
    explicitly requires a fresh cold profile. Close the previous test host first unless simultaneous
    hosts are strictly required by the scenario.
 2. Use a dedicated Extension Development Host window. Do not use a production Varro window that has
    unrelated sessions or settings.
-3. Open the Varro view and explicitly select GPT Luna. Record the exact provider/model shown by Varro.
+3. Open the Varro view and explicitly select GPT Luna or GPT Terra. Use Luna for controlled text-height
+   streams and Luna or Terra for realistic repository work; record the exact provider/model per scenario.
 4. Start with the secondary sidebar between 430 and 500 CSS pixels wide and the window at least 800
    CSS pixels high. Record window size, zoom, sidebar side, panel visibility, theme, and font scaling.
 5. Use a new Varro session titled `VFZ <seed>` unless the scenario requires reopening a prepared long
@@ -148,10 +199,11 @@ what was omitted.
    containing row or an adjacent card.
 7. Keep DevTools closed for the first pass because docking changes webview dimensions. Use it only for
    diagnosis or metric capture, and record that the run became instrumented.
-8. Record every test host PID, profile path, and debugging endpoint when it is launched. Before writing
-   the ledger or final report, terminate every Extension Development Host launched by the run and verify
-   that its process and debugging endpoint have stopped. Delete run-created temporary sessions before
-   terminating the final host. Never leave persistent test hosts open.
+8. Record every test host PID, profile path, workspace path, and debugging endpoint when it is launched.
+   Verify that the workspace shown by launch metadata is `tmp/opencode`. Before writing the ledger or
+   final report, terminate every Extension Development Host launched by the run and verify that its
+   process and debugging endpoint have stopped. Delete run-created temporary sessions before terminating
+   the final host. Never leave persistent test hosts open.
 
 The existing F5 host can preserve extension state. For cold-load checks, close the Extension
 Development Host, start it again, and do not warm the target session by opening or scrolling it first.
@@ -163,7 +215,8 @@ is not the interactive geometry environment.
 Do not stop after noticing that no Extension Development Host is already running. Attempt recovery in
 this order:
 
-1. Run `npm run ai:vscode` and verify that a window titled `[Extension Development Host]` appears.
+1. Run `VARRO_AI_WORKSPACE="$PWD/tmp/opencode" npm run ai:vscode` and verify that a window titled
+   `[Extension Development Host]` appears.
 2. If launch fails, inspect the command output and running processes. On macOS, an IPC socket error such
    as `longer than 103 chars` means the user-data path is too long; use the launcher rather than a long
    hand-written `--user-data-dir`. A regular VS Code window without the development-host title usually
@@ -178,8 +231,9 @@ this order:
    **"The Extension Development Host is running, but I cannot control its VS Code window. Would you
    like to enable/approve editor automation, perform the listed native actions while I record results,
    or stop and record the AI test as failed?"**
-5. If credentials, GPT Luna, required prepared history, or another precondition needs user action, ask
-   one concrete question describing the missing prerequisite and the available choices.
+5. If credentials, GPT Luna/Terra, a clean `tmp/opencode` fixture, required prepared history, or another
+   precondition needs user action, ask one concrete question describing the missing prerequisite and
+   the available choices.
 6. If the user stops, declines, or the problem remains unresolved, mark affected scenarios `BLOCKED`
    and the overall AI test `FAIL`. Preserve diagnostics and the recovery attempts in the ledger.
 
@@ -202,7 +256,7 @@ Record every chosen action before performing it. Use these action sets:
 | Pause after action | `0`, `1`, `2`, `4`, or `12` animation-equivalent frames |
 | Width | `360`, `430`, `486`, `720` CSS pixels |
 | Transcript key | `ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`, `Space`, `Shift+Space`, `Home`, `End` |
-| Content mutation | stream text, complete tool, expand/collapse disclosure, toggle Thinking, open/close diff |
+| Content mutation | stream reasoning/text, start/complete tool, update todo, edit file, expand/collapse disclosure, toggle Thinking, open/close diff |
 | Focus owner | transcript, composer, inline editor, diff, nested tool scroller, session list |
 
 Throughout this playbook, `native` means an actual desktop-style browser/Electron input event delivered
@@ -217,10 +271,36 @@ that assigns `scrollTop`, calls `scrollTo()`, invokes `.click()`, or directly mu
 ownership transition and browser event ordering are part of the test. DOM and CDP evaluation remain
 valid for inspection and geometry sampling.
 
+### Frame-Level Flicker Observation
+
+Flicker is a regression, not cosmetic tolerance. Observe the complete streaming lifecycle, with special
+attention to boundaries where Varro changes the projection of the same underlying content:
+
+- Thinking starts, receives deltas, collapses, expands, moves into Explored, or becomes hidden
+- parallel tools enter, complete out of order, become retained/exiting, group into Explored, or yield
+  space to streamed text
+- todo rows update or disappear while another tool or response is streaming
+- file edits first appear, merge into a file stack, open as a diff, receive focus, and settle
+- command output grows into or out of a nested scroller
+- final prose begins after tools, the active tray disappears, and Worked replaces the trailing state
+
+Sample consecutive animation frames before, during, and after each boundary. Track stable part/message
+identities and bounding rectangles where possible, while also directly observing opacity, visibility,
+order, duplicate mounts, and transient text. A one-frame disappearance and reappearance, stale label,
+double render, order swap, collapsed gap, or surrounding-content shift fails the scenario even if the
+same final DOM eventually returns. A final screenshot, settled geometry assertion, or successful model
+response cannot by itself prove that flicker did not occur.
+
 ## Transcript Recipes
 
 Prefix every generated prompt with a unique marker such as `[VFZ:<seed>:T07]`. Markers make visual
 anchors and failed turns searchable after reload.
+
+Synthetic payloads remain useful for deterministic height coverage, but they do not replace realistic
+agent streaming. During the standard run, observe both a controlled text stream and an OpenCode task
+that interleaves reasoning, tool starts/completions, file edits, test commands, diff rendering, and final
+text. Sample every animation frame around each projection change; a transient wrong frame is a failure
+even when the settled layout is correct.
 
 ### Varied Height Turn
 
@@ -236,7 +316,7 @@ Send this template, replacing the marker and rotating the requested form by seed
 Do not summarize or omit rows. End with END-<number>.
 ```
 
-### Long Luna Stream
+### Controlled Text Stream
 
 ```text
 [VFZ:<seed>:STREAM] Produce 80 numbered sections. Alternate a one-line section with a paragraph of
@@ -247,13 +327,30 @@ blocks after section 40. Emit every section in order and end with VFZ-STREAM-END
 ### Tool And Activity Stream
 
 ```text
-[VFZ:<seed>:TOOLS] Inspect this repository for message-list virtualization risks. Use several separate
-read, grep, and test operations rather than one combined operation. When parallel tool calls are
-supported, begin with at least six independent read or grep operations in one assistant step so four
-or more activity items remain visible together, then run at least two tests separately. Keep a todo
-list, explain findings between operations, and finish with a concise report containing VFZ-TOOLS-END.
-Do not edit files.
+[VFZ:<seed>:TOOLS] Work only in the current OpenCode repository. Investigate one real, bounded code
+quality or test-coverage issue, explain the approach in reasoning, inspect the relevant implementation
+with several separate read/search operations, edit two to four existing source or test files, and run
+at least two focused checks separately. When parallel tool calls are supported, begin with at least six
+independent read or search operations in one assistant step so four or more activity items remain
+visible together. Keep a todo list and continue producing brief progress text between tool groups.
+Open and review the resulting diff, fix any issue found by the checks, and finish with a concise report
+containing VFZ-TOOLS-END. Do not commit, change branches, install or upgrade dependencies, generate
+dependency trees, touch files outside this repository, or undo changes you did not make.
 ```
+
+Choose a task that naturally exercises several content forms instead of instructing the model to emit
+decorative Markdown. The timed observation must include all of these if the model supports them:
+
+- visible Thinking/reasoning updates before and between tool groups
+- parallel and sequential reads/searches with overlapping active items
+- at least one real file edit followed by an inline file card or diff
+- a command with enough output to create a nested scroller
+- a failed or corrective intermediate check when it occurs naturally; do not manufacture failures
+- completion transitions from active tools into Explored/Worked plus final response text
+
+If the first prompt does not produce edits, a diff, and a verified nested scroller, send one bounded
+follow-up in the same run-created session. If those preconditions still cannot be reached, mark AI-07
+and AI-08 `BLOCKED`; do not replace the realistic task with injected DOM state or edits to Varro.
 
 ### Long Session Preparation
 
@@ -383,12 +480,14 @@ Pass invariants:
 - The first prompt is reachable and the history banner disappears at the true beginning.
 - The replay follows the same marker order, even if response latency differs.
 
-### AI-06 Luna Streaming And Bottom Follow
+### AI-06 Controlled Streaming And Bottom Follow
 
 Precondition: the 32-turn session is at the bottom.
 
-1. Send the long Luna stream recipe and make no input for the first 20 visible sections.
-2. Wheel upward beyond one viewport while Luna is still streaming and record a visible marker offset.
+1. Send the controlled text stream recipe with Luna or Terra and make no input for the first 20 visible
+   sections.
+2. Wheel upward beyond one viewport while the model is still streaming and record a visible marker
+   offset.
 3. Wait for 10 more sections, then scroll slowly farther upward.
 4. Return near the bottom with downward wheel input, then use jump-to-latest if shown.
 5. While pinned, send one small downward wheel tick and let the stream complete.
@@ -402,19 +501,23 @@ Pass invariants:
   not.
 - The final `VFZ-STREAM-END` marker is reachable and the trailing Thinking/Worked area does not double
   mount or leave a permanent gap.
+- No streamed paragraph, code block, table, Thinking block, status label, or trailing summary disappears,
+  reappears, swaps order, or flashes in a different projection for even one sampled frame.
 
 ### AI-07 Activity, Tools, And Sticky Streaming
 
-Precondition: the session is virtualized, the latest user prompt can become sticky, and the active
-tray contains a nested scroller that can consume wheel input in the intended direction. Before the
-timed actions, verify that the target has `scrollHeight > clientHeight`, computed `overflow-y` of
+Precondition: the Extension Development Host workspace is the clean `tmp/opencode` fixture, the session
+is virtualized, the latest user prompt can become sticky, and the active tray contains a nested scroller
+that can consume wheel input in the intended direction. Before the timed actions, verify that the target
+has `scrollHeight > clientHeight`, computed `overflow-y` of
 `auto` or `scroll`, and available scroll range in that direction. If the first tool recipe does not
-produce enough simultaneously visible or retained activity, prompt Luna for at least six independent
-read/search operations in one assistant step when parallel tool calls are supported, then restart the
-scenario from its precondition. An expanded Explored disclosure is ordinary outer flow content and
+produce enough simultaneously visible or retained activity, prompt Luna or Terra for at least six
+independent read/search operations in one assistant step when parallel tool calls are supported, then
+restart the scenario from its precondition. An expanded Explored disclosure is ordinary outer flow content and
 does not satisfy this precondition unless it independently passes the same nested-scroller checks.
 
-1. Send the tool and activity recipe using Luna.
+1. Send the realistic tool and activity recipe using Luna or Terra. Record the clean fixture baseline
+   and every changed path before timed interaction continues.
 2. Keep the source prompt just above the viewport while reasoning text and tool cards appear.
 3. Expand the active tray item when available, wheel the verified nested scroller while it has range,
    and then move the pointer outside that scroller and wheel the outer transcript.
@@ -432,14 +535,20 @@ Pass invariants:
 - A detached visible marker remains fixed through completion and grouping.
 - At the bottom, disappearing activity space is replaced without a one-frame jump and releases after
   streamed content consumes it.
+- Thinking, active items, completed items, file cards, diffs, Explored, Worked, and final text never
+  disappear and reappear, render twice, swap order, or flash through a stale intermediate projection.
+- Every run-created OpenCode edit appears in the expected file/diff UI and remains stable while tool
+  completion and response text stream around it.
 
 ### AI-08 Seeded Mixed-Ownership Fuzz
 
-Precondition: an active Luna stream in a virtualized session with at least one expandable disclosure
-and a verified nested scroller using the AI-07 geometry and overflow checks.
+Precondition: an active Luna or Terra realistic repository stream in a virtualized session with at
+least one file edit, one expandable disclosure, and a verified nested scroller using the AI-07 geometry
+and overflow checks.
 
 Generate and record all 50 seeded actions before starting the stream. Reserve early positions for the
-session switch and nested-to-outer wheel handoff so Luna cannot normally finish before those actions.
+session switch and nested-to-outer wheel handoff so the model cannot normally finish before those
+actions.
 Perform exactly those 50 actions and ensure the sequence contains at least one of every category:
 
 - upward and downward wheel input
@@ -447,6 +556,7 @@ Perform exactly those 50 actions and ensure the sequence contains at least one o
 - the same keys while the composer or inline editor is focused
 - sidebar width resize
 - disclosure expansion and collapse
+- file-card and diff expansion, focus, and collapse
 - sticky click or jump-to-latest
 - session switch away and back
 - outer transcript movement after nested scrolling
@@ -454,9 +564,9 @@ Perform exactly those 50 actions and ensure the sequence contains at least one o
 An unavailable or mis-targeted action does not count toward the 50. Do not treat sticky chrome, a
 message row, an expanded non-scrollable disclosure, or an element that merely differs by a few pixels
 of box-model rounding as a nested scroller. Recheck the target immediately before dispatch because
-streaming can remove its available range. If Luna settles before every required active-stream action,
-restart the scenario with the same seed and a fresh long stream rather than completing the sequence
-against settled content.
+streaming can remove its available range. If the model settles before every required active-stream
+action, restart the scenario with the same seed and a fresh realistic stream rather than completing the
+sequence against settled content.
 
 Pass invariants:
 
@@ -465,6 +575,8 @@ Pass invariants:
 - Session switching never mixes messages, sticky previews, loading states, or streaming status.
 - Focus remains usable and the composer accepts input after the sequence.
 - The viewport has painted rows at all times and returns to a coherent latest state.
+- No content form flickers during the sequence, including Thinking, todo updates, activity trays,
+  inline edits, changed-file summaries, diffs, command output, streamed prose, and Worked state.
 
 On failure, stop the random sequence. Save the exact action prefix, then replay only that prefix from
 the scenario precondition with the same seed. Use delta debugging: remove contiguous halves of the
@@ -486,12 +598,18 @@ Run these when the changed area, observed behavior, or user request calls for th
 | `AI-16` | Huge code, table, terminal, and nested scrollers | Markdown, tool cards, terminal attachments, or wheel ownership changed |
 
 For each extended scenario, combine the named mutation with `AI-02` reflow, `AI-06` detached
-streaming, and the ownership invariants relevant to the changed component.
+streaming, the realistic `tmp/opencode` workflow when tools or edits are relevant, and the ownership
+invariants relevant to the changed component.
 
 ## Failure Oracle
 
 Treat any of the following as a failure even if the final screen settles correctly:
 
+- Any one-frame flicker, flash, disappearance/reappearance, duplicate projection, stale projection, or
+  order swap in streamed content. This includes Thinking, todo items, active/retained/exiting tools,
+  Explored/Worked summaries, inline file cards, diffs, command output, Markdown, and final response text.
+- A tool-to-Explored, reasoning-to-text, edit-to-diff, or streaming-to-Worked handoff briefly collapses
+  space and shifts surrounding content before restoring it.
 - A marked row visibly jumps without matching direct input.
 - Content reverses the direction of a mouse-wheel, keyboard, pointer-drag, or scrollbar input.
 - A frame shows a blank viewport, overlapping rows, duplicate rows, or the wrong sticky prompt.
@@ -506,6 +624,10 @@ Treat any of the following as a failure even if the final screen settles correct
 
 A visual suspicion is not yet a root cause. Preserve the observation time, marker, preceding actions,
 and layout. Capture a screenshot when available, then replay before editing production code.
+Flicker can exist for only one animation frame, so a settled screenshot or final DOM state cannot clear
+a suspected failure. Sample consecutive animation frames across every tool start/completion, streamed
+delta, reasoning visibility change, file edit, diff mount, activity grouping, and Worked transition.
+Record which exact element disappeared, duplicated, changed order, or changed its viewport rectangle.
 For resize and measurement suspicions, first prove that the same painted element moved. Text lookup on
 an outer row, a first-intersecting-row heuristic, or movement of a neighboring card is insufficient
 when the active anchor may be a visible assistant render item inside that row.
@@ -526,8 +648,10 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 - OS and VS Code version:
 - Varro version:
 - OpenCode version:
-- Model/provider:
+- Model/provider per scenario:
 - Seed:
+- Fixture path, baseline commit, and initial status:
+- Run-created fixture paths and rollback verification:
 - Window and webview dimensions:
 - Zoom, theme, sidebar side, panel state:
 - Session title/ID and prepared turn count:
@@ -565,6 +689,9 @@ Create `artifacts/ai-fuzzy/<timestamp>-<seed>.md` from this template:
 
 Do not write `PASS` without evidence that the scenario reached its precondition. Record unavailable
 attachments, insufficient history, missing controls, credentials, or model access as explicit blocks.
+For AI-07 and AI-08, also record the realistic task, actual reasoning/tool/edit/test/diff content
+observed, changed OpenCode paths, and frame-level flicker sampling points. Synthetic Markdown-only
+streaming cannot satisfy those scenarios.
 The overall result is `PASS` only when every scenario required by the request ran in the real Extension
 Development Host and passed. Any `FAIL` or `BLOCKED` required scenario makes the overall result `FAIL`.
 

@@ -568,6 +568,7 @@ export function MessageList() {
   let directMovementAnchor: { anchor: VisibleScrollAnchor; scrollTop: number } | null = null;
   let pendingWheelResizeAnchor: VisibleScrollAnchor | null = null;
   let detachedAnchorRefreshRafId = 0;
+  let keydownDestinationRafId = 0;
   let pendingThinkingLayoutAnchor: VisibleScrollAnchor | null = null;
   const AUTO_SCROLL_THRESHOLD_PX = 60;
   const REATTACH_THRESHOLD_PX = 10;
@@ -965,10 +966,26 @@ export function MessageList() {
   function beginWidthResize(options?: { fontChanged?: boolean }) {
     if (!widthResizeAnchor && !autoScroll()) {
       const wheelAnchor = pendingWheelResizeAnchor;
+      const containerRect = containerRef?.getBoundingClientRect();
+      // The wheel anchor is a prediction captured at gesture time and may be minutes old;
+      // unlike freshly captured anchors it must re-verify visibility before use.
+      const wheelAnchorElement = wheelAnchor?.element ?? null;
+      const wheelAnchorRect = wheelAnchorElement?.getBoundingClientRect();
+      const wheelAnchorIsVisible = !!(
+        wheelAnchor &&
+        wheelAnchorElement &&
+        containerRef?.contains(wheelAnchorElement) &&
+        wheelAnchorElement.isConnected &&
+        containerRect &&
+        wheelAnchorRect &&
+        wheelAnchorRect.bottom > containerRect.top &&
+        wheelAnchorRect.top < containerRect.bottom
+      );
+      const usableWheelAnchor = wheelAnchorIsVisible ? wheelAnchor : null;
+      pendingWheelResizeAnchor = null;
       const rememberedElement = lastDetachedVisibleAnchor
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
-      const containerRect = containerRef?.getBoundingClientRect();
       const rememberedRect = rememberedElement?.getBoundingClientRect();
       const directElementIsCurrent = !!(
         lastDetachedVisibleAnchor?.element?.isConnected &&
@@ -991,7 +1008,10 @@ export function MessageList() {
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
           : null;
       widthResizeAnchor =
-        wheelAnchor ?? rememberedAnchor ?? virtualAnchor ?? captureMountedVisibleScrollAnchor();
+        usableWheelAnchor ??
+        rememberedAnchor ??
+        virtualAnchor ??
+        captureMountedVisibleScrollAnchor();
       setWidthResizePinnedMessageId(widthResizeAnchor?.messageId ?? null);
       restoreVisibleScrollAnchor(widthResizeAnchor);
     }
@@ -3353,6 +3373,11 @@ export function MessageList() {
         exitingActivityPartKeys().size > 0
       ) {
         activityExitSummarySettleRafId = requestAnimationFrame(settle);
+      } else if (isLoading() && untrack(appendBottomReserve) > 0.5) {
+        // Keep ownership without a hot frame loop until turn completion consumes the reserve.
+        activityExitSummarySettleFrames = 0;
+      } else {
+        clearActivityExitSummaryAnchor();
       }
     };
     activityExitSummarySettleRafId = requestAnimationFrame(settle);
@@ -4520,6 +4545,15 @@ export function MessageList() {
     ) {
       return;
     }
+    // Space activates interactive controls instead of scrolling the list; arming scroll
+    // ownership for it would misattribute later programmatic scrolls to user input.
+    if (
+      event.key === ' ' &&
+      target !== containerRef &&
+      target.closest('button, a, label, summary, [role="button"], [role="tab"], [role="option"]')
+    ) {
+      return;
+    }
     if (
       event.key !== 'ArrowUp' &&
       event.key !== 'ArrowDown' &&
@@ -4534,9 +4568,11 @@ export function MessageList() {
     pendingExpansionScrollAnchor = null;
     historyAnchorSettleOwner = null;
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    pendingWheelResizeAnchor = null;
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
       widthResizeAnchor = null;
+      finishWidthResizeNow();
     }
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
@@ -4573,8 +4609,10 @@ export function MessageList() {
       containerRef.scrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
       directMovementAnchor = null;
       const sessionId = state.activeSessionId;
-      requestAnimationFrame(() => {
-        if (!containerRef || state.activeSessionId !== sessionId) return;
+      if (keydownDestinationRafId) cancelAnimationFrame(keydownDestinationRafId);
+      keydownDestinationRafId = requestAnimationFrame(() => {
+        keydownDestinationRafId = 0;
+        if (disposed || !containerRef || state.activeSessionId !== sessionId) return;
         const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
         const destinationIndex = destinationMetrics
           ? getFirstVisibleMessageIndexFromVirtualMetrics({
@@ -4605,6 +4643,7 @@ export function MessageList() {
     }
     deferredScrollToBottomRequestKey = null;
     stickyJumpSettleEpoch += 1;
+    pendingWheelResizeAnchor = null;
     setStickyNavigationInProgress(false);
     pendingTurnNavigationAnimationMessageId = null;
     setActiveTurnNavigationTargetId(null);
@@ -4626,6 +4665,7 @@ export function MessageList() {
     }
     pendingExpansionScrollAnchor = null;
     directMovementAnchor = null;
+    pendingWheelResizeAnchor = null;
     if (event.pointerType !== 'touch') {
       if (event.target !== containerRef) return;
 
@@ -4648,6 +4688,7 @@ export function MessageList() {
     if (widthResizeActive) {
       publishPendingWidthMeasurements({ preserveVisibleAnchor: false });
       widthResizeAnchor = null;
+      finishWidthResizeNow();
     }
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
     historyAnchorSettleOwner = null;
@@ -4965,6 +5006,7 @@ export function MessageList() {
       clearLoadingRowReserveReleaseTimer();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       if (detachedAnchorRefreshRafId) cancelAnimationFrame(detachedAnchorRefreshRafId);
+      if (keydownDestinationRafId) cancelAnimationFrame(keydownDestinationRafId);
       cancelScheduledMeasurement();
       cancelScheduledStickyPreviewFrame();
       cancelWidthResize();
@@ -5156,6 +5198,7 @@ export function MessageList() {
     lastVirtualContentOrigin = 0;
     lastDetachedVisibleAnchor = null;
     directMovementAnchor = null;
+    pendingWheelResizeAnchor = null;
     measuredHeights.clear();
     zeroHeightRenderContentSignatures.clear();
     forcedVirtualContentMessageIds.clear();
@@ -5539,6 +5582,81 @@ export function MessageList() {
         : message
     );
   });
+  const activityPartKeysBehindStreamingPartState = createMemo<{
+    sessionId: string | null;
+    userMessageId: string | null;
+    keys: ReadonlySet<string>;
+  }>(
+    (previous) => {
+      const sessionId = state.activeSessionId;
+      const turn = trailingAssistantTurn();
+      const userMessageId = turn?.userMessageId ?? null;
+      const retainedKeys =
+        previous.sessionId === sessionId && previous.userMessageId === userMessageId
+          ? previous.keys
+          : new Set<string>();
+      const trailingMessageIds = trailingAssistantTurn()?.assistantMessageIds;
+      const streamingPartId = state.streamingPartId;
+      if (
+        !trailingMessageIds?.size ||
+        !streamingPartId ||
+        state.streamingText.trim().length === 0
+      ) {
+        return { sessionId, userMessageId, keys: retainedKeys };
+      }
+      const precedingActivityPartKeys = new Set<string>();
+      for (const message of compactActivityMessages()) {
+        if (!trailingMessageIds.has(message.info.id)) continue;
+        for (const part of message.parts) {
+          if (part.id === streamingPartId) {
+            const keys =
+              part.type === 'text'
+                ? new Set([...retainedKeys, ...precedingActivityPartKeys])
+                : retainedKeys;
+            return { sessionId, userMessageId, keys };
+          }
+          if (isAssistantActivityPart(part)) {
+            precedingActivityPartKeys.add(getAssistantActivityPartKey(part));
+          }
+        }
+      }
+      return { sessionId, userMessageId, keys: retainedKeys };
+    },
+    { sessionId: null, userMessageId: null, keys: new Set<string>() }
+  );
+  const activityPartKeysBehindStreamingPart = createMemo(
+    () => activityPartKeysBehindStreamingPartState().keys
+  );
+  const filterActivityPartKeysBehindStream = (keys: ReadonlySet<string>) => {
+    const hiddenKeys = activityPartKeysBehindStreamingPart();
+    if (hiddenKeys.size === 0 || ![...keys].some((key) => hiddenKeys.has(key))) return keys;
+    return new Set([...keys].filter((key) => !hiddenKeys.has(key)));
+  };
+  createComputed<ReadonlySet<string>>((previousHiddenKeys) => {
+    const hiddenKeys = activityPartKeysBehindStreamingPart();
+    const newlyHiddenTransitionKeys = new Set<string>();
+    for (const key of hiddenKeys) {
+      if (
+        !previousHiddenKeys.has(key) &&
+        (visibleActiveActivityPartKeys().has(key) ||
+          retainedActivityPartKeys().has(key) ||
+          exitingActivityPartKeys().has(key))
+      ) {
+        newlyHiddenTransitionKeys.add(key);
+      }
+    }
+    reserveCollapsedActivityTraySpace(newlyHiddenTransitionKeys);
+    return hiddenKeys;
+  }, new Set<string>());
+  const renderedVisibleActiveActivityPartKeys = createMemo(() =>
+    filterActivityPartKeysBehindStream(visibleActiveActivityPartKeys())
+  );
+  const renderedRetainedActivityPartKeys = createMemo(() =>
+    filterActivityPartKeysBehindStream(retainedActivityPartKeys())
+  );
+  const renderedExitingActivityPartKeys = createMemo(() =>
+    filterActivityPartKeysBehindStream(exitingActivityPartKeys())
+  );
   const activeActivityMessageIds = createMemo<ReadonlySet<string>>(() => {
     if (!activeSessionWorking()) return new Set<string>();
     return trailingAssistantTurn()?.assistantMessageIds ?? new Set<string>();
@@ -5825,9 +5943,9 @@ export function MessageList() {
       (key) => getMessageBlockExpanded(key) ?? false,
       (part) => {
         const key = getAssistantActivityPartKey(part);
-        if (visibleActiveActivityPartKeys().has(key)) return 'active';
-        if (retainedActivityPartKeys().has(key)) return 'retained';
-        if (exitingActivityPartKeys().has(key)) return 'exiting';
+        if (renderedVisibleActiveActivityPartKeys().has(key)) return 'active';
+        if (renderedRetainedActivityPartKeys().has(key)) return 'retained';
+        if (renderedExitingActivityPartKeys().has(key)) return 'exiting';
         return 'grouped';
       }
     );
@@ -5912,9 +6030,9 @@ export function MessageList() {
       (key) => getMessageBlockExpanded(key) ?? false,
       {
         delayed: delayedActivityPartKeys,
-        visibleActive: visibleActiveActivityPartKeys(),
-        retained: retainedActivityPartKeys(),
-        exiting: exitingActivityPartKeys(),
+        visibleActive: renderedVisibleActiveActivityPartKeys(),
+        retained: renderedRetainedActivityPartKeys(),
+        exiting: renderedExitingActivityPartKeys(),
       },
       { partId: state.streamingPartId, text: state.streamingText }
     );
@@ -6122,6 +6240,7 @@ export function MessageList() {
 
   function handleStickyPreviewClick(preview: StickyUserMessagePreview) {
     if (stickyNavigationOwnsScroll()) cancelStickyNavigation();
+    pendingWheelResizeAnchor = null;
     pendingTurnNavigationAnimationMessageId = preview.id;
     setActiveTurnNavigationTargetId(preview.id);
     finishWidthResizeNow();
@@ -6649,9 +6768,10 @@ export function MessageList() {
                   trailingFinalResponseMessageId() === messageId)
               }
               assistantActivityGroupMap={assistantActivityGroupMap()}
-              retainedActivityPartKeys={retainedActivityPartKeys()}
-              exitingActivityPartKeys={exitingActivityPartKeys()}
-              visibleActiveActivityPartKeys={visibleActiveActivityPartKeys()}
+              retainedActivityPartKeys={renderedRetainedActivityPartKeys()}
+              exitingActivityPartKeys={renderedExitingActivityPartKeys()}
+              visibleActiveActivityPartKeys={renderedVisibleActiveActivityPartKeys()}
+              groupedActiveActivityPartKeys={visibleActiveActivityPartKeys()}
               hasBuildAgent={hasBuildAgent()}
               latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
               visibleRange={visibleRange()}

@@ -751,7 +751,7 @@ describe('client', () => {
     expect(wildcard).toHaveBeenNthCalledWith(2, message.payload);
   });
 
-  it('delivers sequence-only upgrades only to wildcard listeners', async () => {
+  it('delivers a sequence-only event semantically when its direct twin was not received', async () => {
     const { serverEvents } = await loadClient();
     const specific = vi.fn();
     const wildcard = vi.fn();
@@ -767,9 +767,33 @@ describe('client', () => {
 
     emitMessage({ type: 'server/event', payload: event });
 
-    expect(specific).not.toHaveBeenCalled();
+    expect(specific).toHaveBeenCalledOnce();
+    expect(specific).toHaveBeenCalledWith(event);
     expect(wildcard).toHaveBeenCalledOnce();
     expect(wildcard).toHaveBeenCalledWith(event);
+  });
+
+  it('applies direct and sequence-only event twins only once', async () => {
+    const { serverEvents } = await loadClient();
+    const specific = vi.fn();
+    const wildcard = vi.fn();
+    serverEvents.on('session.updated', specific);
+    serverEvents.on('*', wildcard);
+    const direct = {
+      id: 'event-twin',
+      type: 'session.updated',
+      properties: { sessionID: 'session-1', info: { id: 'session-1' } },
+    } as const;
+    const sequenced = { ...direct, seq: 3, sequenceOnly: true } as const;
+
+    emitMessage({ type: 'server/event', payload: direct });
+    emitMessage({ type: 'server/event', payload: sequenced });
+
+    expect(specific).toHaveBeenCalledOnce();
+    expect(specific).toHaveBeenCalledWith(direct);
+    expect(wildcard).toHaveBeenCalledTimes(2);
+    expect(wildcard).toHaveBeenNthCalledWith(1, direct);
+    expect(wildcard).toHaveBeenNthCalledWith(2, sequenced);
   });
 
   it('logs errors from server event handlers without aborting other listeners', async () => {

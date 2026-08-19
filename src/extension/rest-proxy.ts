@@ -512,6 +512,7 @@ export class RestProxy {
         : await this.callbacks.server.request('GET', '/model/default');
     } catch (err) {
       if (signal?.aborted) throw err;
+      logger.warn(`Default model request failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (response === null) return null;
@@ -530,6 +531,7 @@ export class RestProxy {
       return parseModelRoute(config?.model) ?? undefined;
     } catch (err) {
       if (signal?.aborted) throw err;
+      logger.warn(`Default model config fallback failed: ${err instanceof Error ? err.message : String(err)}`);
       return undefined;
     }
   }
@@ -1852,6 +1854,7 @@ function summarizeSessionDiff(
   for (const candidate of candidates) {
     const diff = asRecord(candidate);
     if (!diff || !isDiffRecord(diff)) continue;
+    if (typeof diff.file === 'string' && isGeneratedDependencyPath(diff.file)) continue;
     validDiffs += 1;
     if (
       typeof diff.file === 'string' &&

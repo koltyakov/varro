@@ -115,6 +115,7 @@ export function Message(props: {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  groupedActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
   let turnRef: HTMLDivElement | undefined;
   const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
@@ -456,6 +457,7 @@ export function Message(props: {
                 retainedActivityPartKeys={props.retainedActivityPartKeys}
                 exitingActivityPartKeys={props.exitingActivityPartKeys}
                 visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+                groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
               />
             </Show>
           </div>

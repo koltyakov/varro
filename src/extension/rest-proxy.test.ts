@@ -1131,6 +1131,31 @@ describe('RestProxy handleRequest', () => {
     expect(JSON.stringify(response)).not.toContain('OTHER_');
   });
 
+  it('excludes generated dependency files from the session diff summary', async () => {
+    const serverRequest = vi.fn((_method: string, path: string) => {
+      if (path === '/session?limit=1000000') {
+        return Promise.resolve([{ id: 'session-1', directory: '/repo' }]);
+      }
+      if (path === '/session/session-1/diff') {
+        return Promise.resolve([
+          { file: 'node_modules/dep/index.js', additions: 40, deletions: 10 },
+          { file: 'src/a.ts', additions: 4, deletions: 1 },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    await proxy.handleRequest(makePayload(88, 'GET', '/varro/session/session-1/diff-summary'));
+
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 88,
+      data: expect.objectContaining({ files: 1, additions: 4, deletions: 1 }),
+    });
+  });
+
   it('includes a descendant beyond OpenCode default session-list page in token totals', async () => {
     const fullSessionList = [
       { id: 'session-1', directory: '/repo' },

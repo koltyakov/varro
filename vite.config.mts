@@ -26,6 +26,6 @@ export default defineConfig(({ mode }) => ({
     minify: 'oxc',
     sourcemap: false,
     target: 'es2022',
-    chunkSizeWarningLimit: 900,
+    chunkSizeWarningLimit: 1024,
   },
 }));

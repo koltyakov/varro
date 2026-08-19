@@ -57,6 +57,10 @@ function reasoningPart(text: string, overrides: Partial<ReasoningPart> = {}): Re
   };
 }
 
+function nextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function assistantMessage(id: string, overrides: Partial<AssistantMessage> = {}): AssistantMessage {
   const base: AssistantMessage = {
     id,
@@ -178,12 +182,17 @@ describe('MessagePart', () => {
     );
   });
 
-  it('follows streaming reasoning at the bottom until the user scrolls away', () => {
+  it('follows streaming reasoning at the bottom until the user scrolls away', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
     const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
       configurable: true,
-      get: () => 500,
+      get(this: HTMLElement) {
+        if (this.classList.contains('thinking-content') && this.textContent?.includes('Step two')) {
+          return 600;
+        }
+        return 500;
+      },
     });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
@@ -198,15 +207,20 @@ describe('MessagePart', () => {
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
       expect(content?.scrollTop).toBe(500);
 
+      // The streaming follow scroll is deferred one frame so it measures the height
+      // after the newest delta is inserted.
       setPart('text', 'Step one\nStep two');
-      expect(content?.scrollTop).toBe(500);
+      await nextFrame();
+      expect(content?.scrollTop).toBe(600);
 
       content!.scrollTop = 100;
       content?.dispatchEvent(new Event('scroll'));
       setPart('text', 'Step one\nStep two\nStep three');
+      await nextFrame();
       expect(content?.scrollTop).toBe(100);
 
       setPart('time', 'end', 1000);
+      await nextFrame();
       expect(content?.scrollTop).toBe(100);
     } finally {
       if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);

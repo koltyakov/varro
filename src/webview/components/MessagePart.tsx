@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { getMessageById, state, showThinking } from '../lib/state';
 import { formatAgentLabel, formatModelName, formatVariantLabel } from '../lib/format';
 import { formatDuration } from '../lib/message-metrics';
@@ -123,6 +123,7 @@ function ReasoningBlock(props: {
   let autoFollow = true;
   let wasExpanded = false;
   let wasStreaming = props.part.time.end === undefined;
+  let followFrameRequest = 0;
   const [expanded, setExpanded] = createSignal(
     getMessageBlockExpanded(currentExpansionKey) ?? false
   );
@@ -145,6 +146,20 @@ function ReasoningBlock(props: {
     setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? false);
   });
 
+  const followStreamingBottom = () => {
+    if (followFrameRequest) cancelAnimationFrame(followFrameRequest);
+    const element = contentElement;
+    if (!element) return;
+    followFrameRequest = requestAnimationFrame(() => {
+      followFrameRequest = 0;
+      if (autoFollow && element.isConnected) element.scrollTop = element.scrollHeight;
+    });
+  };
+
+  onCleanup(() => {
+    if (followFrameRequest) cancelAnimationFrame(followFrameRequest);
+  });
+
   createEffect(() => {
     const nextExpanded = expanded();
     const nextStreaming = isStreaming();
@@ -163,7 +178,9 @@ function ReasoningBlock(props: {
       if (autoFollow) contentElement.scrollTop = 0;
       autoFollow = false;
     } else if (nextStreaming && autoFollow) {
-      contentElement.scrollTop = contentElement.scrollHeight;
+      // The newest delta's DOM insert lands after this effect run; measure on the next
+      // frame so the follow scroll reflects the post-insert height.
+      followStreamingBottom();
     }
 
     wasExpanded = nextExpanded;

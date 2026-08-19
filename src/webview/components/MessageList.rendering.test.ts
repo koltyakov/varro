@@ -907,7 +907,7 @@ describe('MessageList compact activity', () => {
     );
   });
 
-  it('skips the minimum visible hold when response text is already streaming', async () => {
+  it('hides completed active activity when response text is already streaming', async () => {
     const search = toolPart('search-streaming', 'assistant-1', 'call-search-streaming');
     search.tool = 'grep';
     search.state = {
@@ -949,15 +949,154 @@ describe('MessageList compact activity', () => {
     });
     await Promise.resolve();
 
-    expect(
-      container?.querySelector('[data-activity-part-id="search-streaming"].is-exiting')
-    ).not.toBeNull();
-    expect(
-      container?.querySelector('[data-activity-part-id="search-streaming"].is-completed')
-    ).toBeNull();
+    expect(container?.querySelector('[data-activity-part-id="search-streaming"]')).toBeNull();
     expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
       'Explored: 1 search'
     );
+  });
+
+  it('hides active activity behind streamed response text', async () => {
+    const read = toolPart('read-before-stream', 'assistant-1', 'call-read-before-stream');
+    read.tool = 'read';
+    read.state = {
+      status: 'completed',
+      input: { filePath: 'src/app.ts' },
+      output: 'source',
+      title: 'src/app.ts',
+      metadata: {},
+      time: { start: 0, end: 1 },
+    };
+    const running = toolPart('search-before-stream', 'assistant-1', 'call-search-before-stream');
+    running.tool = 'grep';
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Searching',
+      time: { start: 1 },
+    };
+    const laterRunning = toolPart(
+      'command-after-stream',
+      'assistant-3',
+      'call-command-after-stream'
+    );
+    laterRunning.state = {
+      status: 'running',
+      input: { command: 'npm test' },
+      title: 'npm test',
+      time: { start: 2 },
+    };
+    const response: TextPart = {
+      ...(textPart('response-streaming', '') as TextPart),
+      messageID: 'assistant-2',
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [read, running],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [response],
+      },
+      {
+        info: assistantMessage('assistant-3', { parentID: 'user-1' }),
+        parts: [laterRunning],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(
+      container?.querySelector('[data-activity-part-id="search-before-stream"]')
+    ).not.toBeNull();
+
+    batch(() => {
+      setState('streamingPartId', response.id);
+      setState('streamingText', 'I found the relevant implementation.');
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+    expect(
+      container?.querySelector('[data-activity-part-id="command-after-stream"]')
+    ).not.toBeNull();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 file'
+    );
+    expect(container?.textContent).toContain('I found the relevant implementation.');
+
+    const explored = [
+      ...container!.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary'),
+    ].find((summary) => summary.textContent?.includes('Explored: 1 file'));
+    expect(explored).toBeDefined();
+    explored?.click();
+
+    expect(container?.querySelector('.assistant-activity-details')?.textContent).toContain(
+      'Search: activity'
+    );
+
+    batch(() => {
+      upsertPart({ ...response, text: 'I found the relevant implementation.' });
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    });
+    await Promise.resolve();
+
+    expect(container?.querySelector('[data-activity-part-id="search-before-stream"]')).toBeNull();
+  });
+
+  it('keeps active activity visible behind streamed reasoning', async () => {
+    const running = toolPart(
+      'search-before-reasoning',
+      'assistant-1',
+      'call-search-before-reasoning'
+    );
+    running.tool = 'grep';
+    running.state = {
+      status: 'running',
+      input: { pattern: 'activity' },
+      title: 'Searching',
+      time: { start: 1 },
+    };
+    const reasoning: Part = {
+      id: 'reasoning-streaming',
+      sessionID: 'session-1',
+      messageID: 'assistant-2',
+      type: 'reasoning',
+      text: '',
+      time: { start: 2 },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Search the code')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [running],
+      },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [reasoning],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(500);
+
+    batch(() => {
+      setState('streamingPartId', reasoning.id);
+      setState('streamingText', 'Considering the relevant implementation.');
+    });
+    await Promise.resolve();
+
+    expect(
+      container?.querySelector('[data-activity-part-id="search-before-reasoning"]')
+    ).not.toBeNull();
   });
 
   it('retains activity while it joins a group owned by an earlier message', async () => {

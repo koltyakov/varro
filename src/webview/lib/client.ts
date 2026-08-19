@@ -605,6 +605,8 @@ type ServerEventsApi = {
 };
 
 const eventListeners = new Map<string, Set<EventHandler>>();
+const observedEventIds = new Set<string>();
+const MAX_OBSERVED_EVENT_IDS = 1_024;
 let workspaceStatusSummary: WorkspaceStatusEventSummary = { entries: [] };
 
 export function invalidateClientWorkspaceCaches(): void {
@@ -612,13 +614,23 @@ export function invalidateClientWorkspaceCaches(): void {
   sessionStatusSlot.current = null;
   questionListSlot.current = null;
   permissionListSlot.current = null;
+  observedEventIds.clear();
   workspaceStatusSummary = { entries: [] };
 }
 
 onMessage((msg) => {
   if (msg.type !== 'server/event') return;
   const evt = msg.payload;
-  if (!evt.sequenceOnly && evt.type === 'workspace.status') {
+  const applyEvent = !evt.id || !observedEventIds.has(evt.id);
+  if (evt.id && applyEvent) {
+    observedEventIds.add(evt.id);
+    while (observedEventIds.size > MAX_OBSERVED_EVENT_IDS) {
+      const oldestId = observedEventIds.values().next().value;
+      if (oldestId === undefined) break;
+      observedEventIds.delete(oldestId);
+    }
+  }
+  if (applyEvent && evt.type === 'workspace.status') {
     const entry = normalizeWorkspaceStatusEntry(evt.properties);
     if (entry) {
       const existing = workspaceStatusSummary.entries.find(
@@ -637,7 +649,7 @@ onMessage((msg) => {
       }
     }
   }
-  if (!evt.sequenceOnly && evt.type === 'workspace.ready') {
+  if (applyEvent && evt.type === 'workspace.ready') {
     const message =
       typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected';
     if (
@@ -650,7 +662,7 @@ onMessage((msg) => {
       };
     }
   }
-  if (!evt.sequenceOnly && evt.type === 'workspace.failed') {
+  if (applyEvent && evt.type === 'workspace.failed') {
     const message =
       typeof evt.properties?.message === 'string'
         ? evt.properties.message
@@ -666,7 +678,7 @@ onMessage((msg) => {
     }
   }
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
-  if (!evt.sequenceOnly && handlers) {
+  if (applyEvent && handlers) {
     for (const h of handlers) {
       try {
         h(evt);

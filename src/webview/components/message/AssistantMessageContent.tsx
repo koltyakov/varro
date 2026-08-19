@@ -359,6 +359,7 @@ export function AssistantMessageContent(props: {
   retainedActivityPartKeys?: ReadonlySet<string>;
   exitingActivityPartKeys?: ReadonlySet<string>;
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
+  groupedActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
   const dedupedParts = createMemo(() => deduplicateFileEdits(props.parts));
   const [readModeOpen, setReadModeOpen] = createSignal(false);
@@ -802,9 +803,10 @@ export function AssistantMessageContent(props: {
             parts={item().parts}
             summaryParts={activityGroup().parts.filter((part) => {
               const key = getAssistantActivityPartKey(part);
+              const activePartKeys =
+                props.groupedActiveActivityPartKeys ?? props.visibleActiveActivityPartKeys;
               return (
-                (!isAssistantActivityPartRunning(part) ||
-                  !props.visibleActiveActivityPartKeys?.has(key)) &&
+                (!isAssistantActivityPartRunning(part) || !activePartKeys?.has(key)) &&
                 (!props.retainedActivityPartKeys?.has(key) ||
                   isActivityGroupExpanded(activityGroup().key))
               );

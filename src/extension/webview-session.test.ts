@@ -661,4 +661,32 @@ describe('WebviewSession', () => {
 
     expect(order).toEqual(['flush', 'post']);
   });
+
+  it('re-posts boot messages before the next API response after a delivery failure', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    await session.handleReady();
+    bridge.post.mockClear();
+
+    const postedTypes = () =>
+      bridge.post.mock.calls.map(([message]) => (message as { type: string }).type);
+
+    const onDeliveryFailure = bridge.onDeliveryFailure.mock.calls[0]?.[0] as () => void;
+    expect(onDeliveryFailure).toBeInstanceOf(Function);
+    onDeliveryFailure();
+
+    session.postApiResponse({ id: 1, data: [] }, session.getRequestGeneration());
+
+    const firstResponseIndex = postedTypes().indexOf('api/response');
+    expect(firstResponseIndex).toBeGreaterThan(-1);
+    expect(postedTypes().slice(0, firstResponseIndex)).toContain('server/status');
+    expect(postedTypes().slice(0, firstResponseIndex)).toContain('config/update');
+
+    bridge.post.mockClear();
+    session.postApiResponse({ id: 2, data: [] }, session.getRequestGeneration());
+
+    expect(postedTypes()).toEqual(['api/response']);
+  });
 });

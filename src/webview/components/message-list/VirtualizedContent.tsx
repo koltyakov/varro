@@ -212,6 +212,7 @@ export function VirtualizedContent(
         retainedActivityPartKeys={props.retainedActivityPartKeys}
         exitingActivityPartKeys={props.exitingActivityPartKeys}
         visibleActiveActivityPartKeys={props.visibleActiveActivityPartKeys}
+        groupedActiveActivityPartKeys={props.groupedActiveActivityPartKeys}
         hasBuildAgent={props.hasBuildAgent}
         latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
         outerListVirtualized={props.outerListVirtualized}

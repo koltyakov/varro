@@ -772,7 +772,6 @@ export {
   archiveSessionGroup,
   deriveSessionIndicators,
   getDiffSummaryStats,
-  getMessageToolSummaryStats,
   getPrimarySessionsForFilter,
   getRecentSessions,
   getRecycleBinSessionIds,

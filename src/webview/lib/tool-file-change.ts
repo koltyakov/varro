@@ -1000,7 +1000,10 @@ type SummaryMessage = {
  * It folds together message-level diff summaries, file-changing tool calls, and
  * patch parts. The same file is merged across absolute (tool) and relative
  * (patch) path forms, line counts accumulate, and directory entries (no
- * extension and no line counts) are dropped.
+ * extension and no line counts) are dropped without consuming the budget. Once
+ * the budget is full the scan stops: changes to already-collected entries that
+ * arrive after the truncation point are intentionally not merged so the scan
+ * stays bounded.
  */
 function collectMessageFileChanges(
   messages: readonly SummaryMessage[],
@@ -1034,6 +1037,26 @@ function collectMessageFileChanges(
       existing = absoluteAliases.get(key);
     }
     if (!existing) {
+      if (Number.isFinite(maxChanges)) {
+        const descendantAlreadyRecorded = result.some((entry) =>
+          keyFor(entry).startsWith(`${key}/`)
+        );
+        if (descendantAlreadyRecorded) return true;
+        for (let index = result.length - 1; index >= 0; index -= 1) {
+          const entry = result[index]!;
+          if (!key.startsWith(`${keyFor(entry)}/`)) continue;
+          result.splice(index, 1);
+          for (const entries of [exactEntries, relativeEntries, absoluteAliases]) {
+            for (const [entryKey, value] of entries) {
+              if (value === entry) entries.delete(entryKey);
+            }
+          }
+        }
+      }
+      // Directory-ish entries (no extension, no line counts) are dropped after the scan
+      // anyway; skipping them here keeps them from consuming the change budget.
+      const hasCounts = (change.additions ?? 0) > 0 || (change.deletions ?? 0) > 0;
+      if (!hasExtension(key) && !hasCounts) return true;
       if (result.length >= maxChanges) {
         truncated = true;
         return false;
@@ -1108,13 +1131,6 @@ function collectMessageFileChanges(
     return hasExtension(key) || hasCounts;
   });
   return { changes, truncated };
-}
-
-export function getMessageFileChanges(
-  messages: readonly SummaryMessage[],
-  workspacePath?: string | null
-): FileChange[] {
-  return collectMessageFileChanges(messages, workspacePath, Number.POSITIVE_INFINITY).changes;
 }
 
 export function getBoundedMessageFileChanges(

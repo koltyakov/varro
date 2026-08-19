@@ -40,9 +40,8 @@ import {
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
 import type { SelectedModel } from '../../lib/app-state-types';
-import type { Part, Session } from '../../types';
+import type { Session } from '../../types';
 import { client } from '../../lib/client';
-import { getMessageFileChanges } from '../../lib/tool-file-change';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
@@ -552,23 +551,6 @@ export function getDiffSummaryStats(diffs: readonly unknown[]): SessionSummarySt
     additions,
     deletions,
   } satisfies SessionSummaryStats;
-}
-
-export function getMessageToolSummaryStats(
-  messages: readonly { info?: { summary?: unknown }; parts: readonly Part[] }[]
-): SessionSummaryStats | null {
-  // Derive from the shared file-change enumeration so the session list count
-  // matches the in-chat Files block exactly.
-  const changes = getMessageFileChanges(messages, state.editorContext.workspacePath);
-  if (changes.length === 0) return null;
-
-  let additions = 0;
-  let deletions = 0;
-  for (const change of changes) {
-    additions += change.additions ?? 0;
-    deletions += change.deletions ?? 0;
-  }
-  return { files: changes.length, additions, deletions } satisfies SessionSummaryStats;
 }
 
 function hasSessionSummaryEdits(stats: SessionSummaryStats) {

@@ -884,12 +884,18 @@ describe('MessageList auto-scroll', () => {
       ],
       rowObserver as unknown as ResizeObserver
     );
-    await Promise.resolve();
-    animationFrames.flush();
+    // Sample every reflow frame: a settled-only assertion can miss a one-frame jump that a
+    // later correction hides.
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+      expect(anchorCard.getBoundingClientRect().top).toBe(8);
+    }
     await Promise.resolve();
 
-    expect(anchorCard.getBoundingClientRect().top).toBe(8);
     list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(anchorCard.getBoundingClientRect().top).toBe(8);
     animationFrames.restore();
   });
 

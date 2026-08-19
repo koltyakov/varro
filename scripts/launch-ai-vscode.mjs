@@ -43,6 +43,8 @@ async function resolveVscodeExecutable() {
 }
 
 const executable = await resolveVscodeExecutable();
+const workspace = path.resolve(process.env.VARRO_AI_WORKSPACE?.trim() || projectRoot);
+await access(workspace);
 // Keep this short because macOS limits local IPC socket paths to roughly 103 bytes.
 const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'vfz-'));
 const userData = path.join(profileRoot, 'u');
@@ -73,7 +75,7 @@ const vscodeArgs = [
   `--user-data-dir=${userData}`,
   `--extensions-dir=${extensions}`,
   `--extensionDevelopmentPath=${projectRoot}`,
-  projectRoot,
+  workspace,
 ];
 const launchExecutable = process.platform === 'darwin' ? '/usr/bin/open' : executable;
 const launchArgs =
@@ -119,7 +121,7 @@ const metadata = await writeVscodeLaunchMetadata(metadataPath, {
   profileRoot,
   userDataDir: userData,
   extensionsDir: extensions,
-  workspace: projectRoot,
+  workspace,
   remoteDebuggingPort,
   sidebarWidth,
 });
@@ -129,6 +131,7 @@ process.stdout.write(
   `Launched persistent VS Code Extension Development Host (Code PID ${String(metadata.pid)})\n`
 );
 process.stdout.write(`Profile: ${profileRoot}\n`);
+process.stdout.write(`Workspace: ${workspace}\n`);
 process.stdout.write(`Launch metadata: ${metadataPath}\n`);
 process.stdout.write(`Remote debugging: http://127.0.0.1:${String(remoteDebuggingPort)}\n`);
 process.stdout.write(`Varro sidebar width: ${String(sidebarWidth)}px\n`);

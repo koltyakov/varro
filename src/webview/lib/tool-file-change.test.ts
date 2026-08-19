@@ -3,7 +3,6 @@ import type { Part, ToolPart, ToolState } from '../types';
 import {
   getBoundedMessageFileChanges,
   getDiffFileChanges,
-  getMessageFileChanges,
   getToolChangePath,
   getToolFileChange,
   getToolFileChanges,
@@ -833,7 +832,7 @@ describe('tool file change helpers', () => {
       },
     ];
 
-    expect(getMessageFileChanges(messages)).toEqual([
+    expect(getBoundedMessageFileChanges(messages, Number.POSITIVE_INFINITY).changes).toEqual([
       {
         kind: 'edited',
         path: 'src/app.ts',
@@ -904,7 +903,9 @@ describe('tool file change helpers', () => {
       { parts: [{ type: 'patch', files: ['src/app.ts'] } as Part] },
     ];
 
-    expect(getMessageFileChanges(messages, workspace)).toEqual([
+    expect(
+      getBoundedMessageFileChanges(messages, Number.POSITIVE_INFINITY, workspace).changes
+    ).toEqual([
       {
         kind: 'edited',
         path: 'src/app.ts',
@@ -928,10 +929,11 @@ describe('tool file change helpers', () => {
       },
     ];
 
-    expect(getMessageFileChanges(messages).map((change) => change.path)).toEqual([
-      'src/webview/App.tsx',
-      'Makefile',
-    ]);
+    expect(
+      getBoundedMessageFileChanges(messages, Number.POSITIVE_INFINITY).changes.map(
+        (change) => change.path
+      )
+    ).toEqual(['src/webview/App.tsx', 'Makefile']);
   });
 
   it('collects large file summaries without quadratic path matching', () => {
@@ -942,7 +944,10 @@ describe('tool file change helpers', () => {
     }));
     const startedAt = performance.now();
 
-    const changes = getMessageFileChanges([{ info: { summary: { diffs } }, parts: [] }]);
+    const changes = getBoundedMessageFileChanges(
+      [{ info: { summary: { diffs } }, parts: [] }],
+      Number.POSITIVE_INFINITY
+    ).changes;
 
     expect(changes).toHaveLength(10_000);
     expect(changes[9_999]?.path).toBe('node_modules/package-9999/index.js');
@@ -966,5 +971,44 @@ describe('tool file change helpers', () => {
     expect(result.truncated).toBe(true);
     expect(result.changes).toHaveLength(100);
     expect(result.changes.at(-1)?.path).toBe('generated/file-99.ts');
+  });
+
+  it('does not count directory entries against the bounded change budget', () => {
+    const messages = [
+      {
+        parts: [
+          toolPart('create', completedState({ path: 'src' })),
+          toolPart('create', completedState({ path: 'dist' })),
+          toolPart('edit', completedState({ path: 'src/a.ts', additions: 1 })),
+          toolPart('edit', completedState({ path: 'src/b.ts', additions: 2 })),
+        ],
+      },
+    ];
+
+    const result = getBoundedMessageFileChanges(messages, 2);
+
+    expect(result.truncated).toBe(false);
+    expect(result.changes.map((change) => change.path)).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('does not count ancestor directory entries with counts or dotted names against the budget', () => {
+    const messages = [
+      {
+        parts: [
+          toolPart('edit', completedState({ path: 'src/generated', additions: 10 })),
+          toolPart('edit', completedState({ path: 'src/generated/a.ts', additions: 1 })),
+          toolPart('edit', completedState({ path: 'cache.v1', additions: 5 })),
+          toolPart('edit', completedState({ path: 'cache.v1/b.ts', additions: 2 })),
+        ],
+      },
+    ];
+
+    const result = getBoundedMessageFileChanges(messages, 2);
+
+    expect(result.truncated).toBe(false);
+    expect(result.changes.map((change) => change.path)).toEqual([
+      'src/generated/a.ts',
+      'cache.v1/b.ts',
+    ]);
   });
 });
