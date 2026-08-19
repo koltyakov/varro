@@ -1,4 +1,5 @@
 import { parseHealthResponse } from '../shared/health';
+import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
 import { parseServerEvent, type ServerStatus } from '../shared/protocol';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { logger } from './logger';
@@ -18,6 +19,7 @@ export type OpenCodeRequestOptions = {
   maxProjectedResponseBytes?: number;
   stripSummaryDiffs?: boolean;
   unscoped?: boolean;
+  signal?: AbortSignal;
 };
 
 export class OpenCodeResponseTooLargeError extends Error {
@@ -34,7 +36,7 @@ export type OpenCodeRescopeResult = {
 
 // The global stream survives per-workspace instance disposal. Its envelopes retain
 // the event directory so Varro can filter them to the active workspace locally.
-const EVENT_STREAM_PATH = '/global/event';
+const EVENT_STREAM_PATH = CURRENT_OPENCODE_ENDPOINTS.eventStream;
 
 interface OpenCodeTransportOptions {
   getUrl: () => string;
@@ -56,6 +58,7 @@ export class OpenCodeTransport {
   private static readonly EVENT_MAX_BUFFER_CHARS = 8_000_000;
   private static readonly EVENT_MAX_PAYLOAD_CHARS = 8_000_000;
   private static readonly EVENT_RECONNECT_WARNING_THRESHOLD = 10;
+  private static readonly EVENT_PROCESSING_YIELD_MS = 8;
   private static readonly MAX_EVENT_RECONNECT_DELAY_MS = 30_000;
   private readonly options: OpenCodeTransportOptions;
   private eventController: AbortController | null = null;
@@ -94,7 +97,9 @@ export class OpenCodeTransport {
     const init: RequestInit = {
       method,
       headers,
-      signal: anySignal(controller.signal, timeoutSignal),
+      signal: options?.signal
+        ? anySignal(controller.signal, timeoutSignal, options.signal)
+        : anySignal(controller.signal, timeoutSignal),
     };
     try {
       if (body !== undefined && method !== 'GET' && method !== 'HEAD') {
@@ -184,7 +189,7 @@ export class OpenCodeTransport {
 
   async readHealthInfo(): Promise<{ healthy: boolean; version?: string }> {
     try {
-      const res = await fetch(`${this.options.getUrl()}/global/health`, {
+      const res = await fetch(`${this.options.getUrl()}${CURRENT_OPENCODE_ENDPOINTS.health}`, {
         signal: AbortSignal.timeout(OpenCodeTransport.HEALTH_TIMEOUT_MS),
       });
       if (!res.ok) return { healthy: false };
@@ -289,9 +294,15 @@ export class OpenCodeTransport {
         resetIdleTimer();
         buffer += decoder.decode(value, { stream: true });
         let boundary: { index: number; length: number } | null;
+        let yieldedAt = Date.now();
         while ((boundary = findSseChunkBoundary(buffer, cursor))) {
           this.processSseChunk(buffer.slice(cursor, boundary.index), controller, generation);
           cursor = boundary.index + boundary.length;
+          if (Date.now() - yieldedAt >= OpenCodeTransport.EVENT_PROCESSING_YIELD_MS) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            if (!isCurrentStream()) return;
+            yieldedAt = Date.now();
+          }
         }
         if (cursor > 0) {
           buffer = buffer.slice(cursor);

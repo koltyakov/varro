@@ -2,6 +2,7 @@ import type { WebviewMessage } from '../shared/protocol';
 import { logger } from './logger';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
+type ApiCancelPayload = Extract<WebviewMessage, { type: 'api/cancel' }>['payload'];
 type ConfigUpdatePayload = Extract<WebviewMessage, { type: 'config/update' }>['payload'];
 type CommandStatePayload = Extract<WebviewMessage, { type: 'commands/state' }>['payload'];
 type DroppedContentFile = Extract<
@@ -68,6 +69,7 @@ export interface MessageRouterCallbacks {
   openExternal(url: string): Promise<void>;
   updateConfig(payload: ConfigUpdatePayload): Promise<void>;
   handleApiRequest(payload: ApiRequestPayload): Promise<void>;
+  cancelApiRequest(payload: ApiCancelPayload): void;
   handleRalphMessage(msg: RalphMessage): void;
   updateQueuedMessages(payload: QueuedMessagesPayload): Promise<void>;
   updateDraftImages(
@@ -196,6 +198,9 @@ export class MessageRouter {
           break;
         case 'api/request':
           await this.handleApiRequestMessage(msg);
+          break;
+        case 'api/cancel':
+          this.callbacks.cancelApiRequest(msg.payload);
           break;
         case 'ralph/start':
         case 'ralph/stop':

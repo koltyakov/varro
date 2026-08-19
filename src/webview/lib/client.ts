@@ -38,6 +38,7 @@ import type {
   ProviderAuthMethodsByProvider,
   WorkspaceStatusEntry,
 } from '../../shared/opencode-types';
+import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
 export type SessionListPage = { items: Session[]; hasMore: boolean };
@@ -45,8 +46,8 @@ export type McpAuthStart = { authorizationUrl: string; oauthState: string };
 
 export const client = {
   async health(): Promise<HealthResponse> {
-    const response = parseHealthResponse(await apiCall('GET', '/global/health'));
-    if (!response) throw malformedResponse('/global/health', 'a health response');
+    const response = parseHealthResponse(await apiCall('GET', CURRENT_OPENCODE_ENDPOINTS.health));
+    if (!response) throw malformedResponse(CURRENT_OPENCODE_ENDPOINTS.health, 'a health response');
     return response;
   },
 
@@ -182,7 +183,11 @@ export const client = {
       // through prompt_async; the queue/steer distinction lives entirely in the UI
       // (queue holds the message until idle, steer sends it immediately).
       const { delivery: _delivery, ...rest } = body;
-      await apiCall('POST', withDirectory(`/session/${id}/prompt_async`, options?.directory), rest);
+      await apiCall(
+        'POST',
+        withDirectory(CURRENT_OPENCODE_ENDPOINTS.sessionPromptAsync(id), options?.directory),
+        rest
+      );
     },
     async respondPermission(
       _sessionId: string,

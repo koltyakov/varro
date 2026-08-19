@@ -84,7 +84,13 @@ export class WebviewSession {
       draftImages(): InitialWebviewState['clipboardImages'];
       flushPendingServerEvents(): void;
     }
-  ) {}
+  ) {
+    this.bridge.onDeliveryFailure(() => {
+      this.deliveryRecoveryPending = true;
+    });
+  }
+
+  private deliveryRecoveryPending = false;
 
   getRequestGeneration() {
     return this.webviewLoadGeneration;
@@ -96,6 +102,10 @@ export class WebviewSession {
   ) {
     if (!this.bridge.getView() || requestGeneration !== this.webviewLoadGeneration) return;
     this.deps.flushPendingServerEvents();
+    if (this.deliveryRecoveryPending) {
+      this.deliveryRecoveryPending = false;
+      this.postBootMessages(this.deps.renderStatus());
+    }
     this.bridge.post({ type: 'api/response', payload });
   }
 
@@ -212,6 +222,7 @@ export class WebviewSession {
     const status = this.deps.renderStatus();
     this.webviewReady = true;
     this.webviewHasFocus = false;
+    this.deliveryRecoveryPending = false;
     this.postBootMessages(status, { clearResolvedEmbedded: true });
     this.flushPendingCommands();
     this.handleInterruptedSessionNotification();
@@ -226,6 +237,7 @@ export class WebviewSession {
   handleVisible() {
     const status = this.deps.renderStatus();
     this.sessionState.clearCompleted();
+    this.deliveryRecoveryPending = false;
     this.postBootMessages(status);
     void this.deps.handleVisibleSideEffects().catch((err) => {
       logger.error(

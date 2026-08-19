@@ -12,6 +12,7 @@ type ReasoningEventContext = {
   markSessionProgress(sessionId: string): void;
   ignoreStaleProgressForCompletedMessage(sessionId: string, messageId: string): boolean;
   ignoreStaleProgressAfterFinishedAssistant(sessionId: string): boolean;
+  recordSessionMessageSnapshotMutation(sessionId: string): void;
 };
 
 export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Array<() => void> {
@@ -75,7 +76,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
   cleanups.push(
     serverEvents.on('session.next.reasoning.started', (data) => {
       const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
+      const sessionID = getEventString(p, 'sessionID');
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
@@ -88,6 +89,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
+      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
       withReasoningMessage(sessionID, reasoningID, () => {}, assistantMessageID);
     })
@@ -96,7 +98,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
   cleanups.push(
     serverEvents.on('session.next.reasoning.delta', (data) => {
       const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
+      const sessionID = getEventString(p, 'sessionID');
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       const delta = getEventString(p, 'delta') || getEventString(p, 'text');
@@ -110,6 +112,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !delta || !ctx.isSessionInActiveTree(sessionID)) return;
+      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
       withReasoningMessage(
         sessionID,
@@ -125,7 +128,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
   cleanups.push(
     serverEvents.on('session.next.reasoning.ended', (data) => {
       const p = data.properties;
-      const sessionID = p?.sessionID as string | undefined;
+      const sessionID = getEventString(p, 'sessionID');
       const reasoningID = getEventString(p, 'reasoningID');
       const assistantMessageID = getEventString(p, 'assistantMessageID');
       if (!sessionID) return;
@@ -138,6 +141,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
       if (!assistantMessageID && ctx.ignoreStaleProgressAfterFinishedAssistant(sessionID)) return;
       ctx.markSessionProgress(sessionID);
       if (!reasoningID || !ctx.isSessionInActiveTree(sessionID)) return;
+      ctx.recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
       const text = getEventString(p, 'text');
       withReasoningMessage(

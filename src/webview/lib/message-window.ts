@@ -20,8 +20,10 @@ const consumedHistoryCursors = new Map<string, Set<string>>();
 const consumedHistoryPromptCursors = new Map<string, Set<string>>();
 // Latest, page, and prompt reads capture this revision before crossing the API boundary.
 const messageWindowRevisions = new Map<string, number>();
+const messageSnapshotMutationRevisions = new Map<string, number>();
 const pendingMessageWindowResets = new Set<string>();
 let nextMessageWindowRevision = 0;
+let nextMessageSnapshotMutationRevision = 0;
 const messageWindowStateVersions = new Map<string, number>();
 const [messageWindowStateVersion, setMessageWindowStateVersion] = createSignal(0);
 let defaultMessageWindowStateVersion = 0;
@@ -234,6 +236,14 @@ export function getSessionMessageWindowRevision(sessionId: string): number {
   return messageWindowRevisions.get(sessionId) ?? 0;
 }
 
+export function getSessionMessageSnapshotMutationRevision(sessionId: string): number {
+  return messageSnapshotMutationRevisions.get(sessionId) ?? 0;
+}
+
+export function recordSessionMessageSnapshotMutation(sessionId: string) {
+  messageSnapshotMutationRevisions.set(sessionId, ++nextMessageSnapshotMutationRevision);
+}
+
 export function getSessionMessageWindowStateVersion(sessionId: string): number {
   messageWindowStateVersion();
   return messageWindowStateVersions.get(sessionId) ?? defaultMessageWindowStateVersion;
@@ -249,8 +259,10 @@ export function resetMessageWindowState() {
   consumedHistoryCursors.clear();
   consumedHistoryPromptCursors.clear();
   messageWindowRevisions.clear();
+  messageSnapshotMutationRevisions.clear();
   pendingMessageWindowResets.clear();
   nextMessageWindowRevision = 0;
+  nextMessageSnapshotMutationRevision = 0;
   messageWindowStateVersions.clear();
   defaultMessageWindowStateVersion = ++nextMessageWindowStateVersion;
   setMessageWindowStateVersion((version) => version + 1);
@@ -309,6 +321,7 @@ function pruneHistoryPageCache() {
 
 function clearSessionMessageWindowStateInternal(sessionId: string) {
   invalidateSessionMessageWindowRequests(sessionId);
+  messageSnapshotMutationRevisions.delete(sessionId);
   messageWindowStateVersions.set(sessionId, ++nextMessageWindowStateVersion);
   setMessageWindowStateVersion((version) => version + 1);
   historyCursors.delete(sessionId);

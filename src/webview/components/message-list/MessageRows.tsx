@@ -290,8 +290,8 @@ function AssistantDialogSummary(props: {
           {props.summary.interrupted
             ? 'Interrupted'
             : props.summary.collectingStats
-            ? 'Collecting stats...'
-            : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
+              ? 'Collecting stats...'
+              : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
         </span>
         <button
           type="button"

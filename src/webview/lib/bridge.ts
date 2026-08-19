@@ -32,10 +32,10 @@ const messageListener = (event: MessageEvent) => {
 window.addEventListener('message', messageListener);
 
 export function cleanupBridge() {
-  disposed = true;
   window.removeEventListener('message', messageListener);
   handlers.clear();
   for (const p of pending.values()) {
+    p.cancelHostRequest();
     p.reject(new Error('Bridge cleaned up'));
   }
   pending.clear();
@@ -52,6 +52,7 @@ export function cleanupBridge() {
     pendingRetries.delete(retry);
     retry.reject(new Error('Bridge cleaned up'));
   }
+  disposed = true;
   if (bridgeWindow[BRIDGE_CLEANUP_KEY] === cleanupBridge) {
     delete bridgeWindow[BRIDGE_CLEANUP_KEY];
   }
@@ -96,6 +97,7 @@ const pending = new Map<
     timer: ReturnType<typeof setTimeout>;
     slowTimer: ReturnType<typeof setTimeout>;
     cleanupAbort?: () => void;
+    cancelHostRequest(): void;
   }
 >();
 type PendingRetry = {
@@ -168,9 +170,17 @@ function sendApiCall<T>(
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
   const id = ++reqId;
+  const cancelKey = crypto.randomUUID();
   const startedAt = Date.now();
   return new Promise<T>((resolve, reject) => {
     let settled = false;
+    let sent = false;
+    let cancelSent = false;
+    const cancelHostRequest = () => {
+      if (!sent || cancelSent) return;
+      cancelSent = true;
+      postMessage({ type: 'api/cancel', payload: { id, cancelKey } });
+    };
     const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
@@ -186,6 +196,7 @@ function sendApiCall<T>(
     };
 
     const timer = setTimeout(() => {
+      cancelHostRequest();
       finish(() => reject(new Error(`API call timed out: ${method} ${path}`)));
     }, options.timeoutMs);
     const slowTimer = setTimeout(() => {
@@ -206,10 +217,12 @@ function sendApiCall<T>(
       timer,
       slowTimer,
       cleanupAbort,
+      cancelHostRequest,
     });
 
     if (options.signal) {
       const abort = () => {
+        cancelHostRequest();
         finish(() => {
           reject(
             options.signal?.reason instanceof Error
@@ -230,12 +243,12 @@ function sendApiCall<T>(
     }
 
     let sendError: unknown;
-    let sent = false;
     try {
       sent = postMessage({
         type: 'api/request',
         payload: {
           id,
+          cancelKey,
           method,
           path,
           body,

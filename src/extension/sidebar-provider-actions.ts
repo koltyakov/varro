@@ -201,6 +201,7 @@ export function createSidebarProviderActions(
       deps.postConfigState();
     },
     handleApiRequest: (payload) => deps.restProxy.handleRequest(payload),
+    cancelApiRequest: (payload) => deps.restProxy.cancelRequest(payload),
     log: (payload) => {
       const level = payload.level || 'info';
       const line = `[webview] ${payload.msg} ${payload.data || ''} ${payload.error || ''}`.trim();

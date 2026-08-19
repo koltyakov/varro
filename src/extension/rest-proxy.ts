@@ -7,6 +7,7 @@ import {
   type ContextMessageEntry,
 } from '../shared/context-breakdown';
 import type { Message, Part } from '../shared/opencode-types';
+import { parseSessionPromptEndpoint } from '../shared/opencode-endpoints';
 import { VARRO_API_ENDPOINTS } from '../shared/protocol';
 import type {
   AutoApproveJudgeReference,
@@ -55,6 +56,7 @@ import {
 } from './util/summary-projection';
 
 type ApiRequestPayload = Extract<WebviewMessage, { type: 'api/request' }>['payload'];
+type ApiCancelPayload = Extract<WebviewMessage, { type: 'api/cancel' }>['payload'];
 type ApiResponsePayload = { id: number; data?: unknown; error?: string };
 const SESSION_SUMMARY_DESCENDANT_CONCURRENCY = 4;
 const SESSION_SUMMARY_CACHE_TTL_MS = 2_000;
@@ -157,11 +159,33 @@ export class RestProxy {
   private sessionSummaryRequests = new Map<string, SessionSummaryCacheEntry>();
   private activeSessionSummaryDescendantRequests = 0;
   private sessionSummaryDescendantWaiters: Array<() => void> = [];
+  private readonly activeRequests = new Map<string, { id: number; controller: AbortController }>();
 
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
+  cancelRequest(payload: ApiCancelPayload) {
+    const request = this.activeRequests.get(payload.cancelKey);
+    if (!request || request.id !== payload.id) return;
+    this.activeRequests.delete(payload.cancelKey);
+    request.controller.abort(new Error('API call aborted'));
+  }
+
   async handleRequest(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
+    const request = payload.cancelKey
+      ? { id: payload.id, controller: new AbortController() }
+      : undefined;
+    if (payload.cancelKey && request) {
+      const existing = this.activeRequests.get(payload.cancelKey);
+      if (existing) {
+        this.callbacks.postApiResponse(requestGeneration, {
+          id: payload.id,
+          error: 'Duplicate API request cancellation key',
+        });
+        return;
+      }
+      this.activeRequests.set(payload.cancelKey, request);
+    }
     try {
       const method = payload.method.toUpperCase();
       if (!isAllowedApiRequest(method, payload.path)) {
@@ -399,8 +423,17 @@ export class RestProxy {
       let responsePromise: Promise<unknown>;
       try {
         responsePromise = paginatedMessages
-          ? this.requestPaginatedMessages(method, forwardedPath, payload.body)
-          : this.callbacks.server.request(method, forwardedPath, payload.body);
+          ? this.requestPaginatedMessages(
+              method,
+              forwardedPath,
+              payload.body,
+              request?.controller.signal
+            )
+          : request
+            ? this.callbacks.server.request(method, forwardedPath, payload.body, {
+                signal: request.controller.signal,
+              })
+            : this.callbacks.server.request(method, forwardedPath, payload.body);
         if (this.isSessionListRequest(method, payload.path) && sessionPageLimit === null) {
           this.trackSessionDirectoryBootstrap(responsePromise, false);
         }
@@ -461,6 +494,10 @@ export class RestProxy {
         id: payload.id,
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      if (payload.cancelKey && this.activeRequests.get(payload.cancelKey) === request) {
+        this.activeRequests.delete(payload.cancelKey);
+      }
     }
   }
 
@@ -494,9 +531,7 @@ export class RestProxy {
 
   private parsePromptSessionID(method: string, path: string): string | undefined {
     if (method.toUpperCase() !== 'POST') return undefined;
-    const url = new URL(path, 'http://localhost');
-    const match = url.pathname.match(/^\/session\/([^/]+)\/prompt(?:_async)?$/);
-    return match ? decodeURIComponent(match[1]!) : undefined;
+    return parseSessionPromptEndpoint(path) ?? undefined;
   }
 
   private async reconcileFailedPrompt(
@@ -529,12 +564,18 @@ export class RestProxy {
     return /^\/session\/[^/]+\/message$/.test(url.pathname) && url.searchParams.has('limit');
   }
 
-  private async requestPaginatedMessages(method: string, path: string, body: unknown) {
+  private async requestPaginatedMessages(
+    method: string,
+    path: string,
+    body: unknown,
+    signal?: AbortSignal
+  ) {
     const options = {
       captureNextCursor: true,
       maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
       maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
       stripSummaryDiffs: true,
+      ...(signal ? { signal } : {}),
     } as const;
     try {
       return await this.callbacks.server.request(method, path, body, options);

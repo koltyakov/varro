@@ -681,7 +681,11 @@ export type WebviewMessage =
       payload: WebviewConfigUpdatePayload;
     }
   | { type: 'ready' }
-  | { type: 'api/request'; payload: { id: number; method: string; path: string; body?: unknown } }
+  | {
+      type: 'api/request';
+      payload: { id: number; cancelKey?: string; method: string; path: string; body?: unknown };
+    }
+  | { type: 'api/cancel'; payload: { id: number; cancelKey: string } }
   | { type: 'ralph/start'; payload: { config: RalphConfig } }
   | { type: 'ralph/stop'; payload: { managerSessionId: string } }
   | { type: 'ralph/pause'; payload: { managerSessionId: string } }

@@ -50,6 +50,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openExternal: vi.fn(() => Promise.resolve()),
     updateConfig: vi.fn(() => Promise.resolve()),
     handleApiRequest: vi.fn(() => Promise.resolve()),
+    cancelApiRequest: vi.fn(),
     handleRalphMessage: vi.fn(),
     updateQueuedMessages: vi.fn(() => Promise.resolve()),
     updateDraftImages: vi.fn(() => Promise.resolve()),
@@ -339,6 +340,14 @@ describe('MessageRouter', () => {
     const payload = { id: 42, method: 'GET', path: '/sessions' };
     await router.handleMessage({ type: 'api/request', payload });
     expect(cb.handleApiRequest).toHaveBeenCalledWith(payload);
+  });
+
+  it('dispatches api/cancel', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+    const payload = { id: 42, cancelKey: 'request-token' };
+    await router.handleMessage({ type: 'api/cancel', payload });
+    expect(cb.cancelApiRequest).toHaveBeenCalledWith(payload);
   });
 
   it('dispatches log', async () => {

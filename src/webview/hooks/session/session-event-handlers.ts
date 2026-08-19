@@ -15,6 +15,7 @@ import { isRunningSessionStatus } from '../../lib/session-event-reducer';
 import { logWarn } from '../../lib/log';
 import {
   invalidateSessionMessageWindowRequests,
+  recordSessionMessageSnapshotMutation,
   resetSessionMessageWindowForRefetch,
 } from '../../lib/message-window';
 import { hasStreamedFinalResponse } from './session-watchdog';
@@ -1070,8 +1071,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('session.status', (data) => {
       const props = data.properties;
       if (!props) return;
-      const sessionID = props.sessionID as string;
-      const status = props.status as SessionStatus;
+      const sessionID = getEventString(props, 'sessionID');
+      const status = parseSessionStatus(props.status);
+      if (!sessionID || !status) return;
       if (deps.shouldIgnorePendingAbortStatus(sessionID, status)) return;
       const abortedRetry = deps.hasPendingAbort(sessionID);
       if (status.type === 'idle') {
@@ -1114,7 +1116,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.idle', (data) => {
-      const sid = data.properties?.sessionID as string | undefined;
+      const sid = getEventString(data.properties, 'sessionID');
       if (!sid) return;
       const abortedRetry = deps.hasPendingAbort(sid);
       if (abortedRetry) cancelTransientConnectionRetry(sid);
@@ -1157,7 +1159,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           }
         | undefined;
       const sessionID = partialMessage?.sessionID;
-      if (!sessionID) return;
+      if (typeof sessionID !== 'string' || !sessionID) return;
       const message = isCompleteMessageInfo(info) ? info : null;
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
       const assistantFinished =
@@ -1187,6 +1189,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
 
       if (isSessionInActiveTree(sessionID)) {
+        recordSessionMessageSnapshotMutation(sessionID);
         if (!assistantFinished) markSessionProgress(sessionID);
         uiStore.markLoadingActivity();
         if (message) {
@@ -1245,15 +1248,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.updated', (data) => {
       const seqStatus = observeSequence(data);
       const rawPart = data.properties?.part;
-      const partialPart = rawPart as { sessionID?: string; type?: string } | undefined;
-      if (partialPart?.sessionID && partialPart.type === 'compaction') {
-        sessionStore.setSessionCompacting(partialPart.sessionID, false);
+      const partialPart = rawPart as { sessionID?: unknown; type?: unknown } | undefined;
+      const partSessionID =
+        typeof partialPart?.sessionID === 'string' ? partialPart.sessionID : undefined;
+      if (partSessionID && partialPart?.type === 'compaction') {
+        sessionStore.setSessionCompacting(partSessionID, false);
       }
-      if (!isSessionInActiveTree(partialPart?.sessionID)) return;
+      if (!isSessionInActiveTree(partSessionID)) return;
+      recordSessionMessageSnapshotMutation(partSessionID!);
 
       if (!isCompleteMessagePart(rawPart)) {
         uiStore.startLoading();
-        if (seqStatus !== 'gap') scheduleMessageSync(partialPart!.sessionID!);
+        if (seqStatus !== 'gap') scheduleMessageSync(partSessionID!);
         return;
       }
 
@@ -1294,13 +1300,14 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const seqStatus = observeSequence(data);
       const p = data.properties;
       if (!p) return;
-      const sessionID = p.sessionID as string | undefined;
-      if (!sessionID || !isSessionInActiveTree(sessionID)) return;
-
-      const messageID = p.messageID as string;
-      const partID = p.partID as string;
-      const delta = p.delta as string;
-      const field = p.field as string;
+      const sessionID = getEventString(p, 'sessionID');
+      const messageID = getEventString(p, 'messageID');
+      const partID = getEventString(p, 'partID');
+      const delta = getEventString(p, 'delta');
+      const field = getEventString(p, 'field');
+      if (!sessionID || !messageID || !partID || !delta || !field) return;
+      if (!isSessionInActiveTree(sessionID)) return;
+      recordSessionMessageSnapshotMutation(sessionID);
       const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(sessionID, messageID);
       if (!staleCompletedMessage) {
         markSessionProgress(sessionID);
@@ -1324,7 +1331,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         const seqStatus = observeSequence(data);
         const p = data.properties;
         if (!p) return;
-        const sessionID = p.sessionID as string | undefined;
+        const sessionID = getEventString(p, 'sessionID');
         if (!sessionID) return;
         const toolTimingUpdate = recordToolExecutionTime(eventName, p);
         if (toolTimingUpdate?.ended) {
@@ -1336,6 +1343,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         ) {
           return;
         }
+        const activeTreeEvent = isSessionInActiveTree(sessionID);
+        if (activeTreeEvent) recordSessionMessageSnapshotMutation(sessionID);
         if (eventName === 'session.next.step.ended' && settleAssistantStepEnd(sessionID, p)) {
           handleSessionIdle(sessionID, deps.hasPendingAbort(sessionID));
           return;
@@ -1353,7 +1362,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           if (agent) appStore.setState('sessionSelectedAgents', sessionID, agent);
         }
 
-        if (!isSessionInActiveTree(sessionID)) return;
+        if (!activeTreeEvent) return;
         uiStore.markLoadingActivity();
         const projected = PROJECTED_SESSION_EVENTS.has(eventName)
           ? handleProjectedSessionEvent(eventName, p)
@@ -1380,13 +1389,13 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      if (!isSessionInActiveTree(p.sessionID as string | undefined)) return;
+      const sessionID = getEventString(p, 'sessionID');
+      const messageID = getEventString(p, 'messageID');
+      const partID = getEventString(p, 'partID');
+      if (!sessionID || !messageID || !partID || !isSessionInActiveTree(sessionID)) return;
+      recordSessionMessageSnapshotMutation(sessionID);
       uiStore.markLoadingActivity();
-      sessionStore.removeMessagePart(
-        p.sessionID as string,
-        p.messageID as string,
-        p.partID as string
-      );
+      sessionStore.removeMessagePart(sessionID, messageID, partID);
       deps.syncTodosFromMessages();
     })
   );
@@ -1395,10 +1404,11 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.removed', (data) => {
       const p = data.properties;
       if (!p) return;
-      const sessionId = p.sessionID as string | undefined;
-      if (!sessionId) return;
+      const sessionId = getEventString(p, 'sessionID');
+      const messageId = getEventString(p, 'messageID');
+      if (!sessionId || !messageId) return;
       invalidateMessageLoads(sessionId, true);
-      const messageId = p.messageID as string;
+      if (isSessionInActiveTree(sessionId)) recordSessionMessageSnapshotMutation(sessionId);
       if (deps.isMessageRemovalDeferred?.(sessionId, messageId)) return;
       if (isSessionInActiveTree(sessionId)) {
         uiStore.markLoadingActivity();
@@ -1429,6 +1439,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       markSessionProgress,
       ignoreStaleProgressForCompletedMessage,
       ignoreStaleProgressAfterFinishedAssistant,
+      recordSessionMessageSnapshotMutation,
     })
   );
 
@@ -1457,6 +1468,57 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     transientConnectionRetryTimers.clear();
   });
   return cleanups;
+}
+
+function parseSessionStatus(value: unknown): SessionStatus | null {
+  if (!value || typeof value !== 'object') return null;
+  const status = value as Record<string, unknown>;
+  if (status.type === 'idle' || status.type === 'busy') return { type: status.type };
+  if (
+    status.type !== 'retry' ||
+    typeof status.attempt !== 'number' ||
+    !Number.isFinite(status.attempt) ||
+    typeof status.next !== 'number' ||
+    !Number.isFinite(status.next) ||
+    typeof status.message !== 'string'
+  ) {
+    return null;
+  }
+
+  if (status.action === undefined) {
+    return {
+      type: 'retry',
+      attempt: status.attempt,
+      message: status.message,
+      next: status.next,
+    };
+  }
+  if (!status.action || typeof status.action !== 'object') return null;
+  const action = status.action as Record<string, unknown>;
+  if (
+    typeof action.reason !== 'string' ||
+    typeof action.provider !== 'string' ||
+    typeof action.title !== 'string' ||
+    typeof action.message !== 'string' ||
+    typeof action.label !== 'string' ||
+    (action.link !== undefined && typeof action.link !== 'string')
+  ) {
+    return null;
+  }
+  return {
+    type: 'retry',
+    attempt: status.attempt,
+    message: status.message,
+    next: status.next,
+    action: {
+      reason: action.reason,
+      provider: action.provider,
+      title: action.title,
+      message: action.message,
+      label: action.label,
+      ...(action.link ? { link: action.link } : {}),
+    },
+  };
 }
 
 function getServerEventSessionId(event: ServerEvent): string | undefined {

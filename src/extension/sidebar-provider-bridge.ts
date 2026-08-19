@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import type { ExtensionMessage, InitialWebviewState } from '../shared/protocol';
+import { logger } from './logger';
 import { renderWebviewHtml, type WebviewAssetUris } from './webview-html';
 
 export class SidebarProviderBridge {
   private view?: vscode.WebviewView;
+  private deliveryFailureHandler?: () => void;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -19,9 +21,27 @@ export class SidebarProviderBridge {
     return Boolean(this.view?.visible);
   }
 
+  onDeliveryFailure(handler: () => void) {
+    this.deliveryFailureHandler = handler;
+  }
+
   post(msg: ExtensionMessage) {
     // oxlint-disable-next-line require-post-message-target-origin
-    this.view?.webview.postMessage(msg);
+    const delivery = this.view?.webview.postMessage(msg);
+    if (delivery === undefined) return;
+    void Promise.resolve(delivery).then(
+      (delivered) => {
+        if (delivered) return;
+        logger.warn(`Webview message was not delivered: ${msg.type}`);
+        this.deliveryFailureHandler?.();
+      },
+      (error: unknown) => {
+        logger.warn(
+          `Webview message delivery failed (${msg.type}): ${error instanceof Error ? error.message : String(error)}`
+        );
+        this.deliveryFailureHandler?.();
+      }
+    );
   }
 
   async renderHtml(initialState: InitialWebviewState) {

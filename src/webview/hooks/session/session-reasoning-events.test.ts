@@ -61,6 +61,7 @@ function install(options: Options = {}) {
   const messages: MessageEntry[] = options.messages ?? [entry(MESSAGE_ID)];
   const logError = vi.fn();
   const markSessionProgress = vi.fn();
+  const recordSessionMessageSnapshotMutation = vi.fn();
   const syncSessionMessages = options.syncSessionMessages ?? vi.fn().mockResolvedValue(undefined);
 
   // Reflect part creation so a second event in the same stream sees it.
@@ -77,6 +78,7 @@ function install(options: Options = {}) {
     markSessionProgress,
     ignoreStaleProgressForCompletedMessage: () => options.ignoreCompleted === true,
     ignoreStaleProgressAfterFinishedAssistant: () => options.ignoreFinished === true,
+    recordSessionMessageSnapshotMutation,
   });
 
   const emit = (event: string, properties: Record<string, unknown>) =>

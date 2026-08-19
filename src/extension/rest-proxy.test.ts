@@ -333,6 +333,41 @@ describe('getOpenCodeDirectoryHeaders', () => {
 });
 
 describe('RestProxy handleRequest', () => {
+  it('aborts only the request matching an opaque cancellation key', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const serverRequest = vi.fn(
+      (_method: string, _path: string, _body: unknown, options?: { signal?: AbortSignal }) =>
+        new Promise<unknown>((_resolve, reject) => {
+          requestSignal = options?.signal;
+          options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+            once: true,
+          });
+        })
+    );
+    const { proxy, callbacks } = createProxy({
+      server: { ...createCallbacks().server, request: serverRequest } as never,
+    });
+
+    const operation = proxy.handleRequest({
+      id: 41,
+      cancelKey: 'request-token-1',
+      method: 'GET',
+      path: '/session',
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+
+    proxy.cancelRequest({ id: 42, cancelKey: 'request-token-1' });
+    expect(requestSignal?.aborted).toBe(false);
+    proxy.cancelRequest({ id: 41, cancelKey: 'request-token-1' });
+    await operation;
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 41,
+      error: 'API call aborted',
+    });
+  });
+
   it('returns error for disallowed API request', async () => {
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(makePayload(1, 'DELETE', '/global/health'));

@@ -405,6 +405,27 @@ describe('webview message validation', () => {
     ).toEqual({ type: 'api/request', payload: { id: 1, method: 'GET', path: '/session' } });
   });
 
+  it('validates API cancellation keys', () => {
+    expect(
+      parseWebviewMessage({
+        type: 'api/request',
+        payload: { id: 1, cancelKey: 'request-token', method: 'GET', path: '/session' },
+      })
+    ).toEqual({
+      type: 'api/request',
+      payload: { id: 1, cancelKey: 'request-token', method: 'GET', path: '/session' },
+    });
+    expect(
+      parseWebviewMessage({
+        type: 'api/cancel',
+        payload: { id: 1, cancelKey: 'request-token' },
+      })
+    ).toEqual({ type: 'api/cancel', payload: { id: 1, cancelKey: 'request-token' } });
+    expect(
+      parseWebviewMessage({ type: 'api/cancel', payload: { id: 1, cancelKey: '' } })
+    ).toBeNull();
+  });
+
   it('sanitizes bounded JSON-compatible API request bodies', () => {
     const body = {
       parts: [{ type: 'text', text: 'Implement the next item' }],

@@ -6,6 +6,8 @@ import {
   cacheSessionHistoryPage,
   clearSessionMessageWindowState,
   getCachedSessionMessages,
+  getSessionMessageSnapshotMutationRevision,
+  getSessionMessageWindowRevision,
   getPrefetchedSessionHistory,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
@@ -19,6 +21,7 @@ import {
   mergeOlderHistory,
   mergeWindowedHistory,
   resetMessageWindowState,
+  recordSessionMessageSnapshotMutation,
   setSessionHistoryCursor,
   setSessionHistoryPromptCursor,
   setSessionHistoryPrompts,
@@ -42,6 +45,27 @@ function entry(id: string, sessionID = 'session-1'): { info: Message; parts: Par
 
 beforeEach(() => {
   resetMessageWindowState();
+});
+
+describe('message snapshot mutation revisions', () => {
+  it('advance independently without invalidating pagination requests', () => {
+    const windowRevision = getSessionMessageWindowRevision('session-1');
+
+    recordSessionMessageSnapshotMutation('session-1');
+    recordSessionMessageSnapshotMutation('session-2');
+    recordSessionMessageSnapshotMutation('session-1');
+
+    expect(getSessionMessageSnapshotMutationRevision('session-1')).toBeGreaterThan(
+      getSessionMessageSnapshotMutationRevision('session-2')
+    );
+    expect(getSessionMessageWindowRevision('session-1')).toBe(windowRevision);
+  });
+
+  it('resets with message window state', () => {
+    recordSessionMessageSnapshotMutation('session-1');
+    resetMessageWindowState();
+    expect(getSessionMessageSnapshotMutationRevision('session-1')).toBe(0);
+  });
 });
 
 describe('mergeWindowedHistory', () => {

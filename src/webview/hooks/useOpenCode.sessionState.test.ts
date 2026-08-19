@@ -1151,6 +1151,58 @@ describe('useOpenCode session state flows', () => {
     }
   });
 
+  it('preserves a same-part SSE update that beats a stale latest response', async () => {
+    const handlers = installServerEventHandlers();
+    mockRuntimeBootstrap();
+    const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    const staleEntry = {
+      ...userEntry('message-1'),
+      parts: [
+        {
+          id: 'part-1',
+          sessionID: 'session-1',
+          messageID: 'message-1',
+          type: 'text' as const,
+          text: 'old',
+        },
+      ],
+    };
+    clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
+    clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
+
+    const { stateModule, hookModule } = await loadModules();
+    const dispose = createRoot((cleanup) => {
+      hookModule.useOpenCode();
+      return cleanup;
+    });
+
+    try {
+      await vi.waitFor(() => expect(handlers.has('session.error')).toBe(true));
+      stateModule.setState('sessions', [session('session-1')]);
+      stateModule.setState('activeSessionId', 'session-1');
+      stateModule.setState('messages', [staleEntry]);
+
+      handlers.get('session.error')?.({
+        properties: { sessionID: 'session-1', error: { name: 'UnexpectedFailure' } },
+      });
+      await vi.waitFor(() => expect(clientMocks.sessionMessages).toHaveBeenCalledTimes(1));
+      handlers.get('message.part.updated')?.({
+        properties: {
+          part: {
+            ...staleEntry.parts[0],
+            text: 'new',
+          },
+        },
+      });
+      staleLatest.resolve([staleEntry]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      expect(stateModule.state.messages[0]?.parts[0]).toMatchObject({ text: 'new' });
+    } finally {
+      dispose();
+    }
+  });
+
   it('preserves child-session messages during active-parent latest-message resync', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();

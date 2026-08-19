@@ -837,7 +837,10 @@ describe('OpenCodeTransport requests', () => {
         parts: [{ type: 'text', text: 'Preserved prompt' }],
       },
     ];
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(payload)))
+    );
 
     await expect(
       createTransport().request('GET', '/session/session-1/message?limit=10', undefined, {

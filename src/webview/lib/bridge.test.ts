@@ -66,7 +66,7 @@ describe('bridge', () => {
     window.__sendToExtension = send;
     const request = bridge.apiCall<{ ok: boolean }>('POST', '/session', body);
     const message = send.mock.calls[0]?.[0] as {
-      payload: { id: number; body?: { nested: { value: number } } };
+      payload: { id: number; cancelKey: string; body?: { nested: { value: number } } };
     };
     body.nested.value = 2;
 
@@ -74,6 +74,7 @@ describe('bridge', () => {
       type: 'api/request',
       payload: {
         id: 1,
+        cancelKey: expect.any(String),
         method: 'POST',
         path: '/session',
         body: { nested: { value: 2 } },
@@ -307,13 +308,24 @@ describe('bridge', () => {
 
   it('aborts in-flight API requests', async () => {
     const bridge = await loadBridge();
-    window.__sendToExtension = vi.fn();
+    const send = vi.fn();
+    window.__sendToExtension = send;
     const controller = new AbortController();
 
     const request = bridge.apiCall('GET', '/session', undefined, { signal: controller.signal });
+    const sentRequest = send.mock.calls[0]?.[0] as {
+      payload: { id: number; cancelKey: string };
+    };
     controller.abort(new Error('request cancelled'));
 
     await expect(request).rejects.toThrow('request cancelled');
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'api/cancel',
+      payload: {
+        id: sentRequest.payload.id,
+        cancelKey: sentRequest.payload.cancelKey,
+      },
+    });
   });
 
   it('rejects immediately when the signal is already aborted', async () => {

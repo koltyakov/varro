@@ -100,6 +100,7 @@ function createSession(options?: { renderHtml?: (state: InitialWebviewState) => 
     }),
     getView: vi.fn(() => currentView),
     isVisible: vi.fn(() => Boolean(currentView?.visible)),
+    onDeliveryFailure: vi.fn(),
     post: vi.fn(),
     webviewOptions: vi.fn(() => ({ enableScripts: true, localResourceRoots: [] })),
     renderHtml: vi.fn(

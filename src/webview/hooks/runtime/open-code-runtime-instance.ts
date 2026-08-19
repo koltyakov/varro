@@ -41,6 +41,7 @@ import {
   cacheSessionHistoryPage,
   clearSessionMessageWindowState,
   getCachedSessionMessages,
+  getSessionMessageSnapshotMutationRevision,
   getSessionMessageWindowRevision,
   getSessionHistoryCursor,
   getSessionHistoryPromptCursor,
@@ -549,6 +550,7 @@ async function fetchSessionMessages(
   options?: { isCurrent?: () => boolean }
 ): Promise<MessageEntry[]> {
   const requestRevision = getSessionMessageWindowRevision(sessionId);
+  const requestMutationRevision = getSessionMessageSnapshotMutationRevision(sessionId);
   const incoming = await client.session.messages(sessionId, { limit: MESSAGE_HISTORY_WINDOW });
   const activeMessages = appStore.state.messages.filter(
     (entry) => entry.info.sessionID === sessionId
@@ -556,7 +558,8 @@ async function fetchSessionMessages(
   const current = activeMessages.length > 0 ? activeMessages : getCachedSessionMessages(sessionId);
   if (
     options?.isCurrent?.() === false ||
-    getSessionMessageWindowRevision(sessionId) !== requestRevision
+    getSessionMessageWindowRevision(sessionId) !== requestRevision ||
+    getSessionMessageSnapshotMutationRevision(sessionId) !== requestMutationRevision
   ) {
     return current;
   }

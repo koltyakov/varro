@@ -124,6 +124,7 @@ const WEBVIEW_MESSAGE_TYPES = {
   'config/update': true,
   ready: true,
   'api/request': true,
+  'api/cancel': true,
   'ralph/start': true,
   'ralph/stop': true,
   'ralph/pause': true,
@@ -452,14 +453,35 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
     case 'api/request': {
       const payload = asRecord(message?.payload);
       const id = getSafeInteger(payload?.id);
+      const cancelKey =
+        payload?.cancelKey === undefined ? undefined : getBoundedString(payload.cancelKey, 128);
       const method = getBoundedString(payload?.method, 16)?.toUpperCase() || null;
       const path = getBoundedString(payload?.path, MAX_PATH_LENGTH + MAX_QUERY_LENGTH);
-      if (id === null || !method || !path || !isAllowedApiRequest(method, path)) return null;
-      if (payload?.body === undefined) return { type, payload: { id, method, path } };
+      if (
+        id === null ||
+        (payload?.cancelKey !== undefined && !cancelKey) ||
+        !method ||
+        !path ||
+        !isAllowedApiRequest(method, path)
+      ) {
+        return null;
+      }
+      if (payload?.body === undefined) {
+        return { type, payload: { id, ...(cancelKey ? { cancelKey } : {}), method, path } };
+      }
       const body = /\/session\/[^/]+\/prompt_async(?:\?|$)/.test(path)
         ? sanitizePromptBodyWithNativePdfs(payload.body)
         : sanitizeApiRequestBody(payload.body);
-      return body === INVALID_JSON_VALUE ? null : { type, payload: { id, method, path, body } };
+      return body === INVALID_JSON_VALUE
+        ? null
+        : { type, payload: { id, ...(cancelKey ? { cancelKey } : {}), method, path, body } };
+    }
+
+    case 'api/cancel': {
+      const payload = asRecord(message?.payload);
+      const id = getSafeInteger(payload?.id);
+      const cancelKey = getBoundedString(payload?.cancelKey, 128);
+      return id === null || !cancelKey ? null : { type, payload: { id, cancelKey } };
     }
 
     case 'ralph/start': {

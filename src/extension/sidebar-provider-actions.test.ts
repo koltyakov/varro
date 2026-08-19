@@ -86,6 +86,7 @@ function createActionFixture() {
   };
   const restProxy = {
     handleRequest: vi.fn(() => Promise.resolve()),
+    cancelRequest: vi.fn(),
   };
   const sessionDiffProvider = {
     open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve(false)),

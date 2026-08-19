@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../shared/protocol';
 
 const mocks = vi.hoisted(() => ({
+  logger: { warn: vi.fn() },
   renderWebviewHtml: vi.fn(() => '<html />'),
   joinPath: vi.fn((base: { fsPath: string }, ...parts: string[]) => ({
     fsPath: [base.fsPath, ...parts].join('/'),
   })),
 }));
+
+vi.mock('./logger', () => ({ logger: mocks.logger }));
 
 vi.mock('vscode', () => ({
   Uri: {
@@ -93,6 +96,23 @@ describe('SidebarProviderBridge', () => {
       enableScripts: true,
       localResourceRoots: [extensionUri],
     });
+  });
+
+  it('reports failed webview deliveries', async () => {
+    const bridge = new SidebarProviderBridge({ fsPath: '/extension' } as never);
+    const view = createView();
+    view.webview.postMessage.mockResolvedValue(false);
+    const onFailure = vi.fn();
+    bridge.onDeliveryFailure(onFailure);
+    bridge.setView(view as never);
+
+    bridge.post({ type: 'command/focus-input' });
+    await Promise.resolve();
+
+    expect(onFailure).toHaveBeenCalledOnce();
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      'Webview message was not delivered: command/focus-input'
+    );
   });
 
   it('renders with cacheable webview asset URIs', async () => {
