@@ -519,6 +519,67 @@ test('viewport narrowing preserves an inner block in a viewport-tall markdown it
   ).toBeLessThanOrEqual(3);
 });
 
+test('width reflow after PageDown preserves a painted block in a tall response', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 808 });
+  await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
+  await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+    element.scrollTop = Math.floor(element.scrollHeight / 2);
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(300);
+  await list.focus();
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(300);
+
+  const anchor = await list.evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    const candidates = element.querySelectorAll<HTMLElement>(
+      '.rendered-markdown :is(p, li, pre)'
+    );
+    const item = [...candidates].find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      const owner = candidate.closest<HTMLElement>('[data-assistant-render-key]');
+      return (
+        owner &&
+        owner.getBoundingClientRect().height > element.clientHeight &&
+        rect.top >= viewport.top &&
+        rect.bottom <= viewport.bottom
+      );
+    });
+    return item
+      ? { text: item.innerText, tagName: item.tagName, top: item.getBoundingClientRect().top }
+      : null;
+  });
+  expect(anchor).not.toBeNull();
+
+  const sample = () =>
+    list.evaluate((element, target) => {
+      const item = [...element.querySelectorAll<HTMLElement>(`.rendered-markdown ${target.tagName}`)]
+        .find((candidate) => candidate.innerText === target.text);
+      return item?.getBoundingClientRect().top ?? null;
+    }, anchor!);
+  const samples = [];
+  for (const width of [360, 720]) {
+    await page.setViewportSize({ width, height: 808 });
+    for (let frame = 0; frame < 12; frame += 1) {
+      await waitForAnimationFrame(page);
+      samples.push({ width, top: await sample() });
+    }
+  }
+
+  expect(samples.every((entry) => entry.top !== null), JSON.stringify({ anchor, samples })).toBe(
+    true
+  );
+  expect(
+    Math.max(...samples.slice(1).map((entry) => Math.abs(entry.top! - anchor!.top))),
+    JSON.stringify({ anchor, samples })
+  ).toBeLessThanOrEqual(3);
+});
+
 test('viewport narrowing replaces a stale tall-row anchor after sticky navigation', async ({
   page,
 }) => {

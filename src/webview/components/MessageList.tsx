@@ -2456,7 +2456,7 @@ export function MessageList() {
     const renderItem = getMountedScrollAnchorElement(
       anchor.element ? { ...anchor, element: undefined } : anchor
     );
-    if (!renderItem || renderItem.getBoundingClientRect().height <= containerRef.clientHeight * 2) {
+    if (!renderItem || renderItem.getBoundingClientRect().height <= containerRef.clientHeight) {
       return anchor;
     }
     for (const userCard of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
@@ -4428,6 +4428,19 @@ export function MessageList() {
     lastScrollInputAt = performance.now();
     directScrollInputEpoch += 1;
     virtualPlaceholderReleaseBlockedUntil = lastScrollInputAt + USER_SCROLL_IDLE_MS;
+    const metrics = shouldVirtualize() ? virtualMetrics() : null;
+    const index = metrics
+      ? getFirstVisibleMessageIndexFromVirtualMetrics({
+          metrics,
+          scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+        })
+      : null;
+    const inputAnchor = refineTallRenderItemScrollAnchor(
+      index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
+    );
+    directMovementAnchor = inputAnchor
+      ? { anchor: inputAnchor, scrollTop: containerRef.scrollTop }
+      : null;
     if (target === containerRef) {
       const pageSize = containerRef.clientHeight;
       const maximumScrollTop = Math.max(0, containerRef.scrollHeight - pageSize);
@@ -4442,6 +4455,19 @@ export function MessageList() {
       else if (event.key === 'End') nextScrollTop = maximumScrollTop;
       event.preventDefault();
       containerRef.scrollTop = Math.min(maximumScrollTop, Math.max(0, nextScrollTop));
+      const destinationMetrics = shouldVirtualize() ? virtualMetrics() : null;
+      const destinationIndex = destinationMetrics
+        ? getFirstVisibleMessageIndexFromVirtualMetrics({
+            metrics: destinationMetrics,
+            scrollTop: getVirtualScrollTop(containerRef.scrollTop),
+          })
+        : null;
+      const anchor = refineTallRenderItemScrollAnchor(
+        destinationIndex === null
+          ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
+          : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex)
+      );
+      if (anchor) lastDetachedVisibleAnchor = anchor;
     }
   }
 
