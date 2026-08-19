@@ -54,6 +54,29 @@ For an unqualified **Run AI tests** or **Run fuzzy tests** request:
 6. Report failed invariants and reproduction steps first, followed by passes, blocked checks, model,
    VS Code version, viewport/layout, seed, and artifact paths.
 
+### Controller Session Safety
+
+The Varro session handling the **Run AI tests** request is the controller session, not a disposable
+test fixture. Never call OpenCode's session abort or delete endpoints for the controller session,
+including through `curl`, scripts, or another tool. Do not abort the controller to recover an
+unresponsive test host or to stop a command launched by the controller; doing so immediately aborts
+the AI test run itself and can leave its child processes orphaned.
+
+Use the dedicated host process recorded in its launch metadata to recover a failed Extension
+Development Host. A raw session abort is allowed only after all of these checks succeed:
+
+1. Fetch the target session and verify that its title starts with the current run's exact `VFZ <seed>`
+   prefix.
+2. Verify that the target session belongs to the dedicated test host and is not the controller
+   session receiving the user's request.
+3. Record the target session ID and the reason for aborting it in the run ledger before sending the
+   abort.
+
+If any check cannot be completed, leave the session running, mark the affected scenario `BLOCKED`,
+and continue with cleanup that targets only the recorded dedicated host PID. Never infer an abort
+target from the currently active session, a recent transcript, or a session ID copied from the
+controller UI.
+
 If credentials, a GUI, or Luna are unavailable, continue with every feasible automated check and mark
 the affected real-editor scenarios `BLOCKED`, but report the overall AI test as `FAIL`. Never turn a
 blocked visual check into a pass or describe an automated-only run as a successful AI test.
