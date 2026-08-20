@@ -57,7 +57,7 @@
     "vscode:install": "node scripts/vscode-install.mjs"
   },
   "dependencies": {
-    "@opencode-ai/sdk": "^1.18.18",
+    "@opencode-ai/sdk": "^1.18.19",
     "dompurify": "^3.4.14",
     "highlight.js": "11.12.0",
     "jsonc-parser": "^3.3.1",

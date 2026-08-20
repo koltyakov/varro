@@ -91,8 +91,7 @@
   margin-right: 3px;
 }
 
-.composer-session-reference .inline-chip-icon-wrap::after,
-.composer-external-link .inline-chip-icon-wrap::after {
+.composer-session-reference .inline-chip-icon-wrap::after {
   content: '\2060';
 }
 

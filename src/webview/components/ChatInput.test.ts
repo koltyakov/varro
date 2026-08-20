@@ -2177,6 +2177,7 @@ describe('ChatInput', () => {
     );
     expect(reference?.dataset.chipMarker).toBeUndefined();
     expect(reference?.getAttribute('contenteditable')).toBeNull();
+    expect(reference?.querySelector('.link-leading-content')?.textContent).toBe('h');
     expect(inputText()).toBe("What's this https://iconoir.com?");
 
     const trailingText = reference.nextSibling;
@@ -2213,7 +2214,7 @@ describe('ChatInput', () => {
       throw new Error('Expected editable external link');
     }
     editor.focus();
-    setCollapsedSelection(linkText, 'https://iconoir.com'.length);
+    setCollapsedSelection(linkText, 'ttps://iconoir.com'.length);
     editor.dispatchEvent(
       new InputEvent('beforeinput', {
         bubbles: true,

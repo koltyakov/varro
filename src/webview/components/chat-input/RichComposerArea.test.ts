@@ -249,12 +249,13 @@ describe('RichComposerArea', () => {
     expect(reference?.dataset.chipMarker).toBeUndefined();
     expect(reference?.getAttribute('contenteditable')).toBeNull();
     expect(extractText(editor)).toBe('See https://iconoir.com');
+    expect(reference?.querySelector('.link-leading-content')?.textContent).toBe('h');
 
     const linkText = reference?.lastChild;
     if (!linkText || linkText.nodeType !== Node.TEXT_NODE)
       throw new Error('Expected external link text');
-    linkText.textContent = 'https://iconoir.dev';
-    setCollapsedSelection(linkText, 'https://iconoir.dev'.length);
+    linkText.textContent = 'ttps://iconoir.dev';
+    setCollapsedSelection(linkText, 'ttps://iconoir.dev'.length);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     expect(onInput).toHaveBeenCalledWith(
@@ -287,8 +288,8 @@ describe('RichComposerArea', () => {
       throw new Error('Expected editable external link');
     }
     editor.focus();
-    linkText.textContent = "https://iconoir.com what's this";
-    setCollapsedSelection(linkText, "https://iconoir.com what's this".length);
+    linkText.textContent = "ttps://iconoir.com what's this";
+    setCollapsedSelection(linkText, "ttps://iconoir.com what's this".length);
     editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
 
     expect(reference.textContent).toBe('https://iconoir.com');
@@ -324,7 +325,7 @@ describe('RichComposerArea', () => {
       throw new Error('Expected editable external link');
     }
     editor.focus();
-    setCollapsedSelection(linkText, 'https://iconoir.com'.length);
+    setCollapsedSelection(linkText, 'ttps://iconoir.com'.length);
     const event = new InputEvent('beforeinput', {
       bubbles: true,
       cancelable: true,

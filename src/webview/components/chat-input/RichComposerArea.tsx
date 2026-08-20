@@ -144,8 +144,9 @@ export function RichComposerArea(props: {
       chip.icon === 'file' || (chip.icon === 'image' && /\.[^./]+$/.test(chip.path || chip.label));
     const materialIconKind = getMaterialIconKind(chip.icon);
     const icon = hasFormatIcon || materialIconKind ? null : getChipIcon(chip.icon);
+    let iconWrapper: HTMLSpanElement | undefined;
     if (icon || hasFormatIcon || materialIconKind) {
-      const iconWrapper = document.createElement('span');
+      iconWrapper = document.createElement('span');
       iconWrapper.className = 'inline-chip-icon-wrap';
       if (chip.type === 'external-link' || chip.type === 'mention-session') {
         iconWrapper.contentEditable = 'false';
@@ -168,11 +169,24 @@ export function RichComposerArea(props: {
       } else if (icon) {
         iconWrapper.innerHTML = icon;
       }
-      span.appendChild(iconWrapper);
+      if (chip.type !== 'external-link') span.appendChild(iconWrapper);
     }
 
     if (chip.type === 'external-link') {
-      span.appendChild(document.createTextNode(chip.label));
+      const firstCharacter = Array.from(chip.label)[0] ?? '';
+      if (iconWrapper && firstCharacter) {
+        const leadingContent = document.createElement('span');
+        leadingContent.className = 'link-leading-content';
+        const leadingLabel = document.createElement('span');
+        leadingLabel.className = 'link-leading-label';
+        leadingLabel.textContent = firstCharacter;
+        leadingContent.append(iconWrapper, leadingLabel);
+        span.appendChild(leadingContent);
+        span.appendChild(document.createTextNode(chip.label.slice(firstCharacter.length)));
+      } else {
+        if (iconWrapper) span.appendChild(iconWrapper);
+        span.appendChild(document.createTextNode(chip.label));
+      }
     } else {
       const labelSpan = document.createElement('span');
       labelSpan.className = 'inline-chip-label';
