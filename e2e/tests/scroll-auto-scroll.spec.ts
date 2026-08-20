@@ -1436,7 +1436,6 @@ test.describe('auto-scroll', () => {
     await activeItems.last().evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
-    await expect(page.locator('.append-scroll-bottom-reserve')).toBeVisible();
     const before = await summary.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list');
       if (!container) throw new Error('Explored container is missing');

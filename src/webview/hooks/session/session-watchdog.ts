@@ -281,6 +281,7 @@ export function registerStuckSessionWatchdogEffect(deps: {
             inFlight = false;
           }
         };
+        void tick();
         const timer = window.setInterval(() => void tick(), STUCK_SESSION_WATCHDOG_INTERVAL_MS);
         onCleanup(() => {
           cancelled = true;

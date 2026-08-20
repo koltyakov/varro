@@ -272,6 +272,7 @@ export function formatAssistantActivityCounts(parts: readonly AssistantActivityP
 export function getAssistantActivityCountItems(parts: readonly AssistantActivityPart[]) {
   const counts = new Map<AssistantActivityKind, number>();
   for (const part of parts) {
+    if (part.type === 'tool' && isAbortedToolError(part.state)) continue;
     const kind = getActivityKind(part);
     const count =
       kind === 'edits' && part.type === 'tool'
@@ -289,10 +290,10 @@ export function getAssistantActivityCountItems(parts: readonly AssistantActivity
 
 export function formatAssistantActivitySummary(parts: readonly AssistantActivityPart[]) {
   const status = getAssistantActivityStatus(parts);
-  const counts = formatAssistantActivityCounts(parts);
+  const countLabels = getAssistantActivityCountItems(parts).map((item) => item.label);
   const statusLabels =
     status.aborted > 0 ? [formatCount(status.aborted, 'tool aborted', 'tools aborted')] : [];
-  return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
+  return `Explored: ${[...countLabels, ...statusLabels].join(', ')}`;
 }
 
 export function getAssistantActivityStatus(parts: readonly AssistantActivityPart[]) {

@@ -1136,8 +1136,7 @@ function AssistantActivitySummaryText(props: {
       props.aborted > 0
         ? [`${props.aborted} ${props.aborted === 1 ? 'tool aborted' : 'tools aborted'}`]
         : [];
-    const counts = `Explored: ${props.items.map((item) => item.label).join(', ')}`;
-    return `${counts}${statusLabels.length > 0 ? ` · ${statusLabels.join(' · ')}` : ''}`;
+    return `Explored: ${[...props.items.map((item) => item.label), ...statusLabels].join(', ')}`;
   };
 
   const measure: AssistantActivityResizeMeasurement = () => {
@@ -1255,14 +1254,12 @@ function AssistantActivitySummaryCandidate(props: {
               </>
             )}
           </For>
+          <Show when={props.aborted > 0}>
+            <Show when={props.items.length > 0}>, </Show>
+            {props.aborted} {props.aborted === 1 ? 'tool aborted' : 'tools aborted'}
+          </Show>
         </span>
       </span>
-      <Show when={props.aborted > 0}>
-        <span>
-          {' · '}
-          {props.aborted} {props.aborted === 1 ? 'tool aborted' : 'tools aborted'}
-        </span>
-      </Show>
     </>
   );
 }

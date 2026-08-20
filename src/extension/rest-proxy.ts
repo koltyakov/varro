@@ -424,7 +424,10 @@ export class RestProxy {
       let responsePromise: Promise<unknown>;
       try {
         responsePromise = defaultModelRequest
-          ? this.requestDefaultModel(request?.controller.signal)
+          ? this.requestDefaultModel(
+              this.getCurrentWorkspaceResolutionRoot() ?? this.getCurrentWorkspacePath(),
+              request?.controller.signal
+            )
           : paginatedMessages
             ? this.requestPaginatedMessages(
                 method,
@@ -504,7 +507,10 @@ export class RestProxy {
     }
   }
 
-  private async requestDefaultModel(signal?: AbortSignal): Promise<unknown> {
+  private async requestDefaultModel(
+    workspaceDirectory: string | undefined,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     let response: unknown;
     try {
       response = signal
@@ -512,7 +518,9 @@ export class RestProxy {
         : await this.callbacks.server.request('GET', '/model/default');
     } catch (err) {
       if (signal?.aborted) throw err;
-      logger.warn(`Default model request failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `Default model request failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     if (response === null) return null;
@@ -523,15 +531,20 @@ export class RestProxy {
     }
 
     try {
+      const configPath = workspaceDirectory
+        ? `/config?directory=${encodeURIComponent(workspaceDirectory)}`
+        : '/config';
       const config = asRecord(
         signal
-          ? await this.callbacks.server.request('GET', '/config', undefined, { signal })
-          : await this.callbacks.server.request('GET', '/config')
+          ? await this.callbacks.server.request('GET', configPath, undefined, { signal })
+          : await this.callbacks.server.request('GET', configPath)
       );
       return parseModelRoute(config?.model) ?? undefined;
     } catch (err) {
       if (signal?.aborted) throw err;
-      logger.warn(`Default model config fallback failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(
+        `Default model config fallback failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       return undefined;
     }
   }

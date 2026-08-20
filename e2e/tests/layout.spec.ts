@@ -460,6 +460,8 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
     const harnessWindow = window as typeof window & {
       __varroE2E?: {
         getSessionMessages?: (id: string) => Array<{ info: Record<string, unknown> }>;
+        updateMessageInfo?: (info: Record<string, unknown>) => void;
+        updateMessagePart?: (part: Record<string, unknown>) => void;
       };
     };
     const original = harnessWindow.__varroE2E
@@ -478,6 +480,8 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
       type: 'text',
       text: '',
     };
+    harnessWindow.__varroE2E?.updateMessageInfo?.(info);
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
     window.postMessage(
       { type: 'server/event', payload: { type: 'message.updated', properties: { info } } },
       '*'
@@ -543,6 +547,10 @@ test('keeps streamed response text fixed when it follows Explored', async ({ pag
       type: 'text',
       text: '',
     };
+    const harnessWindow = window as typeof window & {
+      __varroE2E?: { updateMessagePart?: (part: Record<string, unknown>) => void };
+    };
+    harnessWindow.__varroE2E?.updateMessagePart?.(part);
     window.postMessage(
       { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
       '*'

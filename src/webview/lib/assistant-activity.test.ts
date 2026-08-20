@@ -106,6 +106,23 @@ describe('assistant activity summaries', () => {
     expect(formatAssistantActivitySummary([failed])).toBe('Explored: 1 command');
   });
 
+  it('includes aborted tools as another activity count', () => {
+    const aborted: ToolPart = {
+      ...completedTool('bash-1', 'bash'),
+      state: {
+        status: 'error',
+        input: { command: 'npm test' },
+        error: 'Tool execution aborted',
+        time: { start: 1, end: 2 },
+      },
+    };
+
+    expect(formatAssistantActivitySummary([aborted])).toBe('Explored: 1 tool aborted');
+    expect(formatAssistantActivitySummary([completedTool('read-1', 'read'), aborted])).toBe(
+      'Explored: 1 file, 1 tool aborted'
+    );
+  });
+
   it('keeps actionable and delegated activity outside compact groups', () => {
     expect(isAssistantActivityPart(completedTool('read-1', 'read'))).toBe(true);
     expect(isAssistantActivityPart(completedTool('question-1', 'question'))).toBe(false);

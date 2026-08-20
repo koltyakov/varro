@@ -494,6 +494,7 @@ export function MessageList() {
   let activityExitSummaryObserver: MutationObserver | null = null;
   let activityExitSummarySettleRafId = 0;
   let activityExitSummarySettleFrames = 0;
+  let activityExitHeldResponseTextSignature: string | null = null;
   let activityCollapseSettleRafId = 0;
   let lastWheelAt = Number.NEGATIVE_INFINITY;
   let lastUserScrollAt = Number.NEGATIVE_INFINITY;
@@ -3337,6 +3338,19 @@ export function MessageList() {
   function startActivityExitSummaryObserver(anchor: { sessionId: string; top: number }) {
     if (!trackRef || activityExitSummaryObserver) return;
     activityExitSummaryObserver = new MutationObserver(() => {
+      if (
+        activityExitHeldResponseTextSignature !== null &&
+        activityExitSummarySettleFrames === 0 &&
+        activityExitBottomTarget === null &&
+        exitingActivityPartKeys().size === 0 &&
+        isLoading() &&
+        getResponseTextSignature() !== activityExitHeldResponseTextSignature
+      ) {
+        clearActivityExitSummaryAnchor();
+        performScroll({ force: true });
+        startFollowLoop(anchor.sessionId, { observedStreaming: true });
+        return;
+      }
       cancelAppendScrollTransition();
       if (initialScrollRafId) cancelAnimationFrame(initialScrollRafId);
       initialScrollRafId = 0;
@@ -3374,8 +3388,9 @@ export function MessageList() {
       ) {
         activityExitSummarySettleRafId = requestAnimationFrame(settle);
       } else if (isLoading() && untrack(appendBottomReserve) > 0.5) {
-        // Keep ownership without a hot frame loop until turn completion consumes the reserve.
+        // Keep ownership without a hot frame loop until completion or response text arrives.
         activityExitSummarySettleFrames = 0;
+        activityExitHeldResponseTextSignature = getResponseTextSignature();
       } else {
         clearActivityExitSummaryAnchor();
       }
@@ -3410,7 +3425,22 @@ export function MessageList() {
 
   function clearActivityExitSummaryAnchor() {
     activityExitSummaryAnchor = null;
+    activityExitHeldResponseTextSignature = null;
     stopActivityExitSummaryObserver();
+  }
+
+  function getResponseTextSignature() {
+    if (!trackRef) return '';
+    return [
+      ...trackRef.querySelectorAll<HTMLElement>(
+        '.assistant-message-flow-item > .rendered-markdown'
+      ),
+    ]
+      .map((element) => {
+        const item = element.closest<HTMLElement>('[data-assistant-render-key]');
+        return `${item?.dataset.assistantRenderKey ?? ''}:${element.textContent?.length ?? 0}`;
+      })
+      .join('|');
   }
 
   function stopActivityExitSummaryObserver() {

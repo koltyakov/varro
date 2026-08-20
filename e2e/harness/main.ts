@@ -5787,6 +5787,7 @@ function setUpHarness() {
       const messages = scenarioState.messagesBySessionId[info.sessionID];
       const message = messages?.find((entry) => entry.info.id === info.id);
       if (message) message.info = info;
+      else messages?.push({ info, parts: [] });
     },
     updateMessagePart: (part) => {
       const messages = scenarioState.messagesBySessionId[part.sessionID];

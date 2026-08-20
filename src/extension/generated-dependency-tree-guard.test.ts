@@ -72,9 +72,7 @@ describe('generated dependency tree guard', () => {
     const root = repository();
     dependency(root, 'src/__pycache__/module.cpython-312.pyc');
 
-    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual([
-      'src/__pycache__',
-    ]);
+    await expect(findUnignoredGeneratedDependencyTrees(root)).resolves.toEqual(['src/__pycache__']);
   });
 
   it('ignores trees excluded by Git', async () => {

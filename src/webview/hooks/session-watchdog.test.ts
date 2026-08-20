@@ -446,8 +446,10 @@ describe('registerStuckSessionWatchdogEffect', () => {
 
       setBusy(true);
       await Promise.resolve();
-      vi.advanceTimersByTime(STUCK_SESSION_WATCHDOG_INTERVAL_MS);
       expect(runReconcile).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(STUCK_SESSION_WATCHDOG_INTERVAL_MS);
+      expect(runReconcile).toHaveBeenCalledTimes(2);
 
       setBusy(false);
       await Promise.resolve();

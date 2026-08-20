@@ -1261,6 +1261,9 @@ kbd {
 }
 
 .chat-tool-invocation-part .tool-invocation-error-label {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
   font-size: 11px;
   color: var(--color-vscode-error);
 }

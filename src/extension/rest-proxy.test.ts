@@ -1506,7 +1506,7 @@ describe('RestProxy handleRequest', () => {
   it('uses the effective OpenCode config when the default model endpoint is unsupported', async () => {
     const serverRequest = vi.fn((_method: string, path: string) => {
       if (path === '/model/default') return Promise.resolve('<!doctype html>');
-      if (path === '/config') {
+      if (path === '/config?directory=%2Frepo') {
         return Promise.resolve({
           model: 'openai/gpt-5.6-sol',
           provider: { secret: { options: { apiKey: 'not-for-webview' } } },
@@ -1521,7 +1521,7 @@ describe('RestProxy handleRequest', () => {
     await proxy.handleRequest(makePayload(901, 'GET', '/model/default'));
 
     expect(serverRequest).toHaveBeenNthCalledWith(1, 'GET', '/model/default');
-    expect(serverRequest).toHaveBeenNthCalledWith(2, 'GET', '/config');
+    expect(serverRequest).toHaveBeenNthCalledWith(2, 'GET', '/config?directory=%2Frepo');
     expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
       id: 901,
       data: { providerID: 'openai', modelID: 'gpt-5.6-sol' },

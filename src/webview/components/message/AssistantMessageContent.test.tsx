@@ -469,6 +469,24 @@ describe('AssistantMessageContent', () => {
     );
   });
 
+  it('renders aborted tools with the activity counts', () => {
+    const aborted = toolPart('patch-aborted', 'apply_patch', { patchText: '*** Begin Patch' });
+    aborted.state = {
+      status: 'error',
+      input: { patchText: '*** Begin Patch' },
+      error: 'Tool execution aborted',
+      time: { start: 0, end: 1 },
+    };
+
+    renderAssistantMessageContent({ parts: [aborted] });
+
+    const counts = container?.querySelector('.assistant-activity-summary-counts');
+    expect(counts?.textContent).toBe('1 tool aborted');
+    expect(
+      container?.querySelector('.assistant-activity-summary-text')?.getAttribute('aria-label')
+    ).toBe('Explored: 1 tool aborted');
+  });
+
   it('keeps active activity visible until it moves into Explored', async () => {
     const running = toolPart('grep-running', 'grep', { pattern: 'activity' });
     running.state = {
