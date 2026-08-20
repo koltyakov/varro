@@ -573,6 +573,25 @@ describe('UserMessageContent', () => {
     ).toBe('https://iconoir.com');
   });
 
+  it('keeps prose ending in a Git remote as linked message text', () => {
+    const send = installSendToExtension();
+    const prompt =
+      'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git';
+    renderUserContent([textPart('text-1', prompt)]);
+
+    expect(container?.querySelector('.message-attachments')).toBeNull();
+    expect(container?.querySelector('.user-message-text')?.textContent).toBe(prompt);
+    const link = container?.querySelector<HTMLAnchorElement>('a.external-link');
+    expect(link?.textContent).toBe('git@github.com:koltyakov/browser-bridge.git');
+    expect(link?.querySelector('.material-chip-icon')).toBeInstanceOf(HTMLImageElement);
+
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-external',
+      payload: { url: 'https://github.com/koltyakov/browser-bridge' },
+    });
+  });
+
   it('hides delegated vision routing context while keeping inline image and agent chips', () => {
     const image = imageFilePart('image-1', '1786723794731-image-1');
     image.source = {

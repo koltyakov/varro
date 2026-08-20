@@ -9,8 +9,9 @@ This changelog summarizes the main user-facing improvements in each Varro minor 
 - Added automatic retries for sessions interrupted by transient connection failures.
 - Preserved chat content, loaded history, context, and scroll position more reliably across session activity, updates, and reopened conversations.
 - Improved slash-command completion behavior, including direct execution of `/stats` from the completion menu and stable suggestions while editing trigger text.
+- Improved composer editing around file and context chips, including atomic deletion and reliable inline image pasting.
 - Added warnings for unignored generated dependency trees and compact handling of very large generated changes in prompts, summaries, and changed-file views.
-- Improved file references in messages with compact type icons, line-aware links, and more reliable opening of uniquely matched workspace and local files.
+- Improved file and repository references in messages with compact type icons, line-aware links, clickable SSH Git remotes, and more reliable opening of uniquely matched workspace and local files.
 
 ## 0.24.x - August 2026
 

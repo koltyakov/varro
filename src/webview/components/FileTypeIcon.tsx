@@ -77,6 +77,7 @@ const FILE_EXTENSION_ICONS: Record<string, string> = {
   dart: dartIcon,
   db: databaseIcon,
   gif: imageIcon,
+  git: gitIcon,
   go: goIcon,
   gql: graphqlIcon,
   graphql: graphqlIcon,

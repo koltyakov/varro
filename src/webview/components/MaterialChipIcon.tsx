@@ -3,8 +3,15 @@ import terminalIcon from 'material-icon-theme/icons/console.svg';
 import sessionIcon from 'material-icon-theme/icons/changelog.svg';
 import imageIcon from 'material-icon-theme/icons/image.svg';
 import externalLinkIcon from 'material-icon-theme/icons/url.svg';
+import gitIcon from 'material-icon-theme/icons/git.svg';
 
-export type MaterialChipIconKind = 'agent' | 'terminal' | 'image' | 'session' | 'external-link';
+export type MaterialChipIconKind =
+  | 'agent'
+  | 'terminal'
+  | 'image'
+  | 'session'
+  | 'external-link'
+  | 'git';
 
 const ICONS: Record<MaterialChipIconKind, string> = {
   agent: agentIcon,
@@ -12,6 +19,7 @@ const ICONS: Record<MaterialChipIconKind, string> = {
   image: imageIcon,
   session: sessionIcon,
   'external-link': externalLinkIcon,
+  git: gitIcon,
 };
 
 export function getMaterialChipIcon(kind: MaterialChipIconKind): string {

@@ -23,4 +23,8 @@ describe('getFileTypeIcon', () => {
     expect(getFileTypeIcon('go.mod')).toBe(getFileTypeIcon('main.go'));
     expect(getFileTypeIcon('go.sum')).toBe(getFileTypeIcon('main.go'));
   });
+
+  it('uses the Git icon for remote names ending in .git', () => {
+    expect(getFileTypeIcon('browser-bridge.git')).toBe(getFileTypeIcon('.gitignore'));
+  });
 });

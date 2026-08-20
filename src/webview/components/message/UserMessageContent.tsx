@@ -28,7 +28,11 @@ import { getPdfDataUrlSize } from '../../../shared/native-pdf';
 import { FileTypeIcon } from '../FileTypeIcon';
 import { FolderIcon } from '../FolderIcon';
 import { ExternalLinkIcon } from '../ExternalLinkIcon';
-import { isSafeExternalHref, splitExternalLinkText } from '../../lib/external-link';
+import {
+  isSafeExternalHref,
+  splitExternalLinkText,
+  type ExternalLinkTextSegment,
+} from '../../lib/external-link';
 import { formatAgentLabel } from '../../lib/format';
 import { AgentChip } from './AgentChip';
 import { InlineMessageImage } from '../InlineMessageImage';
@@ -85,7 +89,7 @@ type InlineTextSegment =
   | { type: 'text'; content: string }
   | { type: 'attachment'; attachment: InlineRenderableAttachment }
   | { type: 'session'; reference: SessionReference }
-  | { type: 'external-link'; href: string };
+  | Extract<ExternalLinkTextSegment, { type: 'external-link' }>;
 
 const USER_CODE_FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g;
 const VISION_DELEGATION_CONTEXT_RE =
@@ -902,7 +906,7 @@ function InlineAttachmentText(props: {
           return <SessionReferenceLink reference={segment.reference} />;
         }
         if (segment.type === 'external-link') {
-          return <ExternalLink href={segment.href} />;
+          return <ExternalLink link={segment} />;
         }
         if (segment.attachment.type === 'agent') {
           return (
@@ -1021,6 +1025,13 @@ function isStandaloneFileReference(text: string): boolean {
   if (trimmed.includes('\n')) return false;
   if (trimmed.length <= 1 || trimmed.length > 300) return false;
   if (/(?:^|\s)[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return false;
+  if (
+    splitExternalLinkText(trimmed).some(
+      (segment) => segment.type === 'external-link' && segment.kind === 'git'
+    )
+  ) {
+    return false;
+  }
   if (/\[\d+\/\d+\]/.test(trimmed)) return false;
   if (/["'{}[\],<>|]/.test(trimmed) || trimmed.includes('>')) return false;
 
@@ -1169,26 +1180,28 @@ function buildInlineTextSegments(
   return segments;
 }
 
-function ExternalLink(props: { href: string }) {
+function ExternalLink(props: { link: Extract<InlineTextSegment, { type: 'external-link' }> }) {
   const openExternal = (event: MouseEvent) => {
     event.preventDefault();
-    if (!isSafeExternalHref(props.href)) return;
-    postMessage({ type: 'vscode/open-external', payload: { url: props.href } });
+    if (!isSafeExternalHref(props.link.target)) return;
+    postMessage({ type: 'vscode/open-external', payload: { url: props.link.target } });
   };
 
   return (
     <a
       class="external-link"
-      href={props.href}
+      href={props.link.target}
       data-external="true"
-      title={`Open ${props.href}`}
+      title={`Open ${props.link.href}`}
       onClick={openExternal}
     >
       <span class="link-leading-content">
-        <ExternalLinkIcon />
-        <span class="link-leading-label">{props.href.slice(0, 1)}</span>
+        <Show when={props.link.kind === 'git'} fallback={<ExternalLinkIcon />}>
+          <MaterialChipIcon kind="git" class="external-link-icon" />
+        </Show>
+        <span class="link-leading-label">{props.link.href.slice(0, 1)}</span>
       </span>
-      {props.href.slice(1)}
+      {props.link.href.slice(1)}
     </a>
   );
 }

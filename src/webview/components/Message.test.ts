@@ -570,6 +570,31 @@ describe('Message user prompt rendering', () => {
     expect(children[2]?.querySelector('.chat-image-caption')).toBeNull();
   });
 
+  it('keeps the user bubble when prose ends in a Git remote before an attachment', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-git-remote'),
+          parts: [
+            textPart(
+              'text-prompt',
+              'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git'
+            ),
+            textPart('text-file', '[Attached file: app.js]'),
+          ],
+        }),
+      container!
+    );
+
+    const card = container?.querySelector('.user-message-card');
+    expect(card?.classList).not.toContain('user-message-card-wrapperless');
+    expect(card?.querySelector('.user-message-text')?.textContent).toContain(
+      'All JS should be strongly typed similar as in git@github.com:koltyakov/browser-bridge.git'
+    );
+    expect(card?.querySelectorAll('.message-attachment-chip')).toHaveLength(1);
+    expect(card?.querySelector('.message-attachment-chip')?.textContent).toContain('app.js');
+  });
+
   it('expands a terminal-only message with its terminal name and line count', () => {
     const send = vi.fn();
     (window as unknown as Record<string, unknown>).__sendToExtension = send;

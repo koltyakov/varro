@@ -999,18 +999,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
     }
 
-    const externalLinks = new Set(
-      splitExternalLinkText(text)
-        .filter((segment) => segment.type === 'external-link')
-        .map((segment) => segment.href)
+    const externalLinks = new Map(
+      splitExternalLinkText(text).flatMap((segment) =>
+        segment.type === 'external-link' ? [[segment.href, segment.kind] as const] : []
+      )
     );
-    for (const href of externalLinks) {
+    for (const [href, kind] of externalLinks) {
       chips.push({
         id: `external-link:${href}`,
         type: 'external-link',
         label: href,
         title: href,
-        icon: 'external-link',
+        icon: kind === 'git' ? 'git' : 'external-link',
         textMarker: href,
       });
     }

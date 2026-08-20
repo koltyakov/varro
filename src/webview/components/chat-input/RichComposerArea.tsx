@@ -21,7 +21,7 @@ export type RichComposerChip = {
   path?: string;
   title?: string;
   detail?: string;
-  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent' | 'session' | 'external-link';
+  icon?: 'file' | 'folder' | 'image' | 'terminal' | 'agent' | 'session' | 'external-link' | 'git';
   disabled?: boolean;
   previewImage?: { url: string; alt: string };
   textMarker: string;
@@ -162,7 +162,7 @@ export function RichComposerArea(props: {
         iconWrapper.appendChild(
           createMaterialChipIconElement(
             materialIconKind,
-            `inline-chip-icon${materialIconKind === 'external-link' ? ' composer-external-link-icon' : ''}`
+            `inline-chip-icon${chip.type === 'external-link' ? ' composer-external-link-icon' : ''}`
           )
         );
       } else if (icon) {
@@ -839,7 +839,8 @@ function getMaterialIconKind(icon?: string): MaterialChipIconKind | null {
     icon === 'image' ||
     icon === 'terminal' ||
     icon === 'session' ||
-    icon === 'external-link'
+    icon === 'external-link' ||
+    icon === 'git'
   ) {
     return icon;
   }

@@ -1,8 +1,8 @@
 export type ExternalLinkTextSegment =
   | { type: 'text'; content: string }
-  | { type: 'external-link'; href: string };
+  | { type: 'external-link'; href: string; target: string; kind: 'web' | 'git' };
 
-const HTTPS_URL_RE = /https:\/\/[^\s<>"']+/gi;
+const EXTERNAL_LINK_RE = /https:\/\/[^\s<>"']+|git@[a-z0-9.-]+:[^\s<>"']+/gi;
 const TRAILING_URL_PUNCTUATION_RE = /[.,!?;:]$/;
 const CLOSING_DELIMITERS = {
   ')': '(',
@@ -18,6 +18,13 @@ export function isSafeExternalHref(href: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+export function getGitRemoteHttpsUrl(remote: string): string | null {
+  const match = remote.match(/^git@([a-z0-9.-]+):([^\s]+)\.git$/i);
+  if (!match?.[1] || !match[2] || !match[2].includes('/')) return null;
+  const target = `https://${match[1]}/${match[2]}`;
+  return isSafeExternalHref(target) ? target : null;
 }
 
 function trimUrlEnd(candidate: string) {
@@ -43,17 +50,19 @@ export function splitExternalLinkText(content: string): ExternalLinkTextSegment[
   const segments: ExternalLinkTextSegment[] = [];
   let lastIndex = 0;
 
-  for (const match of content.matchAll(HTTPS_URL_RE)) {
+  for (const match of content.matchAll(EXTERNAL_LINK_RE)) {
     const index = match.index ?? 0;
     const candidate = match[0];
     const urlEnd = trimUrlEnd(candidate);
     const href = candidate.slice(0, urlEnd);
-    if (!isSafeExternalHref(href)) continue;
+    const gitTarget = getGitRemoteHttpsUrl(href);
+    const target = gitTarget ?? href;
+    if (!isSafeExternalHref(target)) continue;
 
     if (index > lastIndex) {
       segments.push({ type: 'text', content: content.slice(lastIndex, index) });
     }
-    segments.push({ type: 'external-link', href });
+    segments.push({ type: 'external-link', href, target, kind: gitTarget ? 'git' : 'web' });
     lastIndex = index + urlEnd;
   }
 
