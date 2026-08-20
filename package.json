@@ -34,6 +34,7 @@
   ],
   "main": "./dist/extension/extension.js",
   "scripts": {
+    "postinstall": "node scripts/build-anti-slop-plugin.mjs",
     "build:extension": "node esbuild.config.mjs",
     "build:webview": "vite build",
     "preview:webview": "vite --open /preview.html",
@@ -66,7 +67,6 @@
     "solid-js": "1.9.15"
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.79.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
@@ -81,6 +81,7 @@
     "material-icon-theme": "^5.37.0",
     "oxfmt": "0.64.0",
     "oxlint": "1.79.0",
+    "oxlint-plugin-anti-slop": "https://github.com/dmmulroy/anti-slop/archive/6d538555cb151d4121ed51a27db81890eacf8ae9.tar.gz",
     "rolldown": "1.2.5",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",

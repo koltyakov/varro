@@ -95,6 +95,14 @@
   content: '\2060';
 }
 
+.composer-external-link .link-leading-content {
+  display: inline;
+}
+
+.composer-external-link .inline-chip-icon-wrap::after {
+  content: '\2060';
+}
+
 .composer-session-reference .inline-chip-icon,
 .composer-external-link .inline-chip-icon {
   display: inline-block;
