@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- OpenCode server events are decoded before bridge state is updated. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Event assertions follow protocol parsing and workspace checks. */
 import * as vscode from 'vscode';
 import type { ExtensionMessage, ServerEvent, ServerStatus } from '../shared/protocol';
 import { parseServerEvent } from '../shared/protocol';

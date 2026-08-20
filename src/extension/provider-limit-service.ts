@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- Provider console responses require runtime validation before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider responses are field-validated before quota use. */
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 import type { ProviderLimitStatus, ServerStatus } from '../shared/protocol';

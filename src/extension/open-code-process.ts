@@ -1,4 +1,6 @@
-import type { ChildProcess } from 'child_process';
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Process, filesystem, and JSON boundaries are validated before ownership data is used. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Ownership assertions follow complete PID, port, executable, and birth-identity checks. */
+import type { ChildProcess, SpawnOptions } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import type { Dirent } from 'fs';
@@ -252,19 +254,18 @@ function parseInjectedConfigOwner(value: unknown): InjectedConfigOwner | null {
     return null;
   }
   if (record.configPath !== undefined && typeof record.configPath !== 'string') return null;
-  return {
+  const owner: InjectedConfigOwner = {
     pid: record.pid as number,
     owner: record.owner,
     createdAt: record.createdAt,
-    ...(hasIdentity
-      ? {
-          port: record.port as number,
-          executable: record.executable as string,
-          birthIdentity: record.birthIdentity as string,
-        }
-      : {}),
-    ...(record.configPath ? { configPath: record.configPath as string } : {}),
   };
+  if (hasIdentity) {
+    owner.port = record.port as number;
+    owner.executable = record.executable as string;
+    owner.birthIdentity = record.birthIdentity as string;
+  }
+  if (record.configPath) owner.configPath = record.configPath as string;
+  return owner;
 }
 
 function parseManagedServerOwnershipClaim(value: unknown): ManagedServerOwnershipClaim | null {
@@ -280,13 +281,14 @@ function parseManagedServerOwnershipClaim(value: unknown): ManagedServerOwnershi
     return null;
   }
   if (typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)) return null;
-  return {
+  const claim: ManagedServerOwnershipClaim = {
     version: 1,
     host: record.host,
     hostPid: record.hostPid as number,
-    ...(record.hostBirthIdentity ? { hostBirthIdentity: record.hostBirthIdentity as string } : {}),
     createdAt: record.createdAt,
   };
+  if (record.hostBirthIdentity) claim.hostBirthIdentity = record.hostBirthIdentity as string;
+  return claim;
 }
 
 function runProcess(
@@ -1099,8 +1101,8 @@ export class OpenCodeProcess {
       ...ownershipHostIdentity,
       state: 'active',
       createdAt: processOwner.createdAt,
-      ...(processOwner.configPath ? { configPath: processOwner.configPath } : {}),
     };
+    if (processOwner.configPath) lease.configPath = processOwner.configPath;
     if (
       !(await this.matchesOwnershipLease(lease)) ||
       !(await this.matchesInjectedConfigOwner(lease))
@@ -1258,8 +1260,8 @@ export class OpenCodeProcess {
       ...ownershipHostIdentity,
       state: 'active',
       createdAt: Date.now(),
-      ...(launch.configPath ? { configPath: launch.configPath } : {}),
     };
+    if (launch.configPath) lease.configPath = launch.configPath;
     try {
       await this.writeOwnershipMarker(lease);
       launch.ownershipMarkerWritten = true;
@@ -1363,12 +1365,11 @@ export class OpenCodeProcess {
   }
 
   async serializeInjectedConfig() {
-    const compaction = {
-      ...(this.compactionSettings.auto !== null ? { auto: this.compactionSettings.auto } : {}),
-      ...(this.compactionSettings.reserved !== null
-        ? { reserved: this.compactionSettings.reserved }
-        : {}),
-    };
+    const compaction: Partial<OpenCodeCompactionSettings> = {};
+    if (this.compactionSettings.auto !== null) compaction.auto = this.compactionSettings.auto;
+    if (this.compactionSettings.reserved !== null) {
+      compaction.reserved = this.compactionSettings.reserved;
+    }
     const config = Object.keys(compaction).length > 0 ? { compaction } : {};
     return `${JSON.stringify(config, null, 2)}\n`;
   }
@@ -1479,15 +1480,16 @@ export class OpenCodeProcess {
     this.foreignActiveOwnership = false;
     let proc: ChildProcess;
     try {
-      proc = spawn(launch.command, launch.args, {
+      const spawnOptions: SpawnOptions = {
         stdio: ['ignore', 'pipe', 'pipe'],
         // Keep POSIX wrappers and descendants in a group that survives the wrapper PID.
         detached: useProcessGroup,
         cwd: callbacks.getWorkspaceCwd(),
         env: this.buildServerEnv(configPath, owner),
         windowsHide: true,
-        ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      });
+      };
+      if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
+      proc = spawn(launch.command, launch.args, spawnOptions);
     } catch (err) {
       if (this.ownershipOwner === owner) this.ownershipOwner = null;
       void this.cleanupInjectedConfigFile(configPath);
@@ -1980,19 +1982,19 @@ export class OpenCodeProcess {
   }
 
   private async writeOwnershipMarker(lease: ManagedServerOwnershipLease) {
-    await writeFile(
-      this.ownershipMarkerPath,
-      `${JSON.stringify({
-        pid: lease.pid,
-        owner: lease.owner,
-        createdAt: lease.createdAt,
-        port: lease.port,
-        executable: lease.executable,
-        birthIdentity: lease.birthIdentity,
-        ...(lease.configPath ? { configPath: lease.configPath } : {}),
-      })}\n`,
-      { encoding: 'utf-8', mode: 0o600 }
-    );
+    const marker: InjectedConfigOwner = {
+      pid: lease.pid,
+      owner: lease.owner,
+      createdAt: lease.createdAt,
+      port: lease.port,
+      executable: lease.executable,
+      birthIdentity: lease.birthIdentity,
+    };
+    if (lease.configPath) marker.configPath = lease.configPath;
+    await writeFile(this.ownershipMarkerPath, `${JSON.stringify(marker)}\n`, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
   }
 
   private async removeOwnershipMarker(expectedOwner: string) {
@@ -2772,13 +2774,14 @@ export class OpenCodeProcess {
       try {
         const command = this.resolveCommand();
         const launch = resolveServerLaunch(command, args);
-        proc = spawn(launch.command, launch.args, {
+        const spawnOptions: SpawnOptions = {
           stdio: ['ignore', 'pipe', 'pipe'],
           cwd: this.getWorkspaceCwd(),
           env: this.buildServerEnv(),
           windowsHide: true,
-          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-        });
+        };
+        if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
+        proc = spawn(launch.command, launch.args, spawnOptions);
 
         handleStdout = (data: Buffer) => {
           stdout += data.toString();

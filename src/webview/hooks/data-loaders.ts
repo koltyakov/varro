@@ -20,7 +20,7 @@ import type {
 } from '../types';
 import { reconcileLoadedAgents, reconcileLoadedProviders } from './routing-state';
 
-type Logger = (context: string, err: unknown) => void;
+type Logger = (context: string, cause: unknown) => void;
 const EMPTY_SESSION_SNAPSHOT_CONFIRMATIONS = 2;
 const SESSION_PAGE_SIZE = 100;
 const MAX_SESSION_PAGE_LIMIT = 1_000_000;

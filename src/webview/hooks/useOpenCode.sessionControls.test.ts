@@ -10,12 +10,16 @@ import {
   session,
 } from './useOpenCode.test-support';
 
+interface ServerEvent {
+  properties: unknown;
+}
+
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 type BridgeOnMessage = typeof onMessage;
 type ServerEventsOn = (
   event: ServerEventName | '*',
-  handler: (data: unknown) => void
+  handler: (data: ServerEvent) => void
 ) => () => void;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 const serverEventsOn = vi.fn<ServerEventsOn>();
@@ -65,7 +69,7 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('ignores stale retry status updates after aborting a retrying session', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -177,7 +181,7 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('aborts child sessions that appear after stop has already started', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -367,7 +371,7 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('records the originating session on usage-limit notices', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -439,7 +443,7 @@ describe('useOpenCode session control flows', () => {
   });
 
   it('attaches retry usage-limit notices to the selected provider', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {

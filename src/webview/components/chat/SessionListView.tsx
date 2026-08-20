@@ -54,6 +54,7 @@ import { writeClipboard } from '../../lib/write-clipboard';
 import { postMessage } from '../../lib/bridge';
 import { showSessionActionFeedback } from './SessionActionFeedback';
 import { SharedSessionIcon } from './SharedSessionIcon';
+import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
 
 type SessionGroups = {
   pinned: (typeof state.sessions)[number][];
@@ -524,7 +525,7 @@ export function getSessionSummaryStats(
 
   const aggregate = {
     files: summary.files,
-    ...(summary.diffsTruncated ? { filesTruncated: true } : {}),
+    filesTruncated: summary.diffsTruncated ? true : undefined,
     additions: summary.additions,
     deletions: summary.deletions,
   } satisfies SessionSummaryStats;
@@ -539,9 +540,10 @@ export function getDiffSummaryStats(diffs: readonly unknown[]): SessionSummarySt
   let deletions = 0;
 
   for (const diff of diffs) {
-    if (!diff || typeof diff !== 'object') continue;
-    const file = (diff as Record<string, unknown>).file;
-    if (typeof file === 'string' && file) files.add(file);
+    if (!diff || !isObject(diff)) continue;
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    const file = (diff as UnknownRecord).file;
+    if (isString(file) && file) files.add(file);
     additions += readDiffCount(diff, 'additions', 'added');
     deletions += readDiffCount(diff, 'deletions', 'removed');
   }
@@ -559,17 +561,18 @@ function hasSessionSummaryEdits(stats: SessionSummaryStats) {
   );
 }
 
-function readDiffCount(
-  diff: unknown,
+function readDiffCount<T>(
+  diff: T,
   primaryKey: 'additions' | 'deletions',
   fallbackKey: 'added' | 'removed'
 ): number {
-  if (!diff || typeof diff !== 'object') return 0;
-  const record = diff as Record<string, unknown>;
+  if (!diff || !isObject(diff)) return 0;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const record = diff as UnknownRecord;
   const primary = record[primaryKey];
-  if (typeof primary === 'number') return primary;
+  if (isNumber(primary)) return primary;
   const fallback = record[fallbackKey];
-  return typeof fallback === 'number' ? fallback : 0;
+  return isNumber(fallback) ? fallback : 0;
 }
 
 export function groupSessions(
@@ -727,7 +730,7 @@ export function SessionListSectionHeader(props: {
   incomplete?: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onArchive?: () => unknown;
+  onArchive?: () => void;
   archiveLabel?: string;
 }) {
   const [isConfirmingArchive, setIsConfirmingArchive] = createSignal(false);
@@ -831,7 +834,7 @@ function SessionListContinuation() {
   };
 
   onMount(() => {
-    if (!sentinelRef || typeof IntersectionObserver === 'undefined') return;
+    if (!sentinelRef || globalThis.IntersectionObserver === undefined) return;
     observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) void loadNextPage();
@@ -1000,7 +1003,7 @@ export function SessionListView(props: {
         limit = nextLimit;
       }
     })()
-      .catch((error: unknown) => {
+      .catch((error) => {
         if (requestKey !== resolutionRequestKey) return;
         setError(error instanceof Error ? error.message : String(error));
       })
@@ -1039,7 +1042,7 @@ export function SessionListView(props: {
         if (Array.isArray(page)) throw new Error('Expected a paginated session search');
         setNativeSearchResults(page.items);
       })
-      .catch((error: unknown) => {
+      .catch((error) => {
         if (requestKey !== searchRequestKey || controller.signal.aborted) return;
         setError(error instanceof Error ? error.message : String(error));
       })
@@ -1863,7 +1866,7 @@ function SessionListItem(props: {
   };
 
   onMount(() => {
-    if (!rowRef || typeof IntersectionObserver === 'undefined') {
+    if (!rowRef || globalThis.IntersectionObserver === undefined) {
       setShouldLoadSummary(true);
       return;
     }

@@ -21,11 +21,13 @@ export function shouldShowAssistantPartInHighlightedCard(part: Part) {
 
 export function isFileEditPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
+  // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
   return getToolFileChange((part as ToolPart).tool, (part as ToolPart).state) !== null;
 }
 
 export function isFileReadPart(part: Part): boolean {
   if (part.type !== 'tool') return false;
+  // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
   return getToolReadPath((part as ToolPart).tool, (part as ToolPart).state) !== null;
 }
 

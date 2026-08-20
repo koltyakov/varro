@@ -1,16 +1,24 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Logging intentionally accepts arbitrary diagnostic values and serializes them defensively. */
 import * as vscode from 'vscode';
 
 const channel = vscode.window.createOutputChannel('Varro');
+
+interface SerializedError {
+  name: string;
+  message: string;
+  stack?: string;
+}
 
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, (_key, currentValue) => {
       if (currentValue instanceof Error) {
-        return {
+        const serialized: SerializedError = {
           name: currentValue.name,
           message: currentValue.message,
-          ...(currentValue.stack ? { stack: currentValue.stack } : {}),
         };
+        if (currentValue.stack) serialized.stack = currentValue.stack;
+        return serialized;
       }
       return currentValue;
     });

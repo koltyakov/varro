@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import {
   applySessionMcpsWithDependencies,
   SessionMcpOperations,
@@ -220,29 +221,30 @@ describe('session MCP helpers', () => {
 
   it('serializes rapid reconciliations so the latest selection wins', async () => {
     let resolveFirstConnect: (() => void) | undefined;
-    let statuses: Record<string, { status: 'connected' | 'disabled' }> = {
-      alpha: { status: 'connected' },
-      beta: { status: 'disabled' },
-    };
-    const selections: Record<string, string[]> = {
-      'session-a': ['beta'],
-      'session-b': ['alpha'],
-    };
+    const statuses = new Map<string, { status: 'connected' | 'disabled' }>([
+      ['alpha', { status: 'connected' }],
+      ['beta', { status: 'disabled' }],
+    ]);
+    const selections = new Map([
+      ['session-a', ['beta']],
+      ['session-b', ['alpha']],
+    ]);
     const connectMcp = vi.fn(async (name: string) => {
       if (name === 'beta') {
         await new Promise<void>((resolve) => {
           resolveFirstConnect = resolve;
         });
       }
-      statuses = { ...statuses, [name]: { status: 'connected' } };
+      statuses.set(name, { status: 'connected' });
     });
     const disconnectMcp = vi.fn(async (name: string) => {
-      statuses = { ...statuses, [name]: { status: 'disabled' } };
+      statuses.set(name, { status: 'disabled' });
     });
     const operations = new SessionMcpOperations({
-      getSelectedMcpsForSession: (sessionId) => (sessionId ? selections[sessionId] : []),
+      getSelectedMcpsForSession: (sessionId) =>
+        sessionId ? (selections.get(sessionId) ?? []) : [],
       getRequiredMcpSessionIds: (sessionId) => (sessionId ? [sessionId] : []),
-      getMcpStatus: () => statuses,
+      getMcpStatus: () => Object.fromEntries(statuses),
       loadMcps: vi.fn(async () => {}),
       getAvailableMcpNames: () => ['alpha', 'beta'],
       connectMcp,
@@ -263,7 +265,7 @@ describe('session MCP helpers', () => {
 
     expect(connectMcp.mock.calls.map(([name]) => name)).toEqual(['beta', 'alpha']);
     expect(disconnectMcp.mock.calls.map(([name]) => name)).toEqual(['alpha', 'beta']);
-    expect(statuses).toEqual({
+    expect(Object.fromEntries(statuses)).toEqual({
       alpha: { status: 'connected' },
       beta: { status: 'disabled' },
     });

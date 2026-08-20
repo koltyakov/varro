@@ -16,10 +16,12 @@ function snap(
 }
 
 function file(path: string): DroppedFile {
+  // SAFETY: The fixture provides the DroppedFile fields read by this statement.
   return { path, relativePath: path, type: 'file' } as DroppedFile;
 }
 
 function image(id: string): ClipboardImage {
+  // SAFETY: The fixture provides the ClipboardImage fields read by this statement.
   return {
     id,
     url: `data:image/png;base64,${id}`,

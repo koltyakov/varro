@@ -1,6 +1,8 @@
 import type { Persistence } from '../../shared/persistence';
 import { postMessage } from './bridge';
 import { logWarn } from './log';
+import type { UnknownRecord } from '../../shared/type-utils';
+import { asRecord, isObject } from './runtime-values';
 
 export class BrowserPersistence implements Persistence {
   private warnedRemoveFailure = false;
@@ -19,13 +21,14 @@ export class BrowserPersistence implements Persistence {
 
     try {
       const raw = this.storage?.getItem(key);
+      // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
       return raw ? (JSON.parse(raw) as T) : undefined;
     } catch {
       return undefined;
     }
   }
 
-  set(key: string, value: unknown) {
+  set<T>(key: string, value: T) {
     const vscodeStateFailure = writeVsCodeWebviewStateValue(key, value);
     if (vscodeStateFailure && !this.warnedVsCodeStateWriteFailure) {
       this.warnedVsCodeStateWriteFailure = true;
@@ -82,24 +85,27 @@ function acquireLocalStorage(): Storage | undefined {
 }
 
 type VsCodeWebviewStateApi = {
-  getState(): Record<string, unknown>;
-  setState(state: Record<string, unknown>): void;
+  getState(): UnknownRecord;
+  setState(state: UnknownRecord): void;
 };
 
 function getVsCodeWebviewStateApi(): VsCodeWebviewStateApi | undefined {
-  return (window as unknown as { __vscodeWebviewState?: VsCodeWebviewStateApi })
-    .__vscodeWebviewState;
+  const value = asRecord(window)?.__vscodeWebviewState;
+  if (!value || !isObject(value)) return undefined;
+  // SAFETY: VS Code installs __vscodeWebviewState with the getState/setState API before startup.
+  return value as VsCodeWebviewStateApi;
 }
 
 function readVsCodeWebviewStateValue<T>(key: string): T | undefined {
   try {
+    // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
     return getVsCodeWebviewStateApi()?.getState()?.[key] as T | undefined;
   } catch {
     return undefined;
   }
 }
 
-function writeVsCodeWebviewStateValue(key: string, value: unknown): { error: unknown } | undefined {
+function writeVsCodeWebviewStateValue<T>(key: string, value: T): { error: unknown } | undefined {
   try {
     const api = getVsCodeWebviewStateApi();
     if (!api) return;

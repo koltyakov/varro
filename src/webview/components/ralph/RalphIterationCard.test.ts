@@ -7,6 +7,7 @@ import { RalphIterationCard } from './RalphIterationCard';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise iteration-card actions through useOpenCode. */
 vi.mock('../../hooks/useOpenCode', () => ({
   selectSession: selectSessionMock,
 }));
@@ -72,6 +73,7 @@ describe('RalphIterationCard', () => {
     );
     expect(button?.className).toContain(`ralph-iter-${status}`);
     expect(container?.querySelector('.ralph-iter-duration')).toBeNull();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((button as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
@@ -88,6 +90,7 @@ describe('RalphIterationCard', () => {
     );
 
     const enabledButton = container?.querySelector('button.ralph-iter-card');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((enabledButton as HTMLButtonElement | null)?.disabled).toBe(false);
 
     enabledButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -98,8 +101,10 @@ describe('RalphIterationCard', () => {
     cleanup = render(() => RalphIterationCard({ iteration: iteration() }), container!);
 
     const disabledButton = container?.querySelector('button.ralph-iter-card');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((disabledButton as HTMLButtonElement | null)?.disabled).toBe(true);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (disabledButton as HTMLButtonElement | null)?.click();
 
     expect(selectSessionMock).toHaveBeenCalledTimes(1);

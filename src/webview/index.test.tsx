@@ -13,11 +13,14 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise the webview entry module's integration boundaries. */
 vi.mock('solid-js/web', () => ({ render: mocks.render }));
 vi.mock('./App', () => ({ AppRoot: () => null }));
 vi.mock('./lib/bridge', () => ({ cleanupBridge: mocks.cleanupBridge }));
 
 import { bootstrap, bootstrapWebview } from './index';
+import { fixture } from './test-fixtures';
+import type { UnknownRecord } from '../shared/type-utils';
 
 mocks.entryRoot.remove();
 
@@ -25,7 +28,8 @@ let root: HTMLDivElement;
 let cleanup: (() => void) | undefined;
 let consoleError: ReturnType<typeof vi.spyOn>;
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
-const bootstrapWindow = window as unknown as Record<string, unknown>;
+// SAFETY: The fixture provides the unknown fields read by this statement.
+const bootstrapWindow = fixture<UnknownRecord>(window);
 
 describe('webview bootstrap', () => {
   beforeEach(() => {

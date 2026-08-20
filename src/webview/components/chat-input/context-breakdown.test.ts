@@ -44,13 +44,13 @@ function assistantMessage(id: string, sessionID = 'session-1', input = 20): Assi
   };
 }
 
-function part<T extends Part>(value: PartInput): T {
+function part(value: PartInput): Part {
   return {
     id: 'part-1',
     sessionID: 'session-1',
     messageID: 'message-1',
     ...value,
-  } as T;
+  };
 }
 
 describe('estimateContextBreakdown', () => {

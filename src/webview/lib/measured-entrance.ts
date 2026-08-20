@@ -47,7 +47,9 @@ export function prepareMeasuredEntrance(
     updateTargetHeight();
 
     observer =
-      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => updateTargetHeight());
+      globalThis.ResizeObserver === undefined
+        ? null
+        : new globalThis.ResizeObserver(() => updateTargetHeight());
     observer?.observe(element);
 
     finish = (event: AnimationEvent) => {

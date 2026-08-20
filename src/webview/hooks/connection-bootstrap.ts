@@ -55,12 +55,15 @@ export function shouldContinueInterruptedSession(messages: MessageEntry[]) {
 
 export async function continueInterruptedSessionWithDependencies(
   deps: {
-    syncSessionMcps(sessionId: string): Promise<void>;
+    syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
     resolveModel(sessionId: string): ResolvedModel | null;
     resolveAgent(sessionId: string): string | null;
-    sendAsync(sessionId: string, body: InterruptedSessionContinueBody): Promise<void>;
-    syncSession(sessionId: string): Promise<void>;
-    recheckSessionStatus(sessionId: string): Promise<void>;
+    sendAsync(
+      sessionId: string,
+      body: InterruptedSessionContinueBody
+    ): Promise<void | boolean | object>;
+    syncSession(sessionId: string): Promise<void | boolean | object>;
+    recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   },
   sessionId: string
 ) {
@@ -86,8 +89,8 @@ export async function recoverInterruptedSessionsWithDependencies(
     hasPendingQuestion(sessionId: string): boolean;
     hasPendingPermission(sessionId: string): boolean;
     loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
-    continueInterruptedSession(sessionId: string): Promise<void>;
-    logError(context: string, err: unknown): void;
+    continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
+    logError(context: string, cause: unknown): void;
   },
   generation: number
 ) {
@@ -120,17 +123,17 @@ export async function recoverInterruptedSessionsWithDependencies(
 export async function initConnectionWithDependencies(
   deps: {
     health(): Promise<HealthResponse>;
-    loadInitialData(): Promise<void>;
-    hydrateSessionStatuses(): Promise<void>;
+    loadInitialData(): Promise<void | boolean | object>;
+    hydrateSessionStatuses(): Promise<void | boolean | object>;
     getActiveSessionId(): string | null;
     getPersistedActiveSessionId(): string | null;
     getPersistedLastOpenedView?(): LastOpenedView | null;
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
-    selectSession(sessionId: string): Promise<void>;
+    selectSession(sessionId: string): Promise<void | boolean | object>;
     setShowSessionPicker(value: boolean): void;
-    recoverInterruptedSessions(generation: number): Promise<void>;
+    recoverInterruptedSessions(generation: number): Promise<void | boolean | object>;
     setInitialized(value: boolean): void;
     setError(message: string | null): void;
     now?(): number;
@@ -174,7 +177,7 @@ async function restoreStartupView(
     getSessionCount?(): number;
     getOnlyPrimarySessionId(): string | null;
     hasSession(sessionId: string): boolean;
-    selectSession(sessionId: string): Promise<void>;
+    selectSession(sessionId: string): Promise<void | boolean | object>;
     setShowSessionPicker(value: boolean): void;
     now?(): number;
   },
@@ -230,7 +233,7 @@ async function restoreStartupView(
 export function ensureConnectionInitializedWithDependencies(deps: {
   isInitialized(): boolean;
   isInitializing(): boolean;
-  initConnection(): Promise<unknown>;
+  initConnection(): Promise<void | boolean | object>;
   beginInitializing(): number;
   finishInitializing(attempt: number): void;
 }) {
@@ -243,15 +246,15 @@ export function ensureConnectionInitializedWithDependencies(deps: {
 
 export function createConnectionBootstrapOperations(deps: {
   health(): Promise<HealthResponse>;
-  loadInitialData(): Promise<void>;
-  hydrateSessionStatuses(): Promise<void>;
+  loadInitialData(): Promise<void | boolean | object>;
+  hydrateSessionStatuses(): Promise<void | boolean | object>;
   getActiveSessionId(): string | null;
   getPersistedActiveSessionId(): string | null;
   getPersistedLastOpenedView?(): LastOpenedView | null;
   getSessionCount?(): number;
   getOnlyPrimarySessionId(): string | null;
   hasSession(sessionId: string): boolean;
-  selectSession(sessionId: string): Promise<void>;
+  selectSession(sessionId: string): Promise<void | boolean | object>;
   setShowSessionPicker(value: boolean): void;
   setInitialized(value: boolean): void;
   setError(message: string | null): void;
@@ -262,13 +265,16 @@ export function createConnectionBootstrapOperations(deps: {
   hasPendingQuestion(sessionId: string): boolean;
   hasPendingPermission(sessionId: string): boolean;
   loadSessionMessages(sessionId: string): Promise<MessageEntry[]>;
-  logError(context: string, err: unknown): void;
-  syncSessionMcps(sessionId: string): Promise<void>;
+  logError(context: string, cause: unknown): void;
+  syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
   resolveModel(sessionId: string): ResolvedModel | null;
   resolveAgent(sessionId: string): string | null;
-  sendAsync(sessionId: string, body: InterruptedSessionContinueBody): Promise<void>;
-  syncSession(sessionId: string): Promise<void>;
-  recheckSessionStatus(sessionId: string): Promise<void>;
+  sendAsync(
+    sessionId: string,
+    body: InterruptedSessionContinueBody
+  ): Promise<void | boolean | object>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   now?(): number;
 }) {
   const recoverInterruptedSessions = (generation: number) => {

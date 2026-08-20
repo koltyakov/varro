@@ -12,9 +12,10 @@ import {
   type WebviewThemeKind,
 } from './protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
-import { asRecord } from './type-utils';
+import { asRecord, isBoolean, isNumber, isString } from './type-utils';
+import type { UnknownRecord } from './type-utils';
 
-const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
+const KNOWN_TYPES = new Set<string>([
   'server/status',
   'server/restart-blocked',
   'server/event',
@@ -47,19 +48,17 @@ const KNOWN_TYPES = new Set<ExtensionMessage['type']>([
  * This is a shallow structural check; it does not deep-validate payloads
  * beyond what is necessary to route the message safely.
  */
-export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
+export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
   const record = asRecord(value);
   if (!record) return null;
   const type = record.type;
-  if (typeof type !== 'string' || !KNOWN_TYPES.has(type as ExtensionMessage['type'])) {
-    return null;
-  }
+  if (!isKnownExtensionMessageType(type)) return null;
 
   switch (type) {
     case 'command/new-session': {
       if (record.payload === undefined) return { type };
       const payload = asRecord(record.payload);
-      if (!payload || typeof payload.prefill !== 'string') return null;
+      if (!payload || !isString(payload.prefill)) return null;
       return { type, payload: { prefill: payload.prefill } };
     }
 
@@ -78,7 +77,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'providers/status': {
       const payload = asRecord(record.payload);
-      if (typeof payload?.pending !== 'boolean') return null;
+      if (!isBoolean(payload?.pending)) return null;
       return { type, payload: { pending: payload.pending } };
     }
 
@@ -111,11 +110,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
     case 'terminal-selection/update': {
       if (record.payload === null) return { type, payload: null };
       const payload = asRecord(record.payload);
-      if (
-        !payload ||
-        typeof payload.text !== 'string' ||
-        typeof payload.terminalName !== 'string'
-      ) {
+      if (!payload || !isString(payload.text) || !isString(payload.terminalName)) {
         return null;
       }
       return { type, payload: { text: payload.text, terminalName: payload.terminalName } };
@@ -137,19 +132,19 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'pdfs/stored': {
       const payload = asRecord(record.payload);
-      if (typeof payload?.id !== 'string' || !isDroppedFile(payload.contextFile)) return null;
+      if (!isString(payload?.id) || !isDroppedFile(payload.contextFile)) return null;
       return { type, payload: { id: payload.id, contextFile: payload.contextFile } };
     }
 
     case 'images/stored': {
       const payload = asRecord(record.payload);
-      if (typeof payload?.id !== 'string' || !isDroppedFile(payload.contextFile)) return null;
+      if (!isString(payload?.id) || !isDroppedFile(payload.contextFile)) return null;
       return { type, payload: { id: payload.id, contextFile: payload.contextFile } };
     }
 
     case 'files/removed': {
       const payload = asRecord(record.payload);
-      if (!payload || typeof payload.path !== 'string') return null;
+      if (!payload || !isString(payload.path)) return null;
       return { type, payload: { path: payload.path } };
     }
 
@@ -157,8 +152,8 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (
         !payload ||
-        typeof payload.requestId !== 'number' ||
-        typeof payload.query !== 'string' ||
+        !isNumber(payload.requestId) ||
+        !isString(payload.query) ||
         !Array.isArray(payload.files) ||
         !payload.files.every(isDroppedFile)
       ) {
@@ -183,19 +178,15 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       ) {
         return null;
       }
-      return {
-        type,
-        payload: {
-          ...(typeof payload.showInlineFileChanges === 'boolean'
-            ? { showInlineFileChanges: payload.showInlineFileChanges }
-            : {}),
-          ...(typeof payload.showChangedFiles === 'boolean'
-            ? { showChangedFiles: payload.showChangedFiles }
-            : {}),
-          desktopSessionPaneSide: payload.desktopSessionPaneSide,
-          defaultPermissionMode: payload.defaultPermissionMode,
-        },
+      const config: Extract<ExtensionMessage, { type: 'config/update' }>['payload'] = {
+        desktopSessionPaneSide: payload.desktopSessionPaneSide,
+        defaultPermissionMode: payload.defaultPermissionMode,
       };
+      if (isBoolean(payload.showInlineFileChanges)) {
+        config.showInlineFileChanges = payload.showInlineFileChanges;
+      }
+      if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
+      return { type, payload: config };
     }
 
     case 'theme/update': {
@@ -208,7 +199,7 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       const payload = asRecord(record.payload);
       if (
         !payload ||
-        typeof payload.requestId !== 'number' ||
+        !isNumber(payload.requestId) ||
         (payload.status !== 'opened' && payload.status !== 'unavailable')
       ) {
         return null;
@@ -218,15 +209,13 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
 
     case 'api/response': {
       const payload = asRecord(record.payload);
-      if (!payload || typeof payload.id !== 'number') return null;
-      return {
-        type,
-        payload: {
-          id: payload.id,
-          ...(payload.error !== undefined ? { error: String(payload.error) } : {}),
-          ...(payload.data !== undefined ? { data: payload.data } : {}),
-        },
+      if (!payload || !isNumber(payload.id)) return null;
+      const response: Extract<ExtensionMessage, { type: 'api/response' }>['payload'] = {
+        id: payload.id,
       };
+      if (payload.error !== undefined) response.error = String(payload.error);
+      if (payload.data !== undefined) response.data = payload.data;
+      return { type, payload: response };
     }
 
     case 'ralph/state': {
@@ -240,8 +229,9 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
       return {
         type,
         payload: {
+          // SAFETY: Ralph run payloads are host-owned snapshots; the loop above validates the only migration-only field.
           runs: runs as RalphStatePayload['runs'],
-          activeIds: payload.activeIds.filter((id): id is string => typeof id === 'string'),
+          activeIds: payload.activeIds.filter(isString),
         },
       };
     }
@@ -251,12 +241,13 @@ export function parseExtensionMessage(value: unknown): ExtensionMessage | null {
   }
 }
 
-function parseRestartBlockedState(value: unknown): RestartBlockedState | null {
+function parseRestartBlockedState<T>(value: T): RestartBlockedState | null {
   const payload = asRecord(value);
   if (
     !payload ||
+    !isNumber(payload.totalSessionCount) ||
     !Number.isSafeInteger(payload.totalSessionCount) ||
-    (payload.totalSessionCount as number) <= 0 ||
+    payload.totalSessionCount <= 0 ||
     !Array.isArray(payload.directories)
   ) {
     return null;
@@ -265,54 +256,56 @@ function parseRestartBlockedState(value: unknown): RestartBlockedState | null {
     const row = asRecord(directoryValue);
     if (
       !row ||
-      (row.directory !== null && typeof row.directory !== 'string') ||
+      (row.directory !== null && !isString(row.directory)) ||
+      !isNumber(row.sessionCount) ||
       !Number.isSafeInteger(row.sessionCount) ||
-      (row.sessionCount as number) <= 0
+      row.sessionCount <= 0
     ) {
       return null;
     }
     return {
-      directory: row.directory as string | null,
-      sessionCount: row.sessionCount as number,
+      directory: row.directory,
+      sessionCount: row.sessionCount,
     };
   });
   if (directories.some((row) => row === null)) return null;
-  const typedDirectories = directories as RestartBlockedState['directories'];
+  const typedDirectories = directories.filter((row) => row !== null);
   if (
     typedDirectories.reduce((total, row) => total + row.sessionCount, 0) !==
     payload.totalSessionCount
   ) {
     return null;
   }
-  return {
-    totalSessionCount: payload.totalSessionCount as number,
+  const result: RestartBlockedState = {
+    totalSessionCount: payload.totalSessionCount,
     directories: typedDirectories,
-    ...(Number.isSafeInteger(payload.checkId) && (payload.checkId as number) >= 0
-      ? { checkId: payload.checkId as number }
-      : {}),
   };
+  if (isNumber(payload.checkId) && Number.isSafeInteger(payload.checkId) && payload.checkId >= 0) {
+    result.checkId = payload.checkId;
+  }
+  return result;
 }
 
-function isServerStatus(value: Record<string, unknown> | null): value is ServerStatus {
+function isServerStatus(value: UnknownRecord | null): value is ServerStatus {
   if (!value) return false;
   switch (value.state) {
     case 'starting':
     case 'stopped':
       return true;
     case 'running':
-      return typeof value.url === 'string';
+      return isString(value.url);
     case 'error':
-      return typeof value.message === 'string';
+      return isString(value.message);
     default:
       return false;
   }
 }
 
-function isDesktopSessionPaneSide(value: unknown): value is DesktopSessionPaneSide {
+function isDesktopSessionPaneSide<T>(value: T): value is T & DesktopSessionPaneSide {
   return value === 'left' || value === 'right';
 }
 
-function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {
+function isWebviewThemeKind<T>(value: T): value is T & WebviewThemeKind {
   return (
     value === 'light' ||
     value === 'dark' ||
@@ -321,10 +314,10 @@ function isWebviewThemeKind(value: unknown): value is WebviewThemeKind {
   );
 }
 
-function isEditorContext(value: unknown): value is EditorContext {
+function isEditorContext<T>(value: T): value is T & EditorContext {
   const record = asRecord(value);
   if (!record) return false;
-  if (record.workspacePath !== null && typeof record.workspacePath !== 'string') return false;
+  if (record.workspacePath !== null && !isString(record.workspacePath)) return false;
   if (!isActiveFile(record.activeFile)) return false;
   if (!isSelection(record.selection)) return false;
   if (record.workspaceFolders !== undefined && !isWorkspaceFolders(record.workspaceFolders)) {
@@ -334,98 +327,101 @@ function isEditorContext(value: unknown): value is EditorContext {
   if (!Array.isArray(record.diagnostics)) return false;
   if (
     record.diagnosticsTotal !== undefined &&
-    (!Number.isInteger(record.diagnosticsTotal) || (record.diagnosticsTotal as number) < 0)
+    (!isNumber(record.diagnosticsTotal) ||
+      !Number.isInteger(record.diagnosticsTotal) ||
+      record.diagnosticsTotal < 0)
   ) {
     return false;
   }
   return record.diagnostics.every(isDiagnostic);
 }
 
-function isWorkspaceFolders(value: unknown): boolean {
+function isWorkspaceFolders<T>(value: T): boolean {
   return (
     Array.isArray(value) &&
     value.every((item) => {
       const record = asRecord(item);
-      return !!record && typeof record.name === 'string' && typeof record.path === 'string';
+      return !!record && isString(record.name) && isString(record.path);
     })
   );
 }
 
-function isEditorText(value: unknown): boolean {
+function isEditorText<T>(value: T): boolean {
   if (value === null) return true;
   const record = asRecord(value);
   return (
     !!record &&
     (record.kind === 'selection' || record.kind === 'dirty-buffer') &&
-    (record.path === null || typeof record.path === 'string') &&
-    typeof record.relativePath === 'string' &&
-    typeof record.language === 'string' &&
+    (record.path === null || isString(record.path)) &&
+    isString(record.relativePath) &&
+    isString(record.language) &&
     isSelection(record.range) &&
     record.range !== null &&
-    typeof record.text === 'string' &&
-    typeof record.truncated === 'boolean'
+    isString(record.text) &&
+    isBoolean(record.truncated)
   );
 }
 
-function isActiveFile(
-  value: unknown
-): value is { path: string; relativePath: string; language: string } | null {
+function isActiveFile<T>(
+  value: T
+): value is T & ({ path: string; relativePath: string; language: string } | null) {
+  if (value === null) return true;
+  const record = asRecord(value);
+  return (
+    !!record && isString(record.path) && isString(record.relativePath) && isString(record.language)
+  );
+}
+
+function isSelection<T>(value: T): value is T & ({ startLine: number; endLine: number } | null) {
   if (value === null) return true;
   const record = asRecord(value);
   return (
     !!record &&
-    typeof record.path === 'string' &&
-    typeof record.relativePath === 'string' &&
-    typeof record.language === 'string'
-  );
-}
-
-function isSelection(value: unknown): value is { startLine: number; endLine: number } | null {
-  if (value === null) return true;
-  const record = asRecord(value);
-  return (
-    !!record &&
-    typeof record.startLine === 'number' &&
-    typeof record.endLine === 'number' &&
+    isNumber(record.startLine) &&
+    isNumber(record.endLine) &&
     Number.isFinite(record.startLine) &&
     Number.isFinite(record.endLine)
   );
 }
 
-function isDiagnostic(value: unknown): value is EditorContext['diagnostics'][number] {
+function isDiagnostic<T>(value: T): value is T & EditorContext['diagnostics'][number] {
   const record = asRecord(value);
   return (
     !!record &&
-    typeof record.path === 'string' &&
+    isString(record.path) &&
     (record.severity === 'error' || record.severity === 'warning' || record.severity === 'info') &&
-    typeof record.message === 'string' &&
-    typeof record.line === 'number' &&
+    isString(record.message) &&
+    isNumber(record.line) &&
     Number.isFinite(record.line)
   );
 }
 
-function isLineRange(value: unknown): value is ContextLineRange {
+function isLineRange<T>(value: T): value is T & ContextLineRange {
   const record = asRecord(value);
   return (
     !!record &&
-    typeof record.startLine === 'number' &&
-    typeof record.endLine === 'number' &&
+    isNumber(record.startLine) &&
+    isNumber(record.endLine) &&
     Number.isFinite(record.startLine) &&
     Number.isFinite(record.endLine)
   );
 }
 
-function isDroppedFile(value: unknown): value is DroppedFile {
+function isDroppedFile<T>(value: T): value is T & DroppedFile {
   const record = asRecord(value);
   if (!record) return false;
-  if (typeof record.path !== 'string' || typeof record.relativePath !== 'string') return false;
+  if (!isString(record.path) || !isString(record.relativePath)) return false;
   if (record.type !== 'file' && record.type !== 'directory') return false;
   if (
     record.attachmentSequence !== undefined &&
-    (typeof record.attachmentSequence !== 'number' || !Number.isFinite(record.attachmentSequence))
+    (!isNumber(record.attachmentSequence) || !Number.isFinite(record.attachmentSequence))
   ) {
     return false;
   }
   if (record.lineRanges === undefined) return true;
   return Array.isArray(record.lineRanges) && record.lineRanges.every(isLineRange);
+}
+
+function isKnownExtensionMessageType<T>(value: T): value is T & ExtensionMessage['type'] {
+  return isString(value) && KNOWN_TYPES.has(value);
 }

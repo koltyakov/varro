@@ -31,7 +31,9 @@ describe('AttachmentChip', () => {
       container
     );
     const chip = container.querySelector<HTMLElement>('.chat-attachment-chip')!;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     container.getBoundingClientRect = () => ({ left: 10, right: 510, width: 500 }) as DOMRect;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     chip.getBoundingClientRect = () => ({ left: 20, right: 120, top: 400, width: 100 }) as DOMRect;
 
     chip.dispatchEvent(new MouseEvent('mouseenter'));

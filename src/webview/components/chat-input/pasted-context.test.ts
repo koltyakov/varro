@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise pasted-context integration with the client module. */
 vi.mock('../../lib/client', () => ({
   client: { varro: { resolveWorkspacePath: vi.fn() } },
 }));

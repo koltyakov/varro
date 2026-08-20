@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Kimi API payloads are decoded before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Parsed JSON is checked before fields are consumed. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,

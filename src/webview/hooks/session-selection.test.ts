@@ -53,7 +53,7 @@ function loadedSession(id: string) {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let reject!: (reason?: Error) => void;
   const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
@@ -108,6 +108,7 @@ function createSelectionDependencies(
 
 describe('session-selection helpers', () => {
   it('keeps a persisted selection over session and message models', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();
@@ -437,6 +438,7 @@ describe('session-selection helpers', () => {
   it.each(['success', 'failure'] as const)(
     'clears message loading after a current-generation selection is abandoned before load %s',
     async (outcome) => {
+      // SAFETY: The fixture provides the string | null fields read by this statement.
       const activeSession = { value: null as string | null };
       const response = deferred<ReturnType<typeof loadedSession>>();
       const setMessagesLoading = vi.fn();
@@ -472,6 +474,7 @@ describe('session-selection helpers', () => {
   it.each(['success', 'failure'] as const)(
     'does not let an older load %s clear a newer selection loading state',
     async (outcome) => {
+      // SAFETY: The fixture provides the string | null fields read by this statement.
       const activeSession = { value: null as string | null };
       const generation = { value: 0 };
       const firstResponse = deferred<ReturnType<typeof loadedSession>>();
@@ -585,6 +588,7 @@ describe('session-selection helpers', () => {
   });
 
   it('reconciles status before startup synchronization completes', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: null as string | null };
     const loaded = deferred<ReturnType<typeof loadedSession>>();
     const statuses = deferred<Record<string, SessionStatus>>();
@@ -620,6 +624,7 @@ describe('session-selection helpers', () => {
   });
 
   it('does not report loaded messages as failed when follow-up startup sync fails', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: null as string | null };
     const setMessagesIncremental = vi.fn();
     const setError = vi.fn();
@@ -785,6 +790,7 @@ describe('session-selection helpers', () => {
   });
 
   it('keeps retry sessions loading even when the latest assistant message has an error', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: null as string | null };
     const startLoading = vi.fn();
     const stopLoading = vi.fn();

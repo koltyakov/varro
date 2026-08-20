@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- HTTP and SSE payloads remain untyped until endpoint-specific consumers validate them. */
+/* oxlint-disable anti-slop/no-known-value-widening -- Request headers intentionally use the Fetch API dictionary contract. */
 import { parseHealthResponse } from '../shared/health';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../shared/opencode-endpoints';
 import { parseServerEvent, type ServerStatus } from '../shared/protocol';
@@ -123,7 +125,9 @@ export class OpenCodeTransport {
       }
       if (options?.captureNextCursor) {
         const nextCursor = res.headers.get('x-next-cursor')?.trim();
-        return { data, ...(nextCursor ? { nextCursor } : {}) } satisfies OpenCodeResponseMetadata;
+        const metadata: OpenCodeResponseMetadata = { data };
+        if (nextCursor) metadata.nextCursor = nextCursor;
+        return metadata;
       }
       return data;
     } catch (err) {

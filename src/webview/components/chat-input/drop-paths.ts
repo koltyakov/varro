@@ -1,3 +1,4 @@
+import { isString, isObject } from '../../lib/runtime-values';
 export async function collectDroppedPaths(
   dataTransfer: DataTransfer | null,
   options: { includeFilePaths?: boolean; preferFileContent?: boolean } = {}
@@ -40,11 +41,13 @@ export async function collectDroppedPaths(
 
   if (options.includeFilePaths !== false) {
     for (const file of Array.from(dataTransfer.files)) {
+      // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
       const path = (file as File & { path?: string }).path;
       if (path) paths.add(path);
     }
 
     for (const item of Array.from(dataTransfer.items)) {
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const file = item.getAsFile() as (File & { path?: string }) | null;
       if (file?.path) paths.add(file.path);
     }
@@ -110,16 +113,18 @@ function parseCodeEditorsDrop(value: string): string[] {
   if (!value) return [];
 
   try {
+    // SAFETY: The surrounding shape or discriminator check establishes the unknown contract used below.
     const parsed = JSON.parse(value) as unknown[];
     const paths = new Set<string>();
     for (const item of parsed) {
       if (!item) continue;
-      if (typeof item === 'string') {
+      if (isString(item)) {
         const decoded = decodeDroppedCandidate(item);
         if (decoded) paths.add(decoded);
         continue;
       }
-      if (typeof item !== 'object') continue;
+      if (!isObject(item)) continue;
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       const resource = 'resource' in item ? (item.resource as string | undefined) : undefined;
       const uri = resource ? decodeDroppedCandidate(resource) : null;
       if (uri) paths.add(uri);
@@ -134,10 +139,11 @@ function parseCodeFilesDrop(value: string): string[] {
   if (!value) return [];
 
   try {
+    // SAFETY: The surrounding shape or discriminator check establishes the unknown contract used below.
     const parsed = JSON.parse(value) as unknown[];
     const paths = new Set<string>();
     for (const item of parsed) {
-      if (typeof item !== 'string') continue;
+      if (!isString(item)) continue;
       const decoded = decodeDroppedCandidate(item);
       if (decoded) paths.add(decoded);
     }
@@ -151,10 +157,11 @@ function parseResourceListDrop(value: string): string[] {
   if (!value) return [];
 
   try {
+    // SAFETY: The surrounding shape or discriminator check establishes the unknown contract used below.
     const parsed = JSON.parse(value) as unknown[];
     const paths = new Set<string>();
     for (const item of parsed) {
-      if (typeof item !== 'string') continue;
+      if (!isString(item)) continue;
       const decoded = decodeDroppedCandidate(item);
       if (decoded) paths.add(decoded);
     }
@@ -289,8 +296,8 @@ function extractPathsFromStructuredDrop(value: string): string[] {
   }
 }
 
-function collectStructuredDropPaths(value: unknown, paths: Set<string>, keyHint = '') {
-  if (typeof value === 'string') {
+function collectStructuredDropPaths<T>(value: T, paths: Set<string>, keyHint = '') {
+  if (isString(value)) {
     const looksPathLike =
       !keyHint ||
       /(path|uri|url|resource)/i.test(keyHint) ||
@@ -319,7 +326,7 @@ function collectStructuredDropPaths(value: unknown, paths: Set<string>, keyHint 
     return;
   }
 
-  if (!value || typeof value !== 'object') return;
+  if (!value || !isObject(value)) return;
 
   for (const [key, entry] of Object.entries(value)) {
     collectStructuredDropPaths(entry, paths, key);
@@ -342,12 +349,13 @@ export function readFileAsBase64(file: File): Promise<string> {
     const reader = new FileReader();
     reader.addEventListener('load', () => {
       const result = reader.result;
-      if (typeof result !== 'string') {
+      if (!isString(result)) {
         reject(new Error('Unexpected FileReader result'));
         return;
       }
-      const comma = result.indexOf(',');
-      resolve(comma >= 0 ? result.slice(comma + 1) : '');
+      const dataUrl = String(result);
+      const comma = dataUrl.indexOf(',');
+      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : '');
     });
     reader.addEventListener('error', () => reject(reader.error || new Error('FileReader failed')));
     reader.readAsDataURL(file);

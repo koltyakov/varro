@@ -316,6 +316,7 @@ describe('popup-position', () => {
       }
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const el = document.createElement('div');
@@ -328,6 +329,7 @@ describe('popup-position', () => {
       expect(reposition).toHaveBeenCalledTimes(1);
       expect(observed).toEqual([el]);
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       resizeCallback?.([], {} as ResizeObserver);
       await Promise.resolve();
       expect(reposition).toHaveBeenCalledTimes(2);

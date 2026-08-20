@@ -409,6 +409,7 @@ describe('optimistic image parts carried onto the server message', () => {
     expect(entry.info.id).toBe(OPTIMISTIC_ID);
     expect(entry.parts).toHaveLength(2);
     expect(entry.parts[0]).toEqual(textPart('p-1', OPTIMISTIC_ID, 'look at this'));
+    // SAFETY: The fixture provides the FilePart fields read by this statement.
     const carried = entry.parts[1] as FilePart;
     expect(carried.id).toBe(`${OPTIMISTIC_ID}-optimistic-file-1`);
     expect(carried.messageID).toBe(OPTIMISTIC_ID);
@@ -427,6 +428,7 @@ describe('optimistic image parts carried onto the server message', () => {
 
 describe('optimistic image part de-duplication', () => {
   function seedServerMessageWithOptimisticImage(overrides?: Partial<FilePart>) {
+    // SAFETY: The fixture provides the FilePart fields read by this statement.
     upsertMessage({
       info: userMessage('msg-1'),
       parts: [{ ...(imagePart('msg-1-optimistic-file-0', 'msg-1') as FilePart), ...overrides }],

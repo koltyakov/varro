@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Server events and persisted snapshots are validated before entering session state. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Snapshot assertions follow discriminant and bounded-field validation. */
 import * as vscode from 'vscode';
 import { friendlyErrorName, isAbortedAssistantError } from '../shared/error-classification';
 import type { Persistence } from '../shared/persistence';
@@ -49,6 +51,19 @@ export type RecoverySnapshot = {
   interruptedSessions: InterruptedSessionSnapshot[];
   blockingRequests: BlockingRequestSnapshot[];
 };
+
+interface PersistedQuestionDefinition {
+  question?: string;
+  header?: string;
+  multiple?: boolean;
+  custom?: boolean;
+  options: PersistedQuestionOption[];
+}
+
+interface PersistedQuestionOption {
+  label: string;
+  description?: string;
+}
 
 export type SessionBusyAttempt = {
   readonly sessionID: string;
@@ -634,7 +649,7 @@ export class SessionStateManager {
         this.blockingRequestMutations.has(item.id)
       )
         continue;
-      this.pendingAttention.set(item.id, {
+      const pending: PendingAttentionEntry = {
         sessionID: item.sessionID,
         kind: item.kind,
         label:
@@ -643,8 +658,9 @@ export class SessionStateManager {
             : describePermissionRequest(item.props),
         props: item.props,
         directory: trimOptionalString(item.directory),
-        ...(item.eventType ? { eventType: item.eventType } : {}),
-      });
+      };
+      if (item.eventType) pending.eventType = item.eventType;
+      this.pendingAttention.set(item.id, pending);
       if (item.kind === 'permission') this.deferPermissionAttention(item.id);
       const directory = trimOptionalString(item.directory);
       if (directory) {
@@ -776,32 +792,38 @@ export class SessionStateManager {
 
   private getBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
     return [...this.pendingAttention.entries()]
-      .map(([id, request]) => ({
-        id,
-        sessionID: request.sessionID,
-        kind: request.kind,
-        props: this.serializeBlockingRequestProps(request.kind, request.props),
-        ...(request.eventType ? { eventType: request.eventType } : {}),
-        directory: trimOptionalString(
-          request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
-        ),
-      }))
+      .map(([id, request]) => {
+        const snapshot: BlockingRequestSnapshot = {
+          id,
+          sessionID: request.sessionID,
+          kind: request.kind,
+          props: this.serializeBlockingRequestProps(request.kind, request.props),
+          directory: trimOptionalString(
+            request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
+          ),
+        };
+        if (request.eventType) snapshot.eventType = request.eventType;
+        return snapshot;
+      })
       .toSorted((a, b) => a.id.localeCompare(b.id))
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
   }
 
   private getLiveBlockingRequestSnapshots(): BlockingRequestSnapshot[] {
     return [...this.pendingAttention.entries()]
-      .map(([id, request]) => ({
-        id,
-        sessionID: request.sessionID,
-        kind: request.kind,
-        props: this.serializeBlockingRequestProps(request.kind, request.props),
-        ...(request.eventType ? { eventType: request.eventType } : {}),
-        directory: trimOptionalString(
-          request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
-        ),
-      }))
+      .map(([id, request]) => {
+        const snapshot: BlockingRequestSnapshot = {
+          id,
+          sessionID: request.sessionID,
+          kind: request.kind,
+          props: this.serializeBlockingRequestProps(request.kind, request.props),
+          directory: trimOptionalString(
+            request.directory || this.getSessionMetadata(this.sessionDirectories, request.sessionID)
+          ),
+        };
+        if (request.eventType) snapshot.eventType = request.eventType;
+        return snapshot;
+      })
       .toSorted((a, b) => a.id.localeCompare(b.id))
       .slice(0, MAX_PERSISTED_BLOCKING_REQUESTS);
   }
@@ -893,14 +915,15 @@ export class SessionStateManager {
       kind === 'question' ? describeQuestionRequest(props) : describePermissionRequest(props);
     this.clearBusy(sessionID);
     this.trailingBusyAfterCompletion.delete(sessionID);
-    this.pendingAttention.set(requestID, {
+    const pending: PendingAttentionEntry = {
       sessionID,
       kind,
       label,
       props: { ...props },
       directory: this.getSessionMetadata(this.sessionDirectories, sessionID),
-      ...(eventType ? { eventType } : {}),
-    });
+    };
+    if (eventType) pending.eventType = eventType;
+    this.pendingAttention.set(requestID, pending);
     this.completedSessions.delete(sessionID);
     if (kind === 'permission') this.deferPermissionAttention(requestID);
     else this.showBlockingNotification(kind, sessionID, label);
@@ -1354,10 +1377,10 @@ function serializePermissionRequestProps(props: Record<string, unknown>): Record
     getString(props.messageID) || getString(asRecord(props.tool)?.messageID) || undefined;
   const callID = getString(props.callID) || getString(asRecord(props.tool)?.callID) || undefined;
   if (messageID || callID) {
-    result.tool = {
-      ...(messageID ? { messageID: trimRequiredString(messageID) } : {}),
-      ...(callID ? { callID: trimRequiredString(callID) } : {}),
-    };
+    const tool: { messageID?: string; callID?: string } = {};
+    if (messageID) tool.messageID = trimRequiredString(messageID);
+    if (callID) tool.callID = trimRequiredString(callID);
+    result.tool = tool;
   }
 
   const source = asRecord(props.source);
@@ -1438,13 +1461,12 @@ function serializeQuestionDefinition(question: Record<string, unknown> | undefin
     : [];
 
   if (!prompt && !header && options.length === 0) return null;
-  return {
-    ...(prompt ? { question: prompt } : {}),
-    ...(header ? { header } : {}),
-    ...(typeof question.multiple === 'boolean' ? { multiple: question.multiple } : {}),
-    ...(typeof question.custom === 'boolean' ? { custom: question.custom } : {}),
-    options,
-  };
+  const definition: PersistedQuestionDefinition = { options };
+  if (prompt) definition.question = prompt;
+  if (header) definition.header = header;
+  if (typeof question.multiple === 'boolean') definition.multiple = question.multiple;
+  if (typeof question.custom === 'boolean') definition.custom = question.custom;
+  return definition;
 }
 
 function serializeQuestionOption(option: Record<string, unknown> | undefined) {
@@ -1452,10 +1474,9 @@ function serializeQuestionOption(option: Record<string, unknown> | undefined) {
   const label = trimOptionalString(getString(option.label));
   if (!label) return null;
   const description = trimOptionalString(getString(option.description));
-  return {
-    label,
-    ...(description ? { description } : {}),
-  };
+  const result: PersistedQuestionOption = { label };
+  if (description) result.description = description;
+  return result;
 }
 
 function isPersistableMetadataValue(value: unknown): value is string | number | boolean {

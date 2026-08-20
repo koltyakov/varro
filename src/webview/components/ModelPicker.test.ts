@@ -328,6 +328,7 @@ describe('ModelPicker', () => {
     const searchInput = container?.querySelector('input[aria-label="Search models"]');
     expect(searchInput).toBeInstanceOf(HTMLInputElement);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'Alpha Cloud';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
@@ -343,6 +344,7 @@ describe('ModelPicker', () => {
     expect(modelNames).toContain('Alpha 10');
     expect(modelNames).not.toContain('Night Owl');
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'Night Owl';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
@@ -353,6 +355,7 @@ describe('ModelPicker', () => {
       )
     ).toEqual(['Night Owl']);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'missing';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
@@ -414,6 +417,7 @@ describe('ModelPicker', () => {
       container!
     );
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const manageButton = Array.from(container?.querySelectorAll('button') ?? []).find((button) =>
       button.textContent?.includes('Manage models')
     ) as HTMLButtonElement | undefined;
@@ -510,6 +514,7 @@ describe('ModelPicker', () => {
     );
     await flushMicrotasks();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.firstElementChild as HTMLDivElement | null;
     const menu = container?.querySelector<HTMLElement>('.model-picker-menu');
     expect(anchor?.style.bottom).toBe('100%');

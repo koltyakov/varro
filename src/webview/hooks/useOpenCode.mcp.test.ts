@@ -4,12 +4,16 @@ import type { ExtensionMessage, McpStatus, ServerEventName } from '../../shared/
 import type { onMessage } from '../lib/bridge';
 import { getBridgeMocks, getClientMocks, loadModules, session } from './useOpenCode.test-support';
 
+interface ServerEvent {
+  properties: unknown;
+}
+
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 type BridgeOnMessage = typeof onMessage;
 type ServerEventsOn = (
   event: ServerEventName | '*',
-  handler: (data: unknown) => void
+  handler: (data: ServerEvent) => void
 ) => () => void;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 const serverEventsOn = vi.fn<ServerEventsOn>();
@@ -153,7 +157,7 @@ describe('useOpenCode mcp flows', () => {
   });
 
   it('disconnects an MCP retained only by a background session after it becomes idle', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {

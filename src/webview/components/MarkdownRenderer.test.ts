@@ -16,9 +16,26 @@ import {
 import { setState } from '../lib/state';
 import { loadCodeHighlighter } from '../lib/code-highlighter';
 
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+
 declare global {
   interface Window {
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 
@@ -27,6 +44,7 @@ let cleanup: (() => void) | undefined;
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const showSessionActionFeedbackMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise markdown action integration with useOpenCode and feedback modules. */
 vi.mock('../hooks/useOpenCode', () => ({
   selectSession: selectSessionMock,
 }));
@@ -97,6 +115,7 @@ describe('MarkdownRenderer', () => {
         .mockResolvedValueOnce({ svg: '<svg></svg>' }),
     };
 
+    // SAFETY: The fixture provides the never fields read by this statement.
     await expect(
       renderMermaidWithColdRetryForTests(mermaid as never, 'flowchart TD\n  A --> B', {
         theme: 'base',
@@ -115,6 +134,7 @@ describe('MarkdownRenderer', () => {
       render: vi.fn(() => Promise.reject(firstError)),
     };
 
+    // SAFETY: The fixture provides the never fields read by this statement.
     await expect(
       renderMermaidWithColdRetryForTests(mermaid as never, 'flowchart TD\n  A -->|', {
         theme: 'base',
@@ -412,6 +432,7 @@ describe('MarkdownRenderer', () => {
         requestId: expect.any(Number),
       },
     });
+    // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
     window.dispatchEvent(
@@ -445,6 +466,7 @@ describe('MarkdownRenderer', () => {
       type: 'vscode/open',
       payload: { path: '/repo/go.mod', line: 3, kind: 'file', requestId: expect.any(Number) },
     });
+    // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
     window.dispatchEvent(
@@ -470,6 +492,7 @@ describe('MarkdownRenderer', () => {
 
     const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
     dispatchAnchorClick(link);
+    // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
     window.dispatchEvent(
@@ -695,6 +718,7 @@ describe('MarkdownRenderer', () => {
         requestId: expect.any(Number),
       },
     });
+    // SAFETY: The fixture provides the { payload: { requestId: number } } fields read by this statement.
     const requestId = (send.mock.calls[0]![0] as { payload: { requestId: number } }).payload
       .requestId;
     window.dispatchEvent(

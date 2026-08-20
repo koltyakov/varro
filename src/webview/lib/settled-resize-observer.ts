@@ -18,7 +18,7 @@ function scheduleSettledCallback(element: Element) {
 }
 
 function getObserver() {
-  if (observer || typeof ResizeObserver === 'undefined') return observer;
+  if (observer || globalThis.ResizeObserver === undefined) return observer;
   observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
       if (callbacks.has(entry.target)) scheduleSettledCallback(entry.target);

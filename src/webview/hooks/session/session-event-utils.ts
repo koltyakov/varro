@@ -10,78 +10,82 @@ import type {
   SessionEventInfo,
 } from '../../types';
 import { asRecord } from '../../../shared/type-utils';
+import type { UnknownRecord } from '../../../shared/type-utils';
+import { isNumber, isString } from '../../lib/runtime-values';
 
-export function isCompleteMessageInfo(value: unknown): value is Message {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
+export function isCompleteMessageInfo<T>(value: T): value is T & Message {
+  const record = asRecord(value);
+  if (!record) return false;
+  const time = asRecord(record.time);
   if (
-    typeof record.id !== 'string' ||
+    !isString(record.id) ||
     !record.id ||
-    typeof record.sessionID !== 'string' ||
+    !isString(record.sessionID) ||
     !record.sessionID ||
-    typeof record.role !== 'string' ||
+    !isString(record.role) ||
     !record.time ||
-    typeof record.time !== 'object' ||
-    typeof (record.time as { created?: unknown }).created !== 'number'
+    !time ||
+    !isNumber(time.created)
   ) {
     return false;
   }
 
   if (record.role === 'user') {
+    const model = asRecord(record.model);
     return !!(
       record.parentID === undefined &&
-      typeof record.agent === 'string' &&
+      isString(record.agent) &&
       record.model &&
-      typeof record.model === 'object' &&
-      typeof (record.model as { providerID?: unknown }).providerID === 'string' &&
-      typeof (record.model as { modelID?: unknown }).modelID === 'string'
+      model &&
+      isString(model.providerID) &&
+      isString(model.modelID)
     );
   }
 
   if (record.role === 'assistant') {
+    const path = asRecord(record.path);
+    const tokens = asRecord(record.tokens);
+    const cache = asRecord(tokens?.cache);
     return !!(
-      typeof record.parentID === 'string' &&
-      typeof record.modelID === 'string' &&
-      typeof record.providerID === 'string' &&
-      typeof record.mode === 'string' &&
+      isString(record.parentID) &&
+      isString(record.modelID) &&
+      isString(record.providerID) &&
+      isString(record.mode) &&
       record.path &&
-      typeof record.path === 'object' &&
-      typeof (record.path as { cwd?: unknown }).cwd === 'string' &&
-      typeof (record.path as { root?: unknown }).root === 'string' &&
-      typeof record.cost === 'number' &&
+      path &&
+      isString(path.cwd) &&
+      isString(path.root) &&
+      isNumber(record.cost) &&
       record.tokens &&
-      typeof record.tokens === 'object' &&
-      typeof (record.tokens as { input?: unknown }).input === 'number' &&
-      typeof (record.tokens as { output?: unknown }).output === 'number' &&
-      typeof (record.tokens as { reasoning?: unknown }).reasoning === 'number' &&
-      (record.tokens as { cache?: unknown }).cache &&
-      typeof (record.tokens as { cache?: unknown }).cache === 'object' &&
-      typeof ((record.tokens as { cache?: unknown }).cache as { read?: unknown }).read ===
-        'number' &&
-      typeof ((record.tokens as { cache?: unknown }).cache as { write?: unknown }).write ===
-        'number'
+      tokens &&
+      isNumber(tokens.input) &&
+      isNumber(tokens.output) &&
+      isNumber(tokens.reasoning) &&
+      cache &&
+      isNumber(cache.read) &&
+      isNumber(cache.write)
     );
   }
 
   return false;
 }
 
-export function isCompleteMessagePart(value: unknown): value is Part {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
+export function isCompleteMessagePart<T>(value: T): value is T & Part {
+  const record = asRecord(value);
+  if (!record) return false;
   return (
-    typeof record.id === 'string' &&
+    isString(record.id) &&
     !!record.id &&
-    typeof record.sessionID === 'string' &&
+    isString(record.sessionID) &&
     !!record.sessionID &&
-    typeof record.messageID === 'string' &&
+    isString(record.messageID) &&
     !!record.messageID &&
-    typeof record.type === 'string' &&
+    isString(record.type) &&
     !!record.type
   );
 }
 
-export function isContinuationStepEnd(eventName: string, props: Record<string, unknown>) {
+export function isContinuationStepEnd(eventName: string, props: UnknownRecord) {
   if (eventName !== 'session.next.step.ended') return false;
   return isContinuationStepFinish(getEventString(props, 'finish'));
 }
@@ -97,23 +101,23 @@ export function getPartDeltaQueueKey(messageID: string, partID: string) {
 export const getToolExecutionKey = (sessionId: string, callId: string) =>
   `${sessionId}\u0000${callId}`;
 
-export const getEventTimestamp = (props: Record<string, unknown>) => {
+export const getEventTimestamp = (props: UnknownRecord) => {
   const timestamp = props.timestamp;
-  return typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : Date.now();
+  return isNumber(timestamp) && Number.isFinite(timestamp) ? timestamp : Date.now();
 };
 
-export function getPermissionReplyId(props: Record<string, unknown>) {
-  const source =
-    props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : props;
-  return (source.id || source.permissionID || source.requestID) as string | undefined;
+export function getPermissionReplyId(props: UnknownRecord) {
+  const source = asRecord(props.info) ?? props;
+  const id = source.id || source.permissionID || source.requestID;
+  return isString(id) ? id : undefined;
 }
 
 // Accept `id` as a fallback for `requestID`, matching the extension host's
 // SessionStateManager so both sides clear question attention on the same
 // event shapes.
-export function getQuestionReplyId(props: Record<string, unknown> | undefined) {
+export function getQuestionReplyId(props: UnknownRecord | undefined) {
   const requestID = props?.requestID || props?.id;
-  return typeof requestID === 'string' ? requestID : undefined;
+  return isString(requestID) ? requestID : undefined;
 }
 
 export type NormalizedSessionEventInfo = SessionEventInfo & { id: string };
@@ -199,7 +203,7 @@ export function hasActiveAssistantReply(messages: MessageEntry[]) {
 }
 
 export function getAssistantUsagePatchFromStepEvent(
-  props: Record<string, unknown>
+  props: UnknownRecord
 ): AssistantUsagePatch | undefined {
   const tokens = parseAssistantTokens(props.tokens);
   const cost = getFiniteNumber(props.cost);
@@ -209,7 +213,7 @@ export function getAssistantUsagePatchFromStepEvent(
   return { tokens: tokens ?? undefined, cost, finish };
 }
 
-function parseAssistantTokens(value: unknown): AssistantMessage['tokens'] | null {
+function parseAssistantTokens<T>(value: T): AssistantMessage['tokens'] | null {
   const tokens = asRecord(value);
   if (!tokens) return null;
 
@@ -230,17 +234,18 @@ function parseAssistantTokens(value: unknown): AssistantMessage['tokens'] | null
   }
 
   const total = getFiniteNumber(tokens.total);
-  return {
-    ...(total !== undefined ? { total } : {}),
+  const result: AssistantMessage['tokens'] = {
     input,
     output,
     reasoning,
     cache: { read: cacheRead, write: cacheWrite },
   };
+  if (total !== undefined) result.total = total;
+  return result;
 }
 
-function getFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+function getFiniteNumber<T>(value: T): number | undefined {
+  return isNumber(value) && Number.isFinite(value) ? value : undefined;
 }
 
 export function latestAssistantMessageForSession(messages: MessageEntry[], sessionId: string) {
@@ -260,7 +265,7 @@ export function getAssistantFinishedMessageId(
   assistantMessage: AssistantMessage | null
 ) {
   if (assistantMessage) return assistantMessage.id;
-  if (typeof partialMessage.id === 'string' && partialMessage.id) return partialMessage.id;
+  if (isString(partialMessage.id) && partialMessage.id) return partialMessage.id;
   if (!partialMessage.sessionID) return null;
   return latestAssistantMessageForSession(messages, partialMessage.sessionID)?.info.id ?? null;
 }
@@ -271,17 +276,19 @@ export function normalizeSessionEventInfo(
 ): NormalizedSessionEventInfo | null {
   if (!info) return null;
   const normalized = stripNullishSessionInfo(info);
-  const id = typeof normalized.id === 'string' && normalized.id ? normalized.id : sessionID;
+  const id = isString(normalized.id) && normalized.id ? normalized.id : sessionID;
   return id ? { ...normalized, id } : null;
 }
 
 function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
-  const normalized: Record<string, unknown> = {};
+  const normalized: UnknownRecord = {};
   for (const [key, value] of Object.entries(info)) {
     if (value === null || value === undefined) continue;
-    if (key === 'time' && value && typeof value === 'object') {
+    if (key === 'time') {
+      const timeRecord = asRecord(value);
+      if (!timeRecord) continue;
       const time = Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).filter(
+        Object.entries(timeRecord).filter(
           ([, timeValue]) => timeValue !== null && timeValue !== undefined
         )
       );
@@ -290,11 +297,12 @@ function stripNullishSessionInfo(info: SessionEventInfo): SessionEventInfo {
     }
     normalized[key] = value;
   }
+  // SAFETY: This copy only removes nullish optional fields from SessionEventInfo.
   return normalized as SessionEventInfo;
 }
 
 export function mergeSessionEventInfo(info: NormalizedSessionEventInfo): Session | null {
-  if (isCompleteSessionEventInfo(info)) return applySessionShareOverride(info as Session);
+  if (isCompleteSessionEventInfo(info)) return applySessionShareOverride(info);
 
   const existing = appStore.state.sessions.find((session) => session.id === info.id);
   if (existing) {
@@ -308,20 +316,22 @@ export function mergeSessionEventInfo(info: NormalizedSessionEventInfo): Session
   return null;
 }
 
-function isCompleteSessionEventInfo(info: NormalizedSessionEventInfo) {
+function isCompleteSessionEventInfo(
+  info: NormalizedSessionEventInfo
+): info is NormalizedSessionEventInfo & Session {
   return (
-    typeof info.projectID === 'string' &&
-    typeof info.directory === 'string' &&
-    typeof info.title === 'string' &&
-    typeof info.version === 'string' &&
-    typeof info.time?.created === 'number' &&
-    typeof info.time.updated === 'number'
+    isString(info.projectID) &&
+    isString(info.directory) &&
+    isString(info.title) &&
+    isString(info.version) &&
+    isNumber(info.time?.created) &&
+    isNumber(info.time.updated)
   );
 }
 
 export function syncSessionAgent(info: NormalizedSessionEventInfo) {
-  const agent = (info as { agent?: unknown }).agent;
-  if (typeof agent === 'string' && agent) {
+  const agent = asRecord(info)?.agent;
+  if (isString(agent) && agent) {
     appStore.setState('sessionSelectedAgents', info.id, agent);
   }
 }
@@ -330,72 +340,65 @@ export function currentStreamingSnapshot() {
   return { partId: appStore.state.streamingPartId, text: appStore.state.streamingText };
 }
 
-export function getEventString(value: unknown, key: string): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const item = (value as Record<string, unknown>)[key];
-  return typeof item === 'string' ? item : undefined;
+export function getEventString<T>(value: T, key: string): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const item = record[key];
+  return isString(item) ? item : undefined;
 }
 
-export function parseToolInput(value: string): Record<string, unknown> {
+export function parseToolInput(value: string): UnknownRecord {
   if (!value.trim()) return {};
   try {
-    const parsed = JSON.parse(value) as unknown;
+    const parsed = JSON.parse(value);
     return asToolInput(parsed);
   } catch {
     return {};
   }
 }
 
-export function asToolInput(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+export function asToolInput<T>(value: T): UnknownRecord {
+  return asRecord(value) ?? {};
 }
 
-export function asToolMetadata(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+export function asToolMetadata<T>(value: T): UnknownRecord {
+  return asRecord(value) ?? {};
 }
 
-export function getToolStateInput(part: Part): Record<string, unknown> {
+export function getToolStateInput(part: Part): UnknownRecord {
   if (part.type !== 'tool') return {};
   const input = part.state.input;
-  return input && typeof input === 'object' && !Array.isArray(input)
-    ? (input as Record<string, unknown>)
-    : {};
+  return asRecord(input) ?? {};
 }
 
 export function getToolStartTime(part: Part): number {
-  if (part.type !== 'tool') return Date.now();
-  const time = (part.state as { time?: { start?: unknown } }).time;
-  return typeof time?.start === 'number' ? time.start : Date.now();
+  if (part.type !== 'tool' || !('time' in part.state)) return Date.now();
+  const time = asRecord(part.state.time);
+  return isNumber(time?.start) ? time.start : Date.now();
 }
 
-export function getToolErrorMessage(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') {
-    const message = (value as Record<string, unknown>).message;
-    if (typeof message === 'string') return message;
-  }
+export function getToolErrorMessage<T>(value: T): string {
+  if (isString(value)) return value;
+  const message = asRecord(value)?.message;
+  if (isString(message)) return message;
   return 'Tool execution failed';
 }
 
-export function toolOutputToString(content: unknown, structured: unknown): string {
+export function toolOutputToString<T, U>(content: T, structured: U): string {
   if (Array.isArray(content)) {
     const text = content
       .map((item) => {
-        if (!item || typeof item !== 'object') return '';
-        const record = item as Record<string, unknown>;
-        if (record.type === 'text' && typeof record.text === 'string') return record.text;
-        if (record.type === 'file' && typeof record.uri === 'string') return record.uri;
+        const record = asRecord(item);
+        if (!record) return '';
+        if (record.type === 'text' && isString(record.text)) return record.text;
+        if (record.type === 'file' && isString(record.uri)) return record.uri;
         return '';
       })
       .filter(Boolean)
       .join('\n');
     if (text) return text;
   }
-  if (structured && typeof structured === 'object') {
+  if (asRecord(structured) || Array.isArray(structured)) {
     try {
       return JSON.stringify(structured, null, 2);
     } catch {

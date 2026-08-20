@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- Playwright callbacks validate synthetic request bodies before inspecting prompt parts. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled harness requests to the shapes under test. */
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 

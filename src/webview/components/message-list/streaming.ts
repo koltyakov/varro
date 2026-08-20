@@ -1,5 +1,6 @@
 import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../../lib/part-utils';
 import type { MessageEntry, Part } from '../../types';
+import { isNumber } from '../../lib/runtime-values';
 
 export function hasVisibleBlockingStreamingPart(part: Part | null, streamingText: string) {
   if (!part) return false;
@@ -41,11 +42,7 @@ export function hasCommittedVisibleTextAsLastPart(
   const entry = messages.at(-1);
   if (!entry || entry.info.role !== 'assistant' || entry.info.error) return false;
   const completedAt = entry.info.time.completed;
-  if (
-    typeof completedAt === 'number' &&
-    loadingStartedAt !== null &&
-    loadingStartedAt > completedAt
-  ) {
+  if (isNumber(completedAt) && loadingStartedAt !== null && loadingStartedAt > completedAt) {
     return false;
   }
 

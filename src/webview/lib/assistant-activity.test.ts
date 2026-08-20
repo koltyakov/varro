@@ -8,8 +8,9 @@ import {
   preserveAssistantActivityGroupKeys,
   shouldCompactAssistantActivityPart,
 } from './assistant-activity';
+import type { UnknownRecord } from '../../shared/type-utils';
 
-function completedTool(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
+function completedTool(id: string, tool: string, input: UnknownRecord = {}): ToolPart {
   return {
     id,
     sessionID: 'session-1',
@@ -29,13 +30,15 @@ function completedTool(id: string, tool: string, input: Record<string, unknown> 
 }
 
 function reasoning(id: string, end?: number): ReasoningPart {
+  const time: ReasoningPart['time'] = { start: 1 };
+  if (end !== undefined) time.end = end;
   return {
     id,
     sessionID: 'session-1',
     messageID: 'assistant-1',
     type: 'reasoning',
     text: 'Thinking',
-    time: { start: 1, ...(end === undefined ? {} : { end }) },
+    time,
   };
 }
 

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These path tests verify platform-dependent module behavior with controlled process and path fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const vscodeMock = vi.hoisted(() => ({

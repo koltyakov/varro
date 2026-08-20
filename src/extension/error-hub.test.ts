@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These tests verify import-time error reporting with partial VS Code output and telemetry fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;

@@ -906,10 +906,13 @@ describe('RichComposerArea', () => {
     container = originalContainer;
     await flushAsyncWork();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     originalContainer!.getBoundingClientRect = () =>
       ({ left: 10, right: 510, width: 500 }) as DOMRect;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     frame.getBoundingClientRect = () => ({ top: 380 }) as DOMRect;
     const inlineChip = frame.querySelector<HTMLElement>('.inline-chip')!;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     inlineChip.getBoundingClientRect = () => ({ left: 30, right: 100, width: 70 }) as DOMRect;
     inlineChip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 

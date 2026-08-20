@@ -1,5 +1,6 @@
 import type { MessageEntry, ToolPart } from '../types';
 import { getToolKind } from './tool-normalization';
+import { isString, type UnknownRecord } from './runtime-values';
 
 export type TaskSessionInfo = {
   id: string;
@@ -9,9 +10,9 @@ export type TaskSessionInfo = {
   tokens?: { input: number; output: number };
 };
 
-function getTaskSessionIdFromMetadata(metadata: Record<string, unknown> | undefined) {
-  if (typeof metadata?.sessionId === 'string') return metadata.sessionId;
-  if (typeof metadata?.sessionID === 'string') return metadata.sessionID;
+function getTaskSessionIdFromMetadata(metadata: UnknownRecord | undefined) {
+  if (isString(metadata?.sessionId)) return metadata.sessionId;
+  if (isString(metadata?.sessionID)) return metadata.sessionID;
   return null;
 }
 
@@ -33,7 +34,8 @@ export function resolveTaskSessionId(
 ) {
   if (getToolKind(tool.tool) !== 'task' || tool.state.status === 'pending') return null;
 
-  const metadata = tool.state.metadata as Record<string, unknown> | undefined;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const metadata = tool.state.metadata as UnknownRecord | undefined;
   const metadataSessionId = getTaskSessionIdFromMetadata(metadata);
   if (metadataSessionId) {
     const metadataSession = sessions.find((session) => session.id === metadataSessionId);
@@ -62,7 +64,7 @@ export function resolveTaskSessionId(
   const title =
     tool.state.status === 'running' || tool.state.status === 'completed' ? tool.state.title : '';
   const taskLabel = normalizeTaskMatchLabel(
-    typeof description === 'string' && description.trim() ? description : title || tool.tool
+    isString(description) && description.trim() ? description : title || tool.tool
   );
   const byTitle = candidates.find((session) => sessionMatchesTaskLabel(session, taskLabel));
   if (byTitle) return byTitle.id;

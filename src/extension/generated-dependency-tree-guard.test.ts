@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking -- This guard verifies the generated bundle through its import boundary. */
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';

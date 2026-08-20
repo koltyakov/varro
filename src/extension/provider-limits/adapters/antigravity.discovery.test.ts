@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/require-safety-comment-for-type-assertion -- These discovery tests verify filesystem imports and malformed external account data. */
 import { createServer } from 'http';
 import type { RequestListener, Server } from 'http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

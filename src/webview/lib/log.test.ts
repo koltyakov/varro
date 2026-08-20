@@ -1,9 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { logError, logWarn } from './log';
 
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+
 declare global {
   interface Window {
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 

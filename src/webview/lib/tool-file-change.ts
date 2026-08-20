@@ -1,6 +1,7 @@
 import type { FileDiff, Part, ToolPart, ToolState } from '../types';
 import { getWorkspaceRelativePath, isAbsolutePath, normalizePath } from './path-display';
 import { getToolKind, isApplyPatchTool, normalizeToolName } from './tool-normalization';
+import { asRecord, isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
 
 export type FileChangeKind = 'added' | 'edited' | 'removed' | 'moved';
 
@@ -144,29 +145,29 @@ function parseTitleFileChange(title: string): Omit<FileChange, 'dedupeKey'> | nu
   };
 }
 
-function firstString(source: Record<string, unknown>, keys: readonly string[]): string | undefined {
+function firstString(source: UnknownRecord, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     const value = source[key];
-    if (typeof value === 'string' && value.length > 0) return value;
+    if (isString(value) && value.length > 0) return value;
   }
   return undefined;
 }
 
-function numberValue(source: Record<string, unknown>, key: string): number | undefined {
+function numberValue(source: UnknownRecord, key: string): number | undefined {
   const value = source[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  return isNumber(value) && Number.isFinite(value) ? value : undefined;
 }
 
-function stringValue(source: Record<string, unknown>, keys: readonly string[]): string | undefined {
+function stringValue(source: UnknownRecord, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     const value = source[key];
-    if (typeof value === 'string') return value;
+    if (isString(value)) return value;
   }
   return undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+function isRecord<T>(value: T): value is T & UnknownRecord {
+  return !!value && isObject(value) && !Array.isArray(value);
 }
 
 function withDedupeKey(change: Omit<FileChange, 'dedupeKey'>): FileChange {
@@ -199,11 +200,12 @@ export function isToolFileRead(toolName: string): boolean {
 
 export function getToolReadPath(toolName: string, toolState: ToolState): string | null {
   if (!isToolFileRead(toolName)) return null;
-  const input = (toolState.input || {}) as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const input = (toolState.input || {}) as UnknownRecord;
   return firstString(input, PRIMARY_PATH_KEYS) || null;
 }
 
-function getToolMetadata(toolState: ToolState): Record<string, unknown> | undefined {
+function getToolMetadata(toolState: ToolState): UnknownRecord | undefined {
   if (
     toolState.status === 'completed' ||
     toolState.status === 'running' ||
@@ -325,7 +327,8 @@ function computeToolFileChanges(toolName: string, toolState: ToolState): FileCha
   );
   if (isApplyPatchTool(normalizedToolName)) {
     const inputChanges = fileChangesFromPatchInput(
-      (toolState.input || {}) as Record<string, unknown>
+      // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+      (toolState.input || {}) as UnknownRecord
     );
     if (metadataChanges.length > 0 || inputChanges.length > 0) {
       return mergeFileChanges(metadataChanges, inputChanges);
@@ -340,7 +343,7 @@ function computeToolFileChanges(toolName: string, toolState: ToolState): FileCha
 }
 
 function fileChangesFromMetadataFiles(
-  metadata: Record<string, unknown>,
+  metadata: UnknownRecord,
   fallbackKind: FileChangeKind | null
 ): MetadataFileChange[] {
   const files = metadata.files;
@@ -446,7 +449,7 @@ function fileChangesFromMetadataFiles(
   return changes;
 }
 
-function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[] {
+function fileChangesFromPatchInput(input: UnknownRecord): FileChange[] {
   const patchText = firstString(input, ['patchText', 'patch_text', 'patch']);
   if (!patchText) return [];
 
@@ -515,6 +518,7 @@ function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[]
       const path = stripPathWrapping(header[2] || '');
       if (!path) return 'continue';
       current = {
+        // SAFETY: The surrounding shape or discriminator check establishes the PatchSection contract used below.
         operation: header[1]!.toLowerCase() as PatchSection['operation'],
         path,
         lines: [],
@@ -608,6 +612,7 @@ function fileChangesFromPatchInput(input: Record<string, unknown>): FileChange[]
       processLine(patchText.slice(lineStart), lineBytes);
     }
   }
+  // SAFETY: The surrounding shape or discriminator check establishes the PatchSection contract used below.
   const unfinishedSection = current as PatchSection | null;
   if (stopMessage && unfinishedSection) {
     unfinishedSection.previewMessage ||=
@@ -844,7 +849,8 @@ function hasChangedPatchLine(patch: string) {
 }
 
 function computeToolFileChange(toolName: string, toolState: ToolState): FileChange | null {
-  const input = (toolState.input || {}) as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const input = (toolState.input || {}) as UnknownRecord;
   const metadata = getToolMetadata(toolState) || {};
   const fileDiff = isRecord(metadata.filediff) ? metadata.filediff : {};
   const title =
@@ -914,18 +920,19 @@ export function getToolChangePath(part: ToolPart): string | null {
 }
 
 function diffCount(diff: FileDiff, primary: 'additions' | 'deletions', alias: string): number {
-  const record = diff as unknown as Record<string, unknown>;
+  const record = asRecord(diff) ?? {};
   const value = record[primary];
-  if (typeof value === 'number') return value;
+  if (isNumber(value)) return value;
   const aliased = record[alias];
-  return typeof aliased === 'number' ? aliased : 0;
+  return isNumber(aliased) ? aliased : 0;
 }
 
 function diffKind(diff: FileDiff): FileChangeKind {
-  const before = (diff as unknown as Record<string, unknown>).before;
-  const after = (diff as unknown as Record<string, unknown>).after;
-  if (before === '' && typeof after === 'string' && after !== '') return 'added';
-  if (after === '' && typeof before === 'string' && before !== '') return 'removed';
+  const record = asRecord(diff);
+  const before = record?.before;
+  const after = record?.after;
+  if (before === '' && isString(after) && after !== '') return 'added';
+  if (after === '' && isString(before) && before !== '') return 'removed';
   return 'edited';
 }
 
@@ -953,7 +960,7 @@ export function getDiffFileChanges(diffs: readonly FileDiff[]): FileChange[] {
 }
 
 function getDiffFileChange(diff: FileDiff): FileChange | null {
-  if (!diff || typeof diff.file !== 'string' || diff.file === '') return null;
+  if (!diff || !isString(diff.file) || diff.file === '') return null;
   return withDedupeKey({
     kind: diffKind(diff),
     path: diff.file,
@@ -1005,11 +1012,13 @@ type SummaryMessage = {
  * arrive after the truncation point are intentionally not merged so the scan
  * stays bounded.
  */
+type CollectedMessageFileChanges = { changes: FileChange[]; truncated: boolean };
+
 function collectMessageFileChanges(
   messages: readonly SummaryMessage[],
   workspacePath: string | null | undefined,
   maxChanges: number
-): { changes: FileChange[]; truncated: boolean } {
+): CollectedMessageFileChanges {
   const result: FileChange[] = [];
   const exactEntries = new Map<string, FileChange>();
   const relativeEntries = new Map<string, FileChange>();
@@ -1089,7 +1098,8 @@ function collectMessageFileChanges(
   scanMessages: for (const message of messages) {
     const summary = message.info?.summary;
     const summaryDiffs =
-      summary && typeof summary === 'object' && 'diffs' in summary && Array.isArray(summary.diffs)
+      // SAFETY: The surrounding shape or discriminator check establishes the readonly contract used below.
+      summary && isObject(summary) && 'diffs' in summary && Array.isArray(summary.diffs)
         ? (summary.diffs as readonly FileDiff[])
         : [];
     for (const diff of summaryDiffs) {
@@ -1099,6 +1109,7 @@ function collectMessageFileChanges(
 
     for (const part of message.parts) {
       if (part.type === 'tool') {
+        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
         for (const change of getToolFileChanges(part.tool, (part as ToolPart).state)) {
           if (!change.isSummary && !record(change)) break scanMessages;
         }

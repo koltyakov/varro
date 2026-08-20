@@ -53,6 +53,7 @@ async function loadModule(initialRuntime = createRuntimeMock('initial').runtime)
   vi.resetModules();
 
   const createOpenCodeRuntime = vi.fn(() => initialRuntime);
+  // oxlint-disable-next-line anti-slop/no-module-mocking -- This test verifies runtime module replacement and reset integration.
   vi.doMock('./open-code-runtime-instance', () => ({
     createOpenCodeRuntime,
   }));

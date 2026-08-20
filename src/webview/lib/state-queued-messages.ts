@@ -39,13 +39,13 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       id,
       sessionId,
       text,
-      ...(agent ? { agent } : {}),
-      ...(paused ? { paused: true } : {}),
+      agent: agent || undefined,
+      paused: paused ? true : undefined,
       droppedFiles,
       clipboardImages,
-      ...(nativePdfs.length > 0 ? { nativePdfs } : {}),
+      nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
       terminalSelection,
-      ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
+      attachedDiagnostics: attachedDiagnostics || undefined,
     })
   );
   postMessage({ type: 'queued-messages/update', payload: { messages: hostPersisted } });

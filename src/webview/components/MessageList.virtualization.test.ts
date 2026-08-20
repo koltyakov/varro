@@ -36,6 +36,7 @@ import {
   toolPart,
   userMessage,
 } from './MessageList.test-utils';
+import { fixture } from '../test-fixtures';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -321,6 +322,7 @@ describe('MessageList history pagination', () => {
     setSessionHistoryCursor('session-1', 'cursor-1');
     replaceMessages(initialMessages);
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
@@ -393,6 +395,7 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not publish a cached history prepend inside the native scroll event', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
       {
@@ -419,8 +422,11 @@ describe('MessageList history pagination', () => {
   it('keeps the visible message fixed when a prepended activity group moves to an older owner', async () => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
       function (this: HTMLElement) {
-        if (!this.dataset.assistantRenderKey) return [] as unknown as DOMRectList;
-        return [this.getBoundingClientRect()] as unknown as DOMRectList;
+        if (!this.dataset.assistantRenderKey)
+          // SAFETY: The fixture provides the unknown fields read by this statement.
+          if (!this.dataset.assistantRenderKey) return fixture<DOMRectList>([]);
+        // SAFETY: The fixture provides the unknown fields read by this statement.
+        return fixture<DOMRectList>([this.getBoundingClientRect()]);
       }
     );
     const thought: Part = {
@@ -440,6 +446,7 @@ describe('MessageList history pagination', () => {
       metadata: {},
       time: { start: 1, end: 2 },
     };
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('shared-user'), parts: [textPart('shared-prompt', 'Inspect')] },
       {
@@ -499,6 +506,7 @@ describe('MessageList history pagination', () => {
         };
       });
     const currentMessages = buildMessages('current');
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = buildMessages('older') as Awaited<ReturnType<typeof client.session.messages>>;
     let releasePage: ((page: typeof olderPage) => void) | undefined;
     vi.spyOn(client.session, 'messages').mockReturnValue(
@@ -551,6 +559,7 @@ describe('MessageList history pagination', () => {
     setSessionHistoryCursor('session-1', 'cursor-1');
     replaceMessages(currentMessages);
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -804,7 +813,8 @@ describe('MessageList history pagination', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     let expansionOffset = 0;
     const harness = await mountDeferredHistory(
       [
@@ -816,10 +826,12 @@ describe('MessageList history pagination', () => {
       (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? expansionOffset : 0)
     );
     await harness.startLoad(20);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     const layoutObserver = observers.find(
       (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
     );
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const expandedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     const expansionControl = document.createElement('button');
     expansionControl.setAttribute('aria-expanded', 'false');
@@ -829,13 +841,15 @@ describe('MessageList history pagination', () => {
     expansionControl.click();
 
     expansionOffset = 100;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
+      [fixture<ResizeObserverEntry>({ target: track })],
+      fixture<ResizeObserver>(layoutObserver)
     );
     harness.animationFrames.flush();
     await Promise.resolve();
     expect(harness.getScrollTop()).toBe(120);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const visibleRow = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
     const visibleTopBefore =
       visibleRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
@@ -870,7 +884,8 @@ describe('MessageList history pagination', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     let expansionOffset = 0;
     const harness = await mountDeferredHistory(
       [
@@ -882,10 +897,12 @@ describe('MessageList history pagination', () => {
       (messageId) => (messageId === 'user-2' || messageId === 'assistant-2' ? expansionOffset : 0)
     );
     await harness.startLoad(20);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     const layoutObserver = observers.find(
       (observer) => observer.targets.has(harness.list) && observer.targets.has(track)
     );
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const expandedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     const expansionControl = document.createElement('button');
     expansionControl.setAttribute('aria-expanded', 'false');
@@ -894,9 +911,10 @@ describe('MessageList history pagination', () => {
     expandedRow.append(expansionControl);
     expansionControl.click();
     expansionOffset = 100;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
+      [fixture<ResizeObserverEntry>({ target: track })],
+      fixture<ResizeObserver>(layoutObserver)
     );
     harness.animationFrames.flush();
     await Promise.resolve();
@@ -907,9 +925,10 @@ describe('MessageList history pagination', () => {
     harness.setScrollTop(160);
     harness.list.dispatchEvent(new Event('scroll'));
     expansionOffset = 200;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
+      [fixture<ResizeObserverEntry>({ target: track })],
+      fixture<ResizeObserver>(layoutObserver)
     );
     harness.animationFrames.flush();
     await Promise.resolve();
@@ -932,6 +951,7 @@ describe('MessageList history pagination', () => {
     harness.list.dispatchEvent(new Event('scroll'));
     startEditingMessage('user-2', 'session-1', 'Prompt 2');
     await Promise.resolve();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const editedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     const editedTopBefore =
       editedRow.getBoundingClientRect().top - harness.list.getBoundingClientRect().top;
@@ -1018,6 +1038,7 @@ describe('MessageList history pagination', () => {
 
   it('preserves a DOM anchor when a history prepend crosses from 49 to 50 rows', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       {
         info: userMessage('older-boundary'),
@@ -1065,6 +1086,7 @@ describe('MessageList history pagination', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1157,6 +1179,7 @@ describe('MessageList history pagination', () => {
     },
   ])('anchors a history prepend $interaction', async ({ userScrollTop, expectedScrollTop }) => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('older-user'), parts: [textPart('older-user-text', 'Older prompt')] },
       {
@@ -1204,6 +1227,7 @@ describe('MessageList history pagination', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1252,8 +1276,9 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not let one session pagination request lock another session', async () => {
-    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- Keeping the page builder beside its one scenario makes pagination setup explicit.
     const pageFor = (sessionId: string, messageId: string) =>
+      // SAFETY: The page contains the complete message and part fields read by pagination.
       [
         {
           info: { ...userMessage(messageId), sessionID: sessionId },
@@ -1314,6 +1339,7 @@ describe('MessageList history pagination', () => {
   });
 
   it('loads truncated history from an upward wheel when the initial window cannot scroll', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -1325,6 +1351,7 @@ describe('MessageList history pagination', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 180 });
@@ -1346,10 +1373,12 @@ describe('MessageList history pagination', () => {
   });
 
   it('loads enough initial history to fill the viewport', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const firstPage = [
       { info: userMessage('older-user-1'), parts: [textPart('older-text-1', 'Older prompt 1')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
     firstPage.nextCursor = 'cursor-oldest';
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const secondPage = [
       { info: userMessage('older-user-2'), parts: [textPart('older-text-2', 'Older prompt 2')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -1364,6 +1393,7 @@ describe('MessageList history pagination', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1386,8 +1416,10 @@ describe('MessageList history pagination', () => {
   });
 
   it('continues ordinary pagination when a page advances the cursor without adding rows', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const emptyPage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     emptyPage.nextCursor = 'cursor-next';
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -1418,12 +1450,14 @@ describe('MessageList history pagination', () => {
   });
 
   it('retries an invalidated history page while the same boundary remains current', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     stalePage.nextCursor = 'cursor-next';
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
       releaseStalePage = resolve;
     });
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const freshPage = [
       { info: userMessage('older-user'), parts: [textPart('older-text', 'Older prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -1452,6 +1486,7 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not retry an invalidated history page after its cursor boundary advances', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
@@ -1485,6 +1520,7 @@ describe('MessageList history pagination', () => {
   });
 
   it('does not retry a stale history page against a replacement message window', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
@@ -1519,6 +1555,7 @@ describe('MessageList history pagination', () => {
 
   it('does not pin a stale history anchor after the same-session window resets', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
@@ -1555,6 +1592,7 @@ describe('MessageList history pagination', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 6000 });

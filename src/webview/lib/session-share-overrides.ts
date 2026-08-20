@@ -1,11 +1,12 @@
 import type { Session } from '../types';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import { isString } from './runtime-values';
 
 const storedUnsharedSessionIds = readStored<unknown>(STORAGE_KEYS.unsharedSessions);
 const unsharedSessionIds = new Set(
   Array.isArray(storedUnsharedSessionIds)
     ? storedUnsharedSessionIds.filter(
-        (sessionID): sessionID is string => typeof sessionID === 'string' && sessionID.length > 0
+        (sessionID): sessionID is string => isString(sessionID) && sessionID.length > 0
       )
     : []
 );

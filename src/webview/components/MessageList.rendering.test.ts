@@ -67,6 +67,7 @@ describe('MessageList keyboard navigation', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((container?.querySelector('.interactive-list') as HTMLElement | null)?.tabIndex).toBe(0);
   });
 
@@ -76,6 +77,7 @@ describe('MessageList keyboard navigation', () => {
       { info: userMessage('user-1'), parts: [textPart('text-1', 'Keyboard scrolling')] },
     ]);
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperties(list, {
       clientHeight: { configurable: true, value: 400 },
@@ -242,6 +244,7 @@ describe('MessageList entrance animation', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 7200 });
@@ -283,6 +286,7 @@ describe('MessageList entrance animation', () => {
 
       cleanup = render(() => MessageList(), container!);
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement;
       let rowCount = 60;
       let scrollTopValue = 0;
@@ -512,6 +516,7 @@ describe('MessageList loading states', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollTopValue = 0;
     let scrollWrites = 0;
@@ -985,6 +990,7 @@ describe('MessageList compact activity', () => {
       title: 'npm test',
       time: { start: 2 },
     };
+    // SAFETY: The fixture provides the TextPart fields read by this statement.
     const response: TextPart = {
       ...(textPart('response-streaming', '') as TextPart),
       messageID: 'assistant-2',

@@ -10,8 +10,10 @@ import {
   getToolReadPath,
   isToolFileRead,
 } from './tool-file-change';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 function toolPart(tool: string, state: ToolState): Part {
+  // SAFETY: The fixture provides the Part fields read by this statement.
   return {
     id: `part-${tool}`,
     sessionID: 'session-1',
@@ -24,7 +26,7 @@ function toolPart(tool: string, state: ToolState): Part {
 }
 
 function completedState(
-  input: Record<string, unknown> = {},
+  input: UnknownRecord = {},
   overrides: Partial<Extract<ToolState, { status: 'completed' }>> = {}
 ): Extract<ToolState, { status: 'completed' }> {
   return {
@@ -812,6 +814,7 @@ describe('tool file change helpers', () => {
   });
 
   it('collects deduplicated file changes across messages including diff summaries', () => {
+    // SAFETY: The fixture provides the Part fields read by this statement.
     const messages = [
       {
         info: {
@@ -888,6 +891,7 @@ describe('tool file change helpers', () => {
 
   it('merges absolute and relative paths and drops directory entries', () => {
     const workspace = '/repo';
+    // SAFETY: The fixture provides the Part fields read by this statement.
     const messages = [
       {
         parts: [

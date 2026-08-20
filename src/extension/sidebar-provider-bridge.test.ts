@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These bridge tests verify module wiring and inspect controlled provider internals. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../shared/protocol';
 

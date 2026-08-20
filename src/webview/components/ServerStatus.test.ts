@@ -5,6 +5,7 @@ import { resetDefaultAppState, setState } from '../lib/state';
 const postMessageMock = vi.hoisted(() => vi.fn());
 const openProviderSetupMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ServerStatus's bridge and provider-setup integrations. */
 vi.mock('../lib/bridge', () => ({
   postMessage: postMessageMock,
   onMessage: vi.fn(),

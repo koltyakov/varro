@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Z.ai API payloads are decoded before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
@@ -177,15 +179,16 @@ function buildZaiWindow(
 
   const descriptor = getZaiWindowDescriptor(type, limitRecord);
 
-  return {
+  const window: ProviderLimitWindow = {
     id: descriptor.id,
     label: descriptor.label,
     unit: descriptor.unit,
     remaining,
     limit: limit != null && limit > 0 ? limit : null,
     resetAt: parseRateLimitResetAt(limitRecord.nextResetTime, checkedAt),
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function resolveZaiAuthToken(

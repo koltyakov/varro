@@ -5,6 +5,7 @@ import type { Message, Part } from '../types';
 type MessageEntry = { info: Message; parts: Part[] };
 
 function msg(id: string): Message {
+  // SAFETY: The fixture provides the Message fields read by this statement.
   return {
     id,
     sessionID: 's1',
@@ -16,6 +17,7 @@ function msg(id: string): Message {
 }
 
 function part(id: string): Part {
+  // SAFETY: The fixture provides the Part fields read by this statement.
   return { id, sessionID: 's1', messageID: 'm1', type: 'text', text: 't' } as Part;
 }
 

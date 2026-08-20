@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- VS Code persistence exposes untyped stored values that callers validate. */
 import type { Memento } from 'vscode';
 import type { Persistence } from '../shared/persistence';
 

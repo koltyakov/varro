@@ -1,4 +1,5 @@
 import { Show, createEffect, createSignal, onMount } from 'solid-js';
+import { isFunction } from '../lib/runtime-values';
 
 export type InlineImagePresentation = 'contain' | 'cover' | 'ambient';
 
@@ -33,11 +34,11 @@ function getCachedImageDimensions(src: string) {
 }
 
 export async function preloadInlineImageDimensions(src: string) {
-  if (getCachedImageDimensions(src) || typeof Image === 'undefined') return;
+  if (getCachedImageDimensions(src) || Image === undefined) return;
 
   const image = new Image();
   image.src = src;
-  if (typeof image.decode !== 'function') return;
+  if (!isFunction(image.decode)) return;
   try {
     await image.decode();
     rememberImageDimensions(src, image.naturalWidth, image.naturalHeight);

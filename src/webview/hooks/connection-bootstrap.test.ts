@@ -122,11 +122,11 @@ describe('connection-bootstrap helpers', () => {
   it('recovers only resumable interrupted sessions', async () => {
     const continueInterruptedSession = vi.fn(async () => {});
     const logError = vi.fn();
-    const statuses: Record<string, SessionStatus> = {
-      'session-busy': { type: 'busy' },
-      'session-retry': { type: 'retry', attempt: 2, message: 'retry', next: 3 },
-      'session-idle': { type: 'idle' },
-    };
+    const statuses = new Map<string, SessionStatus>([
+      ['session-busy', { type: 'busy' }],
+      ['session-retry', { type: 'retry', attempt: 2, message: 'retry', next: 3 }],
+      ['session-idle', { type: 'idle' }],
+    ]);
 
     await recoverInterruptedSessionsWithDependencies(
       {
@@ -141,7 +141,7 @@ describe('connection-bootstrap helpers', () => {
         ],
         isCurrentGeneration: () => true,
         hasSession: (sessionId) => sessionId !== 'session-missing',
-        getSessionStatus: (sessionId) => statuses[sessionId],
+        getSessionStatus: (sessionId) => statuses.get(sessionId),
         hasPendingQuestion: (sessionId) => sessionId === 'session-question',
         hasPendingPermission: (sessionId) => sessionId === 'session-permission',
         loadSessionMessages: async (sessionId) => {

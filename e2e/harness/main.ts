@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- This E2E harness decodes and synthesizes extension-host protocol payloads at the browser boundary. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Harness assertions bridge controlled scenario fixtures and browser globals to their protocol-owned shapes. */
 import type {
   InitialWebviewState,
   RecycleBinEntry,
@@ -26,6 +28,12 @@ import {
 type AssistantActivityGroupMapBuilder = typeof GetAssistantActivityGroupMap;
 
 type MessageEntry<TMessage extends Message = Message> = { info: TMessage; parts: Part[] };
+type ReasoningPartTime = Extract<Part, { type: 'reasoning' }>['time'];
+type UserMessageModel = Extract<Message, { role: 'user' }>['model'];
+type DispatchedMessage = { type: string; payload?: unknown };
+type TerminalCommand = { command: string; title?: string };
+type OpenTarget = { path: string; line?: number; kind?: string };
+type MessagePage = { items: MessageEntry[]; nextCursor?: string };
 type PermissionResponse = {
   sessionId: string;
   permissionId: string;
@@ -175,12 +183,12 @@ type HarnessWindow = Window & {
     permissionResponses: PermissionResponse[];
     externalUrls: string[];
     planOpenRequests: string[];
-    dispatchedMessages?: Array<{ type: string; payload?: unknown }>;
-    terminalCommands?: Array<{ command: string; title?: string }>;
+    dispatchedMessages?: DispatchedMessage[];
+    terminalCommands?: TerminalCommand[];
     settingsQueries?: string[];
     serverRestartCount?: number;
     filePickCount?: number;
-    openTargets?: Array<{ path: string; line?: number; kind?: string }>;
+    openTargets?: OpenTarget[];
     exportSessionIds?: string[];
     updateMessageInfo?: (info: Message) => void;
     updateMessagePart?: (part: Part) => void;
@@ -552,16 +560,15 @@ function makeReasoningPart(
   startedAt: number,
   endedAt?: number
 ): Extract<Part, { type: 'reasoning' }> {
+  const time: ReasoningPartTime = { start: startedAt };
+  if (endedAt) time.end = endedAt;
   return {
     id,
     sessionID: sessionId,
     messageID: messageId,
     type: 'reasoning',
     text,
-    time: {
-      start: startedAt,
-      ...(endedAt ? { end: endedAt } : {}),
-    },
+    time,
   };
 }
 
@@ -4600,15 +4607,16 @@ function normalizeMockPromptParts(
       typeof part.url === 'string' &&
       part.url.length > 0
     ) {
-      parts.push({
+      const filePart: Extract<Part, { type: 'file' }> = {
         id,
         sessionID: sessionId,
         messageID: messageId,
         type: 'file',
         mime: part.mime,
-        ...(typeof part.filename === 'string' ? { filename: part.filename } : {}),
         url: part.url,
-      });
+      };
+      if (typeof part.filename === 'string') filePart.filename = part.filename;
+      parts.push(filePart);
     }
   }
   return parts;
@@ -4638,6 +4646,11 @@ function appendMockPromptMessages(
       (part): part is Extract<Part, { type: 'text' }> =>
         part.type === 'text' && !part.text.startsWith('[Working directory:')
     )?.text || 'Untitled request';
+  const model: UserMessageModel = {
+    providerID,
+    modelID,
+  };
+  if (options.variant) model.variant = options.variant;
   const userMessage: MessageEntry = {
     info: {
       id: userId,
@@ -4645,7 +4658,7 @@ function appendMockPromptMessages(
       role: 'user',
       time: { created: createdAt },
       agent,
-      model: { providerID, modelID, ...(options.variant ? { variant: options.variant } : {}) },
+      model,
     },
     parts,
   };
@@ -4729,10 +4742,9 @@ function dispatchToWebview(message: unknown) {
       ? (message as { type: string; payload?: unknown })
       : null;
   if (typed) {
-    (window as HarnessWindow).__varroE2E?.dispatchedMessages?.push({
-      type: typed.type,
-      ...(typed.payload !== undefined ? { payload: typed.payload } : {}),
-    });
+    const dispatchedMessage: DispatchedMessage = { type: typed.type };
+    if (typed.payload !== undefined) dispatchedMessage.payload = typed.payload;
+    (window as HarnessWindow).__varroE2E?.dispatchedMessages?.push(dispatchedMessage);
   }
   window.postMessage(message, '*');
 }
@@ -5118,12 +5130,13 @@ async function handleApiRequest(
       before === null &&
       new URLSearchParams(window.location.search).get('omitReopenedLatestCursor') === '1' &&
       (state.latestMessageRequestCounts[sessionId] ?? 0) > 1;
-    return {
+    const result: MessagePage = {
       items: messages.slice(start, end),
-      ...(start > 0 && !omitLatestCursor
-        ? { nextCursor: getMessageCursor(state, sessionId, start) }
-        : {}),
     };
+    if (start > 0 && !omitLatestCursor) {
+      result.nextCursor = getMessageCursor(state, sessionId, start);
+    }
+    return result;
   }
 
   const deleteMessageMatch = path.match(/^\/session\/([^/]+)\/message\/([^/]+)$/);
@@ -5549,10 +5562,13 @@ function installBridge(state: ScenarioState) {
         state.externalUrls.push(webviewMessage.payload.url);
         return;
       case 'terminal/run':
-        harnessWindow.__varroE2E?.terminalCommands?.push({
-          command: webviewMessage.payload.command,
-          ...(webviewMessage.payload.title ? { title: webviewMessage.payload.title } : {}),
-        });
+        {
+          const terminalCommand: TerminalCommand = {
+            command: webviewMessage.payload.command,
+          };
+          if (webviewMessage.payload.title) terminalCommand.title = webviewMessage.payload.title;
+          harnessWindow.__varroE2E?.terminalCommands?.push(terminalCommand);
+        }
         return;
       case 'vscode/open-settings':
         harnessWindow.__varroE2E?.settingsQueries?.push(webviewMessage.payload.query || '');
@@ -5652,15 +5668,18 @@ function installBridge(state: ScenarioState) {
         harnessWindow.__varroE2E?.exportSessionIds?.push(webviewMessage.payload.sessionId);
         return;
       case 'vscode/open':
-        harnessWindow.__varroE2E?.openTargets?.push({
-          path: webviewMessage.payload.path,
-          ...(typeof webviewMessage.payload.line === 'number'
-            ? { line: webviewMessage.payload.line }
-            : {}),
-          ...(typeof webviewMessage.payload.kind === 'string'
-            ? { kind: webviewMessage.payload.kind }
-            : {}),
-        });
+        {
+          const openTarget: OpenTarget = {
+            path: webviewMessage.payload.path,
+          };
+          if (typeof webviewMessage.payload.line === 'number') {
+            openTarget.line = webviewMessage.payload.line;
+          }
+          if (typeof webviewMessage.payload.kind === 'string') {
+            openTarget.kind = webviewMessage.payload.kind;
+          }
+          harnessWindow.__varroE2E?.openTargets?.push(openTarget);
+        }
         if (typeof webviewMessage.payload.requestId === 'number') {
           const status = webviewMessage.payload.path.endsWith('/missing-file.ts')
             ? 'unavailable'

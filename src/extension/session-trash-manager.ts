@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-returns -- OpenCode deletion responses are intentionally opaque and only completion is observed. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Recycle-bin entries are normalized before restoration. */
 import type { Persistence } from '../shared/persistence';
 import { normalizeRecycleBinEntries, normalizeRecycleBinSession } from '../shared/recycle-bin';
 import type { RecycleBinEntry, RecycleBinSession } from '../shared/protocol';
@@ -247,11 +249,12 @@ function collectHiddenSessionIds(entries: ReadonlyMap<string, RecycleBinEntry>) 
 }
 
 function cloneSession(session: RecycleBinSession): RecycleBinSession {
-  return {
+  const cloned: RecycleBinSession = {
     ...session,
-    ...(session.summary ? { summary: { ...session.summary } } : {}),
     time: { ...session.time },
   };
+  if (session.summary) cloned.summary = { ...session.summary };
+  return cloned;
 }
 
 async function deleteIgnoringMissing(

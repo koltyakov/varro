@@ -34,6 +34,7 @@ export function MessagePart(props: {
       case 'text':
         return (
           <MarkdownRenderer
+            // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
             content={props.streamedText ?? (part as TextPart).text}
             cacheByContent={!!props.messageInfo?.time.completed}
             lightweight={props.lightweight}

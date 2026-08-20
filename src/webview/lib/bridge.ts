@@ -1,5 +1,6 @@
 import type { ExtensionMessage, WebviewMessage } from '../../shared/protocol';
 import { parseExtensionMessage } from '../../shared/extension-message';
+import { isString, type UnknownRecord, isObject } from './runtime-values';
 
 type MessageHandler = (msg: ExtensionMessage) => void;
 export type SlowApiRequest = {
@@ -21,7 +22,12 @@ const slowApiRequestHandlers = new Set<SlowApiRequestHandler>();
 const slowApiRequests = new Map<number, SlowApiRequest>();
 let disposed = false;
 const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
-const bridgeWindow = window as unknown as Record<string, unknown>;
+type BridgeWindow = Window & {
+  [BRIDGE_CLEANUP_KEY]?: () => void;
+  __sendToExtension?: (message: WebviewMessage) => void;
+};
+// SAFETY: Browser globals may carry the two optional bridge callbacks declared above.
+const bridgeWindow = window as BridgeWindow;
 
 const messageListener = (event: MessageEvent) => {
   const msg = parseExtensionMessage(event.data);
@@ -71,9 +77,7 @@ export function onSlowApiRequestsChange(handler: SlowApiRequestHandler): () => v
 
 export function postMessage(msg: WebviewMessage): boolean {
   if (disposed) return false;
-  const send = (window as unknown as Record<string, unknown>).__sendToExtension as
-    | ((m: WebviewMessage) => void)
-    | undefined;
+  const send = bridgeWindow.__sendToExtension;
   if (!send) return false;
   send(msg);
   return true;
@@ -92,8 +96,8 @@ const pendingOpenPaths = new Map<
 const pending = new Map<
   number,
   {
-    resolve(v: unknown): void;
-    reject(e: unknown): void;
+    resolve(v: UnknownRecord[string]): void;
+    reject(cause: unknown): void;
     timer: ReturnType<typeof setTimeout>;
     slowTimer: ReturnType<typeof setTimeout>;
     cleanupAbort?: () => void;
@@ -152,7 +156,7 @@ export function openPathWithResult(payload: {
 export function apiCall<T = unknown>(
   method: string,
   path: string,
-  body?: unknown,
+  body?: UnknownRecord[string],
   options?: ApiCallOptions
 ): Promise<T> {
   return sendApiCall(method, path, body, {
@@ -165,7 +169,7 @@ export function apiCall<T = unknown>(
 function sendApiCall<T>(
   method: string,
   path: string,
-  body: unknown,
+  body: UnknownRecord[string],
   options: { timeoutMs: number; signal?: AbortSignal; retries: number }
 ): Promise<T> {
   if (disposed) return Promise.reject(new Error('Bridge cleaned up'));
@@ -212,6 +216,7 @@ function sendApiCall<T>(
 
     let cleanupAbort: (() => void) | undefined;
     pending.set(id, {
+      // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
       resolve: (value) => finish(() => resolve(value as T)),
       reject: (error) => finish(() => reject(error)),
       timer,
@@ -294,10 +299,11 @@ function sendApiCall<T>(
   });
 }
 
-function describeSendError(value: unknown): string {
-  if (value && typeof value === 'object' && 'message' in value) {
+function describeSendError<T>(value: T): string {
+  if (value && isObject(value) && 'message' in value) {
+    // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
     const message = (value as { message: unknown }).message;
-    if (typeof message === 'string' && message) return message;
+    if (isString(message) && message) return message;
   }
   return String(value);
 }

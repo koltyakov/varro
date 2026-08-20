@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createAppState } from './app-state';
 import { STORAGE_KEYS } from './state-storage';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 beforeEach(() => {
   window.localStorage.clear();
-  delete (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
-  delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
 });
 
 describe('composer draft persistence', () => {
@@ -22,12 +25,13 @@ describe('composer draft persistence', () => {
   });
 
   it('restores draft text from VS Code webview state', () => {
-    let vscodeState: Record<string, unknown> = {};
+    let vscodeState: UnknownRecord = {};
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     (
-      window as unknown as {
+      window as {
         __vscodeWebviewState: {
-          getState(): Record<string, unknown>;
-          setState(state: Record<string, unknown>): void;
+          getState(): UnknownRecord;
+          setState(state: UnknownRecord): void;
         };
       }
     ).__vscodeWebviewState = {
@@ -88,7 +92,8 @@ describe('composer draft persistence', () => {
   });
 
   it('restores pasted images from host state without stale temporary files', () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       clipboardImages: [
         {
           id: 'image-1',

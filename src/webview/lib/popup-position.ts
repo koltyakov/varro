@@ -229,7 +229,7 @@ export function observePopupViewport(el: HTMLElement, reposition: () => void): (
   run();
   window.addEventListener('resize', run);
 
-  if (typeof ResizeObserver === 'undefined') {
+  if (globalThis.ResizeObserver === undefined) {
     return () => window.removeEventListener('resize', run);
   }
 

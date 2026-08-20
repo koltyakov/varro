@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests inspect controlled private configuration state on the provider fixture. */
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachTestView,

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These bridge tests model malformed server events and partial imported collaborators. */
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEvent, ServerStatus } from '../shared/protocol';
 

@@ -10,6 +10,8 @@ import {
   parseToolInput,
   toolOutputToString,
 } from './session-event-utils';
+import { fixture } from '../../test-fixtures';
+import type { UnknownRecord } from '../../../shared/type-utils';
 
 function toolPart(state: Extract<Part, { type: 'tool' }>['state']): Part {
   return {
@@ -88,10 +90,9 @@ describe('getToolStateInput', () => {
 
   it('returns an empty object for non-tool parts and non-object inputs', () => {
     expect(getToolStateInput(textPart())).toEqual({});
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     expect(
-      getToolStateInput(
-        toolPart({ status: 'pending', input: [] as unknown as Record<string, unknown>, raw: '' })
-      )
+      getToolStateInput(toolPart({ status: 'pending', input: fixture<UnknownRecord>([]), raw: '' }))
     ).toEqual({});
   });
 });
@@ -172,7 +173,7 @@ describe('toolOutputToString', () => {
   });
 
   it('degrades to String() when structured output is not serializable', () => {
-    const circular: Record<string, unknown> = {};
+    const circular: UnknownRecord = {};
     circular.self = circular;
     expect(toolOutputToString(null, circular)).toBe(String(circular));
   });

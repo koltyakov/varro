@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback updates protocol-shaped tool state owned by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 

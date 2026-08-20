@@ -20,6 +20,7 @@ describe('task session resolution', () => {
         time: { start: 1_100, end: 1_500 },
       },
     } satisfies ToolPart;
+    // SAFETY: The fixture provides the Message fields read by this statement.
     const parent = {
       id: 'assistant-1',
       sessionID: 'session-1',
@@ -60,6 +61,7 @@ describe('task session resolution', () => {
         time: { start: 1_100, end: 1_500 },
       },
     } satisfies ToolPart;
+    // SAFETY: The fixture provides the Message fields read by this statement.
     const parent = {
       id: 'assistant-1',
       sessionID: 'session-1',

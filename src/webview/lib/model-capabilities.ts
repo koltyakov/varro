@@ -1,5 +1,6 @@
 import type { Provider } from '../types';
-import { asRecord } from '../../shared/type-utils';
+import { asRecord, type UnknownRecord } from '../../shared/type-utils';
+import { isBoolean, isString } from './runtime-values';
 
 type ProviderModel = Provider['models'][string];
 
@@ -13,15 +14,16 @@ function getModel(
   return provider?.models[modelID] || null;
 }
 
-function getBooleanCapability(value: Record<string, unknown> | null, keys: string[]) {
+function getBooleanCapability(value: UnknownRecord | null, keys: string[]) {
   if (!value) return null;
   for (const key of keys) {
-    if (typeof value[key] === 'boolean') return value[key] as boolean;
+    const item = value[key];
+    if (isBoolean(item)) return Boolean(item);
   }
   return null;
 }
 
-function getBooleanCapabilityFromRecord(value: unknown, keys: string[]) {
+function getBooleanCapabilityFromRecord<T>(value: T, keys: string[]) {
   return getBooleanCapability(asRecord(value), keys);
 }
 
@@ -34,10 +36,10 @@ function normalizeSignal(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ');
 }
 
-function hasImageInputSignal(value: unknown): boolean {
+function hasImageInputSignal<T>(value: T): boolean {
   if (value === null || value === undefined) return false;
 
-  if (typeof value === 'string') {
+  if (isString(value)) {
     return /\b(image|vision|multimodal)\b/.test(normalizeSignal(value));
   }
 
@@ -47,7 +49,7 @@ function hasImageInputSignal(value: unknown): boolean {
 
   const record = asRecord(value);
   if (!record) return false;
-  if (typeof record.image === 'boolean') return record.image;
+  if (isBoolean(record.image)) return record.image;
   return (
     ('input' in record && hasImageInputSignal(record.input)) ||
     ('inputs' in record && hasImageInputSignal(record.inputs)) ||
@@ -117,7 +119,8 @@ export function modelSupportsVision(
   const model = getModel(providerID, modelID, providers);
   if (!model || !providerID) return false;
 
-  const rawModel = model as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const rawModel = model as UnknownRecord;
   const capabilities = asRecord(rawModel.capabilities);
   const explicitCapability = getBooleanCapability(capabilities, [
     'vision',

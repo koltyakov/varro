@@ -52,6 +52,17 @@ import {
   seedContextFileAttachmentSequences,
 } from './attachment-order';
 import { createMessageIndex } from './message-index';
+import { asRecord, isString } from './runtime-values';
+
+function isWebviewThemeKind<T>(value: T): value is T & WebviewThemeKind {
+  return (
+    isString(value) &&
+    (value === 'light' ||
+      value === 'dark' ||
+      value === 'high-contrast' ||
+      value === 'high-contrast-light')
+  );
+}
 import {
   activePermissionReconciliations,
   finishPermissionReconciliation,
@@ -419,11 +430,14 @@ export function createAppState(): AppStateInstance {
   const [draftPermissionMode, setDraftPermissionMode] = createSignal<PermissionMode>(
     resolveInitialDraftMode(permissionWorkspace, defaultPermissionMode())
   );
+  const startupTheme = asRecord(window)?.__initialTheme;
+  const initialTheme: WebviewThemeKind = isWebviewThemeKind(startupTheme) ? startupTheme : 'dark';
   const [theme, setTheme] = createSignal<WebviewThemeKind>(
-    initialWebviewState.theme ||
-      ((window as unknown as Record<string, string>).__initialTheme as WebviewThemeKind) ||
-      'dark'
+    initialWebviewState.theme || initialTheme
   );
+  const streamingDeltaQueue = createStreamingDeltaQueue(() => {
+    flushPendingStreamingDeltasFor(appState);
+  });
 
   const appState = {
     state,
@@ -485,12 +499,8 @@ export function createAppState(): AppStateInstance {
     permissionWorkspace,
     sessionTreeIndex,
     messageIndex,
-    streamingDeltaQueue: null as unknown as StreamingDeltaQueue,
+    streamingDeltaQueue,
   } satisfies AppStateInstance;
-
-  appState.streamingDeltaQueue = createStreamingDeltaQueue(() => {
-    flushPendingStreamingDeltasFor(appState);
-  });
 
   return appState;
 }

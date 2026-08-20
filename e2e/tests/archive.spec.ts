@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These E2E checks inspect controlled archive requests exposed by the harness browser global. */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { getE2EState } from './helpers';
 

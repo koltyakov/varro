@@ -144,6 +144,7 @@ describe('MessageList prompt numbers', () => {
   it('loads every older prompt page before showing absolute counters', async () => {
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- Shared fixtures are imported from the test-utils module.
     const promptPage = (start: number, end: number, nextCursor?: string) => {
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
       const page = Array.from({ length: end - start + 1 }, (_, index) => {
         const promptNumber = start + index;
         return {
@@ -209,6 +210,7 @@ describe('MessageList prompt numbers', () => {
 
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
 
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const olderPage = [
       { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -246,6 +248,7 @@ describe('MessageList prompt numbers', () => {
     resetSessionMessageWindowForRefetch('session-1');
     clearSessionMessageWindowState('session-1');
     setSessionHistoryPromptCursor('session-1', 'cursor-reloaded');
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const reloadedPage = [
       { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt 1')] },
       { info: userMessage('user-2'), parts: [textPart('user-text-2', 'Older prompt 2')] },
@@ -286,11 +289,13 @@ describe('MessageList prompt numbers', () => {
   });
 
   it('does not wait for an obsolete prompt-number load after a window reset', async () => {
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
       releaseStalePage = resolve;
     });
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const currentPage = [
       { info: userMessage('user-1'), parts: [textPart('user-text-1', 'Older prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;

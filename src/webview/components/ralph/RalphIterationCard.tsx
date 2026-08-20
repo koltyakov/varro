@@ -28,13 +28,15 @@ function acquireTicker(): () => void {
   };
 }
 
-const STATUS_LABELS: Record<RalphIteration['status'], string> = {
+type RalphIterationStatusLabels = Record<RalphIteration['status'], string>;
+
+const STATUS_LABELS = {
   pending: 'Pending',
   running: 'Running',
   passed: 'Passed',
   failed: 'Failed',
   aborted: 'Aborted',
-};
+} satisfies RalphIterationStatusLabels;
 
 export function RalphIterationCard(props: { iteration: RalphIteration }) {
   // Acquire the shared ticker only while this iteration is still in flight,

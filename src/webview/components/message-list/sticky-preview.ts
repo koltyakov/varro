@@ -16,12 +16,14 @@ export type StickyUserMessagePreview = {
   imageCount: number;
 };
 
-function getStickyUserMessageCounts(parts: Part[]): {
+type StickyUserMessageCounts = {
   attachmentCount: number;
   imageCount: number;
   format?: UserMessageMarkupFormat;
   formatPrefix?: string;
-} {
+};
+
+function getStickyUserMessageCounts(parts: Part[]): StickyUserMessageCounts {
   const parsed = parseUserMessageContent(parts);
   const imageCount = parsed.fileParts.filter((part) => part.mime.startsWith('image/')).length;
   const attachmentCount = parsed.attachments.length + (parsed.fileParts.length - imageCount);
@@ -31,8 +33,8 @@ function getStickyUserMessageCounts(parts: Part[]): {
   return {
     attachmentCount,
     imageCount,
-    ...(markup ? { format: markup.format } : {}),
-    ...(formatPrefix ? { formatPrefix } : {}),
+    format: markup ? markup.format : undefined,
+    formatPrefix: formatPrefix || undefined,
   };
 }
 

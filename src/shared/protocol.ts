@@ -4,7 +4,8 @@ import type { NativePdfAttachment } from './native-pdf';
 import type { ServerEventPropertiesByName, WorkspaceStatusEntry } from './opencode-types';
 import type { WebviewConfigUpdatePayload } from './provider-limit-config';
 import type { RalphConfig, RalphRun, RalphSelectedModel } from './ralph';
-import { asRecord } from './type-utils';
+import { asRecord, isNumber, isString } from './type-utils';
+import type { UnknownRecord } from './type-utils';
 
 export interface WorkspaceFolderContext {
   name: string;
@@ -71,7 +72,7 @@ export type ChatModelSelection = {
   variant?: string;
 };
 
-export function isPermissionMode(value: unknown): value is PermissionMode {
+export function isPermissionMode<T>(value: T): value is T & PermissionMode {
   return value === 'default' || value === 'edits' || value === 'auto' || value === 'full';
 }
 
@@ -83,11 +84,11 @@ export type AutoApproveJudgeReference = {
   title: string;
   response: 'once' | 'always' | 'reject';
   pattern?: string | string[];
-  metadata?: Record<string, unknown>;
+  metadata?: UnknownRecord;
 };
 
 export type AutoApproveJudgeRequest = {
-  permission: Record<string, unknown>;
+  permission: UnknownRecord;
   model?: { providerID: string; modelID: string; variant?: string };
   approvedReferences?: AutoApproveJudgeReference[];
 };
@@ -419,11 +420,19 @@ export type ServerEvent = {
   };
 }[ServerEventName];
 
-export function isServerEventName(value: unknown): value is ServerEventName {
-  return typeof value === 'string' && SERVER_EVENT_NAME_SET.has(value);
+type ParsedServerEvent = {
+  type: ServerEventName;
+  id?: string;
+  sequenceOnly?: true;
+  seq?: number;
+  properties?: UnknownRecord;
+};
+
+export function isServerEventName<T>(value: T): value is T & ServerEventName {
+  return isString(value) && SERVER_EVENT_NAME_SET.has(value);
 }
 
-export function parseServerEvent(value: unknown): ServerEvent | null {
+export function parseServerEvent<T>(value: T): ServerEvent | null {
   const record = asRecord(value);
   if (!record) return null;
 
@@ -434,7 +443,7 @@ export function parseServerEvent(value: unknown): ServerEvent | null {
   );
 }
 
-function parseServerEventRecord(record: Record<string, unknown> | null): ServerEvent | null {
+function parseServerEventRecord(record: UnknownRecord | null): ServerEvent | null {
   if (!record) return null;
 
   const syncEvent = parseSyncEventRecord(asRecord(record.syncEvent));
@@ -453,16 +462,16 @@ function parseServerEventRecord(record: Record<string, unknown> | null): ServerE
   // Current `/api/event` payloads put the durable cursor under `durable.seq`;
   // transitional/legacy sync wrappers may still expose it at the top level.
   const seq = getServerEventSeq(record);
-  const base = {
-    type: eventType,
-    ...(id === undefined ? {} : { id }),
-    ...(sequenceOnly ? { sequenceOnly: true as const } : {}),
-    ...(seq === undefined ? {} : { seq }),
-  };
-  return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
+  const event: ParsedServerEvent = { type: eventType };
+  if (id !== undefined) event.id = id;
+  if (sequenceOnly) event.sequenceOnly = true;
+  if (seq !== undefined) event.seq = seq;
+  if (properties) event.properties = properties;
+  // SAFETY: eventType was normalized against SERVER_EVENT_NAMES; property payloads remain intentionally shallow-validated.
+  return event as ServerEvent;
 }
 
-function parseSyncEventRecord(record: Record<string, unknown> | null): ServerEvent | null {
+function parseSyncEventRecord(record: UnknownRecord | null): ServerEvent | null {
   if (!record) return null;
 
   const eventType = getVersionedServerEventName(record.type);
@@ -472,32 +481,32 @@ function parseSyncEventRecord(record: Record<string, unknown> | null): ServerEve
   const id = getServerEventId(record);
   const sequenceOnly = record.sequenceOnly === true;
   const seq = getServerEventSeq(record);
-  const base = {
-    type: eventType,
-    ...(id === undefined ? {} : { id }),
-    ...(sequenceOnly ? { sequenceOnly: true as const } : {}),
-    ...(seq === undefined ? {} : { seq }),
-  };
-  return properties ? ({ ...base, properties } as ServerEvent) : (base as ServerEvent);
+  const event: ParsedServerEvent = { type: eventType };
+  if (id !== undefined) event.id = id;
+  if (sequenceOnly) event.sequenceOnly = true;
+  if (seq !== undefined) event.seq = seq;
+  if (properties) event.properties = properties;
+  // SAFETY: eventType was normalized against SERVER_EVENT_NAMES; property payloads remain intentionally shallow-validated.
+  return event as ServerEvent;
 }
 
-function getServerEventId(record: Record<string, unknown>): string | undefined {
-  return typeof record.id === 'string' && record.id.length > 0 ? record.id : undefined;
+function getServerEventId(record: UnknownRecord): string | undefined {
+  return isString(record.id) && record.id.length > 0 ? record.id : undefined;
 }
 
-function getServerEventSeq(record: Record<string, unknown>): number | undefined {
-  if (typeof record.seq === 'number' && Number.isFinite(record.seq)) return record.seq;
+function getServerEventSeq(record: UnknownRecord): number | undefined {
+  if (isNumber(record.seq) && Number.isFinite(record.seq)) return record.seq;
   const durable = asRecord(record.durable);
-  return typeof durable?.seq === 'number' && Number.isFinite(durable.seq) ? durable.seq : undefined;
+  return isNumber(durable?.seq) && Number.isFinite(durable.seq) ? durable.seq : undefined;
 }
 
-function getSyncServerEventName(type: unknown, name: unknown): ServerEventName | null {
-  if (type !== 'sync' || typeof name !== 'string') return null;
+function getSyncServerEventName<Type, Name>(type: Type, name: Name): ServerEventName | null {
+  if (type !== 'sync' || !isString(name)) return null;
   return getVersionedServerEventName(name);
 }
 
-function getVersionedServerEventName(value: unknown): ServerEventName | null {
-  if (typeof value !== 'string') return null;
+function getVersionedServerEventName<T>(value: T): ServerEventName | null {
+  if (!isString(value)) return null;
   const eventName = value.replace(/\.\d+$/, '');
   return isServerEventName(eventName) ? eventName : null;
 }
@@ -544,8 +553,8 @@ export type InitialWebviewState = {
   desktopSessionPaneSide?: DesktopSessionPaneSide;
   defaultPermissionMode?: PermissionMode;
   interruptedSessionIds?: string[];
-  pendingPermissions?: Array<Record<string, unknown>>;
-  pendingQuestions?: Array<Record<string, unknown>>;
+  pendingPermissions?: UnknownRecord[];
+  pendingQuestions?: UnknownRecord[];
   recycleBinEntries?: RecycleBinEntry[];
   pinnedSessionIds?: string[];
   queuedMessages?: QueuedMessageSnapshot[];

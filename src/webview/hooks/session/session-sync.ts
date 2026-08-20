@@ -270,6 +270,7 @@ export function resolveMessagesSelectedModel(
 ) {
   return routingStore.resolveSelectedModel(
     deriveModelFromMessages(messages),
+    // SAFETY: The surrounding shape or discriminator check establishes the Parameters<typeof routingStore.resolveSelectedModel> contract used below.
     providers as Parameters<typeof routingStore.resolveSelectedModel>[1],
     providerDefaults
   );

@@ -41,28 +41,30 @@ function assistantMessage(id: string, tokens = { input: 0, output: 0 }): Assista
 }
 
 function session(id: string, parentID?: string, tokens?: Session['tokens']): Session {
-  return {
+  const value: Session = {
     id,
     projectID: 'project-1',
     directory: '/workspace',
     title: id,
     version: '1',
     time: { created: 1, updated: 1 },
-    ...(parentID ? { parentID } : {}),
-    ...(tokens ? { tokens } : {}),
   };
+  if (parentID) value.parentID = parentID;
+  if (tokens) value.tokens = tokens;
+  return value;
 }
 
-function countedEntry(info: Message, onRead: () => void): { info: Message } {
-  const entry = {} as { info: Message };
-  Object.defineProperty(entry, 'info', {
-    configurable: true,
-    get: () => {
+interface CountedEntry {
+  readonly info: Message;
+}
+
+function countedEntry(info: Message, onRead: () => void): CountedEntry {
+  return {
+    get info() {
       onRead();
       return info;
     },
-  });
-  return entry;
+  };
 }
 
 describe('ChatInput perf helpers', () => {

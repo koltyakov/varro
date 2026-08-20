@@ -1,5 +1,6 @@
 import type { Agent, Provider } from '../types';
 import { modelSupportsVision } from './model-capabilities';
+import { isString } from './runtime-values';
 
 export const VISION_AGENT_NAME = 'vision';
 
@@ -8,7 +9,7 @@ export function canDelegateVision(
   agents: Agent[],
   providers: Provider[]
 ): boolean {
-  const texts = typeof text === 'string' ? [text] : text;
+  const texts = isString(text) ? [text] : text;
   if (!texts.some((value) => mentionsAgent(value, VISION_AGENT_NAME))) return false;
   const agent = agents.find(
     (item) =>

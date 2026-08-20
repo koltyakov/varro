@@ -12,6 +12,7 @@ import { uiStore } from '../../lib/stores/ui-store';
 import { clearQueuedMessagesForSession } from '../../lib/state-queued-messages';
 import { clearSessionMessageWindowState } from '../../lib/message-window';
 import type { Session } from '../../types';
+import { isNumber } from '../../lib/runtime-values';
 
 type LifecycleState = {
   activeSessionId: string | null;
@@ -169,7 +170,7 @@ export function applySessions(deps: LifecycleDependencies, sessions: Session[]) 
     sessions
       .filter(
         (session) =>
-          typeof session.time.archived !== 'number' &&
+          !isNumber(session.time.archived) &&
           isSessionInWorkspace(session, deps.getCurrentWorkspacePath())
       )
       .map((session) => mergeFreshSession(existingById.get(session.id), session))
@@ -253,7 +254,7 @@ export function removeDeletedSessionTree(
 
 export function upsertSession(deps: LifecycleDependencies, session: Session) {
   const { activeSessionId, sessions, showSessionPicker } = deps.getState();
-  if (typeof session.time.archived === 'number') {
+  if (isNumber(session.time.archived)) {
     if (sessions.some((item) => item.id === session.id)) {
       removeDeletedSessionTree(deps, session.id, sessions);
     }

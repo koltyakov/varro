@@ -79,7 +79,7 @@ export function ClampedToolText(props: {
     if (!preRef) return;
     measure();
     queueMicrotask(measure);
-    if (typeof ResizeObserver === 'undefined') return;
+    if (globalThis.ResizeObserver === undefined) return;
     const observer = new ResizeObserver(measure);
     observer.observe(preRef);
     onCleanup(() => observer.disconnect());

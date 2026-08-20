@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The test fixture supplies the adapter registry shape consumed by this module. */
 import { describe, expect, it } from 'vitest';
 import { findProviderLimitAdapter } from './index';
 import type { ProviderMetadata } from '../util/provider-limit';

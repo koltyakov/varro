@@ -43,6 +43,7 @@ function session(id = 'session-1'): Session {
 
 describe('session sync helpers', () => {
   it('selects a session through the state dependency wrapper', async () => {
+    // SAFETY: The fixture provides the string | null fields read by this statement.
     const activeSession = { value: 'session-0' as string | null };
     const startLoading = vi.fn();
 

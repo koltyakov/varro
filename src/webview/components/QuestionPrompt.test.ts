@@ -10,6 +10,7 @@ const { rejectQuestionMock, respondQuestionMock } = vi.hoisted(() => ({
   respondQuestionMock: vi.fn(async () => {}),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise QuestionPrompt's useOpenCode module integration. */
 vi.mock('../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {

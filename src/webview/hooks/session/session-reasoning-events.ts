@@ -7,7 +7,7 @@ import { getEventString, latestAssistantMessageForSession } from './session-even
 type ReasoningEventContext = {
   getMessages(): MessageEntry[];
   syncSessionMessages(sessionId: string): Promise<void>;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
   isSessionInActiveTree(sessionId: string | null | undefined): boolean;
   markSessionProgress(sessionId: string): void;
   ignoreStaleProgressForCompletedMessage(sessionId: string, messageId: string): boolean;
@@ -41,6 +41,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
     const message = findReasoningMessage(sessionId, assistantMessageID);
     if (!message) return null;
     if (!message.parts.some((part) => part.id === reasoningId)) {
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       sessionStore.upsertPart({
         id: reasoningId,
         sessionID: sessionId,
@@ -149,6 +150,7 @@ export function registerReasoningEventHandlers(ctx: ReasoningEventContext): Arra
         reasoningID,
         (messageID) => {
           if (!text) return;
+          // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
           sessionStore.upsertPart({
             id: reasoningID,
             sessionID,

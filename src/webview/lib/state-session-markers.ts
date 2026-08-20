@@ -1,4 +1,5 @@
 import type { Session } from '../types';
+import { isNumber, type UnknownRecord, isObject } from './runtime-values';
 
 export type SessionMarkerMap = Record<string, number>;
 type ScopedSessionMarkerStore = Record<string, SessionMarkerMap>;
@@ -7,7 +8,7 @@ export const NO_WORKSPACE_STORAGE_SCOPE = '__varro.no-workspace__';
 
 type SessionMarkerStorage = {
   readStored<T>(key: string): T | null | undefined;
-  writeStored(key: string, value: unknown): void;
+  writeStored<T>(key: string, value: T): void;
 };
 
 export function normalizeWorkspacePath(path: string | null | undefined) {
@@ -99,7 +100,7 @@ export function nextSkippedPlanSessions(
 ) {
   const sessionUpdatedAt =
     updatedAt ?? sessions.find((session) => session.id === sessionId)?.time.updated;
-  if (typeof sessionUpdatedAt !== 'number') return null;
+  if (!isNumber(sessionUpdatedAt)) return null;
   return { ...current, [sessionId]: sessionUpdatedAt };
 }
 
@@ -109,7 +110,7 @@ export function isSkippedPlanSessionMarker(
   updatedAt: number
 ) {
   const skippedAt = skippedPlanSessions[sessionId];
-  return typeof skippedAt === 'number' && skippedAt >= updatedAt;
+  return isNumber(skippedAt) && skippedAt >= updatedAt;
 }
 
 export function isSessionUnreadMarker(
@@ -146,18 +147,20 @@ export function pruneSessionMarkers(markers: SessionMarkerMap, sessionIds: Set<s
   return nextMarkers;
 }
 
-function isSessionMarkerMap(value: unknown): value is SessionMarkerMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.values(value as Record<string, unknown>).every(
-    (item) => typeof item === 'number' && Number.isFinite(item)
+function isSessionMarkerMap<T>(value: T): value is T & SessionMarkerMap {
+  if (!value || !isObject(value) || Array.isArray(value)) return false;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  return Object.values(value as UnknownRecord).every(
+    (item) => isNumber(item) && Number.isFinite(item)
   );
 }
 
-function sanitizeSessionMarkerMap(value: unknown): SessionMarkerMap {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+function sanitizeSessionMarkerMap<T>(value: T) {
+  if (!value || !isObject(value) || Array.isArray(value)) return {};
   const sanitized: SessionMarkerMap = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof item === 'number' && Number.isFinite(item)) {
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  for (const [key, item] of Object.entries(value as UnknownRecord)) {
+    if (isNumber(item) && Number.isFinite(item)) {
       sanitized[key] = item;
     }
   }
@@ -169,12 +172,13 @@ function readScopedSessionMarkerStore(
   key: string
 ): ScopedSessionMarkerStore {
   const raw = storage.readStored<unknown>(key);
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || isSessionMarkerMap(raw)) {
+  if (!raw || !isObject(raw) || Array.isArray(raw) || isSessionMarkerMap(raw)) {
     return {};
   }
 
   return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>).map(([workspaceScope, value]) => [
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    Object.entries(raw as UnknownRecord).map(([workspaceScope, value]) => [
       workspaceScope,
       sanitizeSessionMarkerMap(value),
     ])

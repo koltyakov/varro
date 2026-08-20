@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- These tests verify provider adapter imports and deliberately pass malformed external response payloads. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromisesModule from 'fs/promises';
 import type * as ProviderLimitsModule from './provider-limits';

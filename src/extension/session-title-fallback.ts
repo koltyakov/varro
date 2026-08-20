@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- OpenCode responses are decoded into title and model domain values here. */
 import { isPlaceholderSessionTitle } from '../shared/session-title';
 import { asRecord } from '../shared/type-utils';
 import type { PermissionRule } from '../shared/opencode-types';
@@ -26,6 +27,14 @@ type ModelRoute = {
   modelID: string;
   variant?: string;
 };
+
+interface TitleMessageRequest {
+  model?: { providerID: string; modelID: string };
+  variant?: string;
+  system: string;
+  parts: Array<{ type: string; text: string }>;
+  format: ReturnType<typeof titleOutputFormat>;
+}
 
 type RenameAttempt = {
   controller: AbortController;
@@ -150,20 +159,19 @@ export class SessionTitleFallback {
 
       const route = await this.resolveTitleModel(messages);
       if (!this.isCurrentAttempt(sessionID, attempt)) return null;
+      const request: TitleMessageRequest = {
+        system: buildTitleSystemPrompt(),
+        parts: [{ type: 'text', text: buildTitleUserPrompt(transcript) }],
+        format: titleOutputFormat(),
+      };
+      if (route) {
+        request.model = { providerID: route.providerID, modelID: route.modelID };
+        if (route.variant) request.variant = route.variant;
+      }
       const response = await this.server.request(
         'POST',
         `${sessionPath(attempt.hiddenSessionID)}/message`,
-        {
-          ...(route
-            ? {
-                model: { providerID: route.providerID, modelID: route.modelID },
-                ...(route.variant ? { variant: route.variant } : {}),
-              }
-            : {}),
-          system: buildTitleSystemPrompt(),
-          parts: [{ type: 'text', text: buildTitleUserPrompt(transcript) }],
-          format: titleOutputFormat(),
-        }
+        request
       );
       if (!this.isCurrentAttempt(sessionID, attempt)) return null;
       return normalizeGeneratedTitle(response);
@@ -211,7 +219,9 @@ export class SessionTitleFallback {
     if (!currentModel) return null;
     const providers = await this.server.request('GET', '/config/providers').catch(() => null);
     const variant = findNoReasoningVariant(providers, currentModel);
-    return { ...currentModel, ...(variant ? { variant } : {}) };
+    const route: ModelRoute = { ...currentModel };
+    if (variant) route.variant = variant;
+    return route;
   }
 
   private async withTimeout<T>(
@@ -260,13 +270,12 @@ function normalizeMessages(value: unknown): MessageEntry[] {
             text: typeof part.text === 'string' ? part.text : undefined,
           }))
       : [];
-    messages.push({
-      info: {
-        role: typeof info?.role === 'string' ? info.role : undefined,
-        ...(model ? { model } : {}),
-      },
+    const message: MessageEntry = {
+      info: { role: typeof info?.role === 'string' ? info.role : undefined },
       parts,
-    });
+    };
+    if (model && message.info) message.info.model = model;
+    messages.push(message);
   }
   return messages;
 }
@@ -277,7 +286,9 @@ function normalizeModelRoute(info: Record<string, unknown> | null): ModelRoute |
   const modelID = getString(model?.modelID) || getString(info?.modelID);
   if (!providerID || !modelID) return null;
   const variant = getString(model?.variant) || getString(info?.variant);
-  return { providerID, modelID, ...(variant ? { variant } : {}) };
+  const route: ModelRoute = { providerID, modelID };
+  if (variant) route.variant = variant;
+  return route;
 }
 
 function findCurrentModel(messages: MessageEntry[]): ModelRoute | null {

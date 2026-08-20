@@ -3,6 +3,7 @@ import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
 import type { AssistantMessage, NormalizedTodo, Part, UserMessage } from '../types';
 
+// SAFETY: The fixture provides the complete domain shape read by this statement.
 const { setState, state } = vi.hoisted(() => ({
   setState: vi.fn(),
   state: {
@@ -13,7 +14,9 @@ const { setState, state } = vi.hoisted(() => ({
   },
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise todo synchronization against the state module boundary. */
 vi.mock('../lib/state', async () => {
+  // SAFETY: The test installs the typed mock implementation before this statement.
   const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
   return {
     ...actual,

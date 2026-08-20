@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- Playwright callbacks validate serialized browser state before reading persistence fields. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The asserted browser state is produced by this test's controlled harness fixture. */
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 

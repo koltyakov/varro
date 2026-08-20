@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/require-safety-comment-for-type-assertion -- These export tests inspect controlled provider internals and deliberately verify opaque response representations. */
 import { writeSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {

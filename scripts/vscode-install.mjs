@@ -65,6 +65,7 @@ function runCommand(spec, cwd) {
 
 async function main() {
   const manifest = JSON.parse(await readFile(join(defaultProjectRoot, 'package.json'), 'utf8'));
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON boundary validation must reject malformed manifest fields before use.
   if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') {
     throw new Error('package.json must define string name and version fields');
   }

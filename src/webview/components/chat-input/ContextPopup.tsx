@@ -11,17 +11,20 @@ import type {
   ContextBreakdownSegment,
 } from '../../../shared/context-breakdown';
 import { Tooltip } from '../Tooltip';
+import { isFunction } from '../../lib/runtime-values';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
 
-const BREAKDOWN_LABELS: Record<ContextBreakdownKey, string> = {
+type ContextBreakdownLabels = Record<ContextBreakdownKey, string>;
+
+const BREAKDOWN_LABELS = {
   system: 'System',
   user: 'User',
   assistant: 'Assistant',
   tool: 'Tool Calls',
   other: 'Other',
-};
+} satisfies ContextBreakdownLabels;
 
 type ContextTokens = {
   total: number;
@@ -72,7 +75,7 @@ export function ContextPopup(props: {
   const setRef = (el: HTMLDivElement) => {
     popupEl = el;
     const forwarded = props.ref;
-    if (typeof forwarded === 'function') forwarded(el);
+    if (isFunction(forwarded)) forwarded(el);
   };
 
   onMount(() => {

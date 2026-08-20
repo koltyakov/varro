@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- These helpers validate JavaScript and network boundary values. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Record assertions follow object and array exclusion checks. */
 import type { ChildProcess } from 'child_process';
 import type { ServerStatus } from '../shared/protocol';
 

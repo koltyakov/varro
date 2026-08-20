@@ -13,56 +13,58 @@ export interface ManagedServerOwnershipLease {
   configPath?: string;
 }
 
-export function parseManagedServerOwnershipLease(
-  value: unknown
-): ManagedServerOwnershipLease | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
+export function parseManagedServerOwnershipLease<T>(value: T): ManagedServerOwnershipLease | null {
+  const record = asRecord(value);
+  if (!record) return null;
   if (record.version !== 1) return null;
-  if (!Number.isSafeInteger(record.pid) || (record.pid as number) <= 0) return null;
+  if (!isNumber(record.pid) || !Number.isSafeInteger(record.pid) || record.pid <= 0) return null;
   if (
+    !isNumber(record.port) ||
     !Number.isSafeInteger(record.port) ||
-    (record.port as number) <= 0 ||
-    (record.port as number) > 65_535
+    record.port <= 0 ||
+    record.port > 65_535
   ) {
     return null;
   }
-  if (typeof record.executable !== 'string' || !record.executable.trim()) return null;
-  if (typeof record.birthIdentity !== 'string' || !record.birthIdentity.trim()) return null;
-  if (typeof record.owner !== 'string' || !record.owner.trim()) return null;
-  if (typeof record.host !== 'string' || !record.host.trim()) return null;
+  if (!isString(record.executable) || !record.executable.trim()) return null;
+  if (!isString(record.birthIdentity) || !record.birthIdentity.trim()) return null;
+  if (!isString(record.owner) || !record.owner.trim()) return null;
+  if (!isString(record.host) || !record.host.trim()) return null;
   const hasHostPid = record.hostPid !== undefined;
   const hasHostBirthIdentity = record.hostBirthIdentity !== undefined;
   if (hasHostPid !== hasHostBirthIdentity) return null;
-  if (hasHostPid && (!Number.isSafeInteger(record.hostPid) || (record.hostPid as number) <= 0)) {
+  if (
+    hasHostPid &&
+    (!isNumber(record.hostPid) || !Number.isSafeInteger(record.hostPid) || record.hostPid <= 0)
+  ) {
     return null;
   }
   if (
     hasHostBirthIdentity &&
-    (typeof record.hostBirthIdentity !== 'string' || !record.hostBirthIdentity.trim())
+    (!isString(record.hostBirthIdentity) || !record.hostBirthIdentity.trim())
   ) {
     return null;
   }
   if (record.state !== 'active' && record.state !== 'relinquished') return null;
-  if (typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)) return null;
-  if (record.configPath !== undefined && typeof record.configPath !== 'string') return null;
+  if (!isNumber(record.createdAt) || !Number.isFinite(record.createdAt)) return null;
+  if (record.configPath !== undefined && !isString(record.configPath)) return null;
 
-  return {
+  const lease: ManagedServerOwnershipLease = {
     version: 1,
-    pid: record.pid as number,
-    port: record.port as number,
+    pid: record.pid,
+    port: record.port,
     executable: record.executable,
     birthIdentity: record.birthIdentity,
     owner: record.owner,
     host: record.host,
-    ...(hasHostPid
-      ? {
-          hostPid: record.hostPid as number,
-          hostBirthIdentity: record.hostBirthIdentity as string,
-        }
-      : {}),
     state: record.state,
     createdAt: record.createdAt,
-    ...(record.configPath ? { configPath: record.configPath as string } : {}),
   };
+  if (hasHostPid && isNumber(record.hostPid) && isString(record.hostBirthIdentity)) {
+    lease.hostPid = record.hostPid;
+    lease.hostBirthIdentity = record.hostBirthIdentity;
+  }
+  if (record.configPath) lease.configPath = record.configPath;
+  return lease;
 }
+import { asRecord, isNumber, isString } from './type-utils';

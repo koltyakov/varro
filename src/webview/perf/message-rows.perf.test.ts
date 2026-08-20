@@ -10,6 +10,7 @@ const { messageRenderCounts } = vi.hoisted(() => ({
   messageRenderCounts: new Map<string, number>(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- This benchmark isolates message-row module integration from rendering cost. */
 vi.mock('../components/Message', async () => {
   const { createRenderEffect } = await import('solid-js');
 

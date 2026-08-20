@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Command handlers decode VS Code extension API values before use. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bind VS Code command contexts to contracts checked by each handler. */
 import * as vscode from 'vscode';
 import { getSelectionRangesFromEditorContext } from '../shared/context-files';
 import { MINIMUM_SUPPORTED_OPENCODE_VERSION } from '../shared/opencode-compatibility';

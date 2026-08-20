@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These tests verify import-time logger construction with a minimal output-channel fixture. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as LoggerModule from './logger';
 

@@ -21,6 +21,7 @@ function loadImage(image: HTMLImageElement, naturalWidth: number, naturalHeight:
     naturalWidth: { configurable: true, value: naturalWidth },
     naturalHeight: { configurable: true, value: naturalHeight },
   });
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   image.parentElement!.getBoundingClientRect = () => ({ width: 640, height: 360 }) as DOMRect;
   image.dispatchEvent(new Event('load'));
 }

@@ -4,6 +4,7 @@ import { resetToolCallExpansionState } from '../../lib/tool-call-expansion-state
 import type { FileDiff } from '../../types';
 import { DiffSummary } from './DiffSummary';
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise DiffSummary's DiffView module integration. */
 vi.mock('../DiffView', () => ({
   DiffView: () => <div class="diff-view-mock">Diff details</div>,
 }));

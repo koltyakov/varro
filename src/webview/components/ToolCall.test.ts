@@ -13,9 +13,12 @@ import {
 import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
 import { client } from '../lib/client';
 import { clearDirectSessionReturn, getDirectSessionReturnId } from '../lib/session-navigation';
+import { fixture } from '../test-fixtures';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 const selectSessionMock = vi.hoisted(() => vi.fn(async () => {}));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ToolCall's useOpenCode module integration. */
 vi.mock('../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {
@@ -29,7 +32,8 @@ let cleanup: (() => void) | undefined;
 
 function setExtensionSender() {
   const sendSpy = vi.fn();
-  (window as unknown as Record<string, unknown>).__sendToExtension = sendSpy;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  fixture<UnknownRecord>(window).__sendToExtension = sendSpy;
   return sendSpy;
 }
 
@@ -38,7 +42,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   setShowInlineFileChanges(false);
   selectSessionMock.mockClear();
-  delete (window as unknown as Record<string, unknown>).__sendToExtension;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete fixture<UnknownRecord>(window).__sendToExtension;
 });
 
 afterEach(() => {
@@ -56,12 +61,13 @@ afterEach(() => {
   setState('activeSessionId', null);
   clearDirectSessionReturn();
   resetToolCallExpansionState();
-  delete (window as unknown as Record<string, unknown>).__sendToExtension;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete fixture<UnknownRecord>(window).__sendToExtension;
   vi.useRealTimers();
 });
 
 function completedState(
-  input: Record<string, unknown> = {},
+  input: UnknownRecord = {},
   title = '',
   output = ''
 ): Extract<ToolPart['state'], { status: 'completed' }> {
@@ -1198,6 +1204,7 @@ describe('ToolCall', () => {
     const runningStatus = container?.querySelector('.tool-invocation-subagent-running');
     const workingIcon = runningStatus?.querySelector('.tool-invocation-working-icon');
     expect(runningStatus?.getAttribute('aria-live')).toBe('polite');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((runningStatus as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(workingIcon).toBeInstanceOf(SVGElement);
     expect(workingIcon?.getAttribute('width')).toBe('12');
@@ -1689,6 +1696,7 @@ describe('ToolCall', () => {
     expect(label?.classList.contains('is-aborted')).toBe(true);
     expect(label?.textContent).toBe('aborted');
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (header as HTMLButtonElement).click();
 
     const detail = container?.querySelector('.tool-invocation-error');

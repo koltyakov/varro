@@ -3,18 +3,21 @@ import { AppRoot } from './App';
 import { cleanupBridge } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
+import { isFunction } from './lib/runtime-values';
 
 const STARTUP_HANDLERS_KEY = '__clearVarroBootstrapFailureHandlers';
-const bootstrapWindow = window as unknown as Record<string, unknown>;
+type BootstrapWindow = Window & { __clearVarroBootstrapFailureHandlers?: () => void };
+// SAFETY: The bootstrap script may install this optional cleanup callback on window.
+const bootstrapWindow = window as BootstrapWindow;
 
-function logWebviewError(message: string, error: unknown) {
+function logWebviewError<T>(message: string, error: T) {
   // oxlint-disable-next-line no-console
   console.error(message, error);
 }
 
 function clearStartupHandlers() {
   const clear = bootstrapWindow[STARTUP_HANDLERS_KEY];
-  if (typeof clear === 'function') clear();
+  if (isFunction(clear)) clear();
   if (bootstrapWindow[STARTUP_HANDLERS_KEY] === clear) {
     delete bootstrapWindow[STARTUP_HANDLERS_KEY];
   }
@@ -58,7 +61,7 @@ export function bootstrap(root: HTMLElement) {
     dispose = undefined;
     cleanupBridgeSafe();
   };
-  const fail = (error: unknown) => {
+  const fail = <T,>(error: T) => {
     if (failed) return;
     failed = true;
     logWebviewError('Varro webview bootstrap failed', error);

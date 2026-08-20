@@ -419,6 +419,7 @@ describe('expansion scroll anchors', () => {
       writable: true,
       value: 200,
     });
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     container.getBoundingClientRect = () =>
       ({
         top: 100,
@@ -431,6 +432,7 @@ describe('expansion scroll anchors', () => {
         y: 100,
         toJSON() {},
       }) as DOMRect;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     anchor.getBoundingClientRect = () =>
       ({
         top: 150,
@@ -451,6 +453,7 @@ describe('expansion scroll anchors', () => {
       windowMs: 250,
     });
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     anchor.getBoundingClientRect = () =>
       ({
         top: 170,

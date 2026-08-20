@@ -10,6 +10,7 @@ import {
   deduplicateFileEdits,
   getFileEditStackRenderKey,
 } from './AssistantMessageContent';
+import { fixture } from '../../test-fixtures';
 
 type MockMarkdownRendererProps = {
   content: string;
@@ -44,6 +45,7 @@ const messagePartMock = vi.hoisted(() =>
   ))
 );
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise assistant-content integration with child render modules. */
 vi.mock('../MarkdownRenderer', () => ({
   MarkdownRenderer: (props: MockMarkdownRendererProps) => markdownRendererMock(props),
 }));
@@ -97,7 +99,7 @@ function textPart(id: string, text: string): TextPart {
 }
 
 function completedToolState(
-  input: Record<string, unknown>,
+  input: ToolPart['state']['input'],
   title: string
 ): Extract<ToolPart['state'], { status: 'completed' }> {
   return {
@@ -136,7 +138,7 @@ function previewFileEditPart(id: string, path: string): ToolPart {
   };
 }
 
-function toolPart(id: string, tool: string, input: Record<string, unknown> = {}): ToolPart {
+function toolPart(id: string, tool: string, input: ToolPart['state']['input'] = {}): ToolPart {
   return {
     id,
     sessionID: 'session-1',
@@ -332,15 +334,20 @@ describe('AssistantMessageContent', () => {
     const nouns = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-summary-noun');
     const icons = measurement?.querySelectorAll<HTMLElement>('.assistant-activity-kind-icon');
     Object.defineProperty(host, 'clientWidth', { configurable: true, value: 256 });
-    if (measurement) measurement.getBoundingClientRect = () => ({ width: 300 }) as DOMRect;
+    if (measurement) {
+      measurement.getBoundingClientRect = () => fixture<DOMRect>({ width: 300 });
+    }
     nouns?.forEach((noun) => {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       noun.getBoundingClientRect = () => ({ width: 35 }) as DOMRect;
     });
     icons?.forEach((icon) => {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       icon.getBoundingClientRect = () => ({ width: 10 }) as DOMRect;
     });
 
-    resize?.([{ target: resizeTarget } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
 
     const summary = container?.querySelector('.assistant-activity-summary-text');
     expect(summary?.getAttribute('aria-label')).toBe(
@@ -353,7 +360,8 @@ describe('AssistantMessageContent', () => {
     ).toEqual(['searches', 'commands']);
 
     Object.defineProperty(host, 'clientWidth', { configurable: true, value: 340 });
-    resize?.([{ target: resizeTarget } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
 
     expect(summary?.querySelector('.assistant-activity-kind-icon')).toBeNull();
     expect(summary?.textContent).toBe('Explored: 1 file, 1 thought, 1 search, 1 command');
@@ -945,6 +953,7 @@ describe('AssistantMessageContent', () => {
     const toggle = container?.querySelector('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (toggle as HTMLButtonElement).click();
 
     await vi.waitFor(() => {

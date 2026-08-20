@@ -10,6 +10,8 @@ export type ContextBreakdownSegment = {
 
 export type ContextMessageEntry = { info: Message; parts: Part[] };
 
+type AssistantPartCharacters = { assistant: number; tool: number };
+
 const estimateTokens = (characters: number) => Math.ceil(characters / 4);
 
 function getUserPartCharacters(part: Part): number {
@@ -19,7 +21,7 @@ function getUserPartCharacters(part: Part): number {
   return 0;
 }
 
-function getAssistantPartCharacters(part: Part): { assistant: number; tool: number } {
+function getAssistantPartCharacters(part: Part): AssistantPartCharacters {
   if (part.type === 'text' || part.type === 'reasoning') {
     return { assistant: part.text.length, tool: 0 };
   }
@@ -102,13 +104,13 @@ export function estimateContextBreakdown(
 export function estimateNestedContextBreakdown(
   sessions: readonly (readonly ContextMessageEntry[])[]
 ): ContextBreakdownSegment[] {
-  const totals: Record<ContextBreakdownKey, number> = {
+  const totals = {
     system: 0,
     user: 0,
     assistant: 0,
     tool: 0,
     other: 0,
-  };
+  } satisfies Record<ContextBreakdownKey, number>;
   let inputTokens = 0;
 
   for (const messages of sessions) {
@@ -129,11 +131,12 @@ export function estimateNestedContextBreakdown(
   }
 
   if (inputTokens <= 0) return [];
-  return (Object.entries(totals) as Array<[ContextBreakdownKey, number]>)
-    .filter(([, tokens]) => tokens > 0)
-    .map(([key, tokens]) => ({
+  const keys: ContextBreakdownKey[] = ['system', 'user', 'assistant', 'tool', 'other'];
+  return keys
+    .filter((key) => totals[key] > 0)
+    .map((key) => ({
       key,
-      tokens,
-      percent: Math.round((tokens / inputTokens) * 1_000) / 10,
+      tokens: totals[key],
+      percent: Math.round((totals[key] / inputTokens) * 1_000) / 10,
     }));
 }

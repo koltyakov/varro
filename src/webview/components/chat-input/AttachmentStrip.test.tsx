@@ -16,6 +16,7 @@ type MockAttachmentChipProps = {
   title?: string;
 };
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise AttachmentStrip integration with AttachmentChip. */
 vi.mock('./AttachmentChip', () => ({
   AttachmentChip: (props: MockAttachmentChipProps) => (
     <div

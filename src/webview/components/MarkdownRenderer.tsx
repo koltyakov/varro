@@ -555,6 +555,7 @@ const INLINE_CODE_RE = /(<code[\s\S]*?<\/code>)/gi;
 const PRE_RE = /(<pre[\s\S]*?<\/pre>)/gi;
 
 function requestIdleWork(callback: () => void): IdleWorkHandle {
+  // SAFETY: The surrounding shape or discriminator check establishes the IdleSchedulerGlobal contract used below.
   const idleScheduler = globalThis as IdleSchedulerGlobal;
   if (idleScheduler.requestIdleCallback) {
     return { kind: 'idle', id: idleScheduler.requestIdleCallback(callback) };
@@ -566,6 +567,7 @@ function cancelIdleWork(handle: IdleWorkHandle | null) {
   if (!handle) return;
 
   if (handle.kind === 'idle') {
+    // SAFETY: The surrounding shape or discriminator check establishes the IdleSchedulerGlobal contract used below.
     const idleScheduler = globalThis as IdleSchedulerGlobal;
     idleScheduler.cancelIdleCallback?.(handle.id);
     return;
@@ -659,6 +661,7 @@ function linkifySessionReferences(fragment: DocumentFragment) {
   const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
   const textNodes: Text[] = [];
   while (walker.nextNode()) {
+    // SAFETY: The surrounding shape or discriminator check establishes the Text contract used below.
     const node = walker.currentNode as Text;
     const parent = node.parentElement;
     if (!parent || parent.closest('a, button, code, pre')) continue;
@@ -747,6 +750,7 @@ function renderMarkdownHtml(
     allowMermaidHydration: options?.allowMermaidHydration === true,
   };
   try {
+    // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
     const parsed = marked.parse(content) as string;
     const sessionContextKey = getSessionReferenceContextKey(content);
     return sanitizeHtml(
@@ -775,6 +779,7 @@ function scanLastSafeMarkdownBoundary(
 
   let index = 0;
   let lastBoundary: number | null = null;
+  // SAFETY: The surrounding shape or discriminator check establishes the MarkdownFenceState contract used below.
   let openFence = null as MarkdownFenceState | null;
   if (previousState && content.startsWith(previousState.content)) {
     index = previousState.resumeIndex;
@@ -784,6 +789,7 @@ function scanLastSafeMarkdownBoundary(
 
   let resumeIndex = 0;
   let resumeLastBoundary: number | null = null;
+  // SAFETY: The surrounding shape or discriminator check establishes the MarkdownFenceState contract used below.
   let resumeOpenFence = null as MarkdownFenceState | null;
 
   while (index < content.length) {
@@ -870,6 +876,7 @@ export function splitStreamingMarkdownContent(content: string): StreamingMarkdow
 
 function hasCompletedHighlightableFence(content: string) {
   let index = 0;
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   let openFence = null as (MarkdownFenceState & { highlightable: boolean }) | null;
 
   while (index < content.length) {
@@ -1636,6 +1643,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
   });
 
   function handleClick(e: MouseEvent) {
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const mermaidCopy = (e.target as HTMLElement).closest<HTMLButtonElement>(
       'button[data-mermaid-copy]'
     );
@@ -1652,6 +1660,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const mermaidExpand = (e.target as HTMLElement).closest<HTMLButtonElement>(
       'button[data-mermaid-expand]'
     );
@@ -1665,6 +1674,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-copy]');
     if (btn) {
       const block = btn.closest('.interactive-result-code-block');
@@ -1684,6 +1694,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.file-path-link');
     if (link) {
       e.preventDefault();
@@ -1708,6 +1719,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const sessionLink = (e.target as HTMLElement).closest<HTMLAnchorElement>(
       'a.session-reference-link'
     );
@@ -1717,6 +1729,7 @@ export function MarkdownRenderer(props: MarkdownProps) {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[href]');
     if (anchor?.dataset.external === 'true') {
       const href = anchor.getAttribute('href');

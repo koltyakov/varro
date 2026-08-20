@@ -20,6 +20,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
 }
 
 function makeOptions(overrides: Partial<Parameters<typeof shouldPruneEmptySession>[1]> = {}) {
+  // SAFETY: The fixture provides the string | null fields read by this statement.
   return {
     activeSessionId: null as string | null,
     isQueued: vi.fn(() => false),

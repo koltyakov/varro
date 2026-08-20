@@ -19,6 +19,14 @@ const INLINE_CONFIG_CONTENT = JSON.stringify({ compaction: { reserved: 3333 } })
 const checks = [];
 let serverOutput = '';
 
+function recordCheck(check, required = true) {
+  if (!required) {
+    check.required = false;
+    check.advisory = true;
+  }
+  checks.push(check);
+}
+
 await writeFile(
   BASE_CONFIG_PATH,
   `${JSON.stringify(
@@ -74,6 +82,7 @@ function scopedUrl(path) {
 }
 
 function isRecord(value) {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- External JSON and protocol payloads require an object-shape boundary check.
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -131,21 +140,21 @@ async function request(name, method, path, options = {}) {
     if (options.validate && !options.validate(data)) {
       throw new Error(`unexpected response shape: ${text.slice(0, 300)}`);
     }
-    checks.push({
-      name,
-      ok: true,
-      ...(options.required === false ? { required: false, advisory: true } : {}),
-      durationMs: Date.now() - startedAt,
-    });
+    recordCheck(
+      { name, ok: true, durationMs: Date.now() - startedAt },
+      options.required !== false
+    );
     return data;
   } catch (error) {
-    checks.push({
-      name,
-      ok: false,
-      ...(options.required === false ? { required: false, advisory: true } : {}),
-      durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    recordCheck(
+      {
+        name,
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      options.required !== false
+    );
     return undefined;
   }
 }
@@ -186,6 +195,7 @@ async function requestExpectedMissingRequest(
       } catch {
         throw new Error(`${response.status} returned a non-JSON ${requestKind} reply result`);
       }
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Parsed JSON must be validated against the endpoint's boolean contract.
       if (typeof data !== 'boolean') {
         throw new Error(`${response.status} returned a non-boolean ${requestKind} reply result`);
       }
@@ -279,6 +289,7 @@ async function checkEventStream() {
     if (
       !isRecord(payload) ||
       !event ||
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The SSE payload is external JSON and its identifier must be validated.
       typeof event.id !== 'string' ||
       event.type !== 'server.connected' ||
       !isRecord(event.properties)
@@ -341,32 +352,34 @@ async function checkMcpLifecycle() {
       if (!pages.includes('first\n') || !pages.includes('second\n')) {
         throw new Error(`MCP pagination marker is incomplete: ${JSON.stringify(pages)}`);
       }
-      checks.push({
-        name: 'MCP tool discovery follows pagination cursors',
-        ok: true,
-        ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
-        durationMs: Date.now() - paginationStartedAt,
-      });
+      recordCheck(
+        {
+          name: 'MCP tool discovery follows pagination cursors',
+          ok: true,
+          durationMs: Date.now() - paginationStartedAt,
+        },
+        MCP_CHECK_REQUIRED
+      );
     } catch (error) {
-      checks.push({
-        name: 'MCP tool discovery follows pagination cursors',
-        ok: false,
-        ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
-        durationMs: Date.now() - paginationStartedAt,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      recordCheck(
+        {
+          name: 'MCP tool discovery follows pagination cursors',
+          ok: false,
+          durationMs: Date.now() - paginationStartedAt,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        MCP_CHECK_REQUIRED
+      );
     }
     const payload = await changedEvent;
     const event = getWrappedEvent(payload);
     if (event?.properties?.server !== MCP_FIXTURE_NAME) {
       throw new Error(`unexpected MCP event: ${JSON.stringify(payload).slice(0, 300)}`);
     }
-    checks.push({
-      name: eventName,
-      ok: true,
-      ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
-      durationMs: Date.now() - eventStartedAt,
-    });
+    recordCheck(
+      { name: eventName, ok: true, durationMs: Date.now() - eventStartedAt },
+      MCP_CHECK_REQUIRED
+    );
 
     await request(
       'POST /mcp/:name/disconnect',
@@ -379,13 +392,15 @@ async function checkMcpLifecycle() {
       required: MCP_CHECK_REQUIRED,
     });
   } catch (error) {
-    checks.push({
-      name: eventName,
-      ok: false,
-      ...(!MCP_CHECK_REQUIRED ? { required: false, advisory: true } : {}),
-      durationMs: Date.now() - eventStartedAt,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    recordCheck(
+      {
+        name: eventName,
+        ok: false,
+        durationMs: Date.now() - eventStartedAt,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      MCP_CHECK_REQUIRED
+    );
   } finally {
     clearTimeout(timeout);
     controller.abort();
@@ -398,6 +413,7 @@ async function runProbe() {
 
   const health = await request('GET /global/health', 'GET', '/global/health', {
     validate: (value) =>
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The health response is external JSON and its version must be validated.
       isRecord(value) && value.healthy === true && typeof value.version === 'string',
   });
   await request('GET /session', 'GET', '/session', { validate: Array.isArray });
@@ -440,8 +456,10 @@ async function runProbe() {
   try {
     const session = await request('POST /session', 'POST', '/session', {
       body: { title: 'Varro compatibility probe' },
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The session response is external JSON and its identifier must be validated.
       validate: (value) => isRecord(value) && typeof value.id === 'string',
     });
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Preserve validation while extracting the external session identifier.
     sessionID = isRecord(session) && typeof session.id === 'string' ? session.id : undefined;
     if (sessionID) {
       const encodedID = encodeURIComponent(sessionID);
@@ -488,6 +506,7 @@ async function runProbe() {
         ? messages
             .toReversed()
             .map((entry) => (isRecord(entry) && isRecord(entry.info) ? entry.info.id : undefined))
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Message identifiers originate in external JSON and must be validated.
             .find((id) => typeof id === 'string')
         : undefined;
       if (messageID) {
@@ -504,9 +523,11 @@ async function runProbe() {
           `/session/${encodedID}/fork`,
           {
             body: { messageID },
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The fork response is external JSON and its identifier must be validated.
             validate: (value) => isRecord(value) && typeof value.id === 'string',
           }
         );
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Preserve validation while extracting the external fork identifier.
         forkSessionID = isRecord(fork) && typeof fork.id === 'string' ? fork.id : undefined;
         await request('POST /session/:id/revert', 'POST', `/session/${encodedID}/revert`, {
           body: { messageID },
@@ -549,11 +570,13 @@ async function runProbe() {
         'DELETE forked /session/:id',
         'DELETE',
         `/session/${encodeURIComponent(forkSessionID)}`,
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The endpoint's external JSON response must satisfy its boolean contract.
         { validate: (value) => typeof value === 'boolean' }
       );
     }
     if (sessionID) {
       await request('DELETE /session/:id', 'DELETE', `/session/${encodeURIComponent(sessionID)}`, {
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The endpoint's external JSON response must satisfy its boolean contract.
         validate: (value) => typeof value === 'boolean',
       });
     }
@@ -561,6 +584,7 @@ async function runProbe() {
 
   return {
     requestedVersion: TESTED_VERSION,
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Preserve validation while extracting the external server version.
     serverVersion: isRecord(health) && typeof health.version === 'string' ? health.version : null,
     compatible: checks.every((check) => check.required === false || check.ok),
     checks,

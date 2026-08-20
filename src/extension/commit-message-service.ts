@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- This service validates Git and OpenCode responses at their I/O boundaries. */
+/* oxlint-disable anti-slop/no-known-value-widening -- Named service contracts intentionally hide transport-specific response detail. */
 import { relative } from 'node:path';
 import * as vscode from 'vscode';
 
@@ -10,6 +12,14 @@ import { logger } from './logger';
 import type { OpenCodeServer } from './server';
 
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
+
+interface CommitMessageRequest {
+  model?: { providerID: string; modelID: string };
+  variant?: string;
+  system: string;
+  parts: Array<{ type: string; text: string }>;
+  format: ReturnType<typeof commitMessageOutputFormat>;
+}
 
 type GitChange = {
   uri: vscode.Uri;
@@ -361,25 +371,24 @@ export class CommitMessageService {
 
       const route = await this.resolveCommitModel(attempt.directory);
       throwIfCancelled(attempt);
+      const request: CommitMessageRequest = {
+        system: buildSystemPrompt(),
+        parts: [
+          {
+            type: 'text',
+            text: buildUserPrompt(stagedPatch, stagedPaths, history),
+          },
+        ],
+        format: commitMessageOutputFormat(),
+      };
+      if (route) {
+        request.model = { providerID: route.providerID, modelID: route.modelID };
+        if (route.variant) request.variant = route.variant;
+      }
       const response = await this.server.request(
         'POST',
         scopedPath(`/session/${encodeURIComponent(attempt.sessionID)}/message`, attempt.directory),
-        {
-          ...(route
-            ? {
-                model: { providerID: route.providerID, modelID: route.modelID },
-                ...(route.variant ? { variant: route.variant } : {}),
-              }
-            : {}),
-          system: buildSystemPrompt(),
-          parts: [
-            {
-              type: 'text',
-              text: buildUserPrompt(stagedPatch, stagedPaths, history),
-            },
-          ],
-          format: commitMessageOutputFormat(),
-        }
+        request
       );
       throwIfCancelled(attempt);
       return normalizeGeneratedMessage(response);

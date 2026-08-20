@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The Memento fake accepts opaque persisted values so corruption handling can be tested. */
 import { describe, expect, it, vi } from 'vitest';
 import type { Persistence } from '../shared/persistence';
 import { QueuedMessageStore } from './queued-message-store';

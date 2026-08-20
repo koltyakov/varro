@@ -2,11 +2,13 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Permission } from '../types';
 
+// SAFETY: The fixture provides the 'default' | 'edits' | 'auto' | 'full' fields read by this statement.
 const mocks = vi.hoisted(() => ({
   respondPermission: vi.fn(async () => {}),
   permissionMode: 'default' as 'default' | 'edits' | 'auto' | 'full',
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise permission prompt integration with hooks and mode state. */
 vi.mock('../hooks/useOpenCode', () => ({
   respondPermission: mocks.respondPermission,
 }));

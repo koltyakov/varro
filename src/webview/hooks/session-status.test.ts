@@ -3,6 +3,7 @@ import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
 import type { Message, SessionStatus } from '../types';
 
+// SAFETY: The fixture provides the complete domain shape read by this statement.
 const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } = vi.hoisted(
   () => ({
     setSessionUsageLimitState: vi.fn(),
@@ -11,13 +12,15 @@ const { setSessionUsageLimitState, setState, startLoading, stopLoading, state } 
     stopLoading: vi.fn(),
     state: {
       sessionStatus: {} as Record<string, SessionStatus>,
-      sessionUsageLimits: {} as Record<string, unknown>,
+      sessionUsageLimits: {} as UnknownRecord,
       messages: [] as Array<unknown>,
     },
   })
 );
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise session-status integration with the state module. */
 vi.mock('../lib/state', async () => {
+  // SAFETY: The test installs the typed mock implementation before this statement.
   const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
   return {
     ...actual,
@@ -74,6 +77,7 @@ import {
   shouldIgnorePendingAbortStatusWithDependencies,
   updateUsageLimitStateWithDependencies,
 } from './session/session-status';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 describe('session status helpers', () => {
   it('tracks pending abort retries and clears them', () => {

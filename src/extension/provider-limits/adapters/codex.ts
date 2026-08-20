@@ -1,7 +1,9 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Codex API and auth-file payloads are decoded before use. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Auth and API assertions follow complete token and quota validation. */
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitWindow } from '../../../shared/protocol';
+import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import { parseRateLimitResetAt, type ProviderAuthRecord } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
@@ -22,6 +24,13 @@ const CODEX_USER_AGENT = 'codex-cli/1.0.0';
 const OPENCODE_OAUTH_DUMMY_KEY = 'opencode-oauth-dummy-key';
 const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const SEVEN_DAY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+
+interface CodexHeaders {
+  [name: string]: string;
+  Accept: string;
+  Authorization: string;
+  'User-Agent': string;
+}
 
 const CODEX_WINDOW_LABELS: Record<string, string> = {
   five_hour: '5-Hour Limit',
@@ -104,16 +113,17 @@ export function createCodexAdapter(): ProviderLimitAdapter {
             );
           }
 
-          return {
+          const status: ProviderLimitStatus = {
             providerID: provider.id,
             modelID,
             status: 'available',
             source: 'provider',
             checkedAt,
             windows,
-            ...(planName ? { planName } : {}),
             note: 'Polled Codex OAuth usage endpoint',
           };
+          if (planName) status.planName = planName;
+          return status;
         }
       } catch {
         return {
@@ -139,17 +149,16 @@ export function createCodexAdapter(): ProviderLimitAdapter {
 }
 
 function buildCodexHeaders(credentials: CodexCredentials) {
-  return {
+  const headers: CodexHeaders = {
     Accept: 'application/json',
     Authorization: `Bearer ${credentials.accessToken}`,
     'User-Agent': CODEX_USER_AGENT,
-    ...(credentials.accountID
-      ? {
-          'ChatGPT-Account-Id': credentials.accountID,
-          'X-Account-Id': credentials.accountID,
-        }
-      : {}),
   };
+  if (credentials.accountID) {
+    headers['ChatGPT-Account-Id'] = credentials.accountID;
+    headers['X-Account-Id'] = credentials.accountID;
+  }
+  return headers;
 }
 
 function extractCodexWindows(payload: unknown, checkedAt: number) {

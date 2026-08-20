@@ -51,7 +51,7 @@ export function loadCodeHighlighter(): Promise<void> {
       codeHighlighter = module;
       setCodeHighlighterVersion((version) => version + 1);
     })
-    .catch((error: unknown) => {
+    .catch((error) => {
       codeHighlighterLoadFailed = true;
       throw error;
     });

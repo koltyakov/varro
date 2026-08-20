@@ -48,117 +48,121 @@ import yamlIcon from 'material-icon-theme/icons/yaml.svg';
 import zipIcon from 'material-icon-theme/icons/zip.svg';
 import { getLeafPathName } from '../lib/path-display';
 
-const FILE_NAME_ICONS: Record<string, string> = {
-  '.dockerignore': dockerIcon,
-  '.gitattributes': gitIcon,
-  '.gitignore': gitIcon,
-  dockerfile: dockerIcon,
-  'go.mod': goIcon,
-  'go.sum': goIcon,
-  license: licenseIcon,
-  makefile: makefileIcon,
-  'package-lock.json': lockIcon,
-  'tsconfig.json': tsconfigIcon,
-};
+const FILE_NAME_ICONS = new Map<string, string>(
+  Object.entries({
+    '.dockerignore': dockerIcon,
+    '.gitattributes': gitIcon,
+    '.gitignore': gitIcon,
+    dockerfile: dockerIcon,
+    'go.mod': goIcon,
+    'go.sum': goIcon,
+    license: licenseIcon,
+    makefile: makefileIcon,
+    'package-lock.json': lockIcon,
+    'tsconfig.json': tsconfigIcon,
+  })
+);
 
-const FILE_EXTENSION_ICONS: Record<string, string> = {
-  avif: imageIcon,
-  aac: audioIcon,
-  bash: shellIcon,
-  bmp: imageIcon,
-  c: cIcon,
-  cc: cppIcon,
-  cjs: javascriptIcon,
-  cpp: cppIcon,
-  cs: csharpIcon,
-  css: cssIcon,
-  cts: typescriptIcon,
-  csv: databaseIcon,
-  dart: dartIcon,
-  db: databaseIcon,
-  gif: imageIcon,
-  git: gitIcon,
-  go: goIcon,
-  gql: graphqlIcon,
-  graphql: graphqlIcon,
-  h: cIcon,
-  hpp: cppIcon,
-  htm: htmlIcon,
-  html: htmlIcon,
-  ico: imageIcon,
-  java: javaIcon,
-  jpeg: imageIcon,
-  jpg: imageIcon,
-  js: javascriptIcon,
-  json: jsonIcon,
-  jsonc: jsonIcon,
-  jsx: reactIcon,
-  kt: kotlinIcon,
-  kts: kotlinIcon,
-  less: lessIcon,
-  lock: lockIcon,
-  lua: luaIcon,
-  md: markdownIcon,
-  mdx: markdownIcon,
-  mjs: javascriptIcon,
-  mkv: videoIcon,
-  mov: videoIcon,
-  mp3: audioIcon,
-  mp4: videoIcon,
-  mts: typescriptIcon,
-  ogg: audioIcon,
-  pdf: pdfIcon,
-  php: phpIcon,
-  pl: perlIcon,
-  png: imageIcon,
-  ps1: powershellIcon,
-  py: pythonIcon,
-  pyi: pythonIcon,
-  r: rIcon,
-  rb: rubyIcon,
-  rs: rustIcon,
-  sass: sassIcon,
-  scss: sassIcon,
-  sh: shellIcon,
-  sqlite: databaseIcon,
-  sql: databaseIcon,
-  svelte: svelteIcon,
-  svg: svgIcon,
-  swift: swiftIcon,
-  tar: zipIcon,
-  tf: terraformIcon,
-  tfvars: terraformIcon,
-  toml: tomlIcon,
-  ts: typescriptIcon,
-  tsx: reactTsIcon,
-  vue: vueIcon,
-  webp: imageIcon,
-  wav: audioIcon,
-  webm: videoIcon,
-  xml: xmlIcon,
-  yaml: yamlIcon,
-  yml: yamlIcon,
-  zip: zipIcon,
-};
+const FILE_EXTENSION_ICONS = new Map<string, string>(
+  Object.entries({
+    avif: imageIcon,
+    aac: audioIcon,
+    bash: shellIcon,
+    bmp: imageIcon,
+    c: cIcon,
+    cc: cppIcon,
+    cjs: javascriptIcon,
+    cpp: cppIcon,
+    cs: csharpIcon,
+    css: cssIcon,
+    cts: typescriptIcon,
+    csv: databaseIcon,
+    dart: dartIcon,
+    db: databaseIcon,
+    gif: imageIcon,
+    git: gitIcon,
+    go: goIcon,
+    gql: graphqlIcon,
+    graphql: graphqlIcon,
+    h: cIcon,
+    hpp: cppIcon,
+    htm: htmlIcon,
+    html: htmlIcon,
+    ico: imageIcon,
+    java: javaIcon,
+    jpeg: imageIcon,
+    jpg: imageIcon,
+    js: javascriptIcon,
+    json: jsonIcon,
+    jsonc: jsonIcon,
+    jsx: reactIcon,
+    kt: kotlinIcon,
+    kts: kotlinIcon,
+    less: lessIcon,
+    lock: lockIcon,
+    lua: luaIcon,
+    md: markdownIcon,
+    mdx: markdownIcon,
+    mjs: javascriptIcon,
+    mkv: videoIcon,
+    mov: videoIcon,
+    mp3: audioIcon,
+    mp4: videoIcon,
+    mts: typescriptIcon,
+    ogg: audioIcon,
+    pdf: pdfIcon,
+    php: phpIcon,
+    pl: perlIcon,
+    png: imageIcon,
+    ps1: powershellIcon,
+    py: pythonIcon,
+    pyi: pythonIcon,
+    r: rIcon,
+    rb: rubyIcon,
+    rs: rustIcon,
+    sass: sassIcon,
+    scss: sassIcon,
+    sh: shellIcon,
+    sqlite: databaseIcon,
+    sql: databaseIcon,
+    svelte: svelteIcon,
+    svg: svgIcon,
+    swift: swiftIcon,
+    tar: zipIcon,
+    tf: terraformIcon,
+    tfvars: terraformIcon,
+    toml: tomlIcon,
+    ts: typescriptIcon,
+    tsx: reactTsIcon,
+    vue: vueIcon,
+    webp: imageIcon,
+    wav: audioIcon,
+    webm: videoIcon,
+    xml: xmlIcon,
+    yaml: yamlIcon,
+    yml: yamlIcon,
+    zip: zipIcon,
+  })
+);
 
 export function hasRecognizedFileType(path: string): boolean {
   const filename = getLeafPathName(path).toLowerCase();
-  if (filename in FILE_NAME_ICONS) return true;
+  if (FILE_NAME_ICONS.has(filename)) return true;
 
   const dotIndex = filename.lastIndexOf('.');
-  return dotIndex >= 0 && filename.slice(dotIndex + 1) in FILE_EXTENSION_ICONS;
+  return dotIndex >= 0 && FILE_EXTENSION_ICONS.has(filename.slice(dotIndex + 1));
 }
 
 export function getFileTypeIcon(path: string | undefined): string {
   if (!path) return fileIcon;
 
   const filename = getLeafPathName(path).toLowerCase();
-  const namedIcon = FILE_NAME_ICONS[filename];
+  const namedIcon = FILE_NAME_ICONS.get(filename);
   if (namedIcon) return namedIcon;
 
   const dotIndex = filename.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === filename.length - 1) return fileIcon;
-  return FILE_EXTENSION_ICONS[filename.slice(dotIndex + 1)] ?? fileIcon;
+  return FILE_EXTENSION_ICONS.get(filename.slice(dotIndex + 1)) ?? fileIcon;
 }
 
 export function createFileTypeIconElement(

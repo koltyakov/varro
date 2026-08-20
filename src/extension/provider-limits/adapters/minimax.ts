@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- MiniMax API payloads are decoded before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Parsed JSON is checked before fields are consumed. */
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
@@ -211,7 +213,7 @@ function buildMiniMaxWindow(
   const used = limit != null ? Math.max(limit - normalizedRemaining, 0) : null;
   const percent = used != null && limit != null ? clampPercent((used / limit) * 100) : null;
 
-  return {
+  const window: ProviderLimitWindow = {
     id: period === 'current' ? 'requests' : 'requests-weekly',
     label: period === 'current' ? 'Requests' : 'Weekly requests',
     unit: 'requests',
@@ -226,8 +228,9 @@ function buildMiniMaxWindow(
         : (record.weekly_end_time ?? record.weeklyEndTime),
       checkedAt
     ),
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function parseMiniMaxResetAt(remainsMs: unknown, absoluteResetAt: unknown, checkedAt: number) {

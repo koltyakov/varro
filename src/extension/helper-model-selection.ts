@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Provider payloads are untrusted and are decoded into model selections here. */
+/* oxlint-disable anti-slop/no-known-value-widening -- Inferred provider records are intentionally returned through model-selection contracts. */
 import type { ChatModelSelection } from '../shared/protocol';
 import { asRecord } from '../shared/type-utils';
 import { parseModelRoute } from './sidebar-provider-utils';
@@ -81,11 +83,12 @@ function resolveFallbackModel(
   const model = findProviderModel(value, fallbackModel.providerID, fallbackModel.modelID);
   if (!model) return null;
   const variant = findLowReasoningVariant(model);
-  return {
+  const selection: ChatModelSelection = {
     providerID: fallbackModel.providerID,
     modelID: fallbackModel.modelID,
-    ...(variant ? { variant } : {}),
   };
+  if (variant) selection.variant = variant;
+  return selection;
 }
 
 function findProviderModel(

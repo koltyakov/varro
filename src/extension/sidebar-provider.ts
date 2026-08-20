@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- VS Code and OpenCode boundary values are validated before provider actions. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider responses are parsed before command-specific use. */
 import * as vscode from 'vscode';
 import { replacesOpenCodeBinary } from '../shared/opencode-install';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
@@ -377,11 +379,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   postCommand(cmd: 'new-session' | 'abort', payload?: { prefill: string }) {
-    this.webviewSession.queueCommand(
-      cmd === 'new-session'
-        ? { type: 'command/new-session', ...(payload ? { payload } : {}) }
-        : { type: 'command/abort' }
-    );
+    if (cmd === 'abort') {
+      this.webviewSession.queueCommand({ type: 'command/abort' });
+      return;
+    }
+    if (payload) {
+      this.webviewSession.queueCommand({ type: 'command/new-session', payload });
+    } else {
+      this.webviewSession.queueCommand({ type: 'command/new-session' });
+    }
   }
 
   switchSession(direction: 'previous' | 'next') {

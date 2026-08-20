@@ -167,6 +167,7 @@ export function ManagedSubagentFooter(props: {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || (!showContextPopup() && !showProviderLimitPopup())) return;
       event.preventDefault();
+      // SAFETY: The surrounding shape or discriminator check establishes the KeyboardEvent contract used below.
       (event as KeyboardEvent & { varroHandled?: boolean }).varroHandled = true;
       closePopups();
     };

@@ -21,6 +21,7 @@ describe('DropOverlay', () => {
   it('renders the drop affordance into a body portal', () => {
     cleanup = render(() => DropOverlay(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const overlay = document.body.querySelector('.chat-drop-overlay') as HTMLDivElement | null;
 
     expect(container?.querySelector('.chat-drop-overlay')).toBeNull();

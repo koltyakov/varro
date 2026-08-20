@@ -243,7 +243,8 @@ describe('useOpenCode initialization', () => {
       };
     });
 
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',
       serverStatus: { state: 'stopped' },
       editorContext: {

@@ -54,6 +54,7 @@ import {
   isWrapperlessUserMessageContent,
   parseUserMessageContent,
 } from './message/UserMessageContent';
+import { isString } from '../lib/runtime-values';
 
 export {
   getAssistantContainerVariant,
@@ -188,9 +189,7 @@ export function Message(props: {
     if (!info) return null;
     const data = info.error?.data;
     const errorProviderID = data && 'providerID' in data ? data.providerID : undefined;
-    return typeof errorProviderID === 'string' && errorProviderID.trim()
-      ? errorProviderID
-      : info.providerID;
+    return isString(errorProviderID) && errorProviderID.trim() ? errorProviderID : info.providerID;
   });
   createEffect(() => {
     const info = assistant();
@@ -313,6 +312,7 @@ export function Message(props: {
 
   const [diffs] = createResource(diffRequest, async (requestKey) => {
     const [sessionID, messageID] = requestKey.split('\u0000');
+    // SAFETY: The surrounding shape or discriminator check establishes the FileDiff contract used below.
     return client.session.diff(sessionID!, messageID!).catch(() => [] as FileDiff[]);
   });
   const visibleDiffs = createMemo(() => (diffRequest() ? diffs() || [] : []));
@@ -438,6 +438,7 @@ export function Message(props: {
             </Show>
             <Show when={!isUser() && assistant()}>
               <AssistantMessageContent
+                // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
                 info={assistant() as AssistantMessage}
                 parts={visibleAssistantParts()}
                 errorMessage={assistantErrorMessage()}

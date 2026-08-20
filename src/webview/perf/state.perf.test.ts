@@ -10,7 +10,7 @@ import {
   removeMessagePart,
   upsertPart,
 } from '../lib/state';
-import type { AssistantMessage, FileDiff, NormalizedTodo, TextPart } from '../types';
+import type { AssistantMessage, FileDiff, NormalizedTodo, Permission, TextPart } from '../types';
 import { respondPermissionWithDependencies } from '../hooks/session/session-approvals';
 import { createPerfRoot, settlePerfEffects } from './harness';
 
@@ -68,7 +68,7 @@ function createPermission(
   id: string,
   groupMembers?: Array<{ id: string; sessionID: string; messageID: string }>
 ) {
-  return {
+  const part: Permission = {
     id,
     type: 'apply_patch' as const,
     sessionID: 'session-1',
@@ -76,8 +76,9 @@ function createPermission(
     title: 'apply_patch',
     metadata: {},
     time: { created: 0 },
-    ...(groupMembers ? { groupMembers } : {}),
   };
+  if (groupMembers) part.groupMembers = groupMembers;
+  return part;
 }
 
 describe('state perf guards', () => {

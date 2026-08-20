@@ -4,6 +4,7 @@ import { resetDefaultAppState, setState, state } from '../lib/state';
 
 const postMessageMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise RestartBlocked's bridge module integration. */
 vi.mock('../lib/bridge', () => ({
   postMessage: postMessageMock,
 }));

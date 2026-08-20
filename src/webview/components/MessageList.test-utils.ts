@@ -48,11 +48,12 @@ export function installMessageListTestEnvironment(
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    globalThis.ResizeObserver = class ResizeObserver {
+    globalThis.ResizeObserver = class ResizeObserver implements globalThis.ResizeObserver {
+      readonly box = 'content-box';
       observe() {}
       unobserve() {}
       disconnect() {}
-    } as typeof ResizeObserver;
+    };
     globalThis.requestAnimationFrame = vi.fn().mockImplementation((cb: FrameRequestCallback) => {
       cb(0);
       return 1;
@@ -94,27 +95,47 @@ export function installMessageListTestEnvironment(
     if (originalResizeObserver) {
       globalThis.ResizeObserver = originalResizeObserver;
     } else {
-      delete (globalThis as Partial<typeof globalThis>).ResizeObserver;
+      Object.defineProperty(globalThis, 'ResizeObserver', {
+        configurable: true,
+        value: undefined,
+        writable: true,
+      });
     }
     if (originalIntersectionObserver) {
       globalThis.IntersectionObserver = originalIntersectionObserver;
     } else {
-      delete (globalThis as Partial<typeof globalThis>).IntersectionObserver;
+      Object.defineProperty(globalThis, 'IntersectionObserver', {
+        configurable: true,
+        value: undefined,
+        writable: true,
+      });
     }
     if (originalRequestAnimationFrame) {
       globalThis.requestAnimationFrame = originalRequestAnimationFrame;
     } else {
-      delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
+      Object.defineProperty(globalThis, 'requestAnimationFrame', {
+        configurable: true,
+        value: undefined,
+        writable: true,
+      });
     }
     if (originalCancelAnimationFrame) {
       globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
     } else {
-      delete (globalThis as Partial<typeof globalThis>).cancelAnimationFrame;
+      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+        configurable: true,
+        value: undefined,
+        writable: true,
+      });
     }
     if (originalScrollIntoView) {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
     } else {
-      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: undefined,
+        writable: true,
+      });
     }
     vi.restoreAllMocks();
   });
@@ -192,14 +213,16 @@ export function installControllableIntersectionObserver() {
   let callback: IntersectionObserverCallback | undefined;
   let observer: IntersectionObserver | undefined;
 
-  class TestIntersectionObserver {
+  class TestIntersectionObserver implements IntersectionObserver {
     readonly root = null;
     readonly rootMargin = '0px';
+    readonly scrollMargin = '0px';
     readonly thresholds = [0, 1];
 
     constructor(nextCallback: IntersectionObserverCallback) {
       callback = nextCallback;
-      observer = this as unknown as IntersectionObserver;
+      // oxlint-disable-next-line no-this-alias -- The harness must pass the exact observer instance back to its callback.
+      observer = this;
     }
 
     observe() {}
@@ -210,15 +233,23 @@ export function installControllableIntersectionObserver() {
     }
   }
 
-  globalThis.IntersectionObserver =
-    TestIntersectionObserver as unknown as typeof IntersectionObserver;
+  globalThis.IntersectionObserver = TestIntersectionObserver;
 
   return {
     emit(
       entries: Array<Partial<IntersectionObserverEntry> & Pick<IntersectionObserverEntry, 'target'>>
     ) {
       if (!callback || !observer) throw new Error('IntersectionObserver was not created');
-      callback(entries as IntersectionObserverEntry[], observer);
+      const completeEntries = entries.map((partialEntry) => ({
+        boundingClientRect: new DOMRectReadOnly(),
+        intersectionRatio: 1,
+        intersectionRect: new DOMRectReadOnly(),
+        isIntersecting: true,
+        rootBounds: null,
+        time: 0,
+        ...partialEntry,
+      }));
+      callback(completeEntries, observer);
     },
   };
 }
@@ -323,7 +354,8 @@ export function session(id: string, options: Partial<Session> = {}): Session {
 }
 
 export function entry(info: Message) {
-  return { info, parts: [] as Part[] };
+  const parts: Part[] = [];
+  return { info, parts };
 }
 
 export function toolPart(id: string, messageID = 'message-1', callID = 'call-1'): ToolPart {

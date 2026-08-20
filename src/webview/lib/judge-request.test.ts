@@ -47,6 +47,7 @@ describe('judge-request', () => {
   it('keeps string patterns and omits absent fields on references', () => {
     const state = createStoreState();
 
+    // SAFETY: The fixture provides the never fields read by this statement.
     const reference = toApprovedPermissionReference(
       { ...state.permissions[0]!, pattern: 'opencode *', metadata: undefined as never },
       'once'

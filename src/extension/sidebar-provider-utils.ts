@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Shared sidebar decoders validate protocol and API values field by field. */
 import type { OpenCodeModelRoute, ServerEvent } from '../shared/protocol';
 import { asRecord as asRecordShared } from '../shared/type-utils';
 

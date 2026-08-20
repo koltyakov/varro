@@ -1,19 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import type { RecycleBinEntry, RecycleBinSession } from './protocol';
 import { normalizeRecycleBinEntries, normalizeRecycleBinEntry } from './recycle-bin';
 
-function session(id: string, parentID?: string) {
-  return {
+function session(id: string, parentID?: string): RecycleBinSession {
+  const value: RecycleBinSession = {
     id,
     projectID: 'project-1',
     directory: '/repo',
-    ...(parentID ? { parentID } : {}),
     title: id,
     version: '1',
     time: { created: 100, updated: 200 },
   };
+  if (parentID) value.parentID = parentID;
+  return value;
 }
 
-function entry(overrides: Record<string, unknown> = {}) {
+type EntryOverrides = Partial<Omit<RecycleBinEntry, 'root' | 'sessions'>> & {
+  root?: RecycleBinSession;
+  sessions?: object[];
+};
+
+function entry(overrides: EntryOverrides = {}) {
   const root = session('root');
   return {
     rootID: 'root',

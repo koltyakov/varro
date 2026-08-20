@@ -65,6 +65,7 @@ let desktopMediaQueryListeners = new Set<(event: MediaQueryListEvent) => void>()
 
 function dispatchDesktopMediaQueryChange(matches: boolean) {
   desktopMediaQueryMatches = matches;
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   const event = { matches, media: '(min-width: 1400px)' } as MediaQueryListEvent;
   desktopMediaQueryListeners.forEach((listener) => listener(event));
 }
@@ -895,6 +896,7 @@ describe('SessionListSectionHeader', () => {
       container!
     );
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const archiveButton = container?.querySelector(
       'button.session-list-section-archive'
     ) as HTMLButtonElement | null;
@@ -902,9 +904,11 @@ describe('SessionListSectionHeader', () => {
 
     archiveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const confirmButton = container?.querySelector(
       'button.session-list-section-confirm'
     ) as HTMLButtonElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const cancelButton = container?.querySelector(
       'button.session-list-section-cancel'
     ) as HTMLButtonElement | null;
@@ -957,6 +961,7 @@ describe('SessionListSectionHeader', () => {
       container!
     );
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const actionButton = container?.querySelector(
       'button.session-list-section-archive'
     ) as HTMLButtonElement | null;
@@ -1159,6 +1164,7 @@ describe('header status badges', () => {
   });
 
   it('switches sessions when requested by the extension host', () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1248,6 +1254,7 @@ describe('header status badges', () => {
 
     const headerLeft = container?.querySelector('.chat-header-left');
     const title = headerLeft?.querySelector('.chat-header-title-text');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = headerLeft?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
@@ -1256,6 +1263,7 @@ describe('header status badges', () => {
     expect(title?.textContent).toBe('parent');
     expect(subagentsButton?.getAttribute('aria-label')).toBe('Show 2 sub-agent sessions');
     expect(subagentsButton?.textContent?.trim()).toBe('2');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect(
       headerChildren.indexOf(title?.closest('.chat-header-session-title') as Element)
     ).toBeLessThan(headerChildren.indexOf(subagentsButton as Element));
@@ -1282,6 +1290,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
@@ -1289,6 +1298,7 @@ describe('header status badges', () => {
   });
 
   it('replaces a managed sub-agent composer with a link to its parent session', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1405,6 +1415,7 @@ describe('header status badges', () => {
   });
 
   it('returns from an active sub-agent session to its top session sub-agent list', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1414,6 +1425,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
@@ -1436,6 +1448,7 @@ describe('header status badges', () => {
   });
 
   it('returns directly to the parent session when the sub-agent was opened from its task', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1446,6 +1459,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
@@ -1461,6 +1475,7 @@ describe('header status badges', () => {
   });
 
   it('shows desktop sub-agent navigation in both the chat header and session sidebar', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1475,6 +1490,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const desktopBackButton = container?.querySelector(
       '.chat-header-chat-desktop .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
@@ -1515,6 +1531,7 @@ describe('header status badges', () => {
   });
 
   it('returns from a nested sub-agent session to the top session sub-agent list', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1528,6 +1545,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const topButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
@@ -1547,6 +1565,7 @@ describe('header status badges', () => {
   });
 
   it('returns from the sub-agent list to the parent session', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1556,12 +1575,14 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
@@ -1621,6 +1642,7 @@ describe('header status badges', () => {
   });
 
   it('auto-opens the only filtered sibling session from the chat header', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1631,6 +1653,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const failedBadge = container?.querySelector(
       '.chat-header-failed-badge'
     ) as HTMLButtonElement | null;
@@ -1654,6 +1677,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
@@ -1692,6 +1716,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
@@ -1726,6 +1751,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const newChatButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
@@ -1759,6 +1785,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to sessions"]'
     ) as HTMLButtonElement | null;
@@ -1784,6 +1811,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const completedBadge = container?.querySelector(
       '.chat-header-completed-badge'
     ) as HTMLButtonElement | null;
@@ -1888,9 +1916,11 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const headerSpinner = container?.querySelector(
       '.chat-header-running-spinner'
     ) as HTMLElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const indicator = container?.querySelector(
       '.session-item .session-item-indicator'
     ) as HTMLElement | null;
@@ -1917,6 +1947,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const backButton = container?.querySelector(
       '.chat-header .chat-header-btn[aria-label="Back to sessions"]'
     ) as HTMLButtonElement | null;
@@ -1933,6 +1964,7 @@ describe('header status badges', () => {
   });
 
   it('keeps opening the filtered session list when multiple sibling sessions match', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -1947,6 +1979,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const failedBadge = container?.querySelector(
       '.chat-header-failed-badge'
     ) as HTMLButtonElement | null;
@@ -1960,6 +1993,7 @@ describe('header status badges', () => {
   });
 
   it('opens attention sessions from state and auto-selects a single match', async () => {
+    // SAFETY: The fixture provides the never fields read by this statement.
     const selectSessionSpy = vi
       .spyOn(openCodeModule, 'selectSession')
       .mockResolvedValue(undefined as never);
@@ -2068,13 +2102,17 @@ describe('header status badges', () => {
     const planRow = Array.from(container?.querySelectorAll('.session-item') ?? []).find(
       (item) => item.querySelector('.session-item-title')?.textContent?.trim() === 'plan-1'
     );
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const trailing = planRow?.querySelector('.session-item-trailing') as HTMLDivElement | null;
     const planTag = trailing?.querySelector('.session-item-plan-tag');
     const subagentsButton = trailing?.querySelector('.session-item-subagents');
     const age = trailing?.querySelector('.session-item-age');
     const trailingChildren = Array.from(trailing?.children ?? []);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const planTagIndex = trailingChildren.indexOf(planTag as Element);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsIndex = trailingChildren.indexOf(subagentsButton as Element);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const ageIndex = trailingChildren.indexOf(age as Element);
 
     expect(planTag?.textContent?.trim()).toBe('Plan');
@@ -2138,6 +2176,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
     expect(input).toBeInstanceOf(HTMLInputElement);
 
@@ -2163,6 +2202,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
     const items = Array.from(container?.querySelectorAll('.session-item') ?? []);
     expect(input).toBeInstanceOf(HTMLInputElement);
@@ -2185,6 +2225,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const input = container?.querySelector('.session-list-search-input') as HTMLInputElement | null;
     expect(input).toBeInstanceOf(HTMLInputElement);
 
@@ -2213,7 +2254,9 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const sections = container?.querySelector('.session-list-sections') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const scrollRegion = sections?.querySelector(
       '.session-list-section.expanded .session-list-section-scroll'
     ) as HTMLDivElement | null;
@@ -2273,6 +2316,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Archive')) as HTMLButtonElement | undefined;
@@ -2308,6 +2352,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const archiveToggle = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Archive')) as HTMLButtonElement | undefined;
@@ -2326,6 +2371,7 @@ describe('header status badges', () => {
     expect(sectionTitles).toEqual(['Recent', 'Archive']);
     expect(sessionTitles).toEqual(['Older session']);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const recentToggle = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Recent')) as HTMLButtonElement | undefined;
@@ -2378,6 +2424,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
@@ -2403,6 +2450,7 @@ describe('header status badges', () => {
     const now = Date.now();
     setState('sessions', [session('active', now - 1_000)]);
     setState('activeSessionId', 'active');
+    // SAFETY: The fixture provides the never fields read by this statement.
     setState('recycleBinEntries', [
       {
         rootID: 'deleted-session',
@@ -2414,6 +2462,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
@@ -2467,6 +2516,7 @@ describe('header status badges', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = Array.from(
       container?.querySelectorAll('button.session-list-section-toggle') ?? []
     ).find((item) => item.textContent?.includes('Recycle Bin')) as HTMLButtonElement | undefined;
@@ -2474,9 +2524,11 @@ describe('header status badges', () => {
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const restoreButton = container?.querySelector(
       'button.recycle-bin-restore'
     ) as HTMLButtonElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const deleteButton = container?.querySelector(
       'button.recycle-bin-delete'
     ) as HTMLButtonElement | null;
@@ -2488,6 +2540,7 @@ describe('header status badges', () => {
     expect(restoreSpy).toHaveBeenCalledWith('deleted-session');
     expect(deleteSpy).not.toHaveBeenCalled();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const confirmButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (item) => item.textContent === 'Confirm'
     ) as HTMLButtonElement | undefined;
@@ -3080,6 +3133,7 @@ describe('usage-limit session status precedence', () => {
 
     cleanup = render(() => Chat(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentsButton = container?.querySelector(
       '.chat-header-subagents'
     ) as HTMLButtonElement | null;

@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Provider API, header, and credential values are decoded before use. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Provider assertions follow credential and numeric quota validation. */
 import { homedir } from 'os';
 import { join } from 'path';
 import type {
@@ -226,11 +228,12 @@ export function parseProviderAuthStore(raw: string): Record<string, ProviderAuth
 
     if (auth.type === 'oauth' && typeof auth.access === 'string' && auth.access.trim()) {
       const accountId = getString(auth.accountId ?? auth.account_id);
-      authStore[providerID] = {
+      const oauth: ProviderAuthRecord = {
         type: 'oauth',
         access: auth.access.trim(),
-        ...(accountId ? { accountId } : {}),
       };
+      if (accountId && oauth.type === 'oauth') oauth.accountId = accountId;
+      authStore[providerID] = oauth;
       continue;
     }
 
@@ -325,14 +328,15 @@ function buildHeaderWindow(
   const remaining = parseFiniteNumber(headers.get(remainingHeader));
   if (remaining == null) return null;
 
-  return {
+  const window: ProviderLimitWindow = {
     id,
     label,
     unit,
     remaining,
     limit: parseFiniteNumber(headers.get(limitHeader)),
     resetAt: parseRateLimitResetAt(headers.get(resetHeader), checkedAt),
-  } satisfies ProviderLimitWindow;
+  };
+  return window;
 }
 
 function buildDirectWindow(
@@ -353,7 +357,7 @@ function buildDirectWindow(
 
   const percent = parseWindowPercent(record);
 
-  return {
+  const window: ProviderLimitWindow = {
     id,
     label,
     unit,
@@ -368,8 +372,9 @@ function buildDirectWindow(
       record.resetAt ?? record.reset ?? record.resetsAt ?? record.reset_after,
       checkedAt
     ),
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function getProviderApiBaseUrl(provider: ProviderMetadata) {

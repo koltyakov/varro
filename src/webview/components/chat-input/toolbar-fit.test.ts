@@ -20,6 +20,7 @@ function createHarness(options: {
 
   Object.defineProperty(toolbar, 'clientWidth', { get: () => available });
   Object.defineProperty(left, 'scrollWidth', { get: () => options.required(currentMode) });
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   right.getBoundingClientRect = () => ({ width: 0 }) as DOMRect;
 
   const fitter = createToolbarFitter({
@@ -68,6 +69,7 @@ describe('createToolbarFitter', () => {
     vi.stubGlobal('cancelAnimationFrame', (handle: number) => {
       frameCallbacks[handle - 1] = () => {};
     });
+    // SAFETY: The fixture provides the CSSStyleDeclaration fields read by this statement.
     vi.stubGlobal(
       'getComputedStyle',
       () => ({ columnGap: '0px', gap: '0px' }) as CSSStyleDeclaration
@@ -132,6 +134,7 @@ describe('createToolbarFitter', () => {
   });
 
   it('counts the column gap against the available width', async () => {
+    // SAFETY: The fixture provides the CSSStyleDeclaration fields read by this statement.
     vi.stubGlobal(
       'getComputedStyle',
       () => ({ columnGap: '20px', gap: '0px' }) as CSSStyleDeclaration
@@ -147,6 +150,7 @@ describe('createToolbarFitter', () => {
   });
 
   it('falls back to the shorthand gap when no column gap is set', async () => {
+    // SAFETY: The fixture provides the CSSStyleDeclaration fields read by this statement.
     vi.stubGlobal(
       'getComputedStyle',
       () => ({ columnGap: '', gap: '20px' }) as CSSStyleDeclaration
@@ -161,6 +165,7 @@ describe('createToolbarFitter', () => {
   });
 
   it('ignores an unparseable gap instead of poisoning the comparison', async () => {
+    // SAFETY: The fixture provides the CSSStyleDeclaration fields read by this statement.
     vi.stubGlobal(
       'getComputedStyle',
       () => ({ columnGap: 'normal', gap: 'normal' }) as CSSStyleDeclaration

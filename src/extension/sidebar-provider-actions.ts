@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unsafe-dictionary-type -- Action dispatch carries protocol payload records that each handler validates. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Action payloads are parsed by the webview decoder before dispatch. */
 import * as vscode from 'vscode';
 import type { ContextProvider } from './context-provider';
 import { logger } from './logger';

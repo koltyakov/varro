@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests feed opaque persisted recycle-bin values and inspect controlled private state. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SESSION_TRASH_RETENTION_MS,

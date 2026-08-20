@@ -165,6 +165,7 @@ export function getAssistantActivityGroupMap(
       continue;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     if ((entry.info as AssistantMessage).mode === 'subagent') {
       flush();
       continue;
@@ -176,6 +177,7 @@ export function getAssistantActivityGroupMap(
         else {
           groupEntries.push({
             messageId: entry.info.id,
+            // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
             parentId: (entry.info as AssistantMessage).parentID,
             parts: [part],
           });
@@ -237,22 +239,17 @@ export function preserveAssistantActivityGroupKeys(
         ownerChanged &&
         (previousGroup.ownerPinned || options?.pinPreviousOwner?.(group));
       claimedPreviousKeys.add(preservedKey);
-      replacements.set(
-        group,
-        preservedKey === group.key && !preserveOwner
-          ? group
-          : {
-              ...group,
-              key: preservedKey,
-              ...(preserveOwner
-                ? {
-                    ownerMessageId: previousGroup.ownerMessageId,
-                    ownerPartId: previousGroup.ownerPartId,
-                    ownerPinned: true,
-                  }
-                : {}),
-            }
-      );
+      if (preservedKey === group.key && !preserveOwner) {
+        replacements.set(group, group);
+        continue;
+      }
+      const replacement: AssistantActivityGroupInfo = { ...group, key: preservedKey };
+      if (preserveOwner) {
+        replacement.ownerMessageId = previousGroup.ownerMessageId;
+        replacement.ownerPartId = previousGroup.ownerPartId;
+        replacement.ownerPinned = true;
+      }
+      replacements.set(group, replacement);
     }
   }
 

@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- REST payloads are untrusted and validated against endpoint contracts before use. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Endpoint assertions follow route-specific runtime validation. */
 import * as vscode from 'vscode';
 import { existsSync } from 'fs';
 import { posix, win32 } from 'path';
@@ -31,6 +33,7 @@ import type { PinnedSessionManager } from './pinned-session-manager';
 import type { OpenCodeServer } from './server';
 import {
   OpenCodeResponseTooLargeError,
+  type OpenCodeRequestOptions,
   type OpenCodeResponseMetadata,
 } from './open-code-transport';
 import type {
@@ -618,13 +621,13 @@ export class RestProxy {
     body: unknown,
     signal?: AbortSignal
   ) {
-    const options = {
+    const options: OpenCodeRequestOptions = {
       captureNextCursor: true,
       maxResponseBytes: SESSION_MESSAGE_FALLBACK_MAX_BYTES,
       maxProjectedResponseBytes: SESSION_MESSAGE_RESPONSE_MAX_BYTES,
       stripSummaryDiffs: true,
-      ...(signal ? { signal } : {}),
-    } as const;
+    };
+    if (signal) options.signal = signal;
     try {
       return await this.callbacks.server.request(method, path, body, options);
     } catch (err) {
@@ -667,10 +670,11 @@ export class RestProxy {
     path: string,
     response: OpenCodeResponseMetadata
   ) {
-    return {
+    const result: { items: unknown; nextCursor?: string } = {
       items: await this.filterApiResponse(method, path, response.data),
-      ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
     };
+    if (response.nextCursor) result.nextCursor = response.nextCursor;
+    return result;
   }
 
   private parsePermanentDeleteRequest(method: string, path: string): PermanentDeleteRequest | null {
@@ -721,17 +725,18 @@ export class RestProxy {
     const summary = await this.summarizeSessionTreeTokens(sessionID, messages, sessions);
     const tokenBreakdown = summary.tokenBreakdown;
     const model = summarizeSessionModel(messages);
-    return {
+    const result: SessionDiffSummary = {
       ...editStats,
       tokens: tokenBreakdown.session.total + tokenBreakdown.subagents.total,
-      ...(historyStatsUnavailable ? { historyStatsUnavailable: true } : {}),
-      ...(model ? { model } : {}),
-      ...(!historyStatsUnavailable ? { tokenBreakdown } : {}),
-      ...(!historyStatsUnavailable && summary.nestedContextBreakdown.length > 0
-        ? { nestedContextBreakdown: summary.nestedContextBreakdown }
-        : {}),
       ...summarizeSessionDuration(messages),
     };
+    if (historyStatsUnavailable) result.historyStatsUnavailable = true;
+    if (model) result.model = model;
+    if (!historyStatsUnavailable) result.tokenBreakdown = tokenBreakdown;
+    if (!historyStatsUnavailable && summary.nestedContextBreakdown.length > 0) {
+      result.nestedContextBreakdown = summary.nestedContextBreakdown;
+    }
+    return result;
   }
 
   private readCachedSessionDiffSummary(
@@ -1513,19 +1518,16 @@ export class RestProxy {
     const providerID = typeof rawModel?.providerID === 'string' ? rawModel.providerID.trim() : '';
     const modelID = typeof rawModel?.modelID === 'string' ? rawModel.modelID.trim() : '';
     const variant = typeof rawModel?.variant === 'string' ? rawModel.variant.trim() : '';
-    return {
+    const request: AutoApproveJudgeRequest = {
       permission,
-      ...(providerID && modelID
-        ? {
-            model: {
-              providerID,
-              modelID,
-              ...(variant ? { variant } : {}),
-            },
-          }
-        : {}),
       approvedReferences: parseApprovedPermissionReferences(payload?.approvedReferences),
     };
+    if (providerID && modelID) {
+      const model: AutoApproveJudgeRequest['model'] = { providerID, modelID };
+      if (variant) model.variant = variant;
+      request.model = model;
+    }
+    return request;
   }
 
   private parseJudgeModelRequest(method: string, path: string) {
@@ -1536,12 +1538,12 @@ export class RestProxy {
     const providerID = url.searchParams.get('providerID')?.trim() || '';
     const modelID = url.searchParams.get('modelID')?.trim() || '';
     const variant = url.searchParams.get('variant')?.trim() || '';
-    return {
-      model:
-        providerID && modelID
-          ? { providerID, modelID, ...(variant ? { variant } : {}) }
-          : undefined,
-    };
+    let model: AutoApproveJudgeRequest['model'];
+    if (providerID && modelID) {
+      model = { providerID, modelID };
+      if (variant) model.variant = variant;
+    }
+    return { model };
   }
 
   private parseRenameIfUntitledRequest(method: string, path: string) {
@@ -1967,10 +1969,8 @@ function summarizeSessionMessageEdits(
     }
   }
   const summary = summarizeSessionDiff(diffs);
-  return {
-    ...summary,
-    ...(filesTruncated && summary.files === 0 ? { filesTruncated: true } : {}),
-  };
+  if (filesTruncated && summary.files === 0) summary.filesTruncated = true;
+  return summary;
 }
 
 function hasOmittedMessageHistory(value: unknown): boolean {
@@ -2153,8 +2153,8 @@ function summarizeSessionModel(value: unknown): SessionDiffSummary['model'] {
     model = {
       providerID: info.providerID,
       modelID: info.modelID,
-      ...(typeof info.variant === 'string' && info.variant ? { variant: info.variant } : {}),
     };
+    if (typeof info.variant === 'string' && info.variant) model.variant = info.variant;
   }
   return model;
 }
@@ -2284,13 +2284,14 @@ function parseApprovedPermissionReferences(value: unknown): AutoApproveJudgeRefe
         ? patternValue
         : undefined;
     const metadata = asRecord(record.metadata);
-    references.push({
+    const reference: AutoApproveJudgeReference = {
       type,
       title,
       response,
-      ...(pattern !== undefined ? { pattern } : {}),
-      ...(metadata ? { metadata } : {}),
-    });
+    };
+    if (pattern !== undefined) reference.pattern = pattern;
+    if (metadata) reference.metadata = metadata;
+    references.push(reference);
   }
   return references.slice(-20);
 }

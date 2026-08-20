@@ -183,7 +183,7 @@ export function replaceContextFiles(files: DroppedFile[]) {
 function persistContextFiles() {
   const files = state.droppedFiles.map((file) => ({
     ...file,
-    ...(file.lineRanges ? { lineRanges: file.lineRanges.map((range) => ({ ...range })) } : {}),
+    lineRanges: file.lineRanges?.map((range) => ({ ...range })),
   }));
   writeStored(STORAGE_KEYS.inputDraftFiles, files.length > 0 ? files : null);
 }
@@ -314,7 +314,7 @@ export function replaceNativePdfs(pdfs: NativePdfAttachment[]): NativePdfAttachm
     totalSize += pdf.size;
     accepted.push({
       ...pdf,
-      ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+      contextFile: pdf.contextFile ? { ...pdf.contextFile } : undefined,
     });
   }
   clearNativePdfAttachmentSequences();
@@ -336,7 +336,7 @@ export function addNativePdf(pdf: NativePdfAttachment) {
     ...pdfs,
     {
       ...pdf,
-      ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+      contextFile: pdf.contextFile ? { ...pdf.contextFile } : undefined,
       attachmentSequence,
     },
   ]);

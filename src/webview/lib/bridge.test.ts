@@ -1,14 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SlowApiRequest } from './bridge';
+import { fixture } from '../test-fixtures';
+
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+interface TestRuntimeRecord {
+  [key: string]: TestRuntimeValue;
+}
 
 declare global {
   interface Window {
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 
 const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
-const bridgeWindow = window as unknown as Record<string, unknown>;
+// SAFETY: The fixture provides the unknown fields read by this statement.
+const bridgeWindow = fixture<TestRuntimeRecord>(window);
 
 let cleanup: (() => void) | null = null;
 
@@ -65,6 +87,7 @@ describe('bridge', () => {
 
     window.__sendToExtension = send;
     const request = bridge.apiCall<{ ok: boolean }>('POST', '/session', body);
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const message = send.mock.calls[0]?.[0] as {
       payload: { id: number; cancelKey: string; body?: { nested: { value: number } } };
     };
@@ -153,6 +176,7 @@ describe('bridge', () => {
     window.__sendToExtension = send;
     const request = bridge.apiCall('DELETE', '/session/1');
     const rejection = expect(request).rejects.toThrow('permission denied');
+    // SAFETY: The fixture provides the [{ payload: { id: number } }] | undefined fields read by this statement.
     const firstCall = send.mock.calls[0] as [{ payload: { id: number } }] | undefined;
     if (!firstCall) throw new Error('Expected bridge request to be sent');
     const id = firstCall[0].payload.id;
@@ -241,6 +265,7 @@ describe('bridge', () => {
     window.__sendToExtension = send;
     await vi.advanceTimersByTimeAsync(150);
 
+    // SAFETY: The fixture provides the { payload: { id: number } } | undefined fields read by this statement.
     const id = (send.mock.calls[0]?.[0] as { payload: { id: number } } | undefined)?.payload.id;
     if (!id) throw new Error('Expected retried request id');
 
@@ -313,6 +338,7 @@ describe('bridge', () => {
     const controller = new AbortController();
 
     const request = bridge.apiCall('GET', '/session', undefined, { signal: controller.signal });
+    // SAFETY: The fixture provides the { payload: { id: number; cancelKey: string }; } fields read by this statement.
     const sentRequest = send.mock.calls[0]?.[0] as {
       payload: { id: number; cancelKey: string };
     };

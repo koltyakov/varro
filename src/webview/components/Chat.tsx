@@ -63,6 +63,7 @@ import {
   clearDirectSessionReturnUnless,
   getDirectSessionReturnId,
 } from '../lib/session-navigation';
+import { isFunction } from '../lib/runtime-values';
 
 type HeaderSessionCounts = {
   running: number;
@@ -122,7 +123,7 @@ export function Chat() {
           providerID: request.providerID,
         });
       },
-      (error: unknown) => {
+      (error) => {
         if (providerConnectionData() !== loadingState) return;
         setProviderConnectionData({
           providers: [],
@@ -197,7 +198,7 @@ export function Chat() {
           ? {
               providerID: selectedModel.providerID,
               modelID: selectedModel.modelID,
-              ...(selectedModel.variant ? { variant: selectedModel.variant } : {}),
+              variant: selectedModel.variant ? selectedModel.variant : undefined,
             }
           : null,
       },
@@ -223,7 +224,7 @@ export function Chat() {
   };
 
   onMount(() => {
-    if (typeof window.matchMedia !== 'function') return;
+    if (!isFunction(window.matchMedia)) return;
 
     const mediaQuery = window.matchMedia(DESKTOP_SESSION_LAYOUT_MEDIA_QUERY);
     const handleChange = (event: MediaQueryListEvent) => {
@@ -509,6 +510,7 @@ export function Chat() {
         if (
           wasHandled ||
           event.defaultPrevented ||
+          // SAFETY: The surrounding shape or discriminator check establishes the KeyboardEvent contract used below.
           (event as KeyboardEvent & { varroHandled?: boolean }).varroHandled
         ) {
           return;

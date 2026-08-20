@@ -3,13 +3,14 @@ import type { Permission } from '../types';
 import { respondPermission } from '../hooks/useOpenCode';
 import { getPermissionModeForSession } from '../lib/state-permission-modes';
 import { CopyIconButton } from './CopyIconButton';
+import { isBoolean, isNumber, isString, isObject } from '../lib/runtime-values';
 
 const respondingPermissionIds = new Set<string>();
 const [respondingPermissionVersion, setRespondingPermissionVersion] = createSignal(0);
 
-function formatMetadataValue(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+function formatMetadataValue<T>(value: T): string {
+  if (isString(value)) return value;
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return JSON.stringify(value);
 }
 
@@ -42,7 +43,7 @@ export function PermissionPrompt(props: {
 
   const metadataEntries = () => {
     const meta = props.permission.metadata;
-    if (!meta || typeof meta !== 'object') return [];
+    if (!meta || !isObject(meta)) return [];
     return Object.entries(meta).filter(([, v]) => v !== undefined && v !== null);
   };
   const displayTitle = () => {
@@ -51,7 +52,7 @@ export function PermissionPrompt(props: {
     const command = props.permission.metadata?.command;
     if (
       (props.permission.type === 'bash' || props.permission.type === 'shell') &&
-      typeof command === 'string' &&
+      isString(command) &&
       command.trim()
     ) {
       return 'Run command';

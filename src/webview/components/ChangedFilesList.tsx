@@ -11,13 +11,16 @@ import { getDiffSummaryStats } from './chat/SessionListView';
 import { formatDisplayPath, getLeafPathName } from '../lib/path-display';
 import { formatEditCount } from '../lib/format';
 import { FileTypeIcon } from './FileTypeIcon';
+import { isObject } from '../lib/runtime-values';
 
-const KIND_BADGE: Record<FileChangeKind, { label: string; title: string; class: string }> = {
+type FileChangeKindBadges = Record<FileChangeKind, { label: string; title: string; class: string }>;
+
+const KIND_BADGE = {
   added: { label: 'A', title: 'Added', class: 'is-added' },
   edited: { label: 'M', title: 'Modified', class: 'is-edited' },
   removed: { label: 'D', title: 'Removed', class: 'is-removed' },
   moved: { label: 'R', title: 'Renamed', class: 'is-moved' },
-};
+} satisfies FileChangeKindBadges;
 const CHANGED_FILE_DISPLAY_LIMIT = 100;
 
 function getActiveSession() {
@@ -94,7 +97,7 @@ export function ChangedFilesList() {
               files: stats.files + 1,
               additions: stats.additions + (change.additions ?? 0),
               deletions: stats.deletions + (change.deletions ?? 0),
-              ...(messageResult.truncated ? { filesTruncated: true } : {}),
+              filesTruncated: messageResult.truncated ? true : undefined,
             }),
             { files: 0, additions: 0, deletions: 0 }
           );
@@ -127,7 +130,7 @@ export function ChangedFilesList() {
     if (sessionSummary?.diffsTruncated) return true;
     return activeMessages().some((message) => {
       const summary = message.info?.summary;
-      return !!summary && typeof summary === 'object' && summary.diffsTruncated === true;
+      return !!summary && isObject(summary) && summary.diffsTruncated === true;
     });
   };
   const totalLabel = () => (truncated() ? 'Details omitted' : String(total()));
@@ -199,7 +202,7 @@ function ChangedFileItem(props: { change: FileChange }) {
         path: openPath(),
         kind: 'file',
         view: 'diff',
-        ...(state.activeSessionId ? { sessionID: state.activeSessionId } : {}),
+        sessionID: state.activeSessionId ? state.activeSessionId : undefined,
       },
     });
   };

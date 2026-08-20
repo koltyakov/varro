@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The in-memory storage fake accepts the same opaque values as VS Code's Memento API. */
 import { describe, expect, it, vi } from 'vitest';
 import type { Persistence } from '../shared/persistence';
 import { DraftImageStore } from './draft-image-store';

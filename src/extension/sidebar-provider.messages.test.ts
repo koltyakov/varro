@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-object-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests call private message handlers with protocol-shaped fixtures and named scenario options. */
 import { describe, expect, it, vi, type Mock } from 'vitest';
 import {
   attachTestView,

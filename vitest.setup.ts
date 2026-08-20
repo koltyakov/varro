@@ -8,6 +8,7 @@ if (!globalThis.CSS) {
     writable: true,
   });
 }
+// oxlint-disable-next-line anti-slop/no-runtime-typeof -- The test environment may provide an incomplete CSS runtime that requires a polyfill.
 if (typeof globalThis.CSS.escape !== 'function') {
   Object.defineProperty(globalThis.CSS, 'escape', {
     configurable: true,
@@ -18,6 +19,6 @@ if (typeof globalThis.CSS.escape !== 'function') {
 
 beforeEach(() => {
   window.localStorage.clear();
-  delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
-  delete (window as unknown as { __initialTheme?: unknown }).__initialTheme;
+  Reflect.deleteProperty(window, '__initialWebviewState');
+  Reflect.deleteProperty(window, '__initialTheme');
 });

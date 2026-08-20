@@ -47,19 +47,19 @@ export function getPdfDataUrlSize(url: string): number | null {
   }
 }
 
-export function isNativePdfAttachment(value: unknown): value is NativePdfAttachment {
-  if (!value || typeof value !== 'object') return false;
-  const pdf = value as Record<string, unknown>;
+export function isNativePdfAttachment<T>(value: T): value is T & NativePdfAttachment {
+  const pdf = asRecord(value);
+  if (!pdf) return false;
   if (
-    typeof pdf.id !== 'string' ||
+    !isString(pdf.id) ||
     pdf.id.length === 0 ||
     pdf.id.length > 512 ||
     pdf.mime !== NATIVE_PDF_MIME ||
-    typeof pdf.filename !== 'string' ||
+    !isString(pdf.filename) ||
     pdf.filename.length === 0 ||
     pdf.filename.length > MAX_NATIVE_PDF_FILENAME_LENGTH ||
-    typeof pdf.url !== 'string' ||
-    typeof pdf.size !== 'number' ||
+    !isString(pdf.url) ||
+    !isNumber(pdf.size) ||
     !Number.isSafeInteger(pdf.size)
   ) {
     return false;
@@ -67,12 +67,12 @@ export function isNativePdfAttachment(value: unknown): value is NativePdfAttachm
   const dataUrlSize = getPdfDataUrlSize(pdf.url);
   if (dataUrlSize === null || dataUrlSize !== pdf.size) return false;
   if (pdf.contextFile !== undefined) {
-    if (!pdf.contextFile || typeof pdf.contextFile !== 'object') return false;
-    const contextFile = pdf.contextFile as Record<string, unknown>;
+    const contextFile = asRecord(pdf.contextFile);
+    if (!contextFile) return false;
     if (
-      typeof contextFile.path !== 'string' ||
+      !isString(contextFile.path) ||
       contextFile.path.length === 0 ||
-      typeof contextFile.relativePath !== 'string' ||
+      !isString(contextFile.relativePath) ||
       contextFile.relativePath.length === 0 ||
       contextFile.type !== 'file'
     ) {
@@ -81,8 +81,9 @@ export function isNativePdfAttachment(value: unknown): value is NativePdfAttachm
   }
   return (
     pdf.attachmentSequence === undefined ||
-    (typeof pdf.attachmentSequence === 'number' &&
+    (isNumber(pdf.attachmentSequence) &&
       Number.isSafeInteger(pdf.attachmentSequence) &&
       pdf.attachmentSequence >= 0)
   );
 }
+import { asRecord, isNumber, isString } from './type-utils';

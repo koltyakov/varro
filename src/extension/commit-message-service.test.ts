@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-shape-in-symbol-names, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests model malformed transport payloads and inspect module-boundary calls with minimal service fixtures. */
 import type * as vscode from 'vscode';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

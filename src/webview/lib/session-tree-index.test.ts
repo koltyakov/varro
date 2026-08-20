@@ -164,7 +164,7 @@ describe('createSessionTreeIndex', () => {
       makeSession('orphan', { parentID: 'filtered-out' }),
       makeSession('c1', { parentID: 'orphan' }),
     ];
-    const limits: Record<string, UsageLimitNotice | null> = { c1: makeNotice('c1') };
+    const limits = { c1: makeNotice('c1') } satisfies Record<string, UsageLimitNotice | null>;
 
     expect(idx.getActiveUsageLimitNotice('orphan', sessions, limits)).toEqual(
       expect.objectContaining({ sessionID: 'c1' })
@@ -216,9 +216,9 @@ describe('createSessionTreeIndex', () => {
   it('getActiveUsageLimitNotice finds notice from any session in tree', () => {
     const idx = createSessionTreeIndex();
     const sessions = [makeSession('root'), makeSession('c1', { parentID: 'root' })];
-    const limits: Record<string, UsageLimitNotice | null> = {
+    const limits = {
       c1: makeNotice('c1'),
-    };
+    } satisfies Record<string, UsageLimitNotice | null>;
     expect(idx.getActiveUsageLimitNotice('root', sessions, limits)).toEqual(
       expect.objectContaining({ sessionID: 'c1' })
     );
@@ -265,10 +265,10 @@ describe('createSessionTreeIndex', () => {
       makeSession('c1', { parentID: 'root' }),
       makeSession('c2', { parentID: 'root' }),
     ];
-    const limits: Record<string, UsageLimitNotice | null> = {
+    const limits = {
       root: makeNotice('root'),
       c1: makeNotice('c1'),
-    };
+    } satisfies Record<string, UsageLimitNotice | null>;
     const result = idx.getActiveUsageLimitNotice('c2', sessions, limits);
     expect(result).toEqual(expect.objectContaining({ sessionID: 'root' }));
   });

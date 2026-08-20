@@ -95,6 +95,7 @@ export function TodoList() {
     queueMicrotask(() => {
       if (collapsed() || activeTodo()?.id !== activeTodoId) return;
       const activeItem = Array.from(listRef?.children || []).find(
+        // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
         (item) => (item as HTMLElement).dataset.todoId === activeTodoId
       );
       activeItem?.scrollIntoView?.({ block: 'nearest' });
@@ -139,7 +140,7 @@ export function TodoList() {
     };
 
     updateAvailableSpace();
-    if (typeof ResizeObserver === 'undefined') return;
+    if (globalThis.ResizeObserver === undefined) return;
 
     const observer = new ResizeObserver((entries) => {
       const shellEntry = entries.find((entry) => entry.target === chatShell);

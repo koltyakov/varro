@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking -- These tests verify the adapter's imported credential-discovery boundary. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { readFileMock } = vi.hoisted(() => ({

@@ -144,9 +144,11 @@ function flushFrame() {
 }
 
 function cloneEntriesWithStaleTexts(rng: Rng, delivered: Map<string, string>): MessageEntry[] {
+  // SAFETY: The fixture provides the MessageEntry['info'] fields read by this statement.
   return state.messages.map((entry) => ({
     info: JSON.parse(JSON.stringify(entry.info)) as MessageEntry['info'],
     parts: entry.parts.map((part) => {
+      // SAFETY: The fixture provides the Part fields read by this statement.
       const clone = JSON.parse(JSON.stringify(part)) as Part;
       const deliveredText = delivered.get(part.id);
       if (deliveredText !== undefined && (clone.type === 'text' || clone.type === 'reasoning')) {

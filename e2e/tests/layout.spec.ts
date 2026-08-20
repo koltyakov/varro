@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Layout scenarios bridge synthetic browser messages and variant-specific message-part records through page.evaluate. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access DOM nodes and protocol-shaped fixtures established by each controlled layout scenario. */
 import { expect, test } from '@playwright/test';
 import {
   getE2EState,

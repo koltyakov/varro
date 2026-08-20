@@ -139,9 +139,9 @@ export function getAssistantDialogSummaryMap(
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
-      ...(interrupted ? { interrupted: true } : {}),
-      ...(permissionRejected ? { permissionRejected: true } : {}),
-      ...(questionSkipped ? { questionSkipped: true } : {}),
+      interrupted: interrupted ? true : undefined,
+      permissionRejected: permissionRejected ? true : undefined,
+      questionSkipped: questionSkipped ? true : undefined,
       collectingStats: options?.collectLeadingSummaryStats && currentUserRequestCreated === null,
     });
 
@@ -162,6 +162,7 @@ export function getAssistantDialogSummaryMap(
       continue;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     const assistant = entry.info as AssistantMessage;
     if (options?.primarySessionId && assistant.sessionID !== options.primarySessionId) continue;
     if (assistant.mode === 'subagent') continue;

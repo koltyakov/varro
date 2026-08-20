@@ -10,6 +10,23 @@ import {
 import { resetDefaultAppState, setState } from '../lib/state';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+
 type DialogProps = Parameters<typeof ProviderConnectionDialog>[0];
 
 const clientMocks = vi.hoisted(() => ({
@@ -20,6 +37,7 @@ const clientMocks = vi.hoisted(() => ({
 const postMessageMock = vi.hoisted(() => vi.fn());
 const openProviderSetupMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise provider-dialog integration with bridge and client modules. */
 vi.mock('../lib/bridge', () => ({ postMessage: postMessageMock }));
 vi.mock('../lib/client', () => ({
   client: {
@@ -145,6 +163,7 @@ beforeEach(() => {
   resetDefaultAppState();
   resetProviderConnectionState();
   originalResizeObserver = globalThis.ResizeObserver;
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
@@ -606,7 +625,7 @@ describe('ProviderConnectionDialog OAuth flow', () => {
   it('aborts a pending authorization exchange when the dialog closes', async () => {
     let capturedSignal: AbortSignal | undefined;
     clientMocks.completeProviderAuth.mockImplementation(
-      (_body: unknown, options?: { signal?: AbortSignal }) => {
+      (_body: TestRuntimeValue, options?: { signal?: AbortSignal }) => {
         capturedSignal = options?.signal;
         return new Promise<boolean>(() => {});
       }

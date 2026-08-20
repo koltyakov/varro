@@ -1,5 +1,6 @@
 import type { DroppedFile } from '../../shared/protocol';
 import type { ClipboardImage, NativePdfAttachment } from './app-state-types';
+import { isNumber } from './runtime-values';
 
 let nextAttachmentSequence = 1;
 
@@ -8,7 +9,7 @@ const clipboardImageAttachmentSequences = new Map<string, number>();
 const nativePdfAttachmentSequences = new Map<string, number>();
 
 function reserveAttachmentSequence(sequence?: number) {
-  if (typeof sequence === 'number' && Number.isFinite(sequence)) {
+  if (isNumber(sequence) && Number.isFinite(sequence)) {
     nextAttachmentSequence = Math.max(nextAttachmentSequence, sequence + 1);
     return sequence;
   }

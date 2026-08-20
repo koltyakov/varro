@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening -- The document registry intentionally exposes VS Code's content-provider contract. */
 import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 

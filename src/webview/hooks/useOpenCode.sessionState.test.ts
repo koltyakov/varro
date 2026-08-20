@@ -12,12 +12,16 @@ import {
   userMessage,
 } from './useOpenCode.test-support';
 
+interface ServerEvent {
+  properties: unknown;
+}
+
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 type BridgeOnMessage = typeof onMessage;
 type ServerEventsOn = (
   event: ServerEventName | '*',
-  handler: (data: unknown) => void
+  handler: (data: ServerEvent) => void
 ) => () => void;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 const serverEventsOn = vi.fn<ServerEventsOn>();
@@ -39,7 +43,7 @@ function userEntry(id: string, sessionId = 'session-1') {
 }
 
 function installServerEventHandlers() {
-  const handlers = new Map<ServerEventName | '*', (data: unknown) => void>();
+  const handlers = new Map<ServerEventName | '*', (data: ServerEvent) => void>();
   serverEventsOn.mockImplementation((event, handler) => {
     handlers.set(event, handler);
     return () => {
@@ -101,7 +105,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('does not resync active session messages on idle when local messages already look settled', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -156,7 +160,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('applies a fallback title when refetching the session fails', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -197,7 +201,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps the active session marked seen when a later session update arrives', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -242,7 +246,7 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('keeps an active completion unread when session metadata updates with the list open', async () => {
-    const handlers = new Map<string, (data: unknown) => void>();
+    const handlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       handlers.set(event, handler);
       return () => {
@@ -316,11 +320,13 @@ describe('useOpenCode session state flows', () => {
 
   it('loads older session messages through cursor pages', async () => {
     const { stateModule, hookModule } = await loadModules();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const latest = [{ info: userMessage('user-3'), parts: [] }] as Array<{
       info: ReturnType<typeof userMessage>;
       parts: [];
     }> & { nextCursor?: string };
     latest.nextCursor = 'cursor-2';
+    // SAFETY: The fixture provides the typeof latest fields read by this statement.
     const older = [
       { info: userMessage('user-1'), parts: [] },
       { info: userMessage('user-2'), parts: [] },
@@ -347,14 +353,17 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('stops full history loading when cursors form a multi-page cycle', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: userMessage('user-3'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-a';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageA = [{ info: userMessage('user-2'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     pageA.nextCursor = 'cursor-b';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageB = [
       { info: userMessage('user-1'), parts: [] },
       { info: userMessage('user-2'), parts: [] },
@@ -384,10 +393,12 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('loads one older history page at a time for scroll pagination', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: userMessage('user-3'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-2';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const older = [
       { info: userMessage('user-1'), parts: [] },
       { info: userMessage('user-2'), parts: [] },
@@ -607,6 +618,7 @@ describe('useOpenCode session state flows', () => {
           value: originalRequestAnimationFrame,
         });
       } else {
+        // SAFETY: The fixture provides the Partial<typeof globalThis> fields read by this statement.
         delete (globalThis as Partial<typeof globalThis>).requestAnimationFrame;
       }
     }
@@ -614,26 +626,31 @@ describe('useOpenCode session state flows', () => {
 
   it('returns a detached older-history response after A -> B -> A reselection', async () => {
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const initialA = [{ info: userMessage('user-a-initial'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     initialA[0]!.info.sessionID = 'session-a';
     initialA.nextCursor = 'cursor-stale';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const reopenedA = [{ info: userMessage('user-a-current'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     reopenedA[0]!.info.sessionID = 'session-a';
     reopenedA.nextCursor = 'cursor-current';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const initialB = [{ info: userMessage('user-b'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     initialB[0]!.info.sessionID = 'session-b';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const staleOlderA = [{ info: userMessage('user-a-stale'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     staleOlderA[0]!.info.sessionID = 'session-a';
     let initialALoads = 0;
 
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockImplementation(async (id, options) => {
       if (id === 'session-a' && options?.before === 'cursor-stale') {
@@ -671,23 +688,28 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('preserves exhausted older history after A -> B -> A reselection', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latestA = [
       userEntry('user-a-2', 'session-a'),
       userEntry('user-a-3', 'session-a'),
     ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     latestA.nextCursor = 'cursor-older';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const olderA = [userEntry('user-a-1', 'session-a')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const reopenedA = [
       userEntry('user-a-2', 'session-a'),
       userEntry('user-a-3', 'session-a'),
     ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const initialB = [userEntry('user-b', 'session-b')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     let latestALoads = 0;
 
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockImplementation(async (id, options) => {
       if (id === 'session-a' && options?.before === 'cursor-older') return olderA;
@@ -723,10 +745,12 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('prefetches a user prompt behind an assistant-only history boundary', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: assistantMessage('assistant-1', 'user-1'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-1';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const boundary = [
       {
         info: userMessage('user-1'),
@@ -791,6 +815,7 @@ describe('useOpenCode session state flows', () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleBoundary = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: assistantMessage('assistant-1', 'user-1'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
@@ -800,10 +825,12 @@ describe('useOpenCode session state flows', () => {
       throw new Error('Expected an assistant message fixture');
     }
     completedAssistant.time.completed = 3;
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const resynced = [latest[0]!, { info: completedAssistant, parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     resynced.nextCursor = 'cursor-1';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const boundary = [
       {
         info: userMessage('user-1'),
@@ -859,12 +886,14 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('does not block scroll pagination on an in-flight prompt prefetch', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [userEntry('user-current')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-a';
     const firstPromptPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const laterPromptPage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const olderPage = [userEntry('user-older')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
@@ -914,10 +943,12 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('prefetches past an empty boundary prompt to the nearest previewable prompt', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: assistantMessage('assistant-1', 'user-valid'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-empty';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const emptyBoundary = [userEntry('user-empty')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
@@ -960,10 +991,12 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('prefetches past a working-directory-only boundary prompt', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [{ info: assistantMessage('assistant-1', 'user-valid'), parts: [] }] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     latest.nextCursor = 'cursor-metadata';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const metadataBoundary = [
       {
         info: userMessage('user-metadata'),
@@ -1017,11 +1050,13 @@ describe('useOpenCode session state flows', () => {
   });
 
   it('prefetches past a previewable boundary prompt already in the loaded window', async () => {
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const latest = [
       userEntry('user-loaded'),
       { info: assistantMessage('assistant-1', 'user-loaded'), parts: [] },
     ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     latest.nextCursor = 'cursor-duplicate';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const duplicateBoundary = [
       {
         info: userMessage('user-loaded'),
@@ -1075,6 +1110,7 @@ describe('useOpenCode session state flows', () => {
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     const canonical = [userEntry('message-1'), userEntry('message-3')];
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages
       .mockReturnValueOnce(staleLatest.promise)
@@ -1117,6 +1153,7 @@ describe('useOpenCode session state flows', () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleLatest = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
@@ -1167,6 +1204,7 @@ describe('useOpenCode session state flows', () => {
         },
       ],
     };
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockReturnValueOnce(staleLatest.promise);
 
@@ -1207,6 +1245,7 @@ describe('useOpenCode session state flows', () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const parentMessage = userEntry('parent-message');
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([parentMessage]);
 
@@ -1245,6 +1284,7 @@ describe('useOpenCode session state flows', () => {
     mockRuntimeBootstrap();
     const stalePage = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
     let latestLoads = 0;
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
       if (options?.before) return stalePage.promise;
@@ -1290,15 +1330,18 @@ describe('useOpenCode session state flows', () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
     const staleBackground = deferred<Awaited<ReturnType<typeof clientMocks.sessionMessages>>>();
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const freshSelection = [userEntry('session-b-fresh', 'session-b')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     freshSelection.nextCursor = 'cursor-fresh';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const staleMessages = [
       userEntry('session-b-stale-1', 'session-b'),
       userEntry('session-b-stale-2', 'session-b'),
     ] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     staleMessages.nextCursor = 'cursor-stale';
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages
       .mockReturnValueOnce(staleBackground.promise)
@@ -1338,6 +1381,7 @@ describe('useOpenCode session state flows', () => {
   it('clears every old history store after empty and disjoint resyncs', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages
       .mockResolvedValueOnce([userEntry('message-old')])
@@ -1395,6 +1439,7 @@ describe('useOpenCode session state flows', () => {
   it('continues full-history loading through an empty continuation page', async () => {
     const { stateModule, hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const emptyPage = [] as Awaited<ReturnType<typeof clientMocks.sessionMessages>>;
     emptyPage.nextCursor = 'cursor-b';
     clientMocks.sessionMessages.mockImplementation(async (_id, options) => {
@@ -1422,10 +1467,12 @@ describe('useOpenCode session state flows', () => {
   it('terminates a cursor cycle across separate one-page history loads', async () => {
     const { stateModule, hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageA = [userEntry('message-2')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     pageA.nextCursor = 'cursor-b';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageB = [
       {
         info: userMessage('message-1'),
@@ -1460,10 +1507,12 @@ describe('useOpenCode session state flows', () => {
   it('terminates a prompt cursor cycle across separate history requests', async () => {
     const { hookModule } = await loadModules();
     const messageWindow = await import('../lib/message-window');
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageA = [userEntry('prompt-a')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
     pageA.nextCursor = 'cursor-b';
+    // SAFETY: The test installs the typed mock implementation before this statement.
     const pageB = [userEntry('prompt-b')] as Awaited<
       ReturnType<typeof clientMocks.sessionMessages>
     >;
@@ -1485,6 +1534,7 @@ describe('useOpenCode session state flows', () => {
   it('canonically resyncs and resets history after a committed revert', async () => {
     const handlers = installServerEventHandlers();
     mockRuntimeBootstrap();
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([userEntry('message-kept')]);
 

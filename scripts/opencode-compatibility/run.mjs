@@ -56,6 +56,7 @@ async function readDeclaredCompatibilityRange() {
   const packageJson = JSON.parse(packageSource);
   const declaredSdkVersion = packageJson.dependencies?.['@opencode-ai/sdk'];
   const ceiling =
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON boundary validation must reject a non-string dependency declaration.
     typeof declaredSdkVersion === 'string'
       ? declaredSdkVersion.match(/\d+\.\d+\.\d+/)?.[0]
       : undefined;

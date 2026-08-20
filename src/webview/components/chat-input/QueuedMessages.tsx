@@ -102,6 +102,7 @@ export function QueuedMessages(props: {
               }
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData(QUEUED_MESSAGE_DRAG_TYPE, item.id);
+              // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
               const row = (event.currentTarget as HTMLElement).closest<HTMLElement>(
                 '.chat-queue-item'
               );
@@ -143,6 +144,7 @@ export function QueuedMessages(props: {
                 onDragEnter={dragOverItem}
                 onDragOver={dragOverItem}
                 onDragLeave={(event) => {
+                  // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
                   if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
                   if (dragOverItemId() === item.id) setDragOverItemId(null);
                 }}

@@ -15,26 +15,28 @@ import metaIcon from '../assets/provider-icons/meta.svg';
 import githubCopilotIcon from '../assets/provider-icons/copilot.svg';
 import zaiIcon from '../assets/provider-icons/zai.svg';
 
-const PROVIDER_ICON_MAP: Record<string, string> = {
-  openai: openaiIcon,
-  anthropic: anthropicIcon,
-  openrouter: openrouterIcon,
-  gemini: geminiIcon,
-  google: geminiIcon,
-  deepseek: deepseekIcon,
-  xai: xaiIcon,
-  'github-copilot': githubCopilotIcon,
-  zai: zaiIcon,
-  'zai-coding-plan': zaiIcon,
-  opencode: opencodeIcon,
-  'opencode-go': opencodeIcon,
-  qwen: qwenIcon,
-  kimi: kimiIcon,
-  'kimi-for-coding': kimiIcon,
-  meta: metaIcon,
-};
+const PROVIDER_ICON_MAP = new Map<string, string>(
+  Object.entries({
+    openai: openaiIcon,
+    anthropic: anthropicIcon,
+    openrouter: openrouterIcon,
+    gemini: geminiIcon,
+    google: geminiIcon,
+    deepseek: deepseekIcon,
+    xai: xaiIcon,
+    'github-copilot': githubCopilotIcon,
+    zai: zaiIcon,
+    'zai-coding-plan': zaiIcon,
+    opencode: opencodeIcon,
+    'opencode-go': opencodeIcon,
+    qwen: qwenIcon,
+    kimi: kimiIcon,
+    'kimi-for-coding': kimiIcon,
+    meta: metaIcon,
+  })
+);
 
 export function getProviderIcon(providerID: string | null | undefined) {
   if (!providerID) return null;
-  return PROVIDER_ICON_MAP[providerID] || null;
+  return PROVIDER_ICON_MAP.get(providerID) || null;
 }

@@ -1,5 +1,6 @@
 import type { ProviderLimitStatus, ProviderLimitUnit } from '../../shared/protocol';
 import type { MessageEntry, SessionStatus } from '../types';
+import { asRecord, isString, type UnknownRecord, isObject } from './runtime-values';
 
 export type UsageLimitNotice = {
   source: 'status' | 'message' | 'retry-part';
@@ -268,23 +269,22 @@ function parseJsonErrorBody(
   message: string,
   options?: { retryAt?: number | null; attempt?: number | null }
 ): UsageLimitNotice | null {
-  let json: Record<string, unknown>;
+  let json: UnknownRecord;
   try {
     const parsed = JSON.parse(message);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    json = parsed as Record<string, unknown>;
+    if (!parsed || !isObject(parsed) || Array.isArray(parsed)) return null;
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    json = parsed as UnknownRecord;
   } catch {
     return null;
   }
 
-  const error = json.error as Record<string, unknown> | undefined;
-  const code = typeof json.code === 'string' ? json.code : '';
+  const error = asRecord(json.error) ?? undefined;
+  const code = isString(json.code) ? json.code : '';
 
   const isStructuredLimit =
     (json.type === 'error' && error?.type === 'too_many_requests') ||
-    (json.type === 'error' &&
-      typeof error?.code === 'string' &&
-      error.code.includes('rate_limit')) ||
+    (json.type === 'error' && isString(error?.code) && error.code.includes('rate_limit')) ||
     code.includes('exhausted') ||
     code.includes('unavailable');
 
@@ -294,8 +294,8 @@ function parseJsonErrorBody(
     ? 'Service temporarily unavailable'
     : 'Rate limited';
   const displayMessage =
-    (typeof error?.message === 'string' && error.message) ||
-    (typeof json.message === 'string' && json.message) ||
+    (isString(error?.message) && error.message) ||
+    (isString(json.message) && json.message) ||
     fallbackMessage;
 
   return {

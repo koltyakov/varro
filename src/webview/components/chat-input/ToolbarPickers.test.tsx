@@ -484,6 +484,7 @@ describe('ToolbarPickers', () => {
       container!
     );
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const wrapper = container?.querySelector('.toolbar-picker')
       ?.parentElement as HTMLDivElement | null;
 

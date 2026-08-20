@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Message, Part } from '../types';
+import type { MessageEntry, Part } from '../types';
 import {
   advanceSessionHistoryCursor,
   advanceSessionHistoryPromptCursor,
@@ -29,7 +29,7 @@ import {
   takeCachedSessionHistoryPage,
 } from './message-window';
 
-function entry(id: string, sessionID = 'session-1'): { info: Message; parts: Part[] } {
+function entry(id: string, sessionID = 'session-1'): MessageEntry {
   return {
     info: {
       id,
@@ -255,6 +255,7 @@ describe('mergeOlderHistory', () => {
   it('prepends older entries while preserving current duplicates', () => {
     const current = [entry('m2'), entry('m3')];
     const olderDuplicate = entry('m2');
+    // SAFETY: The fixture provides the Part fields read by this statement.
     olderDuplicate.parts = [{ id: 'old-part' } as Part];
 
     const merged = mergeOlderHistory(current, [entry('m1'), olderDuplicate]);

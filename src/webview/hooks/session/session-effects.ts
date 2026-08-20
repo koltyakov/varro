@@ -26,7 +26,7 @@ export function createSessionMessageSyncCoordinator(
   type ForceWaiter = {
     generation: number;
     resolve(): void;
-    reject(reason: unknown): void;
+    reject(cause: unknown): void;
   };
   type SessionSyncState = {
     active: Promise<boolean | void> | null;
@@ -82,8 +82,8 @@ export function createSessionMessageSyncCoordinator(
         for (const waiter of takeForceWaiters(state, forceGeneration)) waiter.resolve();
         finish();
       },
-      (reason: unknown) => {
-        for (const waiter of takeForceWaiters(state, forceGeneration)) waiter.reject(reason);
+      (cause: unknown) => {
+        for (const waiter of takeForceWaiters(state, forceGeneration)) waiter.reject(cause);
         finish();
       }
     );
@@ -131,7 +131,7 @@ export function registerLoadingStatusPollEffect(deps: {
   isDocumentVisible(): boolean;
   getEventStreamState(): EventStreamState;
   recheckSessionStatus(sessionId: string): Promise<void>;
-  logError?(context: string, err: unknown): void;
+  logError?(context: string, cause: unknown): void;
 }) {
   const inFlight = new Map<string, Promise<void>>();
   const recheck = (sessionId: string): Promise<void> => {
@@ -192,7 +192,7 @@ export function registerEventStreamRecoveryEffect(deps: {
   isLoading(): boolean;
   getActiveSessionId(): string | null;
   recheckSessionStatus(sessionId: string): Promise<void>;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 }) {
   createEffect(
     on(deps.getEventStreamState, (current, previous) => {
@@ -217,7 +217,7 @@ export function registerVisibleRunningSessionSyncEffect(deps: {
   loadQuestions(): Promise<void>;
   loadPendingPermissions?(): Promise<void>;
   syncSessionMessages(sessionId: string): Promise<void>;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 }) {
   const syncTarget = createMemo(() => {
     if (deps.getServerState() !== 'running' || !deps.isDocumentVisible()) return null;
@@ -347,7 +347,7 @@ export function registerProviderLimitRefreshEffect(deps: {
     limit: ProviderLimitStatus | null
   ): void;
   getPollIntervalMs(): number;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 }) {
   createEffect(
     on(

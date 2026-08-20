@@ -253,12 +253,15 @@ function rankWorkspaceFiles(
     insertRankedWorkspaceFile(ranked, { file, score }, limit);
   }
 
-  return ranked.map(({ file }) => ({
-    path: file.path,
-    relativePath: file.relativePath,
-    type: file.type,
-    ...(file.lineRanges ? { lineRanges: file.lineRanges } : {}),
-  }));
+  return ranked.map(({ file }) => {
+    const result: DroppedFile = {
+      path: file.path,
+      relativePath: file.relativePath,
+      type: file.type,
+    };
+    if (file.lineRanges) result.lineRanges = file.lineRanges;
+    return result;
+  });
 }
 
 function insertRankedWorkspaceFile(

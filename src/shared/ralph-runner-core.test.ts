@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockedFunction } from 'vitest';
 import {
   RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT,
   type RalphConfig,
@@ -92,14 +93,14 @@ type Harness = {
   store: ReturnType<typeof createMemoryStore>;
   ports: RalphRunnerPorts;
   runner: ReturnType<typeof createRalphRunner>;
-  createSession: ReturnType<typeof vi.fn>;
-  sendPrompt: ReturnType<typeof vi.fn>;
-  abortSession: ReturnType<typeof vi.fn>;
-  listSessions: ReturnType<typeof vi.fn>;
-  listMessages: ReturnType<typeof vi.fn>;
-  getSessionStatus: ReturnType<typeof vi.fn>;
-  readWorkspaceFile: ReturnType<typeof vi.fn>;
-  logError: ReturnType<typeof vi.fn>;
+  createSession: MockedFunction<RalphRunnerPorts['createSession']>;
+  sendPrompt: MockedFunction<RalphRunnerPorts['sendPrompt']>;
+  abortSession: MockedFunction<RalphRunnerPorts['abortSession']>;
+  listSessions: MockedFunction<RalphRunnerPorts['listSessions']>;
+  listMessages: MockedFunction<RalphRunnerPorts['listMessages']>;
+  getSessionStatus: MockedFunction<RalphRunnerPorts['getSessionStatus']>;
+  readWorkspaceFile: MockedFunction<RalphRunnerPorts['readWorkspaceFile']>;
+  logError: MockedFunction<RalphRunnerPorts['logError']>;
   emitIdle: (sessionID: string) => void;
   emitStatus: (sessionID: string, status: RalphSessionStatus) => void;
   idleListenerCount: () => number;
@@ -108,14 +109,18 @@ type Harness = {
 function createHarness(overrides: Partial<RalphRunnerPorts> = {}): Harness {
   const store = createMemoryStore();
   const idleListeners = new Set<(sessionID: string, status: RalphSessionStatus) => void>();
-  const createSession = vi.fn();
-  const sendPrompt = vi.fn(async () => {});
-  const abortSession = vi.fn(async () => {});
-  const listSessions = vi.fn(async () => []);
-  const listMessages = vi.fn(async () => [] as RalphMessageEntry[]);
-  const getSessionStatus = vi.fn(async () => ({ type: 'active' }) as const);
-  const readWorkspaceFile = vi.fn(async () => '# Plan\n- [ ] next chunk');
-  const logError = vi.fn();
+  const createSession = vi.fn<RalphRunnerPorts['createSession']>();
+  const sendPrompt = vi.fn<RalphRunnerPorts['sendPrompt']>(async () => {});
+  const abortSession = vi.fn<RalphRunnerPorts['abortSession']>(async () => {});
+  const listSessions = vi.fn<RalphRunnerPorts['listSessions']>(async () => []);
+  const listMessages = vi.fn<RalphRunnerPorts['listMessages']>(async () => []);
+  const getSessionStatus = vi.fn<RalphRunnerPorts['getSessionStatus']>(async () => ({
+    type: 'active',
+  }));
+  const readWorkspaceFile = vi.fn<RalphRunnerPorts['readWorkspaceFile']>(
+    async () => '# Plan\n- [ ] next chunk'
+  );
+  const logError = vi.fn<RalphRunnerPorts['logError']>();
 
   const ports: RalphRunnerPorts = {
     store,
@@ -195,12 +200,10 @@ function completedVerificationReport(text: string): RalphMessageEntry[] {
 
 function createDeferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+  const promise = new Promise<T>((promiseResolve) => {
     resolve = promiseResolve;
-    reject = promiseReject;
   });
-  return { promise, resolve, reject };
+  return { promise, resolve };
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -851,7 +854,7 @@ describe('ralph runner cancellation', () => {
 
     await harness.runner.start(config);
 
-    const messageIDs = harness.sendPrompt.mock.calls.map(([, body]) => body.messageID as string);
+    const messageIDs = harness.sendPrompt.mock.calls.map(([, body]) => body.messageID);
     expect(messageIDs).toHaveLength(2);
     expect(messageIDs.every((id) => /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(id))).toBe(true);
     expect(messageIDs[1]! > messageIDs[0]!).toBe(true);
@@ -1389,15 +1392,19 @@ describe('ralph runner iteration repair', () => {
 
     // Messages snapshot per session - keyed by sessionId so the order of
     // calls (work / verify / repair / verify) doesn't matter.
-    const messagesBySession: Record<string, RalphMessageEntry[]> = {
-      'child-1': assistantReport(
-        'Implemented first chunk.\nlint: PASS\ntypecheck: FAIL\ntest: PASS'
-      ),
-      'repair-1': assistantReport(
-        'Fixed the typecheck issue.\nlint: PASS\ntypecheck: PASS\ntest: PASS'
-      ),
-    };
-    harness.listMessages.mockImplementation(async (sid: string) => messagesBySession[sid] ?? []);
+    const messagesBySession = new Map<string, RalphMessageEntry[]>([
+      [
+        'child-1',
+        assistantReport('Implemented first chunk.\nlint: PASS\ntypecheck: FAIL\ntest: PASS'),
+      ],
+      [
+        'repair-1',
+        assistantReport('Fixed the typecheck issue.\nlint: PASS\ntypecheck: PASS\ntest: PASS'),
+      ],
+    ]);
+    harness.listMessages.mockImplementation(
+      async (sid: string) => messagesBySession.get(sid) ?? []
+    );
     settlePromptsViaIdle(harness);
 
     await harness.runner.start(config);
@@ -1410,8 +1417,7 @@ describe('ralph runner iteration repair', () => {
     expect(harness.sendPrompt).toHaveBeenCalledTimes(4);
 
     const sendsBySession = new Map<string, string[]>();
-    for (const call of harness.sendPrompt.mock.calls) {
-      const [sid, body] = call as [string, { parts: Array<{ type: string; text: string }> }];
+    for (const [sid, body] of harness.sendPrompt.mock.calls) {
       const text = body.parts[0]?.text ?? '';
       const list = sendsBySession.get(sid) ?? [];
       list.push(text);

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These refresh tests inspect controlled provider internals and model opaque server and filesystem results. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OpenCodeModelRouting } from '../shared/opencode-types';
 import {

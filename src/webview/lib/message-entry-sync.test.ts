@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, ToolPart } from '../types';
 import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './message-entry-sync';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 function assistantMessage(id: string, createdAt = 0): AssistantMessage {
   return {
@@ -23,7 +24,7 @@ function assistantMessage(id: string, createdAt = 0): AssistantMessage {
   };
 }
 
-function toolPart(status: 'running' | 'completed', metadata?: Record<string, unknown>): ToolPart {
+function toolPart(status: 'running' | 'completed', metadata?: UnknownRecord): ToolPart {
   return {
     id: 'tool-1',
     sessionID: 'session-1',

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These export tests verify VS Code save-dialog integration with partial message and filesystem fixtures. */
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

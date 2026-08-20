@@ -41,6 +41,7 @@ function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantM
 }
 
 function toolPart(status: string, id = 'tool-1'): Part {
+  // SAFETY: The fixture provides the Part fields read by this statement.
   return {
     id,
     sessionID: 'session-1',
@@ -53,6 +54,7 @@ function toolPart(status: string, id = 'tool-1'): Part {
 }
 
 function textPart(id: string): Part {
+  // SAFETY: The fixture provides the Part fields read by this statement.
   return {
     id,
     sessionID: 'session-1',

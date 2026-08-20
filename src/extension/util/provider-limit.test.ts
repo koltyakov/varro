@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests deliberately pass malformed provider-limit payloads through the runtime normalizer. */
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import {

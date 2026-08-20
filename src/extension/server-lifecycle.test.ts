@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- The emitter fake forwards arbitrary error payloads to verify runtime normalization. */
 import { describe, expect, it, vi } from 'vitest';
 import { ServerLifecycleStateMachine } from './server-lifecycle';
 

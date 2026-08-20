@@ -34,7 +34,7 @@ type SessionStatusDependencies = {
   isActiveSession(sessionId: string): boolean;
   getMessages?(): MessageEntry[];
   onSessionSettled?(sessionId: string): void;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 };
 
 export class SessionStatusOperations {
@@ -343,7 +343,7 @@ export async function recheckSessionStatusWithDependencies(
     isActiveSession(sessionId: string): boolean;
     getCurrentSessionStatus?(sessionId: string): SessionStatus | null | undefined;
     getMessages?(): MessageEntry[];
-    logError(context: string, err: unknown): void;
+    logError(context: string, cause: unknown): void;
   },
   sessionId: string
 ) {
@@ -434,7 +434,7 @@ async function settleVoid(promise: Promise<void>): Promise<PromiseSettledResult<
 }
 
 function logRejectedSyncs(
-  deps: { logError(context: string, err: unknown): void },
+  deps: { logError(context: string, cause: unknown): void },
   results: PromiseSettledResult<void>[]
 ) {
   for (const result of results) {

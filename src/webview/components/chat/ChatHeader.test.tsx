@@ -9,6 +9,7 @@ import { SessionActionFeedback } from './SessionActionFeedback';
 const deleteSessionMock = vi.hoisted(() => vi.fn());
 const renameSessionMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ChatHeader's useOpenCode module integration. */
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: deleteSessionMock,
   renameSession: renameSessionMock,

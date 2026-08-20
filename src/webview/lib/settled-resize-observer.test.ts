@@ -43,6 +43,7 @@ describe('observeSettledResize', () => {
     const entries = [resizeObserverEntry(first), resizeObserverEntry(second)];
 
     for (let index = 0; index < 20; index += 1) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       notifyResize?.(entries, {} as ResizeObserver);
     }
 
@@ -80,8 +81,10 @@ describe('observeSettledResize', () => {
     const disposeFirst = observeSettledResize(first, firstCallback);
     const disposeSecond = observeSettledResize(second, secondCallback);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     notifyResize?.([resizeObserverEntry(first), resizeObserverEntry(second)], {} as ResizeObserver);
     await vi.advanceTimersByTimeAsync(50);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     notifyResize?.([resizeObserverEntry(first)], {} as ResizeObserver);
     await vi.advanceTimersByTimeAsync(50);
 
@@ -117,6 +120,7 @@ describe('observeSettledResize', () => {
     const disposeFirst = observeSettledResize(first, firstCallback);
     const disposeSecond = observeSettledResize(second, secondCallback);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     notifyResize?.([resizeObserverEntry(first), resizeObserverEntry(second)], {} as ResizeObserver);
     disposeFirst();
     await vi.advanceTimersByTimeAsync(100);
@@ -125,6 +129,7 @@ describe('observeSettledResize', () => {
     expect(secondCallback).toHaveBeenCalledOnce();
     expect(disconnect).not.toHaveBeenCalled();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     notifyResize?.([resizeObserverEntry(second)], {} as ResizeObserver);
     disposeSecond();
     await vi.advanceTimersByTimeAsync(100);

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening -- Scoped header objects intentionally satisfy the Fetch API header dictionary. */
 export function scopeOpenCodeRequest(baseUrl: string, path: string, directory?: string) {
   const url = new URL(path, baseUrl);
   if (!path.startsWith('/') || path.startsWith('//') || url.origin !== baseUrl) {

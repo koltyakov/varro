@@ -16,6 +16,7 @@ import {
   observePopupViewport,
 } from '../../lib/popup-position';
 import { PermissionModeIcon } from './PermissionModeIcon';
+import { isFunction } from '../../lib/runtime-values';
 
 function PickerChevron() {
   return (
@@ -180,7 +181,7 @@ export function PermissionModePicker(props: {
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
     const forwarded = props.popoverRef;
-    if (typeof forwarded === 'function') forwarded(el);
+    if (isFunction(forwarded)) forwarded(el);
   };
 
   return (
@@ -313,7 +314,7 @@ export function AgentPicker(props: {
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
     const forwarded = props.popoverRef;
-    if (typeof forwarded === 'function') forwarded(el);
+    if (isFunction(forwarded)) forwarded(el);
   };
 
   return (
@@ -392,7 +393,7 @@ export function VariantPicker(props: {
   const setPopoverRef = (el: HTMLDivElement) => {
     popupEl = el;
     const forwarded = props.popoverRef;
-    if (typeof forwarded === 'function') forwarded(el);
+    if (isFunction(forwarded)) forwarded(el);
   };
 
   const popoverStyle = () =>

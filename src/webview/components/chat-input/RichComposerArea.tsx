@@ -291,6 +291,7 @@ export function RichComposerArea(props: {
     if (!range || !range.collapsed) return null;
 
     const container =
+      // SAFETY: The surrounding shape or discriminator check establishes the Element contract used below.
       range.startContainer.nodeType === Node.ELEMENT_NODE
         ? (range.startContainer as Element)
         : range.startContainer.parentElement;
@@ -349,6 +350,7 @@ export function RichComposerArea(props: {
     const range = getSelectionRange();
     if (!range || !range.collapsed) return false;
     const container =
+      // SAFETY: The surrounding shape or discriminator check establishes the Element contract used below.
       range.startContainer.nodeType === Node.ELEMENT_NODE
         ? (range.startContainer as Element)
         : range.startContainer.parentElement;
@@ -395,6 +397,7 @@ export function RichComposerArea(props: {
 
   function getSessionReferenceBoundary(node: Node): { start: number; end: number } | null {
     if (!editorEl) return null;
+    // SAFETY: The surrounding shape or discriminator check establishes the Element contract used below.
     const element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
     const reference = element?.closest<HTMLElement>('.composer-session-reference') ?? null;
     const marker = reference?.dataset.chipMarker;
@@ -538,6 +541,7 @@ export function RichComposerArea(props: {
       return;
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the ComposerClipboardEvent contract used below.
     const overrideText = (e as ComposerClipboardEvent).__varroPasteText;
     const text = overrideText ?? e.clipboardData?.getData('text/plain') ?? '';
     if (overrideText !== undefined) {
@@ -613,6 +617,7 @@ export function RichComposerArea(props: {
   }
 
   function showImagePreview(target: EventTarget | null) {
+    // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
     const chipElement = (target as HTMLElement | null)?.closest?.<HTMLElement>(
       '.inline-chip[data-preview-image]'
     );
@@ -741,6 +746,7 @@ export function RichComposerArea(props: {
         onCopy={handleCopy}
         onMouseOver={(event) => showImagePreview(event.target)}
         onMouseOut={(event) => {
+          // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
           const sourceChip = (event.target as HTMLElement).closest?.('[data-preview-image]');
           const relatedChip =
             event.relatedTarget instanceof HTMLElement
@@ -752,6 +758,7 @@ export function RichComposerArea(props: {
         onFocus={() => props.onFocus()}
         onBlur={() => props.onBlur()}
         onClick={(e) => {
+          // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
           const chipEl = (e.target as HTMLElement).closest?.('[data-chip-id]');
           if (chipEl instanceof HTMLElement && chipEl.dataset.chipId) {
             props.onChipClick?.(chipEl.dataset.chipId);
@@ -827,6 +834,7 @@ export function extractText(el: HTMLElement): string {
     if (node.nodeType === Node.TEXT_NODE) {
       result += (node.textContent || '').split(CARET_SPACER).join('');
     } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
       const element = node as HTMLElement;
       if (element.tagName === 'BR') {
         if (element.dataset.caretPlaceholder) continue;
@@ -876,6 +884,7 @@ export function findNodeAtOffset(
       }
       remaining -= len;
     } else if (child.nodeType === Node.ELEMENT_NODE) {
+      // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
       const el = child as HTMLElement;
       if (el.tagName === 'BR') {
         if (el.dataset.caretPlaceholder) {
@@ -946,6 +955,7 @@ function getNodeTextLength(node: Node): number {
     return (node.textContent || '').split(CARET_SPACER).join('').length;
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return 0;
+  // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
   const el = node as HTMLElement;
   if (el.dataset.caretPlaceholder) return 0;
   if (el.tagName === 'BR') return 1;

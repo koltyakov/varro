@@ -77,13 +77,14 @@ beforeEach(() => {
   document.body.appendChild(container);
   originalResizeObserver = globalThis.ResizeObserver;
   disconnectObserverMock = vi.fn();
+  // SAFETY: The fixture provides the unknown fields read by this statement.
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
     disconnect() {
       disconnectObserverMock();
     }
-  } as unknown as typeof ResizeObserver;
+  } as typeof ResizeObserver;
 });
 
 afterEach(() => {
@@ -94,6 +95,7 @@ afterEach(() => {
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
   } else {
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
   }
   vi.restoreAllMocks();

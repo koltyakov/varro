@@ -5,6 +5,7 @@ const LEGACY_STORAGE_KEY = 'varro.ralph.runs';
 
 const { postMessage } = vi.hoisted(() => ({ postMessage: vi.fn() }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise Ralph store persistence through the bridge module. */
 vi.mock('../bridge', () => ({ postMessage }));
 
 function createConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {

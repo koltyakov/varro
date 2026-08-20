@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise the VS Code import boundary with partial editor, terminal, and workspace fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromises from 'node:fs/promises';
 

@@ -5,6 +5,7 @@ const { postMessage } = vi.hoisted(() => ({
   postMessage: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise send-factory integration with the bridge module. */
 vi.mock('../lib/bridge', async (importOriginal) => {
   const actual = await importOriginal<typeof BridgeModule>();
   return {
@@ -23,7 +24,7 @@ type SendAsync = ConstructorParameters<typeof SessionSendOperations>[0]['sendAsy
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let reject!: (reason?: Error) => void;
   const promise = new Promise<T>((next, fail) => {
     resolve = next;
     reject = fail;

@@ -7,6 +7,7 @@ import { AssistantDialogSummaryForMessage, getForkBoundaryMessageId } from './Me
 
 const forkSessionMock = vi.hoisted(() => vi.fn(async () => 'forked-session'));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise MessageRows integration with useOpenCode actions. */
 vi.mock('../../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../../hooks/useOpenCode');
   return { ...actual, forkSession: forkSessionMock };

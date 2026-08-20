@@ -1,6 +1,6 @@
 import { createRoot, createSignal } from 'solid-js';
 import { describe, expect, it, vi } from 'vitest';
-import type { Message, Part, SessionStatus } from '../types';
+import type { AssistantMessage, MessageEntry, TextPart, ToolPart, UserMessage } from '../types';
 import {
   forceReconcileIdleSessionWithDependencies,
   hasLocalEvidenceTurnDone,
@@ -10,41 +10,66 @@ import {
   selectUnsettledLatestAssistant,
   STUCK_SESSION_GRACE_MS,
   STUCK_SESSION_WATCHDOG_INTERVAL_MS,
+  type ForceReconcileIdleSessionDeps,
+  type StuckSessionReconcileDeps,
 } from './session/session-watchdog';
 
-type MessageEntry = { info: Message; parts: Part[] };
-
-function assistant(id: string, sessionID: string, overrides: Partial<Message> = {}): MessageEntry {
+function assistant(
+  id: string,
+  sessionID: string,
+  overrides: Partial<AssistantMessage> = {}
+): MessageEntry<AssistantMessage> {
   return {
     info: {
       id,
       sessionID,
       role: 'assistant',
       time: { created: 1 },
+      parentID: 'u1',
+      modelID: 'test-model',
+      providerID: 'test-provider',
+      mode: 'default',
+      path: { cwd: '/workspace', root: '/workspace' },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
       ...overrides,
-    } as Message,
+    },
     parts: [],
   };
 }
 
-function user(id: string, sessionID: string): MessageEntry {
+function user(id: string, sessionID: string): MessageEntry<UserMessage> {
   return {
-    info: { id, sessionID, role: 'user', time: { created: 1 } } as Message,
+    info: {
+      id,
+      sessionID,
+      role: 'user',
+      time: { created: 1 },
+      agent: 'build',
+      model: { providerID: 'test-provider', modelID: 'test-model' },
+    },
     parts: [],
   };
 }
 
-function baseReconcileDeps(overrides: Record<string, unknown> = {}) {
+function baseReconcileDeps(
+  overrides: Partial<StuckSessionReconcileDeps> = {}
+): StuckSessionReconcileDeps {
   return {
-    loadSessionStatuses: vi.fn(async () => ({}) as Record<string, SessionStatus>),
-    getLocalSessionStatuses: vi.fn(() => ({}) as Record<string, SessionStatus>),
-    getActiveSessionId: vi.fn(() => null as string | null),
+    loadSessionStatuses: vi.fn(async () => ({})),
+    getLocalSessionStatuses: vi.fn(() => ({})),
+    getActiveSessionId: vi.fn(() => null),
     isLoading: vi.fn(() => false),
     isAwaitingInput: vi.fn(() => false),
     hasPendingAbort: vi.fn(() => false),
     forceReconcileIdleSession: vi.fn(async () => {}),
     logError: vi.fn(),
-    getMessages: vi.fn(() => [] as MessageEntry[]),
+    getMessages: vi.fn(() => []),
     getStreamingText: vi.fn(() => ({ partId: null, text: '' })),
     ...overrides,
   };
@@ -53,7 +78,7 @@ function baseReconcileDeps(overrides: Record<string, unknown> = {}) {
 describe('reconcileStuckSessionsWithDependencies', () => {
   it('does not poll the server when nothing is locally busy', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }),
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
@@ -63,8 +88,8 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('waits for the grace window before force-reconciling a stuck session', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
 
@@ -85,8 +110,8 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('clears the timer when the server reports the session still busy', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
-      loadSessionStatuses: async () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
+      loadSessionStatuses: async () => ({ s1: { type: 'busy' } }),
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
@@ -96,9 +121,8 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('never settles sessions awaiting input or pending abort', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () =>
-        ({ s1: { type: 'busy' }, s2: { type: 'busy' } }) as Record<string, SessionStatus>,
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' }, s2: { type: 'busy' } }),
+      loadSessionStatuses: async () => ({}),
       isAwaitingInput: (id: string) => id === 's1',
       hasPendingAbort: (id: string) => id === 's2',
     });
@@ -113,9 +137,10 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('treats a retry status as busy and a server error/absence as idle', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () =>
-        ({ s1: { type: 'retry', attempt: 1 } }) as unknown as Record<string, SessionStatus>,
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({
+        s1: { type: 'retry', attempt: 1, message: 'retrying', next: 2 },
+      }),
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>([['s1', 1]]);
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000 + STUCK_SESSION_GRACE_MS);
@@ -124,7 +149,7 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('keeps the grace timer when the status poll throws', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       loadSessionStatuses: async () => {
         throw new Error('network down');
       },
@@ -140,10 +165,10 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     // Completion event was missed: the session status is idle, but the global
     // loading flag (which drives the "Thinking..." spinner) is still on.
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }),
       getActiveSessionId: () => 's1',
       isLoading: () => true,
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
 
@@ -156,9 +181,9 @@ describe('reconcileStuckSessionsWithDependencies', () => {
   });
 
   it('does not treat the active session as stuck when the loading flag clears', async () => {
-    const loadSessionStatuses = vi.fn(async () => ({}) as Record<string, SessionStatus>);
+    const loadSessionStatuses = vi.fn(async () => ({}));
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'idle' } }),
       getActiveSessionId: () => 's1',
       isLoading: () => false,
       loadSessionStatuses,
@@ -174,9 +199,9 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const streamed = assistant('a1', 's1');
     streamed.parts = [textPart('t1', 's1', 'The full final answer.')];
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       getMessages: () => [streamed],
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
     // First poll: server idle + streamed evidence -> reconcile at once, no grace wait.
@@ -187,9 +212,9 @@ describe('reconcileStuckSessionsWithDependencies', () => {
 
   it('still waits for the grace window when only a busy status is stuck (no streamed text)', async () => {
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       getMessages: () => [],
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
@@ -203,9 +228,9 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const streamed = assistant('a1', 's1');
     streamed.parts = [textPart('t1', 's1', 'Working on it.'), toolPart('tool-1', 's1', 'running')];
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       getMessages: () => [streamed],
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
@@ -220,10 +245,10 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const streamed = assistant('a1', 's1');
     streamed.parts = [textPart('t1', 's1', '')];
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       getMessages: () => [streamed],
       getStreamingText: () => ({ partId: 't1', text: 'The full final answer.' }),
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
@@ -240,9 +265,9 @@ describe('reconcileStuckSessionsWithDependencies', () => {
     const completed = assistant('a1', 's1', { time: { created: 1, completed: 2 } });
     completed.parts = [textPart('t1', 's1', 'Pong.')];
     const deps = baseReconcileDeps({
-      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }) as Record<string, SessionStatus>,
+      getLocalSessionStatuses: () => ({ s1: { type: 'busy' } }),
       getMessages: () => [completed],
-      loadSessionStatuses: async () => ({}) as Record<string, SessionStatus>,
+      loadSessionStatuses: async () => ({}),
     });
     const timers = new Map<string, number>();
     await reconcileStuckSessionsWithDependencies(deps, timers, 1000);
@@ -251,22 +276,29 @@ describe('reconcileStuckSessionsWithDependencies', () => {
   });
 });
 
-function textPart(id: string, sessionID: string, text: string): Part {
-  return { id, sessionID, messageID: 'a1', type: 'text', text } as Part;
+function textPart(id: string, sessionID: string, text: string): TextPart {
+  return { id, sessionID, messageID: 'a1', type: 'text', text };
 }
 
-function toolPart(id: string, sessionID: string, status: 'running' | 'pending'): Part {
+function toolPart(id: string, sessionID: string, status: 'running' | 'pending'): ToolPart {
+  const state: ToolPart['state'] =
+    status === 'running'
+      ? { status: 'running', input: {}, time: { start: 1 } }
+      : { status: 'pending', input: {}, raw: '' };
   return {
     id,
     sessionID,
     messageID: 'a1',
     type: 'tool',
     callID: id,
-    state: { status, input: {} },
-  } as unknown as Part;
+    tool: 'test',
+    state,
+  };
 }
 
-function baseForceDeps(overrides: Record<string, unknown> = {}) {
+function baseForceDeps(
+  overrides: Partial<ForceReconcileIdleSessionDeps> = {}
+): ForceReconcileIdleSessionDeps {
   return {
     setSessionStatusEntry: vi.fn(),
     clearPendingAbort: vi.fn(),
@@ -331,7 +363,7 @@ describe('selectUnsettledLatestAssistant', () => {
 
   it('returns null when the latest assistant errored', () => {
     const messages = [
-      assistant('a1', 's1', { error: { name: 'x', data: {} } } as Partial<Message>),
+      assistant('a1', 's1', { error: { name: 'UnknownError', data: { message: 'x' } } }),
     ];
     expect(selectUnsettledLatestAssistant(messages, 's1')).toBeNull();
   });
@@ -402,7 +434,9 @@ describe('hasLocalEvidenceTurnDone', () => {
   });
 
   it('is true when the latest assistant errored', () => {
-    const msg = assistant('a1', 's1', { error: { name: 'x', data: {} } } as Partial<Message>);
+    const msg = assistant('a1', 's1', {
+      error: { name: 'UnknownError', data: { message: 'x' } },
+    });
     expect(hasLocalEvidenceTurnDone([msg], 's1')).toBe(true);
   });
 

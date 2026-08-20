@@ -10,11 +10,12 @@ import {
   shouldShowAssistantPartInline,
 } from './part-utils';
 import { setShowThinking } from './state';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 function completedState(
-  input: Record<string, unknown>,
+  input: UnknownRecord,
   title = '',
-  metadata: Record<string, unknown> = {}
+  metadata: UnknownRecord = {}
 ): ToolStateCompleted {
   return {
     status: 'completed',

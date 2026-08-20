@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- This adapter test deliberately checks the representation of an untrusted response body. */
 import { createServer } from 'http';
 import type { RequestListener } from 'http';
 import { afterEach, describe, expect, it, vi } from 'vitest';

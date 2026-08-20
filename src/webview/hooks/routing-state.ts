@@ -117,6 +117,7 @@ export function reconcileLoadedProviders(args: {
   );
 
   if (args.selectedModel && !effectiveModel) {
+    // SAFETY: The surrounding shape or discriminator check establishes the SelectedModel contract used below.
     return { effectiveModel, nextSelectedModel: null as SelectedModel | null | undefined };
   }
 

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: VS Code URI values are established by the editor API before conversion. */
 import * as vscode from 'vscode';
 import { Buffer } from 'buffer';
 import type { DroppedFile, ExtensionMessage } from '../shared/protocol';

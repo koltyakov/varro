@@ -14,7 +14,7 @@ export async function implementPlanWithDependencies(
     setError(message: string): void;
     clearSkippedPlanSession(sessionId: string): void;
     applySelectedAgent(agent: string, sessionId: string): void;
-    sendMessage(prompt: string): Promise<unknown>;
+    sendMessage(prompt: string): Promise<void | boolean | object>;
   },
   prompt: string,
   sessionId: string | null
@@ -36,7 +36,7 @@ export async function openPlanWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
     setError(message: string | null): void;
-    openPlan(markdown: string): Promise<unknown>;
+    openPlan(markdown: string): Promise<void | boolean | object>;
   },
   markdown: string,
   sessionId: string | null
@@ -63,7 +63,7 @@ export async function initSessionWithDependencies(
     createSession(): Promise<string | null>;
     getMessageCount(): number;
     setError(message: string): void;
-    sendMessage(prompt: string): Promise<unknown>;
+    sendMessage(prompt: string): Promise<void | boolean | object>;
   },
   prompt = INIT_PROMPT
 ) {
@@ -97,8 +97,8 @@ export async function runSlashCommandWithDependencies(
     upsertPart(part: Part): void;
     syncTodosFromMessages(): void;
     requestMessageListScrollToBottom(): void;
-    syncSession(sessionId: string): Promise<void>;
-    recheckSessionStatus(sessionId: string): Promise<void>;
+    syncSession(sessionId: string): Promise<void | boolean | object>;
+    recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
     stopLoading(): void;
     setError(message: string): void;
   },
@@ -149,8 +149,8 @@ type SessionActionDependencies = {
   setError(message: string | null): void;
   clearSkippedPlanSession(sessionId: string): void;
   applySelectedAgent(agent: string, sessionId: string): void;
-  sendMessage(prompt: string): Promise<unknown>;
-  openPlan(markdown: string): Promise<unknown>;
+  sendMessage(prompt: string): Promise<void | boolean | object>;
+  openPlan(markdown: string): Promise<void | boolean | object>;
   createSession(): Promise<string | null>;
   getMessageCount(): number;
   hasCommand(name: string): boolean;
@@ -164,8 +164,8 @@ type SessionActionDependencies = {
   upsertPart(part: Part): void;
   syncTodosFromMessages(): void;
   requestMessageListScrollToBottom(): void;
-  syncSession(sessionId: string): Promise<void>;
-  recheckSessionStatus(sessionId: string): Promise<void>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   stopLoading(): void;
 };
 

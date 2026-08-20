@@ -3,6 +3,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Permission, QuestionRequest } from '../../types';
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise chrome integration with permission and question prompts. */
 vi.mock('../QuestionPrompt', () => ({
   QuestionPrompt: (props: { request: QuestionRequest }) => (
     <div class="mock-question-prompt">question:{props.request.id}</div>
@@ -292,6 +293,7 @@ describe('MessageListChrome', () => {
     );
 
     for (let index = 0; index < 20; index += 1) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       resizeCallback?.(
         [
           { target: container!.querySelector('.latest-user-message-sticky-text')! },

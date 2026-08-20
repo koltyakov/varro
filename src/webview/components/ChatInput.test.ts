@@ -26,6 +26,13 @@ import { client } from '../lib/client';
 import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-state';
 import { setSessionHistoryPrompts } from '../lib/message-window';
 import { hasExpandedDiffOverlay, setExpandedDiffOverlay } from '../lib/diff-overlay-state';
+import { fixture } from '../test-fixtures';
+import type { UnknownRecord } from '../../shared/type-utils';
+
+interface SessionEventProperties extends UnknownRecord {
+  sessionID: string;
+  status?: { type: 'idle' };
+}
 
 const {
   abortSessionMock,
@@ -53,13 +60,10 @@ const {
   sendMessageMock: vi.fn<typeof UseOpenCodeModule.sendMessage>(async () => true),
   serverEventHandlers: new Map<
     string,
-    Set<(event: { type: string; properties?: Record<string, unknown> }) => void>
+    Set<(event: { type: string; properties?: UnknownRecord }) => void>
   >(),
   serverEventsOnMock: vi.fn(
-    (
-      type: string,
-      handler: (event: { type: string; properties?: Record<string, unknown> }) => void
-    ) => {
+    (type: string, handler: (event: { type: string; properties?: UnknownRecord }) => void) => {
       if (!serverEventHandlers.has(type)) serverEventHandlers.set(type, new Set());
       serverEventHandlers.get(type)!.add(handler);
       return () => serverEventHandlers.get(type)?.delete(handler);
@@ -67,6 +71,7 @@ const {
   ),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ChatInput's module-level hook and client integration. */
 vi.mock('../hooks/useOpenCode', async () => {
   const actual = await vi.importActual<typeof UseOpenCodeModule>('../hooks/useOpenCode');
   return {
@@ -351,7 +356,8 @@ async function waitForDropdown() {
 function createDragDataTransfer() {
   const values = new Map<string, string>();
   const types: string[] = [];
-  return {
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  return fixture<DataTransfer>({
     types,
     effectAllowed: 'uninitialized',
     dropEffect: 'none',
@@ -363,7 +369,7 @@ function createDragDataTransfer() {
       return values.get(type) ?? '';
     },
     setDragImage: vi.fn(),
-  } as unknown as DataTransfer;
+  });
 }
 
 function dispatchDragEvent(target: Element, type: string, dataTransfer: DataTransfer) {
@@ -418,7 +424,8 @@ function installControllableFileReader() {
     }
   }
 
-  globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  globalThis.FileReader = fixture<typeof FileReader>(MockFileReader);
   return {
     resolve(filename: string) {
       const pending = pendingReads.get(filename);
@@ -438,7 +445,7 @@ function installControllableFileReader() {
   };
 }
 
-function emitServerEvent(type: string, properties: Record<string, unknown>) {
+function emitServerEvent(type: string, properties: UnknownRecord) {
   for (const handler of serverEventHandlers.get(type) ?? []) {
     handler({ type, properties });
   }
@@ -555,7 +562,8 @@ describe('ChatInput', () => {
 
   it('sends at most 20 dropped content files in individual messages', async () => {
     const originalFileReader = globalThis.FileReader;
-    const bridgeWindow = window as unknown as {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -578,9 +586,11 @@ describe('ChatInput', () => {
       }
     }
 
-    globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.FileReader = fixture<typeof FileReader>(MockFileReader);
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
+      // SAFETY: The fixture provides the File[] fields read by this statement.
       const files = Array.from({ length: 21 }, (_, index) => ({
         name: `file-${index}.txt`,
         size: 0,
@@ -604,7 +614,8 @@ describe('ChatInput', () => {
 
   it('rejects per-file and aggregate dropped content limits before FileReader work', async () => {
     const originalFileReader = globalThis.FileReader;
-    const bridgeWindow = window as unknown as {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -627,10 +638,12 @@ describe('ChatInput', () => {
       }
     }
 
-    globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.FileReader = fixture<typeof FileReader>(MockFileReader);
     bridgeWindow.__sendToExtension = (message) => sent.push(message);
     try {
       const tenMiB = 10 * 1024 * 1024;
+      // SAFETY: The fixture provides the File[] fields read by this statement.
       const files = [
         { name: 'oversized.bin', size: tenMiB + 1 },
         ...Array.from({ length: 6 }, (_, index) => ({
@@ -666,7 +679,8 @@ describe('ChatInput', () => {
   });
 
   it('runs /stats without sending a chat message', async () => {
-    const bridgeWindow = window as unknown as {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -1263,6 +1277,7 @@ describe('ChatInput', () => {
       Output: '100',
       Total: '500',
     });
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const subagentToggle = sections[1] as HTMLButtonElement;
     expect(subagentToggle.getAttribute('aria-expanded')).toBe('false');
     expect(subagentToggle.children[1]?.classList.contains('context-popup-section-chevron')).toBe(
@@ -2071,7 +2086,8 @@ describe('ChatInput', () => {
   });
 
   it('runs /stats from the completion menu on the first Enter', async () => {
-    const bridgeWindow = window as unknown as {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;
@@ -2379,12 +2395,13 @@ describe('ChatInput', () => {
     setIsLoading(false);
     for (const eventType of ['session.status', 'session.idle']) {
       for (const handler of serverEventHandlers.get(eventType) ?? []) {
+        const properties: SessionEventProperties = {
+          sessionID: 'session-1',
+        };
+        if (eventType === 'session.status') properties.status = { type: 'idle' };
         handler({
           type: eventType,
-          properties: {
-            sessionID: 'session-1',
-            ...(eventType === 'session.status' ? { status: { type: 'idle' } } : {}),
-          },
+          properties,
         });
       }
     }
@@ -5642,7 +5659,8 @@ describe('ChatInput', () => {
       },
     });
     const sent: WebviewMessage[] = [];
-    const bridgeWindow = window as unknown as {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const bridgeWindow = window as {
       __sendToExtension?: (message: WebviewMessage) => void;
     };
     const originalSend = bridgeWindow.__sendToExtension;

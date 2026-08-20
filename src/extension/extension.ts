@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- VS Code configuration values require runtime validation at activation. */
 import * as vscode from 'vscode';
 import { OpenCodeServer } from './server';
 import { SidebarProvider } from './sidebar-provider';

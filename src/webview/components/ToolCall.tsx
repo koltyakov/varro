@@ -16,13 +16,8 @@ import {
   isQuestionSkippedToolError,
 } from '../../shared/error-classification';
 import { asRecord } from '../../shared/type-utils';
-import type {
-  AssistantMessage,
-  QuestionRequest,
-  ToolPart,
-  ToolStateCompleted,
-  ToolStateError,
-} from '../types';
+import type { UnknownRecord } from '../../shared/type-utils';
+import type { AssistantMessage, QuestionRequest, ToolPart } from '../types';
 import { postMessage } from '../lib/bridge';
 import {
   state as appState,
@@ -54,6 +49,7 @@ import { DiffView } from './DiffView';
 import type { DiffViewFile } from './DiffView';
 import { ClampedToolText } from './ClampedToolText';
 import { CopyIconButton } from './CopyIconButton';
+import { isBoolean, isNumber, isString } from '../lib/runtime-values';
 
 export { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 
@@ -243,26 +239,25 @@ function getQuestionSummaryItems(state: ToolPart['state']): QuestionSummaryItem[
       : [];
 
   return questions.flatMap((value, index) => {
-    if (!value || typeof value !== 'object') return [];
-    const question = (value as Record<string, unknown>).question;
-    if (typeof question !== 'string' || !question.trim()) return [];
+    const question = asRecord(value)?.question;
+    if (!isString(question) || !question.trim()) return [];
 
     const answer = answers[index];
     return [
       {
         question: question.trim(),
         answers: Array.isArray(answer)
-          ? answer.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []))
+          ? answer.flatMap((item) => (isString(item) && item.trim() ? [item.trim()] : []))
           : [],
       },
     ];
   });
 }
 
-function getSearchPattern(input: Record<string, unknown>) {
+function getSearchPattern(input: UnknownRecord) {
   for (const key of ['pattern', 'query']) {
     const value = input[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (isString(value) && value.trim()) return value.trim();
   }
   return null;
 }
@@ -272,14 +267,14 @@ function getStateTitle(state: ToolPart['state']) {
   return state.title?.trim() || '';
 }
 
-function hasVisibleInputValue(value: unknown) {
+function hasVisibleInputValue<T>(value: T) {
   if (value === undefined || value === null) return false;
-  if (typeof value === 'string') return value.trim().length > 0;
+  if (isString(value)) return value.trim().length > 0;
   return true;
 }
 
-function normalizedComparableText(value: unknown) {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+function normalizedComparableText<T>(value: T) {
+  return isString(value) ? value.trim().toLowerCase() : '';
 }
 
 /**
@@ -296,13 +291,13 @@ function getRunningToolOutput(state: ToolPart['state']) {
   const metadata = state.metadata;
   const content = metadata?.content;
 
-  if (typeof content === 'string') return content;
+  if (isString(content)) return content;
   if (Array.isArray(content)) {
     const text = content
       .flatMap((item) => {
-        if (!item || typeof item !== 'object') return [];
-        const value = item as Record<string, unknown>;
-        return value.type === 'text' && typeof value.text === 'string' ? [value.text] : [];
+        const value = asRecord(item);
+        if (!value) return [];
+        return value.type === 'text' && isString(value.text) ? [value.text] : [];
       })
       .join('\n');
     if (text) return text;
@@ -310,17 +305,17 @@ function getRunningToolOutput(state: ToolPart['state']) {
 
   for (const key of ['output', 'progress']) {
     const value = metadata?.[key];
-    if (typeof value === 'string') return value;
+    if (isString(value)) return value;
   }
   return '';
 }
 
-export function getVisibleInputEntries(input: Record<string, unknown>) {
+export function getVisibleInputEntries(input: UnknownRecord) {
   return Object.entries(input).filter(([, value]) => hasVisibleInputValue(value));
 }
 
 export function formatToolTitle(toolName: string, state: ToolPart['state']) {
-  const input = (state.input || {}) as Record<string, unknown>;
+  const input = asRecord(state.input) ?? {};
   const title = getStateTitle(state);
   const normalizedToolName = normalizeToolName(toolName);
 
@@ -332,14 +327,14 @@ export function formatToolTitle(toolName: string, state: ToolPart['state']) {
 
   if (normalizedToolName === 'task') {
     const description = input.description;
-    if (typeof description === 'string' && description.trim()) return description.trim();
+    if (isString(description) && description.trim()) return description.trim();
   }
 
   // Error and pending states carry no server title; fall back to the command so
   // failed bash calls keep the same title shape as completed ones.
   if (normalizedToolName === 'bash' && !title) {
     const command = input.command;
-    if (typeof command === 'string' && command.trim()) return command.trim();
+    if (isString(command) && command.trim()) return command.trim();
   }
 
   return title || toolName;
@@ -350,9 +345,9 @@ function formatVisibleToolDuration(ms: number | null | undefined) {
   return formatDuration(ms) || null;
 }
 
-function parseIntLike(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
-  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value, 10);
+function parseIntLike<T>(value: T): number | null {
+  if (isNumber(value) && Number.isFinite(value)) return Math.trunc(value);
+  if (isString(value) && /^\d+$/.test(value.trim())) return Number.parseInt(value, 10);
   return null;
 }
 
@@ -396,12 +391,12 @@ function extractTaggedOutput(output: string, tagName: string): string | null {
 }
 
 function extractReadRange(
-  input: Record<string, unknown>,
-  metadata: Record<string, unknown> | undefined
+  input: UnknownRecord,
+  metadata: UnknownRecord | undefined
 ): { start: number; end: number } | null {
   const source = { ...metadata, ...input };
-  let start = null as number | null;
-  let end = null as number | null;
+  let start: number | null = null;
+  let end: number | null = null;
 
   for (const key of [
     'start_line',
@@ -441,7 +436,7 @@ function extractReadRange(
 
 function isDirectoryOutput(toolState: ToolPart['state']): boolean {
   if (toolState.status !== 'completed') return false;
-  const output = (toolState as ToolStateCompleted).output || '';
+  const output = toolState.output || '';
   return /<type>\s*directory\s*<\/type>/i.test(output) || /<entries>/i.test(output);
 }
 
@@ -559,7 +554,7 @@ export function ToolCall(props: {
   };
 
   const inputEntries = createMemo(() => {
-    const input = (state().input || {}) as Record<string, unknown>;
+    const input = asRecord(state().input) ?? {};
     const normalizedTitle = normalizedComparableText(title());
     return getVisibleInputEntries(input).filter(([key, value]) => {
       if (key !== 'description') return true;
@@ -578,8 +573,8 @@ export function ToolCall(props: {
   // editor tab, which replaced the old head/tail excerpt - that excerpt could
   // cut a closing tag out of the middle of the output.
   const fullOutput = createMemo(() => {
-    if (state().status !== 'completed') return '';
-    return (state() as ToolStateCompleted).output || '';
+    const current = state();
+    return current.status === 'completed' ? current.output || '' : '';
   });
   const runningOutput = createMemo(() => getRunningToolOutput(state()));
 
@@ -726,7 +721,6 @@ function ReadToolCard(props: {
   waitingForPermission: boolean;
 }) {
   const s = () => props.toolState;
-  const isCompleted = () => s().status === 'completed';
   const isError = () => s().status === 'error';
   const isAborted = () => isAbortedToolError(s());
   const statusClass = () => {
@@ -757,7 +751,7 @@ function ReadToolCard(props: {
   const hasFilePath = () => !!props.filePath;
   const normalizedPath = () => (props.filePath ? normalizePath(props.filePath) : '');
   const normalizedSessionDirectory = () =>
-    sessionDirectory() ? normalizePath(sessionDirectory() as string) : null;
+    sessionDirectory() ? normalizePath(sessionDirectory() || '') : null;
 
   const isCurrentDirectory = () =>
     props.filePath === '.' ||
@@ -767,8 +761,7 @@ function ReadToolCard(props: {
       normalizedPath() === normalizedSessionDirectory());
 
   const isDirectory = () => hasFilePath() && (isCurrentDirectory() || isDirectoryOutput(s()));
-  const lineRange = () =>
-    extractReadRange((s().input || {}) as Record<string, unknown>, metadata());
+  const lineRange = () => extractReadRange(asRecord(s().input) ?? {}, metadata());
 
   const openFile = (e: Event) => {
     e.preventDefault();
@@ -776,13 +769,13 @@ function ReadToolCard(props: {
     if (!props.filePath) return;
     const range = lineRange();
     const directory = isDirectory();
+    const payload =
+      !directory && range
+        ? { path: props.filePath, kind: 'file' as const, line: range.start }
+        : { path: props.filePath, kind: directory ? ('directory' as const) : ('file' as const) };
     postMessage({
       type: 'vscode/open',
-      payload: {
-        path: props.filePath,
-        kind: directory ? 'directory' : 'file',
-        ...(!directory && range ? { line: range.start } : {}),
-      },
+      payload,
     });
   };
 
@@ -793,12 +786,12 @@ function ReadToolCard(props: {
       return formatDisplayPath(props.filePath, appState.editorContext.workspacePath);
     return getLeafPathName(formatDisplayPath(props.filePath, appState.editorContext.workspacePath));
   };
-  const completedDurationLabel = () =>
-    isCompleted()
-      ? formatVisibleToolDuration(
-          (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
-        )
+  const completedDurationLabel = () => {
+    const state = s();
+    return state.status === 'completed'
+      ? formatVisibleToolDuration(state.time.end - state.time.start)
       : null;
+  };
 
   return (
     <div class="chat-tool-invocation-part file-read-card">
@@ -980,33 +973,34 @@ function FileChangeCard(props: {
     if (fromChanges.hasStats) {
       return { additions: fromChanges.additions, deletions: fromChanges.deletions };
     }
-    const meta = (s() as ToolStateCompleted).metadata || {};
-    const additions =
-      typeof meta.additions === 'number'
-        ? (meta.additions as number)
-        : typeof meta.linesAdded === 'number'
-          ? (meta.linesAdded as number)
-          : undefined;
-    const deletions =
-      typeof meta.deletions === 'number'
-        ? (meta.deletions as number)
-        : typeof meta.linesRemoved === 'number'
-          ? (meta.linesRemoved as number)
-          : undefined;
+    const state = s();
+    if (state.status !== 'completed') return null;
+    const meta = state.metadata || {};
+    const additions = isNumber(meta.additions)
+      ? meta.additions
+      : isNumber(meta.linesAdded)
+        ? meta.linesAdded
+        : undefined;
+    const deletions = isNumber(meta.deletions)
+      ? meta.deletions
+      : isNumber(meta.linesRemoved)
+        ? meta.linesRemoved
+        : undefined;
     if (additions !== undefined || deletions !== undefined) {
       return { additions: additions || 0, deletions: deletions || 0 };
     }
     return null;
   };
-  const completedDurationLabel = () =>
-    isCompleted()
-      ? formatVisibleToolDuration(
-          (s() as ToolStateCompleted).time.end - (s() as ToolStateCompleted).time.start
-        )
+  const completedDurationLabel = () => {
+    const state = s();
+    return state.status === 'completed'
+      ? formatVisibleToolDuration(state.time.end - state.time.start)
       : null;
+  };
   const errorMessage = () => {
-    if (!isError()) return null;
-    const message = (s() as ToolStateError).error.trim();
+    const state = s();
+    if (state.status !== 'error') return null;
+    const message = state.error.trim();
     return message || null;
   };
   const errorBodyId = createUniqueId();
@@ -1250,7 +1244,7 @@ function GenericToolCall(props: {
   const usesStructuredCard = () => isStructured() || isSearchTool();
   const taskAgentLabel = () => {
     const type = props.state.input?.subagent_type;
-    if (typeof type !== 'string' || !type.trim()) return 'Subagent';
+    if (!isString(type) || !type.trim()) return 'Subagent';
     const label = type.trim();
     return `${label.charAt(0).toUpperCase()}${label.slice(1)} subagent`;
   };
@@ -1279,16 +1273,15 @@ function GenericToolCall(props: {
 
     const type = props.state.input?.subagent_type;
     const agent =
-      typeof type === 'string' && type.trim()
+      isString(type) && type.trim()
         ? appState.allAgents.find((candidate) => candidate.name === type.trim())
         : null;
     const parentEntry = appState.messages.find((entry) => entry.info.id === props.tool.messageID);
     const parent = parentEntry?.info.role === 'assistant' ? parentEntry.info : null;
     const metadata = 'metadata' in props.state ? props.state.metadata : undefined;
     const metadataModel = asRecord(asRecord(metadata)?.model);
-    const metadataProviderID =
-      typeof metadataModel?.providerID === 'string' ? metadataModel.providerID : '';
-    const metadataModelID = typeof metadataModel?.modelID === 'string' ? metadataModel.modelID : '';
+    const metadataProviderID = isString(metadataModel?.providerID) ? metadataModel.providerID : '';
+    const metadataModelID = isString(metadataModel?.modelID) ? metadataModel.modelID : '';
     const resolvedMetadataModel =
       metadataProviderID && metadataModelID
         ? { providerID: metadataProviderID, modelID: metadataModelID }
@@ -1364,7 +1357,7 @@ function GenericToolCall(props: {
   };
   const bashCommand = () => {
     const command = props.state.input?.command;
-    return typeof command === 'string'
+    return isString(command)
       ? formatCommandDisplay(command, appState.editorContext.workspacePath)
       : '';
   };
@@ -1403,8 +1396,8 @@ function GenericToolCall(props: {
     return { label: 'result', value: isBlank(props.fullOutput) ? '(no output)' : props.fullOutput };
   };
   const completedDurationMs = () => {
-    if (props.state.status !== 'completed') return null;
-    const state = props.state as ToolStateCompleted;
+    const state = props.state;
+    if (state.status !== 'completed') return null;
     return Math.max(0, state.time.end - state.time.start);
   };
   const completedDurationLabel = () => formatVisibleToolDuration(completedDurationMs());
@@ -1570,7 +1563,7 @@ function GenericToolCall(props: {
                         {([key, value]) => (
                           <div class="tool-input-entry">
                             <span class="tool-input-key">{key}</span>
-                            {isPathKey(key) && typeof value === 'string' ? (
+                            {isPathKey(key) && isString(value) ? (
                               <a
                                 href="#"
                                 class="file-path-link tool-input-value"
@@ -1638,7 +1631,7 @@ function GenericToolCall(props: {
                   class={`terminal-command-row terminal-command-row-output terminal-command-row-error${isAborted() ? ' is-aborted' : ''}`}
                 >
                   <ClampedToolText
-                    content={(props.state as ToolStateError).error}
+                    content={props.state.status === 'error' ? props.state.error : ''}
                     title={`${props.title} (error)`}
                     language="plaintext"
                     class={`terminal-command-text terminal-command-output tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
@@ -1664,7 +1657,7 @@ function GenericToolCall(props: {
           </Show>
           <Show when={props.state.status === 'error' && !isBash() && !usesStructuredCard()}>
             <ClampedToolText
-              content={(props.state as ToolStateError).error}
+              content={props.state.status === 'error' ? props.state.error : ''}
               title={`${props.title} (error)`}
               language="plaintext"
               class={`tool-invocation-error${isAborted() ? ' is-aborted' : ''}`}
@@ -1751,7 +1744,7 @@ function LiveTerminalOutput(props: { content: string }) {
   });
 
   onMount(() => {
-    if (!contentRef || typeof ResizeObserver === 'undefined') return;
+    if (!contentRef || globalThis.ResizeObserver === undefined) return;
     const observer = new ResizeObserver(scrollToBottom);
     observer.observe(contentRef);
     onCleanup(() => observer.disconnect());
@@ -1790,7 +1783,7 @@ function StructuredToolCard(props: {
           return (
             <div class="structured-tool-row">
               <span class="structured-tool-label">{key}</span>
-              {isPathKey(key) && typeof value === 'string' ? (
+              {isPathKey(key) && isString(value) ? (
                 <a
                   href="#"
                   class="file-path-link structured-tool-value"
@@ -1855,31 +1848,31 @@ function StructuredToolCard(props: {
   );
 }
 
-function shouldShowStructuredToolValueAsBlock(key: string, value: unknown): boolean {
+function shouldShowStructuredToolValueAsBlock<T>(key: string, value: T): boolean {
   if (isPathKey(key)) return false;
-  if (typeof value === 'string') {
+  if (isString(value)) {
     if (key === 'pattern' && !value.includes('\n')) return false;
     return value.includes('\n') || value.length > 100;
   }
-  return typeof value === 'object' && value !== null;
+  return asRecord(value) !== null || Array.isArray(value);
 }
 
-function formatExpandedValue(key: string, value: unknown): string {
-  if (typeof value === 'string') {
+function formatExpandedValue<T>(key: string, value: T): string {
+  if (isString(value)) {
     return key === 'command'
       ? formatCommandDisplay(value, appState.editorContext.workspacePath)
       : value;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return JSON.stringify(value, null, 2);
 }
 
-function formatValue(key: string, value: unknown): string {
-  if (typeof value === 'string') {
+function formatValue<T>(key: string, value: T): string {
+  if (isString(value)) {
     const formatted =
       key === 'command' ? formatCommandDisplay(value, appState.editorContext.workspacePath) : value;
     return formatted.length > 200 ? formatted.slice(0, 200) + '...' : formatted;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (isNumber(value) || isBoolean(value)) return String(value);
   return JSON.stringify(value);
 }

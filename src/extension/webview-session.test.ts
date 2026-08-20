@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These session tests verify extension-host imports with partial webview, URI, and private-state fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { loggerMock, vscodeMock } = vi.hoisted(() => ({

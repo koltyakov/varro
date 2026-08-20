@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking -- These tests verify generated HTML against the imported VS Code URI and nonce boundaries. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InitialWebviewState } from '../shared/protocol';
 

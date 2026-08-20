@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 
+// SAFETY: The fixture provides the Error | null fields read by this statement.
 const appMocks = vi.hoisted(() => ({
   apiCall: vi.fn(),
   cleanupBridge: vi.fn(),
@@ -10,6 +11,7 @@ const appMocks = vi.hoisted(() => ({
   useOpenCode: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise App's module-level view routing integration. */
 vi.mock('./hooks/useOpenCode', () => ({
   useOpenCode: appMocks.useOpenCode,
 }));

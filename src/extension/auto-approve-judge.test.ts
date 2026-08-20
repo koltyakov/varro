@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise module-boundary adapters with malformed model payloads and partial host fixtures. */
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';

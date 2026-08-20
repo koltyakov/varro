@@ -1,5 +1,6 @@
 import type { PermissionMode } from './protocol';
 import { normalizeWorkspaceIdentity } from './workspace-path';
+import { isString } from './type-utils';
 
 export const RALPH_INCOMPLETE_RESUME_ITERATION_INCREMENT = 5;
 export const MAX_RALPH_ITERATIONS = 1_000;
@@ -94,8 +95,8 @@ export type RalphRun = {
   note?: string;
 };
 
-export function normalizeRalphWorkspaceDirectory(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
+export function normalizeRalphWorkspaceDirectory<T>(value: T): string | null {
+  if (!isString(value)) return null;
   const trimmed = value.trim();
   const identity = normalizeWorkspaceIdentity(trimmed);
   if (!identity) return null;

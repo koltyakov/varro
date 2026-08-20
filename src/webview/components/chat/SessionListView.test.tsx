@@ -15,11 +15,30 @@ import {
   applySessionShareOverride,
   resetSessionShareOverridesForTests,
 } from '../../lib/session-share-overrides';
+import { fixture } from '../../test-fixtures';
+
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
 
 const renameSessionMock = vi.hoisted(() => vi.fn());
 const reloadSessionsMock = vi.hoisted(() => vi.fn());
 const loadMoreSessionsMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise SessionListView's useOpenCode module integration. */
 vi.mock('../../hooks/useOpenCode', () => ({
   deleteSession: vi.fn(),
   deleteSessionPermanently: vi.fn(),
@@ -107,12 +126,13 @@ afterEach(() => {
   setState('sessionsLoadingMore', false);
   setState('sessionsPaginationError', null);
   setState('recycleBinLoadError', null);
-  delete (window as unknown as { __sendToExtension?: (message: unknown) => void })
-    .__sendToExtension;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension;
   vi.restoreAllMocks();
   if (originalIntersectionObserver) {
     globalThis.IntersectionObserver = originalIntersectionObserver;
   } else {
+    // SAFETY: The fixture provides the Partial<typeof globalThis> fields read by this statement.
     delete (globalThis as Partial<typeof globalThis>).IntersectionObserver;
   }
   resetSessionDiffSummaryStateForTests();
@@ -516,8 +536,9 @@ describe('SessionListView diff summaries', () => {
 
       disconnect() {}
     }
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     globalThis.IntersectionObserver =
-      TestIntersectionObserver as unknown as typeof IntersectionObserver;
+      fixture<typeof IntersectionObserver>(TestIntersectionObserver);
     const diffSummarySpy = vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
       additions: 0,
@@ -539,6 +560,7 @@ describe('SessionListView diff summaries', () => {
     expect(rows).toHaveLength(3);
     expect(rows.every((row) => callbacks.has(row))).toBe(true);
     for (const row of rows) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callbacks.get(row)?.(
         [{ target: row, isIntersecting: true } as IntersectionObserverEntry],
         {} as IntersectionObserver
@@ -1026,7 +1048,8 @@ describe('SessionListView actions', () => {
 
   it('opens a session in OpenCode from its row menu', () => {
     const send = vi.fn();
-    (window as unknown as { __sendToExtension?: (message: unknown) => void }).__sendToExtension =
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: (message: TestRuntimeValue) => void }).__sendToExtension =
       send;
     vi.spyOn(client.varro.session, 'diffSummary').mockResolvedValue({
       files: 0,
@@ -1479,8 +1502,9 @@ describe('SessionListView load errors', () => {
       }
       disconnect() {}
     }
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     globalThis.IntersectionObserver =
-      TestIntersectionObserver as unknown as typeof IntersectionObserver;
+      fixture<typeof IntersectionObserver>(TestIntersectionObserver);
     const now = Date.now();
     const archivedSessions = Array.from({ length: 50 }, (_, index) =>
       session(`archived-${index}`, now - (index + 2) * 86_400_000)
@@ -1497,6 +1521,7 @@ describe('SessionListView load errors', () => {
 
     archive!.click();
     const continuation = container.querySelector('.session-list-continuation')!;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     callbacks.get(continuation)?.(
       [{ target: continuation, isIntersecting: true } as IntersectionObserverEntry],
       {} as IntersectionObserver

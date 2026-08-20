@@ -5,9 +5,26 @@ import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
 import { collapseExpandedDiffOverlays, hasExpandedDiffOverlay } from '../lib/diff-overlay-state';
 import { DiffView, getDiffLines, parseUnifiedPatch } from './DiffView';
 
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+
 declare global {
   interface Window {
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 
@@ -450,6 +467,7 @@ describe('DiffView', () => {
       viewport?.dispatchEvent(new Event('scroll'));
       for (const observer of observers) {
         if (!observer.target) continue;
+        // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
         observer.callback(
           [{ target: observer.target }] as ResizeObserverEntry[],
           {} as ResizeObserver
@@ -458,8 +476,8 @@ describe('DiffView', () => {
     }
     await Promise.resolve();
 
-    const leaks = warn.mock.calls.filter(
-      ([message]) => typeof message === 'string' && message.includes('never be disposed')
+    const leaks = warn.mock.calls.filter(([message]) =>
+      String(message).includes('never be disposed')
     );
     expect(leaks).toEqual([]);
   });
@@ -508,6 +526,7 @@ describe('DiffView', () => {
     clientWidthReads = 0;
 
     for (let index = 0; index < 20; index += 1) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       notifyResize?.([{ target: observedElement! }] as ResizeObserverEntry[], {} as ResizeObserver);
     }
 
@@ -1034,6 +1053,7 @@ describe('DiffView', () => {
       container!
     );
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = container?.querySelector('button.diff-view-filename') as HTMLButtonElement;
     expect(button.textContent).toContain('Unknown file');
     expect(button.disabled).toBe(true);

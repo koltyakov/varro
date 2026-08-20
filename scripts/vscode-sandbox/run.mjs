@@ -80,6 +80,7 @@ function reservePort() {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Node's socket boundary returns either an address object or a pipe name.
       if (!address || typeof address === 'string') {
         server.close();
         reject(new Error('Could not reserve a local sandbox port'));

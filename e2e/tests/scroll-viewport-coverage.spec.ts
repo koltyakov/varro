@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unsafe-dictionary-type -- Browser callbacks model synthetic message parts whose variant-specific fields are intentionally open. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access and mutate message fixtures installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Locator } from '@playwright/test';
 import { getScrollMetrics, waitForAnimationFrames } from './helpers';

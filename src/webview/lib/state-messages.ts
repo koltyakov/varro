@@ -14,6 +14,7 @@ import { areMessageEntriesEquivalent, getSharedMessagePrefixLength } from './mes
 import { markSessionResponseCompleted, markSessionSeen } from './state-session-lifecycle';
 import { flushPendingStreamingDeltasFor, shouldUseStreamingText } from './streaming-deltas';
 import { isTodoToolName, isTodoToolTitle } from './tool-normalization';
+import { isString, type UnknownRecord, isObject } from './runtime-values';
 
 const EMPTY_CHILD_RUNS_BY_PARENT_ID = new Map<string, Array<MessageEntry<AssistantMessage>>>();
 const OPTIMISTIC_USER_MESSAGE_ID_PREFIX = 'optimistic-user-';
@@ -125,6 +126,7 @@ function isPendingOptimisticUserMessage(entry: MessageEntry) {
 export function upsertPart(part: Part) {
   flushPendingStreamingDeltas();
   const nextPart = materializeStreamingTextInPart(part, getStreamingTextSnapshot());
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   const msgId = (nextPart as { messageID: string }).messageID;
   batch(() => {
     setState(
@@ -236,9 +238,9 @@ function getAssistantDialogPartSignature(part: Part | undefined): string | null 
     part.sessionID,
     part.messageID,
     part.state.status,
-    typeof metadataSessionId === 'string' ? metadataSessionId : '',
-    typeof description === 'string' ? description : '',
-    typeof title === 'string' ? title : '',
+    isString(metadataSessionId) ? metadataSessionId : '',
+    isString(description) ? description : '',
+    isString(title) ? title : '',
   ]);
 }
 
@@ -942,14 +944,14 @@ function cloneMessageEntries(entries: MessageEntry[]) {
 
 function cloneValue<T>(value: T): T {
   if (Array.isArray(value)) {
+    // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
     return value.map((item) => cloneValue(item)) as T;
   }
-  if (value && typeof value === 'object') {
+  if (value && isObject(value)) {
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-        key,
-        cloneValue(entry),
-      ])
+      // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+      Object.entries(value as UnknownRecord).map(([key, entry]) => [key, cloneValue(entry)])
     ) as T;
   }
   return value;
@@ -969,11 +971,13 @@ export function getChildRunsByParentId(
   const map = new Map<string, Array<MessageEntry<AssistantMessage>>>();
   for (const entry of messages) {
     if (entry.info.role !== 'assistant') continue;
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     const a = entry.info as AssistantMessage;
     if (a.mode !== 'subagent') continue;
     const children = map.get(a.parentID);
-    if (children) children.push(entry as MessageEntry<AssistantMessage>);
-    else map.set(a.parentID, [entry as MessageEntry<AssistantMessage>]);
+    const assistantEntry: MessageEntry<AssistantMessage> = { info: a, parts: entry.parts };
+    if (children) children.push(assistantEntry);
+    else map.set(a.parentID, [assistantEntry]);
   }
   for (const children of map.values()) {
     children.sort((a, b) => a.info.time.created - b.info.time.created);

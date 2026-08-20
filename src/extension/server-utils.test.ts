@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The child-process fixtures implement the event and exit fields read by the utility. */
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';

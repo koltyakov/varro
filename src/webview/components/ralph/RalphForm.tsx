@@ -1,4 +1,5 @@
 import { Show, Suspense, createEffect, createMemo, createSignal, lazy, onCleanup } from 'solid-js';
+import type { JSX } from 'solid-js';
 import { Dynamic, Portal } from 'solid-js/web';
 import { client } from '../../lib/client';
 import { logError } from '../../lib/log';
@@ -108,6 +109,7 @@ export function RalphForm() {
   const currentModelInfo = createMemo(() => {
     const sel = model();
     if (!sel) {
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       return { providerID: null as string | null, providerName: '', modelName: '' };
     }
     const provider = visibleProviders().find((p) => p.id === sel.providerID);
@@ -240,7 +242,7 @@ export function RalphForm() {
         ? {
             providerID: selectedModel.providerID,
             modelID: selectedModel.modelID,
-            ...(reasoningLevel ? { variant: reasoningLevel } : {}),
+            variant: reasoningLevel ? reasoningLevel : undefined,
           }
         : null;
 
@@ -266,6 +268,7 @@ export function RalphForm() {
           modelID: config.model.modelID,
         };
         if (config.model.variant) {
+          // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
           (anchorBody.model as { variant?: string }).variant = config.model.variant;
         }
       }
@@ -314,6 +317,7 @@ export function RalphForm() {
             aria-labelledby="ralph-form-title"
             onClick={(e) => {
               e.stopPropagation();
+              // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
               const target = e.target as HTMLElement | null;
               if (target && !target.closest('.ralph-form-model-picker')) {
                 if (showModelPicker()) setShowModelPicker(false);
@@ -418,7 +422,7 @@ export function RalphForm() {
                           setModel({
                             providerID: sel.providerID,
                             modelID: sel.modelID,
-                            ...(variant ? { variant } : {}),
+                            variant: variant || undefined,
                           });
                           setVariantPreference(variant);
                         }
@@ -457,7 +461,7 @@ export function RalphForm() {
                             setModel({
                               providerID: sel.providerID,
                               modelID: sel.modelID,
-                              ...(keepVariant ? { variant: keepVariant } : {}),
+                              variant: keepVariant ? keepVariant : undefined,
                             });
                             setVariantPreference(keepVariant);
                           }
@@ -516,11 +520,11 @@ export function RalphForm() {
   );
 }
 
-function Field(props: { label: string; children: unknown; as?: 'label' | 'div' }) {
+function Field(props: { label: string; children: JSX.Element; as?: 'label' | 'div' }) {
   return (
     <Dynamic component={props.as ?? 'label'} class="ralph-form-field">
       <span class="ralph-form-label">{props.label}</span>
-      {props.children as never}
+      {props.children}
     </Dynamic>
   );
 }

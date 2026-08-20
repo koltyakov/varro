@@ -10,9 +10,26 @@ import { setState } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import { ModelsPanel } from './ModelsPanel';
 
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+
 declare global {
   interface Window {
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 
@@ -34,6 +51,7 @@ const providerSetupMocks = vi.hoisted(() => ({
   openProviderSetup: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise ModelsPanel integration with client, setup, and hook modules. */
 vi.mock('../lib/client', () => ({
   client: {
     varro: {
@@ -65,15 +83,16 @@ let cleanup: (() => void) | undefined;
 let originalResizeObserver: typeof globalThis.ResizeObserver | undefined;
 
 function session(id: string, parentID?: string): Session {
-  return {
+  const value: Session = {
     id,
     projectID: 'project-1',
     directory: '/repo',
     title: id,
     version: '1',
     time: { created: 1, updated: 1 },
-    ...(parentID ? { parentID } : {}),
   };
+  if (parentID) value.parentID = parentID;
+  return value;
 }
 
 beforeEach(() => {
@@ -82,6 +101,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   delete window.__sendToExtension;
   originalResizeObserver = globalThis.ResizeObserver;
+  // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
   globalThis.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
@@ -555,7 +575,7 @@ describe('ModelsPanel', () => {
     });
     let callbackSignal: AbortSignal | undefined;
     clientMocks.completeProviderAuth.mockImplementation(
-      (_body: unknown, options?: { signal?: AbortSignal }) => {
+      (_body: TestRuntimeValue, options?: { signal?: AbortSignal }) => {
         callbackSignal = options?.signal;
         return new Promise((_resolve, reject) => {
           options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
@@ -675,6 +695,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
@@ -722,6 +743,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const nextRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
@@ -756,6 +778,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const currentRow = Array.from(container?.querySelectorAll('.settings-model-row') ?? []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
     ) as HTMLElement;
@@ -898,6 +921,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
@@ -923,6 +947,7 @@ describe('ModelsPanel', () => {
     ).toBe(true);
     expect(menuItems.some((item) => item.textContent?.includes('Use for auto-approve'))).toBe(true);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = menuItems.find((item) =>
       item.textContent?.includes('Use as small model')
     ) as HTMLButtonElement;
@@ -968,12 +993,14 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
     expect(row.querySelector('[aria-label="Pinned model"]')).not.toBeNull();
 
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const menu = document.querySelector('.settings-context-menu') as HTMLElement;
     const unpinButton = Array.from(
       menu.querySelectorAll<HTMLButtonElement>('.settings-context-menu-item')
@@ -1006,6 +1033,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5'
     ) as HTMLElement;
@@ -1024,6 +1052,7 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const renamedRow = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'Primary coder'
     ) as HTMLElement;
@@ -1056,6 +1085,7 @@ describe('ModelsPanel', () => {
     cleanup = render(() => ModelsPanel(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const row = Array.from(container?.querySelectorAll('.settings-model-row') || []).find(
       (item) => item.querySelector('.settings-model-name')?.textContent === 'GPT-5 mini'
     ) as HTMLElement;

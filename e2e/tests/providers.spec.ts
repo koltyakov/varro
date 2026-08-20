@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback invokes the provider hook installed by the controlled harness fixture. */
 import { expect, test } from '@playwright/test';
 
 test('shows usage-limit retry state and lets the user switch providers', async ({ page }) => {

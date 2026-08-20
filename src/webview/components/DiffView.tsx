@@ -96,57 +96,61 @@ const MAX_FALLBACK_DIFF_CELLS = 250_000;
 const MAX_DIFF_VIEW_LCS_CELLS = 500_000;
 const DIFF_CONTEXT_LINES = 3;
 const COLLAPSED_DIFF_LINE_COUNT = 6;
-const DIFF_FILE_TYPE_OVERRIDES: Record<string, { label?: string; language?: string }> = {
-  cc: { label: 'C++', language: 'cpp' },
-  cjs: { language: 'javascript' },
-  cpp: { label: 'C++' },
-  cs: { label: 'C#', language: 'csharp' },
-  cts: { language: 'typescript' },
-  cxx: { label: 'C++', language: 'cpp' },
-  gql: { language: 'graphql' },
-  h: { language: 'c' },
-  hpp: { label: 'C++', language: 'cpp' },
-  htm: { label: '<>' },
-  html: { label: '<>' },
-  js: { language: 'javascript' },
-  json: { label: '{}' },
-  jsonc: { label: '{}', language: 'json' },
-  jsx: { language: 'javascript' },
-  kt: { language: 'kotlin' },
-  kts: { language: 'kotlin' },
-  mdx: { language: 'markdown' },
-  mjs: { language: 'javascript' },
-  mts: { language: 'typescript' },
-  pl: { language: 'perl' },
-  pyi: { language: 'python' },
-  rb: { language: 'ruby' },
-  rs: { language: 'rust' },
-  sass: { language: 'scss' },
-  svelte: { label: '<>', language: 'xml' },
-  svg: { label: '<>', language: 'xml' },
-  toml: { language: 'ini' },
-  ts: { language: 'typescript' },
-  tsx: { language: 'typescript' },
-  vb: { language: 'vbnet' },
-  vue: { label: '<>', language: 'xml' },
-  xml: { label: '<>' },
-};
-const DIFF_SPECIAL_FILE_TYPES: Record<string, { label: string; language?: string }> = {
-  makefile: { label: 'MK', language: 'makefile' },
-};
+const DIFF_FILE_TYPE_OVERRIDES = new Map<string, { label?: string; language?: string }>(
+  Object.entries({
+    cc: { label: 'C++', language: 'cpp' },
+    cjs: { language: 'javascript' },
+    cpp: { label: 'C++' },
+    cs: { label: 'C#', language: 'csharp' },
+    cts: { language: 'typescript' },
+    cxx: { label: 'C++', language: 'cpp' },
+    gql: { language: 'graphql' },
+    h: { language: 'c' },
+    hpp: { label: 'C++', language: 'cpp' },
+    htm: { label: '<>' },
+    html: { label: '<>' },
+    js: { language: 'javascript' },
+    json: { label: '{}' },
+    jsonc: { label: '{}', language: 'json' },
+    jsx: { language: 'javascript' },
+    kt: { language: 'kotlin' },
+    kts: { language: 'kotlin' },
+    mdx: { language: 'markdown' },
+    mjs: { language: 'javascript' },
+    mts: { language: 'typescript' },
+    pl: { language: 'perl' },
+    pyi: { language: 'python' },
+    rb: { language: 'ruby' },
+    rs: { language: 'rust' },
+    sass: { language: 'scss' },
+    svelte: { label: '<>', language: 'xml' },
+    svg: { label: '<>', language: 'xml' },
+    toml: { language: 'ini' },
+    ts: { language: 'typescript' },
+    tsx: { language: 'typescript' },
+    vb: { language: 'vbnet' },
+    vue: { label: '<>', language: 'xml' },
+    xml: { label: '<>' },
+  })
+);
+const DIFF_SPECIAL_FILE_TYPES = new Map<string, { label: string; language?: string }>(
+  Object.entries({
+    makefile: { label: 'MK', language: 'makefile' },
+  })
+);
 
 function getDiffFileType(file: string | undefined) {
   if (!file) return null;
 
   const filename = getLeafPathName(file).toLowerCase();
-  const specialType = DIFF_SPECIAL_FILE_TYPES[filename];
+  const specialType = DIFF_SPECIAL_FILE_TYPES.get(filename);
   if (specialType) return specialType;
 
   const dotIndex = filename.lastIndexOf('.');
   if (dotIndex <= 0 || dotIndex === filename.length - 1) return null;
 
   const extension = filename.slice(dotIndex + 1);
-  const override = DIFF_FILE_TYPE_OVERRIDES[extension];
+  const override = DIFF_FILE_TYPE_OVERRIDES.get(extension);
   return {
     label: override?.label ?? extension.slice(0, 3).toUpperCase(),
     language: override?.language ?? extension,
@@ -834,7 +838,7 @@ function DiffItem(props: {
         path,
         kind: 'file',
         view: 'diff',
-        ...(state.activeSessionId ? { sessionID: state.activeSessionId } : {}),
+        sessionID: state.activeSessionId ? state.activeSessionId : undefined,
       },
     });
   };

@@ -273,7 +273,9 @@ export function ModelPicker(props: {
     if (!menuRef) return;
     const stopObservingViewport = observePopupViewport(menuRef, reposition);
     const listObserver =
-      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateScrollMetrics);
+      globalThis.ResizeObserver === undefined
+        ? null
+        : new globalThis.ResizeObserver(updateScrollMetrics);
     if (listRef) listObserver?.observe(listRef);
     onCleanup(() => {
       clearTimeout(detailsHoverTimer);

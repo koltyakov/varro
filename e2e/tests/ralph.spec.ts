@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- The init-script callback deliberately merges opaque persisted Ralph fixture state into a synthetic browser store. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The asserted state is supplied directly by this test's controlled init-script fixture. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { getE2EState } from './helpers';

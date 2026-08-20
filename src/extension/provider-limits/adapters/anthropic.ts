@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Anthropic API and credential files are untrusted and validated field by field. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Credential and API assertions follow required-field and token validation. */
 import { randomUUID } from 'crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import { homedir } from 'os';
@@ -223,12 +225,13 @@ function mergeAnthropicStatuses(
 
   const windows = mergeAnthropicWindows(primary.windows, secondary.windows);
   const note = [primary.note, secondary.note].filter(Boolean).join(' + ') || undefined;
-  return {
+  const merged: ProviderLimitStatus = {
     ...primary,
     checkedAt: Math.max(primary.checkedAt, secondary.checkedAt),
     windows,
-    ...(note ? { note } : {}),
   };
+  if (note) merged.note = note;
+  return merged;
 }
 
 function mergeAnthropicWindows(
@@ -359,7 +362,7 @@ function buildMeridianBucketWindow(
   const percent = clampPercent(utilization * 100);
   if (percent == null) return null;
 
-  return {
+  const window: ProviderLimitWindow = {
     id,
     label: MERIDIAN_WINDOW_LABELS[id] || toLabel(id),
     unit: 'unknown',
@@ -367,7 +370,8 @@ function buildMeridianBucketWindow(
     limit: 100,
     resetAt: parseRateLimitResetAt(bucket.resetsAt, checkedAt),
     percent,
-  } satisfies ProviderLimitWindow;
+  };
+  return window;
 }
 
 function buildMeridianExtraUsageWindow(
@@ -384,15 +388,16 @@ function buildMeridianExtraUsageWindow(
   const utilization = clampFraction(parseFiniteNumber(extraUsage.utilization));
   const percent = clampPercent((utilization ?? used / limit) * 100);
 
-  return {
+  const window: ProviderLimitWindow = {
     id: 'extra_usage',
     label: 'Extra Usage',
     unit: 'credits',
     remaining: Math.max(limit - used, 0),
     limit,
     resetAt: parseRateLimitResetAt(extraUsage.resetsAt, checkedAt),
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function buildAnthropicWindow(

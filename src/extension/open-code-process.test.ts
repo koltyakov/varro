@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These process-boundary tests deliberately model malformed config, OS results, child processes, and private lease state. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import {

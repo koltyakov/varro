@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These provider tests verify VS Code URI integration with minimal document and content-provider fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ExecuteCommandMock = (

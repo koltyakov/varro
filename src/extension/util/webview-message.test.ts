@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests deliberately pass open, malformed webview payloads through the parser. */
 import { describe, expect, it } from 'vitest';
 import { isAllowedApiRequest, isAllowedExternalUrl, parseWebviewMessage } from './webview-message';
 

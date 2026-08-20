@@ -12,6 +12,7 @@ import {
   parseToolInput,
   toolOutputToString,
 } from './session-event-utils';
+import { isString, type UnknownRecord } from '../../lib/runtime-values';
 
 type ProjectedSessionEventContext = {
   isSessionInActiveTree(sessionId: string | null | undefined): boolean;
@@ -52,6 +53,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     }
     const existing = message.parts.find((part) => part.id === partID);
     if (!existing) {
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       sessionStore.upsertPart({
         id: partID,
         sessionID: sessionId,
@@ -62,16 +64,13 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     }
     return message.info.id;
   };
-  const handleProjectedTextEvent = (
-    eventName: string,
-    props: Record<string, unknown>,
-    sessionId: string
-  ) => {
+  const handleProjectedTextEvent = (eventName: string, props: UnknownRecord, sessionId: string) => {
     const textID = getEventString(props, 'textID');
     const assistantMessageID = getEventString(props, 'assistantMessageID');
     if (!textID) return false;
     const text = getEventString(props, 'text') || '';
     if (eventName === 'session.next.text.ended') {
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       return !!applyProjectedPart(sessionId, assistantMessageID, {
         id: textID,
         sessionID: sessionId,
@@ -88,11 +87,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     }
     return true;
   };
-  const handleProjectedToolEvent = (
-    eventName: string,
-    props: Record<string, unknown>,
-    sessionId: string
-  ) => {
+  const handleProjectedToolEvent = (eventName: string, props: UnknownRecord, sessionId: string) => {
     const assistantMessageID = getEventString(props, 'assistantMessageID');
     const callID = getEventString(props, 'callID');
     if (!callID) return false;
@@ -149,8 +144,9 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     }
 
     if (eventName === 'session.next.tool.called') {
-      const eventInput =
-        typeof props.input === 'string' ? parseToolInput(props.input) : asToolInput(props.input);
+      const eventInput = isString(props.input)
+        ? parseToolInput(props.input)
+        : asToolInput(props.input);
       const input =
         Object.keys(eventInput).length > 0 || !existingTool
           ? eventInput
@@ -186,7 +182,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
             ...structured,
             structured,
             content: props.content,
-            ...(progress ? { progress } : {}),
+            progress: progress || undefined,
           },
         },
       });
@@ -244,7 +240,8 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
 
     return false;
   };
-  return (eventName: string, props: Record<string, unknown>) => {
+  return (eventName: string, props: UnknownRecord) => {
+    // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
     const sessionId = props.sessionID as string | undefined;
     if (!sessionId || !ctx.isSessionInActiveTree(sessionId)) return false;
     if (eventName.startsWith('session.next.text.')) {

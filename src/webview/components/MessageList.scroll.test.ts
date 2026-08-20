@@ -27,6 +27,7 @@ import {
   toolPart,
   userMessage,
 } from './MessageList.test-utils';
+import { fixture } from '../test-fixtures';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -64,6 +65,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -115,6 +117,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -202,6 +205,7 @@ describe('MessageList auto-scroll', () => {
       setState('activeSessionId', 'session-1');
       replaceMessages(baseMessages);
       cleanup = render(() => MessageList(), container!);
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       list = container?.querySelector('.interactive-list') as HTMLDivElement;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', {
@@ -228,6 +232,7 @@ describe('MessageList auto-scroll', () => {
       animationFrames.flush();
       await Promise.resolve();
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const anchorBefore = container?.querySelector(
         `[data-msg-id="${anchorId}"]`
       ) as HTMLDivElement;
@@ -259,6 +264,7 @@ describe('MessageList auto-scroll', () => {
       animationFrames.flush();
       await Promise.resolve();
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const anchorAfter = container?.querySelector(`[data-msg-id="${anchorId}"]`) as HTMLDivElement;
       expect(anchorAfter).toBeInstanceOf(HTMLDivElement);
       expect(
@@ -290,7 +296,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const rowHeights = Array.from({ length: 50 }, () => 100);
     const rowTop = (index: number) =>
@@ -330,6 +337,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -355,7 +363,9 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const changedRows = [8, 14, 20, 25].map(
       (index) => container?.querySelector(`[data-msg-id="assistant-${index}"]`) as HTMLDivElement
     );
@@ -369,15 +379,15 @@ describe('MessageList auto-scroll', () => {
     rowHeights[14] = 80;
     rowHeights[20] = 180;
     rowHeights[25] = 160;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
-      changedRows.map(
-        (row, index) =>
-          ({
-            target: row,
-            borderBoxSize: [{ blockSize: rowHeights[[8, 14, 20, 25][index]!]!, inlineSize: 500 }],
-          }) as unknown as ResizeObserverEntry
+      changedRows.map((row, index) =>
+        fixture<ResizeObserverEntry>({
+          target: row,
+          borderBoxSize: [{ blockSize: rowHeights[[8, 14, 20, 25][index]!]!, inlineSize: 500 }],
+        })
       ),
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
 
     expect(scrollTopValue).toBe(2010);
@@ -385,14 +395,15 @@ describe('MessageList auto-scroll', () => {
 
     const belowRow = changedRows[3]!;
     rowHeights[25] = 200;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: belowRow,
           borderBoxSize: [{ blockSize: 200, inlineSize: 500 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
     expect(scrollTopValue).toBe(2010);
     expect(anchor.getBoundingClientRect().top).toBe(anchorTopBefore);
@@ -421,7 +432,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const rowHeight = 100;
     let list: HTMLDivElement | null = null;
@@ -453,6 +465,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 50 * rowHeight });
@@ -468,6 +481,7 @@ describe('MessageList auto-scroll', () => {
       await Promise.resolve();
       animationFrames.flush();
     }
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const staleRow = container?.querySelector('[data-msg-id="assistant-49"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(staleRow));
     expect(staleRow).toBeInstanceOf(HTMLDivElement);
@@ -487,14 +501,15 @@ describe('MessageList auto-scroll', () => {
       );
     const bottomPadBefore = bottomSpacer();
     document.body.append(staleRow);
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: staleRow,
           borderBoxSize: [{ blockSize: 500, inlineSize: 500 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
     await Promise.resolve();
 
@@ -525,7 +540,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const rowHeights = Array.from({ length: 50 }, () => 100);
     const rowTop = (index: number) =>
@@ -564,6 +580,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
@@ -592,20 +609,22 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     vi.advanceTimersByTime(600);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(anchor));
     expect(anchor).toBeInstanceOf(HTMLDivElement);
     expect(rowObserver).toBeDefined();
     const publishWidthMeasurement = (height: number, inlineSize: number) => {
       rowHeights[20] = height;
+      // SAFETY: The fixture provides the unknown fields read by this statement.
       rowObserver!.callback(
         [
-          {
+          fixture<ResizeObserverEntry>({
             target: anchor,
             borderBoxSize: [{ blockSize: height, inlineSize }],
-          } as unknown as ResizeObserverEntry,
+          }),
         ],
-        rowObserver as unknown as ResizeObserver
+        fixture<ResizeObserver>(rowObserver)
       );
     };
 
@@ -660,7 +679,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const rowHeights = Array.from({ length: 50 }, () => 100);
     const rowTop = (index: number) =>
@@ -699,6 +719,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
@@ -730,7 +751,9 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
     scrollTopValue = 2010;
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const staleRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const visibleRow = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
     const rowObserver = observers.find(
       (observer) => observer.targets.has(staleRow) && observer.targets.has(visibleRow)
@@ -740,18 +763,19 @@ describe('MessageList auto-scroll', () => {
     expect(rowObserver).toBeDefined();
 
     rowHeights[19] = 165;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: staleRow,
           borderBoxSize: [{ blockSize: 165, inlineSize: 360 }],
-        } as unknown as ResizeObserverEntry,
-        {
+        }),
+        fixture<ResizeObserverEntry>({
           target: visibleRow,
           borderBoxSize: [{ blockSize: 100, inlineSize: 360 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
     await Promise.resolve();
     animationFrames.flush();
@@ -783,7 +807,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const rowHeights = Array.from({ length: 60 }, () => 100);
     const rowTop = (index: number) =>
@@ -829,6 +854,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 786 });
     Object.defineProperty(list, 'clientWidth', { configurable: true, value: 500 });
@@ -857,8 +883,11 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const precedingRow = container?.querySelector('[data-msg-id="assistant-19"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchorRow = container?.querySelector('[data-msg-id="user-20"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchorCard = anchorRow.querySelector('.user-message-card') as HTMLDivElement;
     const rowObserver = observers.find(
       (observer) => observer.targets.has(precedingRow) && observer.targets.has(anchorRow)
@@ -871,18 +900,19 @@ describe('MessageList auto-scroll', () => {
     expect(anchorCard.getBoundingClientRect().top).toBe(8);
 
     rowHeights[19] = 122;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: precedingRow,
           borderBoxSize: [{ blockSize: 122, inlineSize: 360 }],
-        } as unknown as ResizeObserverEntry,
-        {
+        }),
+        fixture<ResizeObserverEntry>({
           target: anchorRow,
           borderBoxSize: [{ blockSize: 100, inlineSize: 360 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
     // Sample every reflow frame: a settled-only assertion can miss a one-frame jump that a
     // later correction hides.
@@ -921,7 +951,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     const chromeHeight = 48;
     const rowHeights: number[] = Array.from({ length: 50 }, (_, index) => (index === 0 ? 20 : 100));
@@ -962,8 +993,11 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const historyBanner = container?.querySelector('.message-history-banner') as HTMLDivElement;
     track.style.paddingTop = '14px';
     historyBanner.style.marginBottom = '12px';
@@ -987,6 +1021,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
     expect(rowObserver).toBeDefined();
@@ -994,14 +1029,15 @@ describe('MessageList auto-scroll', () => {
     expect(topBefore).toBe(18);
 
     rowHeights[0] = 40;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: firstRow,
           borderBoxSize: [{ blockSize: 40, inlineSize: 500 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
 
     expect(firstRow.getBoundingClientRect().top).toBe(topBefore);
@@ -1050,6 +1086,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
@@ -1141,6 +1178,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
@@ -1240,6 +1278,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1265,6 +1304,7 @@ describe('MessageList auto-scroll', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.querySelector('[data-msg-id="assistant-20"]') as HTMLDivElement;
     expect(anchor).toBeInstanceOf(HTMLDivElement);
     expect(container?.querySelector('[data-msg-id="assistant-0"]')).toBeNull();
@@ -1319,6 +1359,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 4900 });
@@ -1373,7 +1414,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
@@ -1402,6 +1444,7 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
@@ -1412,18 +1455,20 @@ describe('MessageList auto-scroll', () => {
         scrollTopValue = value;
       },
     });
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const firstRow = container?.querySelector('[data-msg-id="assistant-0"]') as HTMLDivElement;
     const rowObserver = observers.find((observer) => observer.targets.has(firstRow));
     expect(firstRow.childElementCount).toBeGreaterThan(0);
     expect(rowObserver).toBeDefined();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [
-        {
+        fixture<ResizeObserverEntry>({
           target: firstRow,
           borderBoxSize: [{ blockSize: 0, inlineSize: 500 }],
-        } as unknown as ResizeObserverEntry,
+        }),
       ],
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
 
     for (let frame = 0; frame < 4; frame += 1) {
@@ -1484,6 +1529,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1514,6 +1560,7 @@ describe('MessageList auto-scroll', () => {
     expect(container?.querySelector('[data-msg-id="assistant-30"]')).toBeNull();
 
     let emptyRowRemounted = false;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     const mutationObserver = new MutationObserver((records) => {
       for (const record of records) {
@@ -1590,6 +1637,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1683,6 +1731,7 @@ describe('MessageList auto-scroll', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1749,7 +1798,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     let listWidth = 500;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
@@ -1774,7 +1824,8 @@ describe('MessageList auto-scroll', () => {
     expect(layoutObserver).toBeDefined();
 
     listWidth = 420;
-    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    layoutObserver!.callback([], fixture<ResizeObserver>(layoutObserver));
     replaceMessages(
       Array.from({ length: 50 }, (_, index) => {
         const messageId = `assistant-${index}`;
@@ -1794,7 +1845,8 @@ describe('MessageList auto-scroll', () => {
 
     listWidth = 400;
     const timersBeforeResize = vi.getTimerCount();
-    layoutObserver!.callback([], layoutObserver as unknown as ResizeObserver);
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    layoutObserver!.callback([], fixture<ResizeObserver>(layoutObserver));
     expect(vi.getTimerCount()).toBeGreaterThan(timersBeforeResize);
     cleanup();
     cleanup = undefined;
@@ -1824,6 +1876,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -1899,6 +1952,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -1950,6 +2004,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2001,6 +2056,7 @@ describe('MessageList auto-scroll', () => {
     ]);
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
@@ -2043,6 +2099,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2087,6 +2144,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2106,6 +2164,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2131,6 +2190,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1700;
     scrollHeightValue = 1700;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2159,6 +2219,7 @@ describe('MessageList auto-scroll', () => {
     ]);
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
@@ -2217,6 +2278,7 @@ describe('MessageList auto-scroll', () => {
     setState('streamingText', 'Initial response');
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
@@ -2282,6 +2344,7 @@ describe('MessageList auto-scroll', () => {
     ]);
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
@@ -2332,6 +2395,7 @@ describe('MessageList auto-scroll', () => {
     startLoading(1);
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     let scrollHeightValue = 1200;
     let scrollTopValue = 0;
@@ -2384,6 +2448,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
@@ -2417,6 +2482,7 @@ describe('MessageList auto-scroll', () => {
     );
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -2437,7 +2503,8 @@ describe('MessageList auto-scroll', () => {
     }
     expect(scrollTopValue).toBe(4600);
     for (const callback of resizeCallbacks) {
-      callback([{ target: list } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+      callback([fixture<ResizeObserverEntry>({ target: list })], {} as ResizeObserver);
     }
     animationFrames.flush();
 
@@ -2452,6 +2519,7 @@ describe('MessageList auto-scroll', () => {
     // Chrome clamps to the new bottom during layout, before it necessarily dispatches scroll.
     scrollTopValue = 600;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2479,6 +2547,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2498,6 +2567,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2525,6 +2595,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1700;
     scrollHeightValue = 1700;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2535,6 +2606,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1688;
     scrollHeightValue = 1688;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2543,6 +2615,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1700;
     scrollHeightValue = 1700;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2567,6 +2640,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2585,6 +2659,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2623,6 +2698,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1400;
     scrollHeightValue = 1400;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2646,6 +2722,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2664,6 +2741,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2695,6 +2773,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1400;
     scrollHeightValue = 1400;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2708,6 +2787,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1600;
     scrollHeightValue = 1600;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2734,6 +2814,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2752,6 +2833,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2786,6 +2868,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1400;
     scrollHeightValue = 1400;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2809,6 +2892,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2827,6 +2911,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2866,6 +2951,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1400;
     scrollHeightValue = 1400;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2882,6 +2968,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1600;
     scrollHeightValue = 1600;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2905,6 +2992,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2924,6 +3012,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2953,6 +3042,7 @@ describe('MessageList auto-scroll', () => {
     scrollHeightValue = 1700;
     scrollTopValue = 1300;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -2977,6 +3067,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -2996,6 +3087,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3030,6 +3122,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1240;
     scrollHeightValue = 1240;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -3051,6 +3144,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3101,6 +3195,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -3120,6 +3215,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3151,6 +3247,7 @@ describe('MessageList auto-scroll', () => {
 
     trackHeight = 1240;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -3175,6 +3272,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -3194,6 +3292,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3240,6 +3339,7 @@ describe('MessageList auto-scroll', () => {
     trackHeight = 1240;
     scrollHeightValue = 1240;
     for (const callback of resizeCallbacks) {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       callback([], {} as ResizeObserver);
     }
     animationFrames.flush();
@@ -3284,6 +3384,7 @@ describe('MessageList auto-scroll', () => {
     replaceMessages(baseMessages);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -3351,6 +3452,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3418,6 +3520,7 @@ describe('MessageList auto-scroll', () => {
       disconnect() {}
     }
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
       function (this: HTMLElement) {
@@ -3437,6 +3540,7 @@ describe('MessageList auto-scroll', () => {
     cleanup = render(() => MessageList(), container!);
     expect(resizeCallbacks.length).toBeGreaterThanOrEqual(2);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3508,7 +3612,8 @@ describe('MessageList auto-scroll', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     let list: HTMLDivElement | null = null;
     let scrollTopValue = 0;
@@ -3542,7 +3647,9 @@ describe('MessageList auto-scroll', () => {
       })
     );
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -3583,9 +3690,10 @@ describe('MessageList auto-scroll', () => {
       (observer) => observer.targets.has(list!) && observer.targets.has(track)
     );
     expect(layoutObserver).toBeDefined();
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
+      [fixture<ResizeObserverEntry>({ target: track })],
+      fixture<ResizeObserver>(layoutObserver)
     );
     await Promise.resolve();
 
@@ -3614,6 +3722,7 @@ describe('MessageList auto-scroll', () => {
 
     cleanup = render(() => MessageList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -3642,6 +3751,7 @@ describe('MessageList auto-scroll', () => {
     list?.dispatchEvent(new Event('scroll'));
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const button = container?.querySelector('.jump-to-latest-button') as HTMLButtonElement | null;
     expect(button).toBeInstanceOf(HTMLButtonElement);
 
@@ -3649,6 +3759,7 @@ describe('MessageList auto-scroll', () => {
     expect(container?.querySelector('.jump-to-latest-button')).toBeNull();
 
     setExpandedDiffOverlay(testDiffOverlayOwner, false);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const restoredButton = container?.querySelector(
       '.jump-to-latest-button'
     ) as HTMLButtonElement | null;

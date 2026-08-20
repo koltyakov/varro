@@ -1,7 +1,7 @@
 import { defineConfig } from 'oxlint';
 
 export default defineConfig({
-  ignorePatterns: ['assets/**', 'dist/**', '*.vsix'],
+  ignorePatterns: ['assets/**', 'dist/**', 'tools/oxlint/anti-slop/**', '*.vsix'],
   plugins: ['eslint', 'typescript', 'unicorn', 'oxc', 'react', 'import'],
   jsPlugins: [
     { name: 'anti-slop', specifier: './tools/oxlint/anti-slop/index.ts' },

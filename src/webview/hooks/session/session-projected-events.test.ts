@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, MessageEntry, Part } from '../../types';
 import { getToolFileChanges } from '../../lib/tool-file-change';
+import type { ServerEvent } from '../../../shared/protocol';
 
 const { upsertPart, applyMessagePartDelta } = vi.hoisted(() => ({
   upsertPart: vi.fn(),
   applyMessagePartDelta: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise projected-event integration with the session store. */
 vi.mock('../../lib/stores/session-store', () => ({
   sessionStore: { upsertPart, applyMessagePartDelta },
 }));
@@ -16,6 +18,7 @@ const { createProjectedSessionEventHandler } = await import('./session-projected
 const SESSION_ID = 'session-1';
 const MESSAGE_ID = 'assistant-1';
 const CALL_ID = 'call-1';
+type EventProperties = NonNullable<ServerEvent['properties']>;
 
 function assistantInfo(id = MESSAGE_ID): AssistantMessage {
   return {
@@ -72,7 +75,7 @@ function currentToolPart({ messages }: Harness) {
   return part;
 }
 
-function emit(harness: Harness, event: string, props: Record<string, unknown> = {}) {
+function emit(harness: Harness, event: string, props: EventProperties = {}) {
   return harness.handle(event, {
     sessionID: SESSION_ID,
     assistantMessageID: MESSAGE_ID,

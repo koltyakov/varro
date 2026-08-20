@@ -49,6 +49,7 @@ function makePart(messageID: string, text = ''): Part {
 function makeMessage(partCount: number): MessageEntry {
   idCounter += 1;
   const id = `message-${idCounter}`;
+  // SAFETY: The fixture provides the MessageEntry['info'] fields read by this statement.
   const info = {
     id,
     sessionID: 'session-1',
@@ -170,6 +171,7 @@ function runScenario(seed: number) {
         const entry = withParts[randomInt(rng, 0, withParts.length - 1)]!;
         const partIdx = randomInt(rng, 0, entry.parts.length - 1);
         const part = entry.parts[partIdx]!;
+        // SAFETY: The fixture provides the Part fields read by this statement.
         entry.parts[partIdx] = { ...part, text: `updated-${step}` } as Part;
         index.notifyPartContentChange();
       }

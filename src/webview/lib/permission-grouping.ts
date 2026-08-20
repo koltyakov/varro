@@ -1,5 +1,13 @@
 import type { Permission, PermissionGroupMember, QuestionRequest } from '../types';
 import { normalizePermissionEvent } from './session-event-reducer';
+import {
+  asRecord,
+  isBoolean,
+  isNumber,
+  isString,
+  type UnknownRecord,
+  isObject,
+} from './runtime-values';
 
 const permissionGroupMemberCache = new WeakMap<Permission, PermissionGroupMember[]>();
 export type PermissionReconciliation = {
@@ -7,22 +15,23 @@ export type PermissionReconciliation = {
 };
 export const activePermissionReconciliations = new Set<PermissionReconciliation>();
 
-function normalizeInitialPermission(value: Record<string, unknown>): Permission | null {
+function normalizeInitialPermission(value: UnknownRecord): Permission | null {
   return normalizePermissionEvent(value);
 }
 
-function stableSerializePermissionValue(value: unknown): string {
+function stableSerializePermissionValue<T>(value: T): string {
   if (value === null || value === undefined) return String(value);
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (isString(value)) return JSON.stringify(value);
+  if (isNumber(value) || isBoolean(value)) return String(value);
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableSerializePermissionValue(item)).join(',')}]`;
   }
-  if (typeof value === 'object') {
+  if (isObject(value)) {
     // Code-unit ordering, not collation: `localeCompare` varies with locale and
     // ICU build, and ties for strings that differ only by ignorable characters,
     // so equal permissions could serialize to different grouping signatures.
-    const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) =>
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    const entries = Object.entries(value as UnknownRecord).toSorted(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0
     );
     return `{${entries
@@ -101,9 +110,9 @@ export function groupPermissions(permissions: Permission[]): Permission[] {
   return [...grouped.values()];
 }
 
-function normalizeInitialQuestion(value: Record<string, unknown>): QuestionRequest | null {
-  const id = typeof value.id === 'string' ? value.id : null;
-  const sessionID = typeof value.sessionID === 'string' ? value.sessionID : null;
+function normalizeInitialQuestion(value: UnknownRecord): QuestionRequest | null {
+  const id = isString(value.id) ? value.id : null;
+  const sessionID = isString(value.sessionID) ? value.sessionID : null;
   const questions = Array.isArray(value.questions) ? value.questions : null;
   if (!id || !sessionID || !questions) return null;
 
@@ -111,40 +120,36 @@ function normalizeInitialQuestion(value: Record<string, unknown>): QuestionReque
   return {
     id,
     sessionID,
+    // SAFETY: The surrounding shape or discriminator check establishes the QuestionRequest contract used below.
     questions: questions as QuestionRequest['questions'],
     tool:
-      tool &&
-      typeof tool === 'object' &&
-      typeof (tool as { messageID?: unknown }).messageID === 'string' &&
-      typeof (tool as { callID?: unknown }).callID === 'string'
+      isString(asRecord(tool)?.messageID) && isString(asRecord(tool)?.callID)
         ? {
-            messageID: (tool as { messageID: string }).messageID,
-            callID: (tool as { callID: string }).callID,
+            messageID: String(asRecord(tool)?.messageID),
+            callID: String(asRecord(tool)?.callID),
           }
         : undefined,
   };
 }
 
-export function normalizeInitialPermissions(values: unknown): Permission[] {
+export function normalizeInitialPermissions<T>(values: T): Permission[] {
   if (!Array.isArray(values)) return [];
   return groupPermissions(
     values
       .map((item) =>
-        item && typeof item === 'object'
-          ? normalizeInitialPermission(item as Record<string, unknown>)
-          : null
+        // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+        item && isObject(item) ? normalizeInitialPermission(item as UnknownRecord) : null
       )
       .filter((item): item is Permission => item !== null)
   );
 }
 
-export function normalizeInitialQuestions(values: unknown): QuestionRequest[] {
+export function normalizeInitialQuestions<T>(values: T): QuestionRequest[] {
   if (!Array.isArray(values)) return [];
   return values
     .map((item) =>
-      item && typeof item === 'object'
-        ? normalizeInitialQuestion(item as Record<string, unknown>)
-        : null
+      // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+      item && isObject(item) ? normalizeInitialQuestion(item as UnknownRecord) : null
     )
     .filter((item): item is QuestionRequest => item !== null);
 }

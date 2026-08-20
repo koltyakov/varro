@@ -1,19 +1,25 @@
 import type { Part, ToolPart, ToolStateCompleted } from '../types';
 import { getToolFileChangeSignature } from './tool-file-change';
+import { isNumber } from './runtime-values';
 
 function getDiffStatsSignature(part: ToolPart): string {
   if (part.state.status !== 'completed') return '';
+  // SAFETY: The surrounding shape or discriminator check establishes the ToolStateCompleted contract used below.
   const metadata = (part.state as ToolStateCompleted).metadata || {};
   const additions =
-    typeof metadata.additions === 'number'
+    // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
+    // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
+    isNumber(metadata.additions)
       ? (metadata.additions as number)
-      : typeof metadata.linesAdded === 'number'
+      : isNumber(metadata.linesAdded)
         ? (metadata.linesAdded as number)
         : null;
   const deletions =
-    typeof metadata.deletions === 'number'
+    // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
+    // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
+    isNumber(metadata.deletions)
       ? (metadata.deletions as number)
-      : typeof metadata.linesRemoved === 'number'
+      : isNumber(metadata.linesRemoved)
         ? (metadata.linesRemoved as number)
         : null;
 

@@ -1,3 +1,4 @@
+import { isNumber } from '../../lib/runtime-values';
 export const VIRTUALIZE_THRESHOLD = 50;
 const DEFAULT_ITEM_HEIGHT = 160;
 const OVERSCAN = 9;
@@ -64,10 +65,9 @@ export function buildVirtualMetrics(args: {
     while (commonLen < upper && previousIds[commonLen] === args.itemIds[commonLen]) {
       commonLen += 1;
     }
-    rebuildFrom =
-      typeof args.dirtyFromIndex === 'number'
-        ? Math.max(0, Math.min(commonLen, args.dirtyFromIndex))
-        : commonLen;
+    rebuildFrom = isNumber(args.dirtyFromIndex)
+      ? Math.max(0, Math.min(commonLen, args.dirtyFromIndex))
+      : commonLen;
     prefix = Array.from<number>({ length: itemCount + 1 });
     prefix[0] = 0;
     const copyUpTo = Math.min(rebuildFrom, previousPrefix.length - 1);

@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Gemini API payloads are decoded before quota extraction. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Gemini records are asserted only after object and quota validation. */
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';

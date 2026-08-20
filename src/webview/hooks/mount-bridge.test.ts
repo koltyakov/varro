@@ -41,7 +41,9 @@ const {
   setWorkspaceStatuses: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise mount-bridge integration with state and client modules. */
 vi.mock('../lib/state', async () => {
+  // SAFETY: The test installs the typed mock implementation before this statement.
   const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
   return {
     ...actual,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage, MessageEntry, Part } from '../../types';
+import type { ServerEvent } from '../../../shared/protocol';
 
 const { serverEventsOn, upsertPart, applyMessagePartDelta, markLoadingActivity } = vi.hoisted(
   () => ({
@@ -10,6 +11,7 @@ const { serverEventsOn, upsertPart, applyMessagePartDelta, markLoadingActivity }
   })
 );
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise reasoning-event integration across store modules. */
 vi.mock('../../lib/client', () => ({ serverEvents: { on: serverEventsOn } }));
 vi.mock('../../lib/stores/session-store', () => ({
   sessionStore: { upsertPart, applyMessagePartDelta },
@@ -51,8 +53,10 @@ type Options = {
   ignoreFinished?: boolean;
 };
 
+type EventProperties = NonNullable<ServerEvent['properties']>;
+
 function install(options: Options = {}) {
-  const handlers = new Map<string, (data: { properties: Record<string, unknown> }) => void>();
+  const handlers = new Map<string, (data: { properties: EventProperties }) => void>();
   serverEventsOn.mockImplementation((event: string, handler: never) => {
     handlers.set(event, handler);
     return () => handlers.delete(event);
@@ -81,7 +85,7 @@ function install(options: Options = {}) {
     recordSessionMessageSnapshotMutation,
   });
 
-  const emit = (event: string, properties: Record<string, unknown>) =>
+  const emit = (event: string, properties: EventProperties) =>
     handlers.get(event)?.({ properties });
 
   return { cleanups, emit, handlers, logError, markSessionProgress, messages, syncSessionMessages };

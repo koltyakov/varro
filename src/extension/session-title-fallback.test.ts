@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These fallback tests verify imported logging and malformed message payload handling. */
 import { describe, expect, it, vi } from 'vitest';
 
 import type { PermissionRule } from '../shared/opencode-types';

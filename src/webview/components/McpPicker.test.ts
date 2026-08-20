@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   status: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise MCP picker integration with bridge and client modules. */
 vi.mock('../lib/bridge', () => ({ postMessage: mocks.postMessage }));
 vi.mock('../lib/client', () => ({
   client: {
@@ -100,6 +101,7 @@ describe('McpPicker', () => {
 
     expect(container?.textContent).toContain('Timed out');
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'needs auth';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
@@ -110,6 +112,7 @@ describe('McpPicker', () => {
       )
     ).toEqual(['iota']);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (searchInput as HTMLInputElement).value = 'missing';
     searchInput?.dispatchEvent(new Event('input', { bubbles: true }));
     await flushMicrotasks();
@@ -263,6 +266,7 @@ describe('McpPicker', () => {
     );
     await flushMicrotasks();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const anchor = container?.firstElementChild as HTMLDivElement | null;
     expect(anchor?.style.bottom).toBe('100%');
     expect(anchor?.style.paddingBottom).toBe('10px');

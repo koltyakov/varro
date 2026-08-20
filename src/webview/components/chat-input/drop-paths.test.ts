@@ -6,6 +6,7 @@ import {
   readFileAsDataUrl,
   readItemByType,
 } from './drop-paths';
+import { fixture } from '../../test-fixtures';
 
 describe('parseDroppedText', () => {
   it('parses absolute, relative, and uri-list entries while dropping comments and duplicates', () => {
@@ -52,8 +53,10 @@ describe('parseDroppedText', () => {
 
 describe('collectDroppedPaths', () => {
   it('ignores UI-machine File.path values remotely while preserving workspace URI drops', async () => {
+    // SAFETY: The fixture provides the File & { path: string } fields read by this statement.
     const localFile = { path: '/Users/local/Desktop/note.txt' } as File & { path: string };
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: ['CodeEditors', 'text/uri-list'],
       files: [localFile],
       items: [{ kind: 'file', getAsFile: () => localFile }],
@@ -63,7 +66,7 @@ describe('collectDroppedPaths', () => {
         }
         return type === 'text/uri-list' ? 'file:///Users/local/Desktop/note.txt' : '';
       },
-    } as unknown as DataTransfer;
+    });
 
     await expect(
       collectDroppedPaths(dataTransfer, {
@@ -74,14 +77,16 @@ describe('collectDroppedPaths', () => {
   });
 
   it('prefers content over generic local file URIs for remote drops', async () => {
+    // SAFETY: The fixture provides the File & { path: string } fields read by this statement.
     const localFile = { path: '/Users/local/Desktop/note.txt' } as File & { path: string };
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: ['text/uri-list'],
       files: [localFile],
       items: [{ kind: 'file', getAsFile: () => localFile }],
       getData: (type: string) =>
         type === 'text/uri-list' ? 'file:///Users/local/Desktop/note.txt' : '',
-    } as unknown as DataTransfer;
+    });
 
     await expect(
       collectDroppedPaths(dataTransfer, {
@@ -92,13 +97,15 @@ describe('collectDroppedPaths', () => {
   });
 
   it('keeps File.path extraction enabled by default for local extension hosts', async () => {
+    // SAFETY: The fixture provides the File & { path: string } fields read by this statement.
     const localFile = { path: '/Users/local/Desktop/note.txt' } as File & { path: string };
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: [],
       files: [localFile],
       items: [],
       getData: () => '',
-    } as unknown as DataTransfer;
+    });
 
     await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
       '/Users/local/Desktop/note.txt',
@@ -114,12 +121,13 @@ function makeDataTransfer(
     types: string[];
   }> = {}
 ) {
-  return {
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  return fixture<DataTransfer>({
     types: overrides.types ?? Object.keys(data),
     files: overrides.files ?? [],
     items: overrides.items ?? [],
     getData: (type: string) => data[type] ?? '',
-  } as unknown as DataTransfer;
+  });
 }
 
 describe('VS Code drop payload parsers', () => {
@@ -203,7 +211,8 @@ describe('VS Code drop payload parsers', () => {
   });
 
   it('tolerates a getData implementation that throws for a type', async () => {
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: ['text/plain', 'text/uri-list'],
       files: [],
       items: [],
@@ -211,13 +220,14 @@ describe('VS Code drop payload parsers', () => {
         if (type === 'text/plain') throw new Error('unavailable');
         return 'file:///repo/src/a.ts';
       },
-    } as unknown as DataTransfer;
+    });
 
     await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/a.ts']);
   });
 
   it('reads string items asynchronously when no synchronous payload yields a path', async () => {
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: [],
       files: [],
       items: [
@@ -230,19 +240,21 @@ describe('VS Code drop payload parsers', () => {
         { kind: 'file', getAsFile: () => null },
       ],
       getData: () => '',
-    } as unknown as DataTransfer;
+    });
 
     await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual(['/repo/src/async.ts']);
   });
 
   it('collects File.path from data transfer items as well as the file list', async () => {
+    // SAFETY: The fixture provides the File & { path: string } fields read by this statement.
     const itemFile = { path: '/repo/from-item.ts' } as File & { path: string };
-    const dataTransfer = {
+    // SAFETY: The fixture provides the File & { path: string } fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       types: [],
       files: [{ path: '/repo/from-files.ts' } as File & { path: string }],
       items: [{ kind: 'file', getAsFile: () => itemFile }],
       getData: () => '',
-    } as unknown as DataTransfer;
+    });
 
     await expect(collectDroppedPaths(dataTransfer)).resolves.toEqual([
       '/repo/from-files.ts',
@@ -302,32 +314,35 @@ describe('dropped path decoding', () => {
 
 describe('readItemByType', () => {
   it('resolves the string item matching the requested type', async () => {
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       items: [
         { kind: 'string', type: 'text/plain', getAsString: (cb: (v: string) => void) => cb('hi') },
       ],
       getData: () => 'unused',
-    } as unknown as DataTransfer;
+    });
 
     await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('hi');
   });
 
   it('falls back to getData when no matching item exists', async () => {
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       items: [],
       getData: (type: string) => (type === 'text/plain' ? 'from-getData' : ''),
-    } as unknown as DataTransfer;
+    });
 
     await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('from-getData');
   });
 
   it('resolves an empty string when the item yields nothing', async () => {
-    const dataTransfer = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const dataTransfer = fixture<DataTransfer>({
       items: [
         { kind: 'string', type: 'text/plain', getAsString: (cb: (v: string) => void) => cb('') },
       ],
       getData: () => '',
-    } as unknown as DataTransfer;
+    });
 
     await expect(readItemByType(dataTransfer, 'text/plain')).resolves.toBe('');
   });

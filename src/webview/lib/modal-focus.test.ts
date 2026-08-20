@@ -326,6 +326,7 @@ describe('trapModalFocus', () => {
     const release = trapModalFocus(dialog);
     await flushEntryFocus();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((document.activeElement as HTMLElement).textContent).toBe('Real');
     release();
   });

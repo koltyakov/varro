@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Webview and OpenCode callbacks cross protocol boundaries and validate values before use. */
 import * as vscode from 'vscode';
 import type {
   BlockingRequestSnapshot,

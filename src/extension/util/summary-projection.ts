@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Summary projections validate untrusted API trees while preserving bounded fields. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Summary records are checked before projection. */
 import { asRecord } from '../../shared/type-utils';
 
 export const SUMMARY_DIFF_COUNT_BUDGET = 100;

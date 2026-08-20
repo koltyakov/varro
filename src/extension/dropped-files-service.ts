@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Dropped editor and filesystem values require runtime validation at this boundary. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: URI assertions follow VS Code URI and filesystem validation. */
 import { writeFile, mkdtemp, mkdir, readFile, readdir, rm, stat as statPath } from 'fs/promises';
 import { tmpdir } from 'os';
 import { Buffer } from 'buffer';

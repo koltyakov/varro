@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests exercise VS Code file-drop boundaries with partial URI and document fixtures. */
 import { access, readFile, stat } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';

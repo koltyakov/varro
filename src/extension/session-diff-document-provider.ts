@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- URI and response values are validated before rendering virtual documents. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Parsed URI JSON is shape-checked before use. */
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import * as vscode from 'vscode';

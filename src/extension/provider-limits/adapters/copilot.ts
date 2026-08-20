@@ -1,7 +1,9 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type -- Copilot API and gh configuration payloads are decoded before use. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Quota assertions follow numeric and record validation. */
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ProviderLimitWindow } from '../../../shared/protocol';
+import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import {
   parseRateLimitResetAt,
   type ProviderAuthRecord,
@@ -112,16 +114,17 @@ export function createCopilotAdapter(): ProviderLimitAdapter {
           );
         }
 
-        return {
+        const status: ProviderLimitStatus = {
           providerID: provider.id,
           modelID,
           status: 'available',
           source: 'provider',
           checkedAt,
           windows,
-          ...(planName ? { planName } : {}),
           note: 'Polled GitHub Copilot internal quota endpoint',
         };
+        if (planName) status.planName = planName;
+        return status;
       } catch {
         return {
           providerID: provider.id,
@@ -184,15 +187,16 @@ function buildCopilotWindow(
     return null;
   }
 
-  return {
+  const window: ProviderLimitWindow = {
     id,
     label: COPILOT_MONTHLY_QUOTA_LABELS[id] ?? COPILOT_QUOTA_LABELS[id] ?? `Monthly ${toLabel(id)}`,
     unit: id === 'chat' ? 'messages' : 'requests',
     remaining,
     limit: limit != null && limit > 0 ? limit : null,
     resetAt,
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function normalizeCopilotQuotaSnapshots(record: Record<string, unknown>) {

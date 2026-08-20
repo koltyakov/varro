@@ -1,5 +1,6 @@
 import { beforeEach, vi } from 'vitest';
 import type { Message, Part, Provider, Session } from '../types';
+import { fixture } from '../test-fixtures';
 
 const mocks = vi.hoisted(() => ({
   client: {
@@ -60,6 +61,7 @@ export function getBridgeMocks() {
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 
+/* oxlint-disable anti-slop/no-module-mocking -- This support harness provides controlled client and bridge module integrations. */
 vi.mock('../lib/client', () => ({
   invalidateClientWorkspaceCaches: clientMocks.invalidateClientWorkspaceCaches,
   client: {
@@ -189,7 +191,8 @@ export function todoPart(
   content: string,
   status = 'completed'
 ): Part {
-  return {
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  return fixture<Part>({
     id,
     sessionID: 'session-1',
     messageID,
@@ -201,7 +204,7 @@ export function todoPart(
         todos: [{ id: `${id}-todo`, content, status, priority: 'medium' }],
       },
     },
-  } as unknown as Part;
+  });
 }
 
 export async function loadModules() {
@@ -212,7 +215,8 @@ export async function loadModules() {
 
 beforeEach(() => {
   vi.resetModules();
-  delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
   clientMocks.health.mockReset();
   clientMocks.commandList.mockReset();
   clientMocks.sessionList.mockReset();

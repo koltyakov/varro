@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- This boundary validates untrusted OpenCode and process payloads before producing judge domain values. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions are applied only after judge response or filesystem identity validation. */
 import { execFile } from 'child_process';
 import { lstatSync, realpathSync, statSync } from 'fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'path';
@@ -22,6 +24,20 @@ import { logger } from './logger';
 type OpenCodeRequest = Pick<OpenCodeServer, 'request'>;
 type JudgeModel = NonNullable<AutoApproveJudgeRequest['model']>;
 type GitWorkTree = { gitDirectory: string; commonDirectory: string };
+type CachedVerdict = {
+  decision: 'allow' | 'reject';
+  reason?: string;
+  actionSummary?: string;
+  expiresAt: number;
+};
+
+interface JudgeMessageRequest {
+  model?: { providerID: string; modelID: string };
+  variant?: string;
+  system: string;
+  parts: Array<{ type: string; text: string }>;
+  format: ReturnType<typeof judgeOutputFormat>;
+}
 
 const VERDICT_CACHE_TTL_MS = 15 * 60_000;
 const VERDICT_CACHE_LIMIT = 200;
@@ -58,10 +74,7 @@ const SAFE_GIT_BRANCH_FLAGS = new Set(['--show-current', '--list', '-a', '-r', '
 const GIT_PROBE_TIMEOUT_MS = 2_000;
 
 export class AutoApproveJudge {
-  private readonly verdictCache = new Map<
-    string,
-    { decision: 'allow' | 'reject'; reason?: string; actionSummary?: string; expiresAt: number }
-  >();
+  private readonly verdictCache = new Map<string, CachedVerdict>();
   private readonly gitWorkTreeProbes = new Map<string, Promise<GitWorkTree | null>>();
 
   constructor(
@@ -138,21 +151,23 @@ export class AutoApproveJudge {
     }
     this.verdictCache.delete(key);
     this.verdictCache.set(key, entry);
-    return {
+    const response: AutoApproveJudgeResponse = {
       decision: entry.decision,
-      ...(entry.reason ? { reason: entry.reason } : {}),
-      ...(entry.actionSummary ? { actionSummary: entry.actionSummary } : {}),
     };
+    if (entry.reason) response.reason = entry.reason;
+    if (entry.actionSummary) response.actionSummary = entry.actionSummary;
+    return response;
   }
 
   private storeCachedVerdict(key: string, decision: AutoApproveJudgeResponse) {
     if (decision.decision === 'ask') return;
-    this.verdictCache.set(key, {
+    const entry: CachedVerdict = {
       decision: decision.decision,
-      ...(decision.reason ? { reason: decision.reason } : {}),
-      ...(decision.actionSummary ? { actionSummary: decision.actionSummary } : {}),
       expiresAt: Date.now() + VERDICT_CACHE_TTL_MS,
-    });
+    };
+    if (decision.reason) entry.reason = decision.reason;
+    if (decision.actionSummary) entry.actionSummary = decision.actionSummary;
+    this.verdictCache.set(key, entry);
     if (this.verdictCache.size > VERDICT_CACHE_LIMIT) {
       const oldest = this.verdictCache.keys().next().value;
       if (oldest) this.verdictCache.delete(oldest);
@@ -192,25 +207,24 @@ export class AutoApproveJudge {
       this.hiddenSessions.hide(sessionID);
       if (!sessionID) return { decision: 'ask', reason: 'Judge session was not created.' };
 
+      const request: JudgeMessageRequest = {
+        system: buildJudgeSystemPrompt(),
+        parts: [
+          {
+            type: 'text',
+            text: buildJudgeUserPrompt(permission, approvedReferences),
+          },
+        ],
+        format: judgeOutputFormat(),
+      };
+      if (model) {
+        request.model = { providerID: model.providerID, modelID: model.modelID };
+        if (model.variant) request.variant = model.variant;
+      }
       const response = await this.server.request(
         'POST',
         `/session/${encodeURIComponent(sessionID)}/message`,
-        {
-          ...(model
-            ? {
-                model: { providerID: model.providerID, modelID: model.modelID },
-                ...(model.variant ? { variant: model.variant } : {}),
-              }
-            : {}),
-          system: buildJudgeSystemPrompt(),
-          parts: [
-            {
-              type: 'text',
-              text: buildJudgeUserPrompt(permission, approvedReferences),
-            },
-          ],
-          format: judgeOutputFormat(),
-        }
+        request
       );
 
       return normalizeJudgeResponse(response);
@@ -343,17 +357,18 @@ function normalizePermissionRequest(value: unknown): NormalizedJudgePermission |
     : typeof patternValue === 'string'
       ? patternValue
       : undefined;
-  return {
+  const permission: NormalizedJudgePermission = {
     id,
     type,
     title,
     sessionID,
-    ...(messageID ? { messageID } : {}),
-    ...(callID ? { callID } : {}),
-    ...(pattern !== undefined ? { pattern } : {}),
     hasMalformedPattern,
     metadata: asRecord(record.metadata) || {},
   };
+  if (messageID) permission.messageID = messageID;
+  if (callID) permission.callID = callID;
+  if (pattern !== undefined) permission.pattern = pattern;
+  return permission;
 }
 
 function hasUsefulPermissionContext(permission: NormalizedJudgePermission) {
@@ -1495,11 +1510,12 @@ function parseJsonObject(text: string) {
 
 function normalizeModel(value: AutoApproveJudgeRequest['model']) {
   if (!value?.providerID || !value.modelID) return null;
-  return {
+  const model: JudgeModel = {
     providerID: value.providerID,
     modelID: value.modelID,
-    ...(value.variant ? { variant: value.variant } : {}),
   };
+  if (value.variant) model.variant = value.variant;
+  return model;
 }
 
 function getString(value: unknown) {

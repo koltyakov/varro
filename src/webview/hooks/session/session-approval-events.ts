@@ -3,14 +3,15 @@ import { normalizePermissionEvent } from '../../lib/session-event-reducer';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import type { Permission, QuestionRequest } from '../../types';
 import { getPermissionReplyId, getQuestionReplyId } from './session-event-utils';
+import type { UnknownRecord } from '../../../shared/type-utils';
 
 type ApprovalEventDependencies = {
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
-  syncPermissionSession?(sessionId: string): Promise<void>;
-  judgePermission?(permission: Permission): Promise<void>;
+  syncPermissionSession?(sessionId: string): Promise<void | boolean | object>;
+  judgePermission?(permission: Permission): Promise<void | boolean | object>;
   permissionReplied?(permissionId: string): void;
   permissionVisible?(permissionId: string): void;
   respondPermission(
@@ -18,8 +19,8 @@ type ApprovalEventDependencies = {
     permissionId: string,
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
-  ): Promise<void>;
-  logError(context: string, err: unknown): void;
+  ): Promise<void | boolean | object>;
+  logError(context: string, cause: unknown): void;
 };
 
 export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): Array<() => void> {
@@ -68,7 +69,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
     deps.permissionVisible?.(permission.id);
   }
 
-  function handlePermissionEvent(props: Record<string, unknown>) {
+  function handlePermissionEvent(props: UnknownRecord) {
     const permission = normalizePermissionEvent(props);
     if (!permission) return;
     if (!deps.isPermissionSessionKnown?.(permission.sessionID) && deps.syncPermissionSession) {
@@ -85,7 +86,7 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
             pendingSessionPermissions.delete(permission.id);
             handleKnownPermission(pending);
           },
-          (err: unknown) => {
+          (err) => {
             const pending = pendingSessionPermissions.get(permission.id);
             if (disposed || !pending) return;
             pendingSessionPermissions.delete(permission.id);
@@ -149,14 +150,20 @@ export function registerApprovalEventHandlers(deps: ApprovalEventDependencies): 
   cleanups.push(
     serverEvents.on('question.asked', (data) => {
       const props = data.properties;
-      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
+      if (props) {
+        // SAFETY: question.asked is decoded by the server-event contract as a complete question request.
+        permissionsStore.upsertQuestion(props as QuestionRequest);
+      }
     })
   );
 
   cleanups.push(
     serverEvents.on('question.v2.asked', (data) => {
       const props = data.properties;
-      if (props) permissionsStore.upsertQuestion(props as QuestionRequest);
+      if (props) {
+        // SAFETY: question.v2.asked is decoded by the server-event contract as a complete question request.
+        permissionsStore.upsertQuestion(props as QuestionRequest);
+      }
     })
   );
 

@@ -42,18 +42,21 @@ type SessionManagementDependencies = {
   getSessions(): Session[];
   getDeletedSessionTreeIds(rootId: string, sessions: Session[]): Set<string>;
   getNextSessionIdAfterDeletion(sessions: Session[]): string | null;
-  deleteRemoteSession(sessionId: string): Promise<unknown>;
+  deleteRemoteSession(sessionId: string): Promise<void | boolean | object>;
   hideDeletedSessionTree(sessionId: string): void;
-  loadRecycleBin(): Promise<void>;
-  selectSession(sessionId: string, options?: { markSeen?: boolean }): Promise<void>;
-  logError(context: string, err: unknown): void;
-  restoreRecycleBinEntry(rootID: string): Promise<unknown>;
-  loadSessions(): Promise<void>;
-  hydrateSessionStatuses(): Promise<void>;
+  loadRecycleBin(): Promise<void | boolean | object>;
+  selectSession(
+    sessionId: string,
+    options?: { markSeen?: boolean }
+  ): Promise<void | boolean | object>;
+  logError(context: string, cause: unknown): void;
+  restoreRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
+  loadSessions(): Promise<void | boolean | object>;
+  hydrateSessionStatuses(): Promise<void | boolean | object>;
   getRecycleBinEntries(): RecycleBinEntry[];
-  deleteRecycleBinEntry(rootID: string): Promise<unknown>;
+  deleteRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
   clearDeletedSessionState(sessionId: string): void;
-  emptyRecycleBin(): Promise<unknown>;
+  emptyRecycleBin(): Promise<void | boolean | object>;
 };
 
 export class SessionManagementOperations {
@@ -232,8 +235,8 @@ export async function createSessionWithDependencies(
     const initialMcpNames = [...deps.getInitialMcpNames()];
     const permission = deps.buildCreatePermission(initialPermissionMode);
     const session = await deps.createRemoteSession({
-      ...(title ? { title } : {}),
-      ...(permission.length > 0 ? { permission } : {}),
+      title: title || undefined,
+      permission: permission.length > 0 ? permission : undefined,
     });
 
     if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
@@ -296,7 +299,10 @@ export async function forkSessionWithDependencies(
     getPermissionModeForSession(sessionId: string): PermissionMode;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
     upsertSession(session: Session): void;
-    selectSession(sessionId: string, options?: { markSeen?: boolean }): Promise<void>;
+    selectSession(
+      sessionId: string,
+      options?: { markSeen?: boolean }
+    ): Promise<void | boolean | object>;
     setError(message: string): void;
   },
   id: string,
@@ -349,12 +355,15 @@ export async function deleteSessionWithDependencies(
     getActiveSessionId(): string | null;
     getDeletedSessionTreeIds(rootId: string, sessions: Session[]): Set<string>;
     getNextSessionIdAfterDeletion(sessions: Session[]): string | null;
-    deleteRemoteSession(sessionId: string): Promise<unknown>;
+    deleteRemoteSession(sessionId: string): Promise<void | boolean | object>;
     hideDeletedSessionTree(sessionId: string): void;
-    loadRecycleBin(): Promise<void>;
-    selectSession(sessionId: string, options?: { markSeen?: boolean }): Promise<void>;
+    loadRecycleBin(): Promise<void | boolean | object>;
+    selectSession(
+      sessionId: string,
+      options?: { markSeen?: boolean }
+    ): Promise<void | boolean | object>;
     setError?(message: string): void;
-    logError(context: string, err: unknown): void;
+    logError(context: string, cause: unknown): void;
   },
   id: string
 ) {
@@ -380,12 +389,12 @@ export async function deleteSessionWithDependencies(
 
 export async function restoreSessionWithDependencies(
   deps: {
-    restoreRecycleBinEntry(rootID: string): Promise<unknown>;
-    loadSessions(): Promise<void>;
-    loadRecycleBin(): Promise<void>;
-    hydrateSessionStatuses(): Promise<void>;
+    restoreRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
+    loadSessions(): Promise<void | boolean | object>;
+    loadRecycleBin(): Promise<void | boolean | object>;
+    hydrateSessionStatuses(): Promise<void | boolean | object>;
     setError?(message: string): void;
-    logError(context: string, err: unknown): void;
+    logError(context: string, cause: unknown): void;
   },
   rootID: string
 ) {
@@ -401,11 +410,11 @@ export async function restoreSessionWithDependencies(
 export async function deleteSessionPermanentlyWithDependencies(
   deps: {
     getRecycleBinEntries(): RecycleBinEntry[];
-    deleteRecycleBinEntry(rootID: string): Promise<unknown>;
-    loadRecycleBin(): Promise<void>;
+    deleteRecycleBinEntry(rootID: string): Promise<void | boolean | object>;
+    loadRecycleBin(): Promise<void | boolean | object>;
     clearDeletedSessionState(sessionId: string): void;
     setError?(message: string): void;
-    logError(context: string, err: unknown): void;
+    logError(context: string, cause: unknown): void;
   },
   rootID: string
 ) {
@@ -414,6 +423,7 @@ export async function deleteSessionPermanentlyWithDependencies(
     await deps.deleteRecycleBinEntry(rootID);
     await deps.loadRecycleBin();
 
+    // SAFETY: The surrounding shape or discriminator check establishes the Session contract used below.
     const deletedSessions = entry?.sessions?.length
       ? entry.sessions
       : entry?.root
@@ -430,11 +440,11 @@ export async function deleteSessionPermanentlyWithDependencies(
 
 export async function emptyRecycleBinWithDependencies(deps: {
   getRecycleBinEntries(): RecycleBinEntry[];
-  emptyRecycleBin(): Promise<unknown>;
-  loadRecycleBin(): Promise<void>;
+  emptyRecycleBin(): Promise<void | boolean | object>;
+  loadRecycleBin(): Promise<void | boolean | object>;
   clearDeletedSessionState(sessionId: string): void;
   setError?(message: string): void;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 }) {
   try {
     const entries = [...deps.getRecycleBinEntries()];

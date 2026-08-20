@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Playwright serializes these browser callbacks, which deliberately inject partial harness and server-event payloads across the page boundary. */
 import { expect, test } from '@playwright/test';
 import {
   getScrollMetrics,

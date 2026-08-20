@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Usage endpoint payloads are decoded before aggregation. */
+/* oxlint-disable anti-slop/no-known-value-widening -- Query and aggregate values intentionally use their named service contracts. */
 import * as vscode from 'vscode';
 
 import { asRecord } from '../shared/type-utils';
@@ -109,12 +111,13 @@ export class UsageReportService {
     let cursor: string | undefined;
 
     do {
-      const path = withQuery('/experimental/session', {
+      const query: Record<string, string> = {
         archived: 'true',
         limit: String(SESSION_PAGE_LIMIT),
-        ...(start === undefined ? {} : { start: String(start) }),
-        ...(cursor ? { cursor } : {}),
-      });
+      };
+      if (start !== undefined) query.start = String(start);
+      if (cursor) query.cursor = cursor;
+      const path = withQuery('/experimental/session', query);
       let response: unknown;
       try {
         response = await this.server.request('GET', path, undefined, {
@@ -357,12 +360,19 @@ function renderAggregateRow(providerID: string, modelID: string, aggregate: Aggr
   return `| ${escapeMarkdown(providerID)} | ${escapeMarkdown(modelID)} | ${integer(aggregate.promptIDs.size)} | ${integer(aggregate.total)} | ${integer(aggregate.input)} | ${integer(aggregate.output)} | ${integer(aggregate.reasoning)} | ${integer(aggregate.cacheRead)} | ${integer(aggregate.cacheWrite)} |`;
 }
 
-function responsePage(value: unknown): { data: unknown[]; nextCursor?: string } | null {
+interface ResponsePage {
+  data: unknown[];
+  nextCursor?: string;
+}
+
+function responsePage(value: unknown): ResponsePage | null {
   if (Array.isArray(value)) return { data: value };
   const record = asRecord(value);
   if (!Array.isArray(record?.data)) return null;
   const nextCursor = stringValue(record.nextCursor);
-  return { data: record.data, ...(nextCursor ? { nextCursor } : {}) };
+  const page: ResponsePage = { data: record.data };
+  if (nextCursor) page.nextCursor = nextCursor;
+  return page;
 }
 
 async function mapConcurrent<T, R>(

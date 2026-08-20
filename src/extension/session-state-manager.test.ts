@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These state tests deliberately model malformed server events, persisted dictionaries, and controlled private state. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ShowMessageMock = (message: string, ...items: string[]) => Promise<string | undefined>;

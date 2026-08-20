@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-object-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- This module is the webview I/O decoder and must inspect untrusted message representations. */
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Webview assertions occur only after bounded structural validation. */
 import { Buffer } from 'buffer';
 import {
   MAX_DROPPED_CONTENT_FILES,
@@ -248,12 +250,16 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
           ? undefined
           : getBoundedString(model.variant, MAX_RALPH_ID_LENGTH);
       if (model?.variant !== undefined && !variant) return null;
+      const selectedModel: NonNullable<
+        Extract<WebviewMessage, { type: 'commands/state' }>['payload']['model']
+      > = { providerID, modelID };
+      if (variant) selectedModel.variant = variant;
       return {
         type,
         payload: {
           canAbort: payload.canAbort,
           canSwitchSessions: payload.canSwitchSessions,
-          model: { providerID, modelID, ...(variant ? { variant } : {}) },
+          model: selectedModel,
         },
       };
     }
@@ -356,13 +362,14 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (typeof payload.deferred !== 'boolean') return null;
       const sessionId = getBoundedString(payload.sessionId, 512);
       if (payload.sessionId !== undefined && !sessionId) return null;
+      const releasePayload: Extract<WebviewMessage, { type: 'images/release' }>['payload'] = {
+        paths,
+        deferred: payload.deferred,
+      };
+      if (sessionId) releasePayload.sessionId = sessionId;
       return {
         type,
-        payload: {
-          paths,
-          deferred: payload.deferred,
-          ...(sessionId ? { sessionId } : {}),
-        },
+        payload: releasePayload,
       };
     }
 
@@ -406,17 +413,13 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (kind !== undefined && kind !== 'auto' && kind !== 'file' && kind !== 'directory')
         return null;
       if (view !== undefined && view !== 'diff') return null;
-      return {
-        type,
-        payload: {
-          path,
-          ...(line !== undefined && line !== null ? { line } : {}),
-          ...(kind ? { kind } : {}),
-          ...(view ? { view } : {}),
-          ...(sessionID ? { sessionID } : {}),
-          ...(requestId !== undefined && requestId !== null ? { requestId } : {}),
-        },
-      };
+      const openPayload: Extract<WebviewMessage, { type: 'vscode/open' }>['payload'] = { path };
+      if (line !== undefined && line !== null) openPayload.line = line;
+      if (kind) openPayload.kind = kind;
+      if (view) openPayload.view = view;
+      if (sessionID) openPayload.sessionID = sessionID;
+      if (requestId !== undefined && requestId !== null) openPayload.requestId = requestId;
+      return { type, payload: openPayload };
     }
 
     case 'vscode/open-text': {
@@ -426,7 +429,12 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       const language = getOptionalBoundedString(payload?.language, 40);
       if (content === null || !title) return null;
       if (language !== undefined && !OPEN_TEXT_LANGUAGES.has(language)) return null;
-      return { type, payload: { content, title, ...(language ? { language } : {}) } };
+      const openTextPayload: Extract<WebviewMessage, { type: 'vscode/open-text' }>['payload'] = {
+        content,
+        title,
+      };
+      if (language) openTextPayload.language = language;
+      return { type, payload: openTextPayload };
     }
 
     case 'vscode/open-external': {
@@ -466,15 +474,21 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       ) {
         return null;
       }
+      const requestPayload: Extract<WebviewMessage, { type: 'api/request' }>['payload'] = {
+        id,
+        method,
+        path,
+      };
+      if (cancelKey) requestPayload.cancelKey = cancelKey;
       if (payload?.body === undefined) {
-        return { type, payload: { id, ...(cancelKey ? { cancelKey } : {}), method, path } };
+        return { type, payload: requestPayload };
       }
       const body = /\/session\/[^/]+\/prompt_async(?:\?|$)/.test(path)
         ? sanitizePromptBodyWithNativePdfs(payload.body)
         : sanitizeApiRequestBody(payload.body);
-      return body === INVALID_JSON_VALUE
-        ? null
-        : { type, payload: { id, ...(cancelKey ? { cancelKey } : {}), method, path, body } };
+      if (body === INVALID_JSON_VALUE) return null;
+      requestPayload.body = body;
+      return { type, payload: requestPayload };
     }
 
     case 'api/cancel': {
@@ -529,15 +543,11 @@ export function parseWebviewMessage(value: unknown): WebviewMessage | null {
       if (!msg) return null;
       if (level !== undefined && level !== 'info' && level !== 'warn' && level !== 'error')
         return null;
-      return {
-        type,
-        payload: {
-          msg,
-          ...(data ? { data } : {}),
-          ...(error ? { error } : {}),
-          ...(level ? { level } : {}),
-        },
-      };
+      const logPayload: Extract<WebviewMessage, { type: 'log' }>['payload'] = { msg };
+      if (data) logPayload.data = data;
+      if (error) logPayload.error = error;
+      if (level) logPayload.level = level;
+      return { type, payload: logPayload };
     }
 
     default: {
@@ -728,8 +738,8 @@ function parseRalphIteration(
     endedAt,
     filesChanged,
     verification,
-    ...(phase ? { phase } : {}),
   };
+  if (phase) iteration.phase = phase;
 
   if (record.tokens !== undefined) {
     const tokens = parseRalphIterationTokens(record.tokens);
@@ -977,15 +987,16 @@ function sanitizeClipboardImages(
     const attachmentSequence = getSafeInteger(record?.attachmentSequence);
     if (record?.contentKey !== undefined && !contentKey) return null;
     if (record?.attachmentSequence !== undefined && attachmentSequence === null) return null;
-    images.push({
+    const image: (typeof images)[number] = {
       id,
       url,
       mime,
       filename,
       size,
-      ...(contentKey ? { contentKey } : {}),
-      ...(attachmentSequence !== null ? { attachmentSequence } : {}),
-    });
+    };
+    if (contentKey) image.contentKey = contentKey;
+    if (attachmentSequence !== null) image.attachmentSequence = attachmentSequence;
+    images.push(image);
   }
   return images;
 }

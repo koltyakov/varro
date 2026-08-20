@@ -4,12 +4,12 @@ type SessionMcpDependencies = {
   getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
   getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
   getMcpStatus(): Record<string, McpStatus>;
-  loadMcps(): Promise<void>;
+  loadMcps(): Promise<void | boolean | object>;
   getAvailableMcpNames(): string[];
-  connectMcp(name: string): Promise<unknown>;
-  authenticateMcp(name: string): Promise<unknown>;
-  disconnectMcp(name: string): Promise<unknown>;
-  logError(context: string, err: unknown): void;
+  connectMcp(name: string): Promise<void | boolean | object>;
+  authenticateMcp(name: string): Promise<void | boolean | object>;
+  disconnectMcp(name: string): Promise<void | boolean | object>;
+  logError(context: string, cause: unknown): void;
   setSelectedMcpsForSession(sessionId: string, names: string[]): void;
   setDraftSelectedMcps(names: string[]): void;
 };
@@ -27,7 +27,7 @@ export class SessionMcpOperations {
   private reconcileSessionMcps = (
     sessionId: string | null,
     preserveBackgroundMcps: boolean
-  ): Promise<void> => {
+  ): Promise<void | boolean | object> => {
     const generation = ++this.reconciliationGeneration;
     const reconciliation = this.reconciliationQueue.then(async () => {
       if (generation !== this.reconciliationGeneration) return;
@@ -52,7 +52,7 @@ export class SessionMcpOperations {
     return reconciliation;
   };
 
-  readonly syncSessionMcps = (sessionId: string | null): Promise<void> => {
+  readonly syncSessionMcps = (sessionId: string | null): Promise<void | boolean | object> => {
     return this.reconcileSessionMcps(sessionId, true);
   };
 
@@ -74,12 +74,12 @@ export async function syncSessionMcpsWithDependencies(
     getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
     getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
     getMcpStatus(): Record<string, McpStatus>;
-    loadMcps(): Promise<void>;
+    loadMcps(): Promise<void | boolean | object>;
     getAvailableMcpNames(): string[];
-    connectMcp(name: string): Promise<unknown>;
-    authenticateMcp(name: string): Promise<unknown>;
-    disconnectMcp(name: string): Promise<unknown>;
-    logError(context: string, err: unknown): void;
+    connectMcp(name: string): Promise<void | boolean | object>;
+    authenticateMcp(name: string): Promise<void | boolean | object>;
+    disconnectMcp(name: string): Promise<void | boolean | object>;
+    logError(context: string, cause: unknown): void;
   },
   sessionId: string | null,
   isCurrent: () => boolean = () => true,
@@ -135,7 +135,7 @@ export async function applySessionMcpsWithDependencies(
   deps: {
     setSelectedMcpsForSession(sessionId: string, names: string[]): void;
     setDraftSelectedMcps(names: string[]): void;
-    syncSessionMcps(sessionId: string | null): Promise<void>;
+    syncSessionMcps(sessionId: string | null): Promise<void | boolean | object>;
   },
   names: string[],
   sessionId: string | null | undefined

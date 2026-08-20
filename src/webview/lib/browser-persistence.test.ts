@@ -1,13 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserPersistence } from './browser-persistence';
+import { fixture } from '../test-fixtures';
+
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+interface TestRuntimeRecord {
+  [key: string]: TestRuntimeValue;
+}
 
 declare global {
   interface Window {
     __vscodeWebviewState?: {
-      getState(): Record<string, unknown>;
-      setState(state: Record<string, unknown>): void;
+      getState(): TestRuntimeRecord;
+      setState(state: TestRuntimeRecord): void;
     };
-    __sendToExtension?: (message: unknown) => void;
+    __sendToExtension?: (message: TestRuntimeValue) => void;
   }
 }
 
@@ -26,7 +47,7 @@ afterEach(() => {
 describe('BrowserPersistence', () => {
   it('mirrors values into VSCode webview state', () => {
     const storage = new BrowserPersistence();
-    let vscodeState: Record<string, unknown> = {};
+    let vscodeState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
       getState: () => vscodeState,
       setState: (state) => {
@@ -68,7 +89,7 @@ describe('BrowserPersistence', () => {
 
   it('continues with VSCode state when localStorage acquisition is denied', () => {
     const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    let vscodeState: Record<string, unknown> = {};
+    let vscodeState: TestRuntimeRecord = {};
     window.__vscodeWebviewState = {
       getState: () => vscodeState,
       setState: (state) => {
@@ -98,13 +119,14 @@ describe('BrowserPersistence', () => {
   it('warns once when storage removal keeps failing', () => {
     const send = vi.fn();
     window.__sendToExtension = send;
-    const failingStorage = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const failingStorage = fixture<Storage>({
       getItem: () => null,
       setItem: () => {},
       removeItem: () => {
         throw new Error('quota exceeded');
       },
-    } as unknown as Storage;
+    });
     const storage = new BrowserPersistence(failingStorage);
 
     storage.remove('varro.lastOpenedView');

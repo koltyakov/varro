@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/require-safety-comment-for-type-assertion -- These transport tests deliberately model malformed HTTP values, stream readers, and module-boundary logging. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { warnMock, updateEventStreamStateMock, emitEventMock } = vi.hoisted(() => ({

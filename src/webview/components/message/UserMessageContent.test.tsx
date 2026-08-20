@@ -10,10 +10,13 @@ import {
   getUserMessagePreviewText,
   hasUserMessageEditableContent,
 } from './UserMessageContent';
+import { fixture } from '../../test-fixtures';
+import type { UnknownRecord } from '../../../shared/type-utils';
 
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const retryMessageMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise user-message actions through the useOpenCode module. */
 vi.mock('../../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
   selectSession: selectSessionMock,
@@ -74,7 +77,8 @@ function renderUserContent(parts: Part[]) {
 
 function installSendToExtension() {
   const send = vi.fn();
-  (window as unknown as Record<string, unknown>).__sendToExtension = send;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  fixture<UnknownRecord>(window).__sendToExtension = send;
   return send;
 }
 
@@ -103,7 +107,8 @@ afterEach(() => {
   setAppState('sessions', []);
   setAppState('allAgents', []);
   resetDefaultAppState();
-  delete (window as unknown as Record<string, unknown>).__sendToExtension;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete fixture<UnknownRecord>(window).__sendToExtension;
 });
 
 describe('UserMessageContent', () => {

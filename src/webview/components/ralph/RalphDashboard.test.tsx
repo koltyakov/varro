@@ -4,6 +4,8 @@ import { render } from 'solid-js/web';
 import type { RalphIteration, RalphRun } from '../../../shared/ralph';
 import { RalphDashboard } from './RalphDashboard';
 import type { ProviderLimitStatus } from '../../../shared/protocol';
+import { fixture } from '../../test-fixtures';
+import type { UnknownRecord } from '../../../shared/type-utils';
 
 const getRunMock = vi.hoisted(() => vi.fn());
 const pauseMock = vi.hoisted(() => vi.fn());
@@ -11,6 +13,7 @@ const resumeMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const stopMock = vi.hoisted(() => vi.fn());
 const getProviderLimitMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise dashboard integration across Ralph state and child modules. */
 vi.mock('../../lib/stores/ralph-store', () => ({
   ralphStore: {
     getRun: getRunMock,
@@ -58,11 +61,12 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 let resizeObserverInstances: ResizeObserverInstance[] = [];
 const originalResizeObserver = globalThis.ResizeObserver;
-let currentSessionStatus: Record<string, unknown> = {};
-let currentUsageLimits: Record<string, unknown> = {};
+let currentSessionStatus: UnknownRecord = {};
+let currentUsageLimits: UnknownRecord = {};
 let currentFailedSessionIds: string[] = [];
 
 function providerLimit(overrides: Partial<ProviderLimitStatus> = {}): ProviderLimitStatus {
+  // SAFETY: The fixture provides the ProviderLimitStatus fields read by this statement.
   return {
     providerID: 'openai',
     modelID: 'gpt-5',
@@ -155,7 +159,8 @@ beforeEach(() => {
       resizeObserverInstances.push(this);
     }
   }
-  globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  globalThis.ResizeObserver = fixture<typeof ResizeObserver>(ResizeObserverMock);
   container = document.createElement('div');
   document.body.appendChild(container);
 });
@@ -168,6 +173,7 @@ afterEach(() => {
   if (originalResizeObserver) {
     globalThis.ResizeObserver = originalResizeObserver;
   } else {
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
   }
 });
@@ -181,7 +187,9 @@ describe('RalphDashboard', () => {
     expect(resizeObserverInstances).toHaveLength(1);
     expect(listScroll).toBeInstanceOf(HTMLDivElement);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     setElementWidths(listScroll as HTMLDivElement, 152, 120);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resizeObserverInstances[0]?.callback([], {} as ResizeObserver);
 
     expect(

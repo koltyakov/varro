@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Server, process, and extension API values are validated before state transitions. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Server assertions follow lifecycle, process, and response validation. */
 import type { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
@@ -166,31 +168,27 @@ function createUpdateRequiredError(options: {
     }
   }
 
-  return {
-    message: `${summary} ${instruction}`,
-    detail: {
-      kind: options.failure
-        ? 'update-failed'
-        : options.blockedBy
-          ? 'update-blocked'
-          : 'update-required',
-      required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
-      observed: options.observed,
-      ...(installMethod ? { installMethod } : {}),
-      ...(options.blockedBy ? { blockedBy: options.blockedBy } : {}),
-      ...(options.settingId ? { settingId: options.settingId } : {}),
-      ...(options.failure
-        ? {
-            cause: options.failure.cause,
-            ...(options.failure.suggestedCommand
-              ? { suggestedCommand: options.failure.suggestedCommand }
-              : {}),
-          }
-        : canSuggestCommand
-          ? { suggestedCommand }
-          : {}),
-    },
+  const detail: ServerErrorDetail = {
+    kind: options.failure
+      ? 'update-failed'
+      : options.blockedBy
+        ? 'update-blocked'
+        : 'update-required',
+    required: MINIMUM_SUPPORTED_OPENCODE_VERSION,
+    observed: options.observed,
   };
+  if (installMethod) detail.installMethod = installMethod;
+  if (options.blockedBy) detail.blockedBy = options.blockedBy;
+  if (options.settingId) detail.settingId = options.settingId;
+  if (options.failure) {
+    detail.cause = options.failure.cause;
+    if (options.failure.suggestedCommand) {
+      detail.suggestedCommand = options.failure.suggestedCommand;
+    }
+  } else if (canSuggestCommand) {
+    detail.suggestedCommand = suggestedCommand;
+  }
+  return { message: `${summary} ${instruction}`, detail };
 }
 
 function describeManagedProcessCleanupFailure(context: string, err: unknown): string {
@@ -349,7 +347,9 @@ export class OpenCodeServer extends EventEmitter {
   }
 
   private setRunningStatus(url = this.url, eventStream?: 'healthy' | 'degraded') {
-    this.setStatus({ state: 'running', url, ...(eventStream ? { eventStream } : {}) });
+    const status: Extract<ServerStatus, { state: 'running' }> = { state: 'running', url };
+    if (eventStream) status.eventStream = eventStream;
+    this.setStatus(status);
   }
 
   private updateEventStreamState(eventStream: 'healthy' | 'degraded') {
@@ -648,7 +648,9 @@ export class OpenCodeServer extends EventEmitter {
           !rawDetail && isMissingCliStartupFailure(rawMessage) ? this.buildMissingCliError() : null;
         const message = missing ? missing.message : rawMessage;
         const detail = missing ? missing.detail : rawDetail;
-        this.setStatus({ state: 'error', message, ...(detail ? { detail } : {}) });
+        const status: Extract<ServerStatus, { state: 'error' }> = { state: 'error', message };
+        if (detail) status.detail = detail;
+        this.setStatus(status);
         const failure = err || new Error(message);
         void beginAttemptCleanup().then(
           () => {

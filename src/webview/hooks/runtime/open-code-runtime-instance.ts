@@ -111,6 +111,7 @@ import {
 import { SessionStatusOperations } from '../session/session-status';
 import { resolveMessagesSelectedModel, SessionSyncOperations } from '../session/session-sync';
 import { createTodoSyncOperations, resetTodoSync } from '../todo-sync';
+import { asRecord, isString } from '../../lib/runtime-values';
 
 const client = clientModule.client;
 
@@ -166,7 +167,7 @@ export interface OpenCodeRuntime {
   undoSession(): Promise<void>;
   redoSession(): Promise<void>;
   initSession(): Promise<void>;
-  runSlashCommandByName(name: string, args: string): Promise<unknown>;
+  runSlashCommandByName(name: string, args: string): Promise<boolean>;
   reviewSession(): Promise<void>;
   compactSession(): Promise<void>;
   respondPermission(
@@ -184,7 +185,7 @@ export interface OpenCodeRuntime {
   rejectQuestion(requestID: string, options?: { rethrow?: boolean }): Promise<void>;
 }
 
-function logError(context: string, err: unknown) {
+function logError<T>(context: string, err: T) {
   if (err instanceof WorkspaceLoadInvalidatedError) return;
   postMessage({
     type: 'log',
@@ -257,7 +258,7 @@ function finishAutoApproveActivity(
     status,
     title:
       permission.title?.trim() || permission.type || current[index]?.title || 'Permission request',
-    ...(detail ? { detail } : {}),
+    detail: detail || undefined,
     createdAt: index >= 0 ? current[index]!.createdAt : Date.now(),
   };
   appStore.setState(
@@ -296,7 +297,7 @@ function showPermissionAfterJudge(
   attempt.permission = {
     ...attempt.permission,
     autoApproveReason: reason,
-    ...(actionSummary ? { actionSummary } : {}),
+    actionSummary: actionSummary || undefined,
   };
   if (attempt.status === 'visible') {
     permissionsStore.setPermissionAutoApprovePresentation(
@@ -320,17 +321,11 @@ function showPermissionAfterJudge(
   });
 }
 
-function getPermissionJudgeErrorMessage(error: unknown): string {
+function getPermissionJudgeErrorMessage<T>(error: T): string {
   if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === 'string' && error.trim()) return error;
-  if (
-    error &&
-    typeof error === 'object' &&
-    typeof (error as { message?: unknown }).message === 'string' &&
-    (error as { message: string }).message.trim()
-  ) {
-    return (error as { message: string }).message;
-  }
+  if (isString(error) && error.trim()) return error;
+  const message = asRecord(error)?.message;
+  if (isString(message) && message.trim()) return message;
   return 'Unknown error';
 }
 
@@ -407,7 +402,7 @@ export function createSessionStatusSnapshotCoordinator(
         if (inFlight === tracked) inFlight = null;
         return snapshot;
       },
-      (err: unknown) => {
+      (err) => {
         if (inFlight === tracked) inFlight = null;
         throw err;
       }
@@ -468,7 +463,7 @@ export function createPerSessionMessageSyncGenerations() {
   return { isCurrent, run, invalidate, clear };
 }
 
-function isNotFoundError(err: unknown) {
+function isNotFoundError<T>(err: T) {
   return err instanceof Error && /^404\b/.test(err.message);
 }
 
@@ -685,7 +680,7 @@ function loadOlderSessionPrompts(
     }
     return false;
   })()
-    .catch((err: unknown) => {
+    .catch((err) => {
       if (isCurrent()) logError('loadOlderSessionPrompts', err);
       return false;
     })
@@ -729,7 +724,7 @@ async function loadSessionWithMessages(
 }> {
   const messagesPromise = fetchSessionMessages(sessionId, {
     isCurrent,
-  }).catch((err: unknown) => {
+  }).catch((err) => {
     if (isNotFoundError(err)) return [];
     throw err;
   });
@@ -1595,11 +1590,11 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
             permissionDecisionReferencesByTree.get(
               getPermissionDecisionScopeId(permission.sessionID)
             ) || [],
-          ...(model ? { model } : {}),
+          model: model || undefined,
         });
         return { type: 'decision', response };
       })
-      .catch((error: unknown): PermissionJudgeOutcome => ({ type: 'error', error }));
+      .catch((error): PermissionJudgeOutcome => ({ type: 'error', error }));
     let timedOut = false;
     let judgeTimeout: ReturnType<typeof setTimeout>;
     const judge = Promise.race([
@@ -1917,7 +1912,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       getConnectedMcpNames: routingStore.getConnectedMcpNames,
       hasSelectedMcps: (sessionId) => routingStore.getSelectedMcpsForSession(sessionId) !== null,
       setSelectedMcpsForSession: routingStore.setSelectedMcpsForSession,
-      syncSessionMcps,
+      syncSessionMcps: async (sessionId) => {
+        await syncSessionMcps(sessionId);
+      },
       resetTodoSync,
       clearMessages: sessionStore.clearMessages,
       setMessagesLoading: (loading) => appStore.setState('messagesLoading', loading),
@@ -2399,7 +2396,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       await sessionApprovalOperations.respondPermission(sessionId, permissionId, response, {
         ...options,
         rethrow: true,
-        ...(response === 'reject' && permission ? { groupMembers } : {}),
+        groupMembers: response === 'reject' && permission ? groupMembers : undefined,
       });
     } catch (err) {
       for (const member of permission

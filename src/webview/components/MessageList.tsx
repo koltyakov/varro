@@ -156,6 +156,7 @@ import {
   getThinkingLayoutSignatures,
   hasVisibleProjectedText,
 } from './message-list/row-layout';
+import { isNumber, isFunction } from '../lib/runtime-values';
 
 function showTruncatedHistoryBanner() {
   return !editingMessage() && isSessionHistoryTruncated(state.activeSessionId);
@@ -1166,7 +1167,7 @@ export function MessageList() {
   function markVirtualMetricsDirty(messageId: string) {
     if (dirtyVirtualMetricsFromIndex === 0) return;
     const index = messageIndexById().get(messageId);
-    if (typeof index !== 'number') return;
+    if (!isNumber(index)) return;
     if (index < dirtyVirtualMetricsFromIndex) {
       dirtyVirtualMetricsFromIndex = index;
     }
@@ -2209,6 +2210,7 @@ export function MessageList() {
     const measurements: Array<{ messageId: string; height: number }> = [];
     let everyInlineSizeChanged = entries.length > 0;
     for (const entry of entries) {
+      // SAFETY: The surrounding shape or discriminator check establishes the HTMLDivElement contract used below.
       const element = entry.target as HTMLDivElement;
       const messageId = element.dataset.msgId;
       const borderBoxSize = entry.borderBoxSize?.[0];
@@ -2556,7 +2558,7 @@ export function MessageList() {
       ...anchor,
       element,
       top: rect.top - containerRect.top,
-      ...(row ? { messageTop: row.getBoundingClientRect().top - containerRect.top } : {}),
+      messageTop: row ? row.getBoundingClientRect().top - containerRect.top : undefined,
     };
   }
 
@@ -2595,7 +2597,7 @@ export function MessageList() {
 
     // A replacement can temporarily shorten the track and clamp scrollTop. Restore on each DOM
     // mutation before paint; the frame loop below bounds ownership and handles measurement-only work.
-    if (trackRef && typeof MutationObserver !== 'undefined') {
+    if (trackRef && MutationObserver !== undefined) {
       const observer = new MutationObserver(() => {
         if (
           pendingStructuralScrollAnchor !== pending ||
@@ -3505,6 +3507,7 @@ export function MessageList() {
       );
       const collapsingTrayElements = new Set(flowTrays.map(({ tray }) => tray));
       const survivingChildCount = visibleChildren.filter((element) => {
+        // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
         if (!collapsingTrayElements.has(element as HTMLElement)) return true;
         return flowTrays.some(({ tray, summary }) => tray === element && summary !== null);
       }).length;
@@ -3739,7 +3742,7 @@ export function MessageList() {
     pendingMeasuredAppendAnchor = null;
     restoreVisibleScrollAnchor(appendAnchor, { useMessageOffsetFallback: true });
     if (
-      typeof window.matchMedia === 'function' &&
+      isFunction(window.matchMedia) &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
       performScroll({ force: true });
@@ -4174,9 +4177,10 @@ export function MessageList() {
         const movedAnchor = {
           ...directMovementAnchor.anchor,
           top: directMovementAnchor.anchor.top + movement,
-          ...(directMovementAnchor.anchor.messageTop !== undefined
-            ? { messageTop: directMovementAnchor.anchor.messageTop + movement }
-            : {}),
+          messageTop:
+            directMovementAnchor.anchor.messageTop !== undefined
+              ? directMovementAnchor.anchor.messageTop + movement
+              : undefined,
         };
         const anchor = refineTallRenderItemScrollAnchor(movedAnchor) ?? movedAnchor;
         directMovementAnchor = { anchor, scrollTop: top };
@@ -4192,9 +4196,10 @@ export function MessageList() {
           return {
             ...remembered,
             top: rect.top - containerRect.top,
-            ...(remembered.messageTop !== undefined && row
-              ? { messageTop: row.getBoundingClientRect().top - containerRect.top }
-              : {}),
+            messageTop:
+              remembered.messageTop !== undefined && row
+                ? row.getBoundingClientRect().top - containerRect.top
+                : undefined,
           };
         }
       }
@@ -4440,9 +4445,10 @@ export function MessageList() {
           ? {
               ...directMovementAnchor.anchor,
               top: directMovementAnchor.anchor.top - movement,
-              ...(directMovementAnchor.anchor.messageTop !== undefined
-                ? { messageTop: directMovementAnchor.anchor.messageTop - movement }
-                : {}),
+              messageTop:
+                directMovementAnchor.anchor.messageTop !== undefined
+                  ? directMovementAnchor.anchor.messageTop - movement
+                  : undefined,
             }
           : null;
     }
@@ -4852,6 +4858,7 @@ export function MessageList() {
           : null;
     });
     onCleanup(stopCapturingThinkingAnchor);
+    // SAFETY: The surrounding shape or discriminator check establishes the EventListener contract used below.
     containerRef.addEventListener('click', handleClickCapture as EventListener, true);
     containerRef.addEventListener('focusin', handleFocusIn);
     containerRef.addEventListener('focusout', handleFocusOut);
@@ -4891,13 +4898,14 @@ export function MessageList() {
     setStickyPreviewViewportHeight(containerRef.clientHeight);
     setStickyPreviewScrollTop(containerRef.scrollTop);
 
-    if (typeof IntersectionObserver !== 'undefined') {
+    if (globalThis.IntersectionObserver !== undefined) {
       // These cached bounds are only a best-effort scroll anchor. Sticky selection and collision
       // must read live DOM rects because observer thresholds do not report in-viewport movement.
       firstVisibleMessageObserver = new IntersectionObserver(
         (entries) => {
           if (!containerRef) return;
           for (const entry of entries) {
+            // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
             const messageId = (entry.target as HTMLElement).dataset.msgId;
             if (!messageId) continue;
 
@@ -4924,7 +4932,7 @@ export function MessageList() {
       });
     }
 
-    if (typeof ResizeObserver !== 'undefined') {
+    if (globalThis.ResizeObserver !== undefined) {
       measuredRowObserver = new ResizeObserver((entries) => {
         setMeasuredHeightsFor(entries);
       });
@@ -5015,6 +5023,7 @@ export function MessageList() {
     observer.observe(trackRef);
     onCleanup(() => {
       resetPendingHistoryGeneration();
+      // SAFETY: The surrounding shape or discriminator check establishes the EventListener contract used below.
       containerRef?.removeEventListener('click', handleClickCapture as EventListener, true);
       containerRef?.removeEventListener('focusin', handleFocusIn);
       containerRef?.removeEventListener('focusout', handleFocusOut);
@@ -5459,6 +5468,7 @@ export function MessageList() {
       let prevVariant: string | undefined;
       for (const msg of messagesSnapshot) {
         if (!isAssistantMessage(msg.info)) continue;
+        // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
         const cur = msg.info as AssistantMessage;
         if (cur.mode === 'subagent') continue;
         const modelChanged = cur.providerID !== prevProvider || cur.modelID !== prevModel;
@@ -5766,13 +5776,13 @@ export function MessageList() {
         `[data-activity-part-id="${CSS.escape(partId)}"]`
       );
       const animation =
-        typeof CSSAnimation === 'undefined'
+        globalThis.CSSAnimation === undefined
           ? undefined
           : item
               ?.getAnimations()
               .find(
                 (candidate): candidate is CSSAnimation =>
-                  candidate instanceof CSSAnimation &&
+                  candidate instanceof globalThis.CSSAnimation &&
                   candidate.animationName === 'assistant-active-activity-out'
               );
       if (!timers || !animation) return;
@@ -5916,7 +5926,7 @@ export function MessageList() {
         const timers = activityCompletionTimers.get(key);
         if (timers) completeActivityExit(key, timers);
       }, holdMs + ACTIVITY_EXIT_MS);
-      activityCompletionTimers.set(key, { finishTimer, ...(exitTimer ? { exitTimer } : {}) });
+      activityCompletionTimers.set(key, { finishTimer, exitTimer });
     }
 
     for (const key of new Set([

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const postMessageMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise provider setup through the bridge module boundary. */
 vi.mock('./bridge', () => ({
   postMessage: postMessageMock,
 }));

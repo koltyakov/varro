@@ -47,7 +47,9 @@ export async function smokeLoadExtensionBundle(bundlePath) {
   execute(module.exports, load, module, bundlePath, dirname(bundlePath));
 
   if (
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The VM-loaded CommonJS boundary must expose callable extension entry points.
     typeof module.exports.activate !== 'function' ||
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- The VM-loaded CommonJS boundary must expose callable extension entry points.
     typeof module.exports.deactivate !== 'function'
   ) {
     throw new Error('Extension bundle smoke load did not expose activation entry points');

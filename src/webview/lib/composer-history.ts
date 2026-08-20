@@ -46,14 +46,14 @@ function getAttachmentSignature(snapshot: ComposerSnapshot): string {
 function cloneSnapshot(snapshot: ComposerSnapshot): ComposerSnapshot {
   const pdfs = snapshot.pdfs?.map((pdf) => ({
     ...pdf,
-    ...(pdf.contextFile ? { contextFile: { ...pdf.contextFile } } : {}),
+    contextFile: pdf.contextFile ? { ...pdf.contextFile } : undefined,
   }));
   return {
     text: snapshot.text,
     caret: snapshot.caret,
     files: snapshot.files.map((file) => ({ ...file })),
     images: snapshot.images.map((image) => ({ ...image })),
-    ...(pdfs?.length ? { pdfs } : {}),
+    pdfs: pdfs?.length ? pdfs : undefined,
   };
 }
 

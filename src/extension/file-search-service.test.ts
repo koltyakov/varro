@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- These tests verify the VS Code search boundary with partial workspace and cancellation fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loggerMock = vi.hoisted(() => ({

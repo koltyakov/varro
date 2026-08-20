@@ -438,6 +438,7 @@ export function ProviderConnectionDialog(props: {
                                     class="provider-connect-input"
                                     type="text"
                                     value={inputs()[prompt.key] ?? ''}
+                                    // SAFETY: The surrounding shape or discriminator check establishes the ProviderAuthPromptText contract used below.
                                     placeholder={(prompt as ProviderAuthPromptText).placeholder}
                                     onInput={(event) =>
                                       updateInput(prompt.key, event.currentTarget.value)
@@ -448,6 +449,7 @@ export function ProviderConnectionDialog(props: {
                                 }
                               >
                                 <PromptSelect
+                                  // SAFETY: The surrounding shape or discriminator check establishes the ProviderAuthPromptSelect contract used below.
                                   prompt={prompt as ProviderAuthPromptSelect}
                                   value={inputs()[prompt.key] ?? ''}
                                   onChange={(value) => updateInput(prompt.key, value)}
@@ -709,6 +711,7 @@ function PromptSelect(props: {
   onMount(() => {
     bodyRef = rootRef?.closest<HTMLElement>('.provider-connect-body') ?? null;
     const onPointerDown = (event: PointerEvent) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       if (!rootRef?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener('pointerdown', onPointerDown);

@@ -36,6 +36,7 @@ import { FormattedModelName } from './chat-input/ToolbarPickers';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
 import { Tooltip } from './Tooltip';
+import { isString } from '../lib/runtime-values';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
@@ -548,9 +549,9 @@ export function ModelsPanel() {
                     target: 'small_model',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
-                    ...(isModelRoute(routing().smallModel, menu.providerID, menu.modelID)
-                      ? { unset: true }
-                      : {}),
+                    unset: isModelRoute(routing().smallModel, menu.providerID, menu.modelID)
+                      ? true
+                      : undefined,
                   })
                 }
               >
@@ -568,9 +569,9 @@ export function ModelsPanel() {
                     target: 'commit_message',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
-                    ...(isModelRoute(routing().commitMessageModel, menu.providerID, menu.modelID)
-                      ? { unset: true }
-                      : {}),
+                    unset: isModelRoute(routing().commitMessageModel, menu.providerID, menu.modelID)
+                      ? true
+                      : undefined,
                   })
                 }
               >
@@ -588,9 +589,9 @@ export function ModelsPanel() {
                     target: 'auto_approve',
                     providerID: menu.providerID,
                     modelID: menu.modelID,
-                    ...(isModelRoute(routing().autoApproveModel, menu.providerID, menu.modelID)
-                      ? { unset: true }
-                      : {}),
+                    unset: isModelRoute(routing().autoApproveModel, menu.providerID, menu.modelID)
+                      ? true
+                      : undefined,
                   })
                 }
               >
@@ -614,7 +615,7 @@ export function ModelsPanel() {
                           agentName: agent.name,
                           providerID: menu.providerID,
                           modelID: menu.modelID,
-                          ...(isAssigned() ? { unset: true } : {}),
+                          unset: isAssigned() ? true : undefined,
                         })
                       }
                     >
@@ -1145,7 +1146,7 @@ function createEmptyRouting(): OpenCodeModelRouting {
   };
 }
 
-function normalizeModelRouting(value: unknown): OpenCodeModelRouting {
+function normalizeModelRouting<T>(value: T): OpenCodeModelRouting {
   const record = asRecord(value);
   if (!record) return createEmptyRouting();
 
@@ -1175,8 +1176,8 @@ function normalizeModelRouting(value: unknown): OpenCodeModelRouting {
   return { smallModel, agentModels, commitMessageModel, autoApproveModel };
 }
 
-function parseModelRoute(value: unknown): OpenCodeModelRouting['smallModel'] {
-  if (typeof value === 'string') {
+function parseModelRoute<T>(value: T): OpenCodeModelRouting['smallModel'] {
+  if (isString(value)) {
     const separatorIndex = value.indexOf('/');
     if (separatorIndex <= 0 || separatorIndex === value.length - 1) return null;
     return {
@@ -1188,8 +1189,8 @@ function parseModelRoute(value: unknown): OpenCodeModelRouting['smallModel'] {
   const record = asRecord(value);
   if (!record) return null;
 
-  const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
-  const modelID = typeof record.modelID === 'string' ? record.modelID.trim() : '';
+  const providerID = isString(record.providerID) ? record.providerID.trim() : '';
+  const modelID = isString(record.modelID) ? record.modelID.trim() : '';
 
   if (!providerID || !modelID) return null;
   return { providerID, modelID };

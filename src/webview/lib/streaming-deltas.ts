@@ -1,5 +1,6 @@
 import { batch } from 'solid-js';
 import type { AppStateInstance } from './app-state';
+import { isFunction } from './runtime-values';
 
 type StreamingDelta = {
   messageId: string;
@@ -62,7 +63,7 @@ export function createStreamingDeltaQueue(
 }
 
 function defaultScheduleFrame(callback: () => void) {
-  if (typeof requestAnimationFrame === 'function') {
+  if (isFunction(requestAnimationFrame)) {
     requestAnimationFrame(callback);
     return;
   }

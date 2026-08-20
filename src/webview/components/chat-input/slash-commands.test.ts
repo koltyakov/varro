@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getSlashCommands } from './slash-commands';
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise slash-command integration with useOpenCode actions. */
 vi.mock('../../hooks/useOpenCode', () => ({
   abortSession: vi.fn(async () => {}),
   compactSession: vi.fn(async () => {}),

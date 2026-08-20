@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'child_process';
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Process output and OpenCode responses are validated before export. */
+import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { mkdtemp, open, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -134,14 +135,15 @@ export class SessionExportService {
       try {
         const command = this.server.resolveCommand();
         const launch = resolveServerLaunch(command, args);
-        proc = spawn(launch.command, launch.args, {
+        const spawnOptions: SpawnOptions = {
           stdio: ['ignore', fileHandle.fd, 'pipe'],
           cwd: this.server.getWorkspaceCwd(),
           env: buildServerEnv(),
           windowsHide: true,
-          ...(process.platform === 'win32' ? {} : { detached: true }),
-          ...(launch.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-        });
+        };
+        if (process.platform !== 'win32') spawnOptions.detached = true;
+        if (launch.windowsVerbatimArguments) spawnOptions.windowsVerbatimArguments = true;
+        proc = spawn(launch.command, launch.args, spawnOptions);
 
         proc.stderr?.on('data', (data: Buffer) => {
           stderr += data.toString();

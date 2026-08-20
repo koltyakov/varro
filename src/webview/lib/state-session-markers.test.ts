@@ -15,13 +15,34 @@ import {
   writeScopedSessionMarkerState,
 } from './state-session-markers';
 
-function createStorage(initial: Record<string, unknown> = {}) {
-  const store = new Map(Object.entries(initial));
+type TestRuntimeValue =
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | TestRuntimeObject
+  | readonly TestRuntimeValue[];
+interface TestRuntimeObject {
+  readonly [key: string]: TestRuntimeValue;
+  readonly type?: string;
+  readonly id?: string | number;
+  readonly message?: string;
+}
+interface TestRuntimeRecord {
+  [key: string]: TestRuntimeValue;
+}
+
+function createStorage(initial: TestRuntimeRecord = {}) {
+  const store = new Map<string, unknown>(Object.entries(initial));
   return {
     readStored<T>(key: string): T | null {
+      // SAFETY: The fixture provides the T | undefined fields read by this statement.
       return (store.get(key) as T | undefined) ?? null;
     },
-    writeStored(key: string, value: unknown) {
+    writeStored<T>(key: string, value: T) {
       store.set(key, value);
     },
     get(key: string) {

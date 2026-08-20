@@ -5,7 +5,7 @@
   "editor.tabSize": 2,
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
-  "oxc.fmt.configPath": ".oxfmtrc.json",
+  "oxc.fmt.configPath": "oxfmt.config.mts",
   "[javascript]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },

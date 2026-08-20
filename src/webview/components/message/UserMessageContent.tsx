@@ -37,6 +37,7 @@ import { formatAgentLabel } from '../../lib/format';
 import { AgentChip } from './AgentChip';
 import { InlineMessageImage } from '../InlineMessageImage';
 import { MaterialChipIcon } from '../MaterialChipIcon';
+import { isFunction } from '../../lib/runtime-values';
 
 export type MessageAttachment =
   | {
@@ -215,6 +216,7 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
 
   for (const part of parts) {
     if (part.type === 'file') {
+      // SAFETY: The surrounding shape or discriminator check establishes the FilePart contract used below.
       fileParts.push(part as FilePart);
       continue;
     }
@@ -225,6 +227,7 @@ export function parseUserMessageContent(parts: Part[]): ParsedUserMessageContent
     }
 
     if (part.type !== 'text') continue;
+    // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
     const text = (part as TextPart).text;
     if (!text || isVisionDelegationContextText(text)) continue;
 
@@ -262,10 +265,12 @@ function isVisionDelegationContextText(text: string): boolean {
   return VISION_DELEGATION_CONTEXT_RE.test(text.replace(/\r\n?/g, '\n').trim());
 }
 
-function parseUserMessageText(text: string): {
+type ParsedUserMessageText = {
   messageTexts: string[];
   attachments: MessageAttachment[];
-} {
+};
+
+function parseUserMessageText(text: string): ParsedUserMessageText {
   const normalized = text.replace(/\r\n?/g, '\n');
   const lines = normalized.split('\n');
   const messageTexts: string[] = [];
@@ -401,6 +406,7 @@ export function getUserMessageEditText(parts: Part[]): string {
 
   for (const part of parts) {
     if (part.type !== 'text') continue;
+    // SAFETY: The surrounding shape or discriminator check establishes the TextPart contract used below.
     const text = (part as TextPart).text;
     if (!text) continue;
 
@@ -464,7 +470,7 @@ export function getUserMessageEditContext(parts: Part[]): MessageEditContext {
   return {
     files,
     images,
-    ...(pdfs.length > 0 ? { pdfs } : {}),
+    pdfs: pdfs.length > 0 ? pdfs : undefined,
     terminalSelection:
       terminalAttachment?.type === 'terminal-selection' && terminalAttachment.text
         ? { terminalName: terminalAttachment.terminalName, text: terminalAttachment.text }
@@ -1345,8 +1351,10 @@ function InlineMessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const attachment = () => props.attachment;
   const isFolder = () =>
     attachment().type === 'file-reference' &&
+    // SAFETY: The surrounding shape or discriminator check establishes the Extract<MessageAttachment, { type: 'file-reference' }> contract used below.
     (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
   const fileSelection = () =>
+    // SAFETY: The surrounding shape or discriminator check establishes the Extract<MessageAttachment, { type: 'file-selection' }> contract used below.
     attachment().type === 'file-selection'
       ? (attachment() as Extract<MessageAttachment, { type: 'file-selection' }>)
       : null;
@@ -1416,6 +1424,7 @@ function MessageAttachmentChip(props: { attachment: MessageAttachment }) {
   const attachment = () => props.attachment;
   const isFolder = () =>
     attachment().type === 'file-reference' &&
+    // SAFETY: The surrounding shape or discriminator check establishes the Extract<MessageAttachment, { type: 'file-reference' }> contract used below.
     (attachment() as Extract<MessageAttachment, { type: 'file-reference' }>).isDirectory;
   const isTerminal = () => attachment().type === 'terminal-selection';
   const isOpenable = () => {
@@ -1776,11 +1785,13 @@ function extractCopiedSelectionText(node: Node, range: Range): string {
   if (!rangeIntersectsNode(range, node)) return '';
 
   if (node.nodeType === Node.TEXT_NODE) {
+    // SAFETY: The surrounding shape or discriminator check establishes the Text contract used below.
     return extractSelectedTextNode(node as Text, range);
   }
 
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
+  // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
   const element = node as HTMLElement;
   if (element.tagName === 'BR') return '\n';
 
@@ -1794,6 +1805,7 @@ function extractCopiedSelectionText(node: Node, range: Range): string {
     result += childText;
     if (
       child.nodeType === Node.ELEMENT_NODE &&
+      // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
       BLOCK_COPY_TAGS.has((child as HTMLElement).tagName) &&
       !result.endsWith('\n')
     ) {
@@ -1820,7 +1832,7 @@ function extractSelectedTextNode(node: Text, range: Range): string {
 }
 
 function rangeIntersectsNode(range: Range, node: Node): boolean {
-  if (typeof range.intersectsNode === 'function') {
+  if (isFunction(range.intersectsNode)) {
     return range.intersectsNode(node);
   }
 

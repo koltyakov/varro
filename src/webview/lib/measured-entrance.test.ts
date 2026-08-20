@@ -33,6 +33,7 @@ describe('prepareMeasuredEntrance', () => {
     expect(element.classList).toContain('measured-entrance-active');
     expect(element.style.getPropertyValue('--test-entrance-height')).toBe('84px');
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const event = new Event('animationend') as AnimationEvent;
     Object.defineProperty(event, 'animationName', { value: 'test-entrance' });
     element.dispatchEvent(event);
@@ -107,6 +108,7 @@ describe('prepareMeasuredEntrance', () => {
 
     dispose();
     dispose();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const event = new Event('animationcancel') as AnimationEvent;
     Object.defineProperty(event, 'animationName', { value: 'test-entrance' });
     element.dispatchEvent(event);

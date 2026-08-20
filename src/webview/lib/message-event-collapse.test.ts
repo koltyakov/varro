@@ -5,11 +5,12 @@ import {
   getFileEditVisualSignature,
   getTrailingFileEventSignature,
 } from './message-event-collapse';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 function completedState(
   title: string,
-  input: Record<string, unknown>,
-  metadata: Record<string, unknown> = {}
+  input: UnknownRecord,
+  metadata: UnknownRecord = {}
 ): ToolStateCompleted {
   return {
     status: 'completed',

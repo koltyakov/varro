@@ -1,8 +1,9 @@
 import type { RecycleBinEntry, RecycleBinSession } from './protocol';
-import { asRecord } from './type-utils';
+import { asRecord, isNumber, isString } from './type-utils';
+import type { UnknownRecord } from './type-utils';
 import { isSameWorkspacePath } from './workspace-path';
 
-export function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {
+export function normalizeRecycleBinEntries<T>(value: T): RecycleBinEntry[] {
   if (!Array.isArray(value)) return [];
   const entries = value
     .map(normalizeRecycleBinEntry)
@@ -18,7 +19,7 @@ export function normalizeRecycleBinEntries(value: unknown): RecycleBinEntry[] {
   );
 }
 
-export function normalizeRecycleBinEntry(value: unknown): RecycleBinEntry | null {
+export function normalizeRecycleBinEntry<T>(value: T): RecycleBinEntry | null {
   const record = asRecord(value);
   if (!record) return null;
 
@@ -42,7 +43,9 @@ export function normalizeRecycleBinEntry(value: unknown): RecycleBinEntry | null
     return null;
   }
 
-  const sessions = normalizedSessions as RecycleBinSession[];
+  const sessions = normalizedSessions.filter(
+    (session): session is RecycleBinSession => session !== null
+  );
   const sessionsByID = new Map<string, RecycleBinSession>();
   for (const session of sessions) {
     if (sessionsByID.has(session.id)) return null;
@@ -66,7 +69,7 @@ export function normalizeRecycleBinEntry(value: unknown): RecycleBinEntry | null
   return { rootID, deletedAt, expiresAt, root, sessions };
 }
 
-export function normalizeRecycleBinSession(value: unknown): RecycleBinSession | null {
+export function normalizeRecycleBinSession<T>(value: T): RecycleBinSession | null {
   const record = asRecord(value);
   const time = asRecord(record?.time);
   if (
@@ -74,7 +77,7 @@ export function normalizeRecycleBinSession(value: unknown): RecycleBinSession | 
     !isNonEmptyString(record.id) ||
     !isNonEmptyString(record.projectID) ||
     !isNonEmptyString(record.directory) ||
-    typeof record.title !== 'string' ||
+    !isString(record.title) ||
     !isNonEmptyString(record.version) ||
     !isSaneTimestamp(time?.created) ||
     !isSaneTimestamp(time.updated) ||
@@ -87,28 +90,27 @@ export function normalizeRecycleBinSession(value: unknown): RecycleBinSession | 
 
   const summary = asRecord(record.summary);
   if (record.summary !== undefined && !isRecycleBinSummary(summary)) return null;
-  return {
+  const session: RecycleBinSession = {
     id: record.id,
     projectID: record.projectID,
     directory: record.directory,
-    ...(typeof record.parentID === 'string' ? { parentID: record.parentID } : {}),
-    ...(isRecycleBinSummary(summary)
-      ? {
-          summary: {
-            additions: summary.additions,
-            deletions: summary.deletions,
-            files: summary.files,
-          },
-        }
-      : {}),
     title: record.title,
     version: record.version,
     time: {
       created: time.created,
       updated: time.updated,
-      ...(typeof time.compacting === 'number' ? { compacting: time.compacting } : {}),
     },
   };
+  if (isString(record.parentID)) session.parentID = record.parentID;
+  if (isRecycleBinSummary(summary)) {
+    session.summary = {
+      additions: summary.additions,
+      deletions: summary.deletions,
+      files: summary.files,
+    };
+  }
+  if (isNumber(time.compacting)) session.time.compacting = time.compacting;
+  return session;
 }
 
 function areRecycleBinSessionsEqual(left: RecycleBinSession, right: RecycleBinSession) {
@@ -129,7 +131,7 @@ function areRecycleBinSessionsEqual(left: RecycleBinSession, right: RecycleBinSe
 }
 
 function isRecycleBinSummary(
-  value: Record<string, unknown> | null
+  value: UnknownRecord | null
 ): value is { additions: number; deletions: number; files: number } {
   return (
     !!value &&
@@ -139,8 +141,8 @@ function isRecycleBinSummary(
   );
 }
 
-function isSaneCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+function isSaneCount<T>(value: T): value is T & number {
+  return isNumber(value) && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isRootOrDescendant(
@@ -163,10 +165,10 @@ function isRootOrDescendant(
   return false;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
+function isNonEmptyString<T>(value: T): value is T & string {
+  return isString(value) && value.trim().length > 0;
 }
 
-function isSaneTimestamp(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+function isSaneTimestamp<T>(value: T): value is T & number {
+  return isNumber(value) && Number.isSafeInteger(value) && value >= 0;
 }

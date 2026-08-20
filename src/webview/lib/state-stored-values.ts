@@ -14,23 +14,30 @@ import type {
 import { isPermissionMode } from '../../shared/protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
+import {
+  asRecord,
+  isBoolean,
+  isNumber,
+  isString,
+  type UnknownRecord,
+  isObject,
+} from './runtime-values';
 
-function asStoredRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function asStoredRecord<T>(value: T): UnknownRecord | null {
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  return value && isObject(value) && !Array.isArray(value) ? (value as UnknownRecord) : null;
 }
 
-function normalizeStoredString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
+function normalizeStoredString<T>(value: T): string | null {
+  return isString(value) && value.length > 0 ? value : null;
 }
 
-function normalizeStoredStringArray(value: unknown): string[] | null {
+function normalizeStoredStringArray<T>(value: T): string[] | null {
   if (!Array.isArray(value)) return null;
   return value.filter((item): item is string => normalizeStoredString(item) !== null);
 }
 
-function normalizeStoredSelectedModel(value: unknown): SelectedModel | null {
+function normalizeStoredSelectedModel<T>(value: T): SelectedModel | null {
   const record = asStoredRecord(value);
   const providerID = normalizeStoredString(record?.providerID);
   const modelID = normalizeStoredString(record?.modelID);
@@ -40,9 +47,9 @@ function normalizeStoredSelectedModel(value: unknown): SelectedModel | null {
   return variant ? { providerID, modelID, variant } : { providerID, modelID };
 }
 
-function normalizeStoredRecord<T>(
-  value: unknown,
-  normalizeValue: (entry: unknown) => T | null
+function normalizeStoredRecord<T, V>(
+  value: V,
+  normalizeValue: (entry: UnknownRecord[string]) => T | null
 ): Record<string, T> {
   const record = asStoredRecord(value);
   if (!record) return {};
@@ -99,7 +106,7 @@ export function readStoredStringArrayRecord(key: string): SessionSelectedMcps {
 
 export function readStoredBooleanRecord(key: string): Record<string, boolean> {
   return normalizeStoredRecord(readStored<unknown>(key), (value) =>
-    typeof value === 'boolean' ? value : null
+    isBoolean(value) ? value : null
   );
 }
 
@@ -109,12 +116,12 @@ export function readStoredPermissionModes(key: string): Record<string, Permissio
   );
 }
 
-function normalizeStoredAttachmentSequence(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+function normalizeStoredAttachmentSequence<T>(value: T): number | undefined {
+  return isNumber(value) && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-export function normalizeStoredClipboardImage(
-  value: unknown
+export function normalizeStoredClipboardImage<T>(
+  value: T
 ): NonNullable<QueuedMessage['clipboardImages']>[number] | null {
   const record = asStoredRecord(value);
   const id = normalizeStoredString(record?.id);
@@ -126,7 +133,7 @@ export function normalizeStoredClipboardImage(
     !url ||
     !mime ||
     !filename ||
-    typeof record?.size !== 'number' ||
+    !isNumber(record?.size) ||
     !Number.isFinite(record.size) ||
     record.size < 0
   ) {
@@ -147,7 +154,7 @@ export function normalizeStoredClipboardImage(
   return image;
 }
 
-function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
+function normalizeStoredDroppedFile<T>(value: T): DroppedFile | null {
   const record = asStoredRecord(value);
   const path = normalizeStoredString(record?.path);
   const relativePath = normalizeStoredString(record?.relativePath);
@@ -161,8 +168,8 @@ function normalizeStoredDroppedFile(value: unknown): DroppedFile | null {
       const range = asStoredRecord(item);
       const startLine = range?.startLine;
       const endLine = range?.endLine;
-      return typeof startLine === 'number' &&
-        typeof endLine === 'number' &&
+      return isNumber(startLine) &&
+        isNumber(endLine) &&
         Number.isSafeInteger(startLine) &&
         Number.isSafeInteger(endLine) &&
         startLine >= 1 &&
@@ -187,23 +194,23 @@ export function readStoredDroppedFiles(key: string): DroppedFile[] {
   return files;
 }
 
-function normalizeStoredTerminalSelection(value: unknown): QueuedMessage['terminalSelection'] {
+function normalizeStoredTerminalSelection<T>(value: T): QueuedMessage['terminalSelection'] {
   const record = asStoredRecord(value);
-  if (typeof record?.text !== 'string' || typeof record.terminalName !== 'string') return null;
+  if (!isString(record?.text) || !isString(record.terminalName)) return null;
   return { text: record.text, terminalName: record.terminalName };
 }
 
-function normalizeStoredDiagnostics(value: unknown): QueuedMessage['attachedDiagnostics'] {
+function normalizeStoredDiagnostics<T>(value: T): QueuedMessage['attachedDiagnostics'] {
   const record = asStoredRecord(value);
   if (!record || !Array.isArray(record.diagnostics)) return null;
   const diagnostics = record.diagnostics.slice(0, 20).flatMap<EditorDiagnostic>((item) => {
     const diagnostic = asStoredRecord(item);
     if (
-      typeof diagnostic?.path !== 'string' ||
+      !isString(diagnostic?.path) ||
       (diagnostic.severity !== 'error' &&
         diagnostic.severity !== 'warning' &&
         diagnostic.severity !== 'info') ||
-      typeof diagnostic.message !== 'string' ||
+      !isString(diagnostic.message) ||
       !Number.isFinite(diagnostic.line)
     ) {
       return [];
@@ -213,22 +220,23 @@ function normalizeStoredDiagnostics(value: unknown): QueuedMessage['attachedDiag
         path: diagnostic.path,
         severity: diagnostic.severity,
         message: diagnostic.message.slice(0, 500),
-        line: diagnostic.line as number,
+        line: Number(diagnostic.line),
       },
     ];
   });
   if (diagnostics.length === 0) return null;
-  const total = Number.isInteger(record.total)
-    ? Math.max(diagnostics.length, record.total as number)
-    : diagnostics.length;
+  const total =
+    isNumber(record.total) && Number.isInteger(record.total)
+      ? Math.max(diagnostics.length, record.total)
+      : diagnostics.length;
   return { diagnostics, total };
 }
 
-function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
+function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
   const record = asStoredRecord(value);
   const id = normalizeStoredString(record?.id);
   const sessionId = normalizeStoredString(record?.sessionId);
-  if (!id || !sessionId || typeof record?.text !== 'string') return null;
+  if (!id || !sessionId || !isString(record?.text)) return null;
   const agent = normalizeStoredString(record.agent);
   const droppedFiles = Array.isArray(record.droppedFiles)
     ? record.droppedFiles
@@ -266,17 +274,17 @@ function normalizeStoredQueuedMessage(value: unknown): QueuedMessage | null {
     id,
     sessionId,
     text: record.text,
-    ...(agent ? { agent } : {}),
-    ...(record.paused === true ? { paused: true } : {}),
+    agent: agent || undefined,
+    paused: record.paused === true ? true : undefined,
     droppedFiles,
     clipboardImages,
-    ...(nativePdfs.length > 0 ? { nativePdfs } : {}),
+    nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
     terminalSelection,
-    ...(attachedDiagnostics ? { attachedDiagnostics } : {}),
+    attachedDiagnostics: attachedDiagnostics || undefined,
   };
 }
 
-export function readStoredQueuedMessages(hostValue?: unknown): QueuedMessage[] {
+export function readStoredQueuedMessages<T>(hostValue?: T): QueuedMessage[] {
   const value = hostValue ?? readStored<unknown>(STORAGE_KEYS.queuedMessages);
   const ids = new Set<string>();
   const messages: QueuedMessage[] = [];
@@ -299,7 +307,7 @@ export function readStoredQueuedMessages(hostValue?: unknown): QueuedMessage[] {
 
 export function readShowThinking(): boolean {
   const value = readStored<unknown>(STORAGE_KEYS.showThinking);
-  return typeof value === 'boolean' ? value : true;
+  return isBoolean(value) ? value : true;
 }
 
 export function readDesktopSessionPaneSide(
@@ -324,7 +332,9 @@ export function resolveInitialDraftMode(
 }
 
 export function readInitialWebviewState(): Partial<InitialWebviewState> {
-  const value = (window as unknown as { __initialWebviewState?: InitialWebviewState })
-    .__initialWebviewState;
-  return value && typeof value === 'object' ? value : {};
+  const value = asRecord(window)?.__initialWebviewState;
+  if (!isObject(value)) return {};
+  // SAFETY: The host owns __initialWebviewState and supplies the InitialWebviewState protocol shape.
+  const initialState = value as InitialWebviewState;
+  return initialState;
 }

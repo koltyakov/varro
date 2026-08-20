@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Webview messages are untrusted until parsed by the bridge. */
 import * as vscode from 'vscode';
 import type { ExtensionMessage, InitialWebviewState } from '../shared/protocol';
 import { logger } from './logger';

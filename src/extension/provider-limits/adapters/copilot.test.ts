@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking -- These tests verify the adapter's imported VS Code authentication boundary. */
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

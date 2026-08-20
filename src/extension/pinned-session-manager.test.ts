@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: The Memento fixture stores opaque persisted values and the tests inspect controlled private state. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Persistence } from '../shared/persistence';
 import { PinnedSessionManager } from './pinned-session-manager';

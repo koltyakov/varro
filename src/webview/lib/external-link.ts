@@ -32,6 +32,7 @@ function trimUrlEnd(candidate: string) {
   while (end > 0 && TRAILING_URL_PUNCTUATION_RE.test(candidate[end - 1]!)) end -= 1;
 
   while (end > 0) {
+    // SAFETY: The surrounding shape or discriminator check establishes the keyof contract used below.
     const closing = candidate[end - 1] as keyof typeof CLOSING_DELIMITERS;
     const opening = CLOSING_DELIMITERS[closing];
     if (!opening) break;

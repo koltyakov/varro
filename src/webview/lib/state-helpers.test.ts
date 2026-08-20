@@ -65,11 +65,7 @@ async function loadState() {
 
 function nextFrame() {
   return new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve());
-      return;
-    }
-    setTimeout(resolve, 16);
+    requestAnimationFrame(() => resolve());
   });
 }
 
@@ -240,7 +236,8 @@ describe('state helpers', () => {
       'varro.queuedMessages',
       JSON.stringify([{ id: 'legacy', sessionId: 'session-1', text: 'legacy' }])
     );
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       queuedMessages: [
         {
           id: 'host',
@@ -280,7 +277,8 @@ describe('state helpers', () => {
       ]);
       expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([]);
     } finally {
-      delete (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState;
+      // SAFETY: The fixture provides the unknown fields read by this statement.
+      delete (window as { __initialWebviewState?: unknown }).__initialWebviewState;
     }
   });
 
@@ -537,7 +535,8 @@ describe('state helpers', () => {
   it('migrates legacy flat session marker storage into the current workspace scope', async () => {
     window.localStorage.setItem('varro.lastSeenSessions', JSON.stringify({ legacy: 123 }));
     window.localStorage.setItem('varro.skippedPlanSessions', JSON.stringify({ legacy: 456 }));
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       editorContext: {
         workspacePath: '/repo',
         activeFile: null,
@@ -590,7 +589,8 @@ describe('state helpers', () => {
   });
 
   it('uses configured default permission mode only without a persisted selection', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       defaultPermissionMode: 'full',
     };
 
@@ -695,7 +695,8 @@ describe('state helpers', () => {
   });
 
   it('persists current document auto-context by project', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       editorContext: {
         workspacePath: '/repo/',
         activeFile: null,
@@ -1083,7 +1084,8 @@ describe('state helpers', () => {
       'varro.modelVariantSelections': 42,
       'varro.sessionSelectedMcps': { 'session-1': null },
     };
-    (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState = {
       getState: () => persisted,
       setState: vi.fn(),
     };
@@ -1102,7 +1104,8 @@ describe('state helpers', () => {
       expect(stateModule.state.sessionSelectedMcps).toEqual({});
       expect(stateModule.isModelVisible('openai', 'gpt-4o')).toBe(false);
     } finally {
-      delete (window as unknown as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
+      // SAFETY: The fixture provides the unknown fields read by this statement.
+      delete (window as { __vscodeWebviewState?: unknown }).__vscodeWebviewState;
     }
   });
 
@@ -1815,7 +1818,8 @@ describe('state helpers', () => {
   });
 
   it('reads desktop session pane side from initial webview state', async () => {
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',
       serverStatus: { state: 'stopped' },
       editorContext: {

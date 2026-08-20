@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Persistence values are validated as image arrays before restoration. */
 import type { Persistence } from '../shared/persistence';
 import type { ClipboardImageSnapshot } from '../shared/protocol';
 

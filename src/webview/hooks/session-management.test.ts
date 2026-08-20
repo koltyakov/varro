@@ -25,7 +25,7 @@ function session(id = 'session-1', overrides?: Partial<Session>): Session {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
+  let reject!: (reason?: Error) => void;
   const promise = new Promise<T>((next, rejectPromise) => {
     resolve = next;
     reject = rejectPromise;

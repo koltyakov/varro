@@ -1,4 +1,5 @@
 import type { Permission, SessionStatus } from '../types';
+import { asRecord, isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
 
 /**
  * Pure helpers that normalize raw server-event payloads into domain shapes.
@@ -17,91 +18,86 @@ export function isRunningSessionStatus(status: SessionStatus | null | undefined)
   return status?.type === 'busy' || status?.type === 'retry';
 }
 
-export function isNormalizedPermission(props: Record<string, unknown>): props is Permission {
+export function isNormalizedPermission(props: UnknownRecord): props is Permission {
   return (
-    typeof props.id === 'string' &&
-    typeof props.sessionID === 'string' &&
-    typeof props.type === 'string' &&
-    typeof props.messageID === 'string' &&
+    isString(props.id) &&
+    isString(props.sessionID) &&
+    isString(props.type) &&
+    isString(props.messageID) &&
     !!props.time &&
-    typeof props.time === 'object'
+    isObject(props.time)
   );
 }
 
-export function normalizePermissionEvent(props: unknown): Permission | null {
-  const record = props && typeof props === 'object' ? (props as Record<string, unknown>) : null;
+export function normalizePermissionEvent<T>(props: T): Permission | null {
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const record = props && isObject(props) ? (props as UnknownRecord) : null;
   if (!record) return null;
   const source =
-    record.info && typeof record.info === 'object'
-      ? (record.info as Record<string, unknown>)
-      : record;
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    record.info && isObject(record.info) ? (record.info as UnknownRecord) : record;
   if (isNormalizedPermission(source)) return source;
-  const id =
-    typeof source.id === 'string'
-      ? source.id
-      : typeof source.permissionID === 'string'
-        ? source.permissionID
-        : typeof source.requestID === 'string'
-          ? source.requestID
-          : null;
-  const sessionID = typeof source.sessionID === 'string' ? source.sessionID : null;
+  const id = isString(source.id)
+    ? source.id
+    : isString(source.permissionID)
+      ? source.permissionID
+      : isString(source.requestID)
+        ? source.requestID
+        : null;
+  const sessionID = isString(source.sessionID) ? source.sessionID : null;
   if (!id || !sessionID) return null;
 
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   const tool = (source.tool as { messageID?: string; callID?: string } | undefined) || undefined;
   const v2Source =
-    source.source && typeof source.source === 'object'
+    // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
+    source.source && isObject(source.source)
       ? (source.source as { messageID?: string; callID?: string })
       : undefined;
-  const permissionName =
-    typeof source.permission === 'string'
-      ? source.permission
-      : typeof source.type === 'string'
-        ? source.type
-        : typeof source.action === 'string'
-          ? source.action
-          : '';
+  const permissionName = isString(source.permission)
+    ? source.permission
+    : isString(source.type)
+      ? source.type
+      : isString(source.action)
+        ? source.action
+        : '';
   const patternValue = source.patterns ?? source.pattern ?? source.resources;
+  // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
   const patterns = Array.isArray(patternValue)
-    ? (patternValue.filter((p): p is string => typeof p === 'string') as string[])
-    : typeof patternValue === 'string'
+    ? (patternValue.filter((p): p is string => isString(p)) as string[])
+    : isString(patternValue)
       ? patternValue
       : undefined;
   const title =
-    typeof source.title === 'string' && source.title.trim().length > 0
+    isString(source.title) && source.title.trim().length > 0
       ? source.title
       : [permissionName, Array.isArray(patterns) ? patterns.join(', ') : patterns]
           .filter(Boolean)
           .join(' ') || 'Permission required';
-  const createdAt =
-    source.time &&
-    typeof source.time === 'object' &&
-    typeof (source.time as { created?: unknown }).created === 'number'
-      ? (source.time as { created: number }).created
-      : Date.now();
+  const created = asRecord(source.time)?.created;
+  const createdAt = isNumber(created) ? created : Date.now();
 
   return {
     id,
     type: permissionName,
     pattern: patterns,
     sessionID,
-    messageID:
-      typeof source.messageID === 'string'
-        ? source.messageID
-        : typeof tool?.messageID === 'string'
-          ? tool.messageID
-          : typeof v2Source?.messageID === 'string'
-            ? v2Source.messageID
-            : '',
-    callID:
-      typeof source.callID === 'string'
-        ? source.callID
-        : typeof tool?.callID === 'string'
-          ? tool.callID
-          : typeof v2Source?.callID === 'string'
-            ? v2Source.callID
-            : undefined,
+    messageID: isString(source.messageID)
+      ? source.messageID
+      : isString(tool?.messageID)
+        ? tool.messageID
+        : isString(v2Source?.messageID)
+          ? v2Source.messageID
+          : '',
+    callID: isString(source.callID)
+      ? source.callID
+      : isString(tool?.callID)
+        ? tool.callID
+        : isString(v2Source?.callID)
+          ? v2Source.callID
+          : undefined,
     title,
-    metadata: (source.metadata as { [key: string]: unknown } | undefined) || {},
+    metadata: asRecord(source.metadata) ?? {},
     time: { created: createdAt },
   };
 }

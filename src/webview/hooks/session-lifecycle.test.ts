@@ -3,6 +3,7 @@ import type { MockedObject } from 'vitest';
 import type * as StateModule from '../lib/state';
 import type { Session, SessionStatus } from '../types';
 
+// SAFETY: The fixture provides the complete domain shape read by this statement.
 const {
   clearMessages,
   clearCurrentDocumentStateForSession,
@@ -42,7 +43,9 @@ const {
   stopLoading: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise session lifecycle integration with the state module. */
 vi.mock('../lib/state', async () => {
+  // SAFETY: The test installs the typed mock implementation before this statement.
   const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
   return {
     ...actual,
@@ -78,17 +81,19 @@ import {
   sortSessions,
   upsertSession,
 } from './session/session-lifecycle';
+import { fixture } from '../test-fixtures';
 
 function session(id: string, directory = '/repo', updated = 0, parentID?: string): Session {
-  return {
+  const value: Session = {
     id,
     projectID: 'project-1',
     directory,
     title: id,
     version: '1',
-    ...(parentID ? { parentID } : {}),
     time: { created: updated, updated },
   };
+  if (parentID) value.parentID = parentID;
+  return value;
 }
 
 function createDeps(overrides?: {
@@ -386,8 +391,10 @@ describe('session-lifecycle helpers', () => {
   });
 
   it('isSessionInWorkspace returns false when session has null or empty directory', () => {
-    const nullDirSession = session('s1', undefined as unknown as string);
-    nullDirSession.directory = null as unknown as string;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    const nullDirSession = session('s1', fixture<string>(undefined));
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    nullDirSession.directory = fixture<string>(null);
     expect(isSessionInWorkspace(nullDirSession, '/repo')).toBe(false);
 
     const emptyDirSession = session('s2', '');

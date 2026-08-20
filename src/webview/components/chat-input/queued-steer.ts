@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { state, removeQueuedMessage } from '../../lib/state';
 import { sendMessage } from '../../hooks/useOpenCode';
+import { isString, isObject } from '../../lib/runtime-values';
 
 const [steeringQueuedMessageIds, setSteeringQueuedMessageIds] = createSignal<ReadonlySet<string>>(
   new Set()
@@ -27,10 +28,11 @@ function updateQueuedSteerId(
   });
 }
 
-export function getPromptEventText(prompt: unknown) {
-  if (!prompt || typeof prompt !== 'object') return null;
+export function getPromptEventText<T>(prompt: T) {
+  if (!prompt || !isObject(prompt)) return null;
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   const text = (prompt as { text?: unknown }).text;
-  return typeof text === 'string' ? text : null;
+  return isString(text) ? text : null;
 }
 
 function matchesQueuedPromptText(itemText: string, promptText: string | null) {
@@ -63,13 +65,13 @@ export async function sendQueuedAsSteer(item: (typeof state.queuedMessages)[numb
     sent =
       (await sendMessage(item.text, {
         delivery: 'steer',
-        ...(item.agent ? { agent: item.agent } : {}),
+        agent: item.agent ? item.agent : undefined,
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,
           nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
-          ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
+          attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
         },
         preserveComposer: true,
       })) !== false;

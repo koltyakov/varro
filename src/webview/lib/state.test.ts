@@ -109,11 +109,7 @@ function pendingToolPart(id: string): Part {
 
 function nextFrame() {
   return new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => resolve());
-      return;
-    }
-    setTimeout(resolve, 16);
+    requestAnimationFrame(() => resolve());
   });
 }
 
@@ -874,7 +870,8 @@ describe('clipboard image placeholders', () => {
 
   it('synchronizes pasted image changes to host persistence', () => {
     const send = vi.fn<(message: WebviewMessage) => void>();
-    (window as unknown as { __sendToExtension?: typeof send }).__sendToExtension = send;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __sendToExtension?: typeof send }).__sendToExtension = send;
 
     addClipboardImage({
       id: 'img-persisted',
@@ -905,7 +902,8 @@ describe('clipboard image placeholders', () => {
       payload: { images: [] },
     });
 
-    delete (window as unknown as { __sendToExtension?: unknown }).__sendToExtension;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    delete (window as { __sendToExtension?: unknown }).__sendToExtension;
   });
 
   it('replaces placeholders for all clipboard images when clearing them', () => {

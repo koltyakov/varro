@@ -12,7 +12,7 @@ type PermissionModeFreshness = {
   onConfirmed?(session: Session): void;
 };
 
-function isMissingPermissionRequestError(error: unknown): boolean {
+function isMissingPermissionRequestError<T>(error: T): boolean {
   return error instanceof Error && /^404\b.*permission request not found/i.test(error.message);
 }
 
@@ -38,7 +38,7 @@ export async function respondPermissionWithDependencies(
       sessionId: string,
       permissionId: string,
       response: PermissionResponse
-    ): Promise<unknown>;
+    ): Promise<void | boolean | object>;
     removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
     setError(message: string): void;
   },
@@ -72,7 +72,10 @@ export async function respondPermissionWithDependencies(
 
 export async function respondQuestionWithDependencies(
   deps: {
-    replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<unknown>;
+    replyQuestion(
+      requestId: string,
+      answers: Array<Array<string>>
+    ): Promise<void | boolean | object>;
     removeQuestion(requestId: string): void;
     setError(message: string): void;
   },
@@ -91,7 +94,7 @@ export async function respondQuestionWithDependencies(
 
 export async function rejectQuestionWithDependencies(
   deps: {
-    rejectQuestion(requestId: string): Promise<unknown>;
+    rejectQuestion(requestId: string): Promise<void | boolean | object>;
     removeQuestion(requestId: string): void;
     setError(message: string): void;
   },
@@ -114,7 +117,7 @@ export async function autoApprovePermissionsForSessionWithDependencies(
       permissionId: string,
       response: PermissionResponse,
       options?: { rethrow?: boolean }
-    ): Promise<void>;
+    ): Promise<void | boolean | object>;
   },
   permissions: Permission[]
 ) {
@@ -139,8 +142,8 @@ export async function updatePermissionModeForSessionWithDependencies(
     upsertSession(session: Session): void;
     setError(message: string): void;
     getPermissionsForSession(sessionId: string): Permission[];
-    autoApprovePermissionsForSession(permissions: Permission[]): Promise<void>;
-    syncPendingPermissions?(): Promise<void>;
+    autoApprovePermissionsForSession(permissions: Permission[]): Promise<void | boolean | object>;
+    syncPendingPermissions?(): Promise<void | boolean | object>;
   },
   mode: PermissionMode,
   permissionRules: Session['permission'],
@@ -201,12 +204,12 @@ type SessionApprovalDependencies = {
     sessionId: string,
     permissionId: string,
     response: PermissionResponse
-  ): Promise<unknown>;
+  ): Promise<void | boolean | object>;
   removePermission(permissionId: string, options?: { removeGroup?: boolean }): void;
   setError(message: string): void;
-  replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<unknown>;
+  replyQuestion(requestId: string, answers: Array<Array<string>>): Promise<void | boolean | object>;
   removeQuestion(requestId: string): void;
-  rejectRemoteQuestion(requestId: string): Promise<unknown>;
+  rejectRemoteQuestion(requestId: string): Promise<void | boolean | object>;
   getPermissionModeForSession(sessionId: string | null | undefined): PermissionMode;
   getDraftPermissionMode(): PermissionMode;
   setPermissionModeForSession(sessionId: string | null | undefined, mode: PermissionMode): void;
@@ -218,13 +221,13 @@ type SessionApprovalDependencies = {
   ): Promise<Session>;
   upsertSession(session: Session): void;
   getPermissionsForSession(sessionId: string): Permission[];
-  syncPendingPermissions?(): Promise<void>;
+  syncPendingPermissions?(): Promise<void | boolean | object>;
 };
 
 type PermissionModeQueue = {
   confirmedMode: PermissionMode;
   pending: number;
-  tail: Promise<void>;
+  tail: Promise<void | boolean | object>;
 };
 
 export class SessionApprovalOperations {

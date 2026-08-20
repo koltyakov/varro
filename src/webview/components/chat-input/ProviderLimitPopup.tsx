@@ -12,6 +12,7 @@ import {
   getProviderLimitWindowRemainingPercent,
   getProviderLimitWindowUsedPercent,
 } from '../../lib/format';
+import { isFunction } from '../../lib/runtime-values';
 
 const PROVIDER_LIMIT_WARNING_PERCENT = 75;
 const PROVIDER_LIMIT_ERROR_PERCENT = 90;
@@ -32,7 +33,7 @@ export function ProviderLimitPopup(props: {
   const setRef = (el: HTMLDivElement) => {
     popupEl = el;
     const forwarded = props.ref;
-    if (typeof forwarded === 'function') forwarded(el);
+    if (isFunction(forwarded)) forwarded(el);
   };
 
   onMount(() => {

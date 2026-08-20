@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E check inspects controlled abort requests exposed by the harness browser global. */
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 

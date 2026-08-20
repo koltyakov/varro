@@ -1,4 +1,5 @@
 import type { MessageEntry } from '../types';
+import { isFunction } from './runtime-values';
 
 export type MessageIndexCallbacks = {
   /** Called when message-level structure changes (add/remove/replace messages or info). */
@@ -8,9 +9,10 @@ export type MessageIndexCallbacks = {
 };
 
 export function createMessageIndex(callbacks?: MessageIndexCallbacks | (() => void)) {
-  const onInvalidate = typeof callbacks === 'function' ? callbacks : callbacks?.onInvalidate;
-  const onPartChange =
-    typeof callbacks === 'function' ? callbacks : (callbacks?.onPartChange ?? onInvalidate);
+  const onInvalidate = isFunction(callbacks) ? callbacks : callbacks?.onInvalidate;
+  const onPartChange = isFunction(callbacks)
+    ? callbacks
+    : (callbacks?.onPartChange ?? onInvalidate);
 
   let messageIndexVersion = 0;
   let indexedVersion = -1;

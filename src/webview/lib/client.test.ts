@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExtensionMessage } from '../../shared/protocol';
+import { fixture } from '../test-fixtures';
+
+interface TestServerEventEnvelope {
+  type: 'server/event';
+  payload: {
+    type: string;
+    properties?: Record<string, string>;
+  };
+}
+
+type TestInboundMessage = ExtensionMessage | TestServerEventEnvelope;
 
 const bridgeMocks = vi.hoisted(() => {
   const apiCall = vi.fn();
   const postMessage = vi.fn();
-  const messageHandlers: Array<(msg: unknown) => void> = [];
-  const onMessage = vi.fn((handler: (msg: unknown) => void) => {
+  const messageHandlers: Array<(msg: ExtensionMessage) => void> = [];
+  const onMessage = vi.fn((handler: (msg: ExtensionMessage) => void) => {
     messageHandlers.push(handler);
     return () => {
       const index = messageHandlers.indexOf(handler);
@@ -16,6 +27,7 @@ const bridgeMocks = vi.hoisted(() => {
   return { apiCall, postMessage, messageHandlers, onMessage };
 });
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise client transport integration through the bridge module. */
 vi.mock('./bridge', () => ({
   apiCall: bridgeMocks.apiCall,
   onMessage: bridgeMocks.onMessage,
@@ -30,7 +42,7 @@ type ClientApi = Awaited<ReturnType<typeof loadClient>>['client'];
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
+  let reject!: (error: Error) => void;
   const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
@@ -38,8 +50,8 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function emitMessage(message: unknown) {
-  for (const handler of bridgeMocks.messageHandlers) handler(message);
+function emitMessage(message: TestInboundMessage) {
+  for (const handler of bridgeMocks.messageHandlers) handler(fixture<ExtensionMessage>(message));
 }
 
 beforeEach(() => {
@@ -288,7 +300,7 @@ describe('client', () => {
 
   it('rejects malformed collection payloads with the endpoint in the error', async () => {
     const { client } = await loadClient();
-    const requests: Array<{ path: string; load: () => Promise<unknown> }> = [
+    const requests = [
       { path: '/session', load: () => client.session.list() },
       { path: '/session/status', load: () => client.session.status() },
       { path: '/session/session-1/message', load: () => client.session.messages('session-1') },

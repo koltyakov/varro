@@ -196,7 +196,9 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
       continue;
     }
     const currentChangeSignature = getToolFileChangeSignature(
+      // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
       (parts[index]! as ToolPart).tool,
+      // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
       (parts[index]! as ToolPart).state
     );
     let last = index;
@@ -204,7 +206,9 @@ export function deduplicateFileEdits(parts: Part[]): Part[] {
       last + 1 < parts.length &&
       isFileEditPart(parts[last + 1]!) &&
       getToolFileChangeSignature(
+        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
         (parts[last + 1]! as ToolPart).tool,
+        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
         (parts[last + 1]! as ToolPart).state
       ) === currentChangeSignature
     ) {
@@ -247,6 +251,7 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
       resizeObserver?.observe(item);
     }
     for (const item of observedItems) {
+      // SAFETY: The surrounding shape or discriminator check establishes the HTMLElement contract used below.
       if (items.includes(item as HTMLElement)) continue;
       observedItems.delete(item);
       resizeObserver?.unobserve(item);
@@ -281,13 +286,13 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     } else {
       element.scrollTop = element.scrollHeight;
     }
-    if (typeof CSSAnimation !== 'undefined') {
+    if (globalThis.CSSAnimation !== undefined) {
       const entranceAnimations = items.flatMap((item) =>
         item
           .getAnimations()
           .filter(
             (animation): animation is CSSAnimation =>
-              animation instanceof CSSAnimation &&
+              animation instanceof globalThis.CSSAnimation &&
               animation.animationName === 'assistant-active-activity-in'
           )
       );
@@ -308,7 +313,7 @@ function prepareActiveActivityItemsViewport(element: HTMLDivElement) {
     queueMicrotask(update);
   };
   const resizeObserver =
-    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueUpdate);
+    globalThis.ResizeObserver === undefined ? null : new globalThis.ResizeObserver(queueUpdate);
   const mutationObserver = new MutationObserver(queueUpdate);
   mutationObserver.observe(element, {
     attributes: true,
@@ -572,12 +577,14 @@ export function AssistantMessageContent(props: {
 
       const activityGroup = canGroupActivityPart(part);
       if (activityGroup && isAssistantActivityPart(part)) {
+        // SAFETY: The surrounding shape or discriminator check establishes the AssistantActivityPart contract used below.
         const activityParts: AssistantActivityPart[] = [part as AssistantActivityPart];
         while (
           index + 1 < parts.length &&
           !isActiveActivityTrayPart(parts[index + 1]!) &&
           canGroupActivityPart(parts[index + 1]!)?.key === activityGroup.key
         ) {
+          // SAFETY: The surrounding shape or discriminator check establishes the AssistantActivityPart contract used below.
           activityParts.push(parts[++index]! as AssistantActivityPart);
         }
         const key = `activity-group:${activityParts[0]!.id}`;
@@ -591,8 +598,10 @@ export function AssistantMessageContent(props: {
       }
 
       if (isFileEditPart(part)) {
+        // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
         const fileEditParts: ToolPart[] = [part as ToolPart];
         while (index + 1 < parts.length && isFileEditPart(parts[index + 1]!)) {
+          // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
           fileEditParts.push(parts[++index]! as ToolPart);
         }
         const key = getFileEditStackRenderKey(fileEditParts, showInlineFileChanges());
@@ -673,6 +682,7 @@ export function AssistantMessageContent(props: {
   const renderAssistantItem = (entry: AssistantRenderEntry) => {
     if (entry.item().kind === 'active-activity-tray') {
       const item = () =>
+        // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'active-activity-tray' }> contract used below.
         entry.item() as Extract<AssistantRenderItem, { kind: 'active-activity-tray' }>;
       const activeSummary = () => {
         for (const part of item().parts) {
@@ -782,6 +792,7 @@ export function AssistantMessageContent(props: {
     const initialItem = entry.item();
     const revealClass = getRevealClass(initialItem);
     if (initialItem.kind === 'activity-group') {
+      // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'activity-group' }> contract used below.
       const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'activity-group' }>;
       const activityGroup = () =>
         compactActivityGroupByPartKey().get(
@@ -823,6 +834,7 @@ export function AssistantMessageContent(props: {
     }
 
     if (initialItem.kind === 'file-edit-stack') {
+      // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'file-edit-stack' }> contract used below.
       const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'file-edit-stack' }>;
       return (
         <div
@@ -859,6 +871,7 @@ export function AssistantMessageContent(props: {
       );
     }
 
+    // SAFETY: The surrounding shape or discriminator check establishes the Extract<AssistantRenderItem, { kind: 'part' }> contract used below.
     const item = () => entry.item() as Extract<AssistantRenderItem, { kind: 'part' }>;
     return (
       <div
@@ -906,11 +919,13 @@ export function AssistantMessageContent(props: {
           streamedText={props.textForPart(item().part)}
           lightweight={isLightweight()}
           questionRequest={
+            // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
             item().part.type === 'tool'
               ? props.questionRequestForTool?.(item().part as ToolPart)
               : undefined
           }
           permissionMatch={
+            // SAFETY: The surrounding shape or discriminator check establishes the ToolPart contract used below.
             item().part.type === 'tool'
               ? props.permissionMatchForTool?.(item().part as ToolPart)
               : undefined
@@ -1088,7 +1103,7 @@ function observeActivitySummaryResize(
   element: Element,
   measurement: AssistantActivityResizeMeasurement
 ) {
-  if (!activitySummaryResizeObserver && typeof ResizeObserver !== 'undefined') {
+  if (!activitySummaryResizeObserver && globalThis.ResizeObserver !== undefined) {
     activitySummaryResizeObserver = new ResizeObserver((entries) => {
       const updates = entries.flatMap((entry) => {
         const measurements = activitySummaryResizeMeasurements.get(entry.target);

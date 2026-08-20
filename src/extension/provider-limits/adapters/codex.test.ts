@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters -- These adapter tests verify module-boundary token discovery and malformed fetch input. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { readFileMock } = vi.hoisted(() => ({

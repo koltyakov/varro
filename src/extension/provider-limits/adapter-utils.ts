@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Provider adapters share runtime decoders for untrusted API values. */
 import type { ProviderLimitStatus } from '../../shared/protocol';
 
 export { asRecord, getString } from '../../shared/type-utils';

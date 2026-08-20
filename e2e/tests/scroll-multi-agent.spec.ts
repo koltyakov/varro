@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Browser callbacks intercept synthetic message-part updates whose payload is intentionally opaque until forwarded. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access message hooks installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import {

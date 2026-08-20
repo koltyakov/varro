@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-chained-type-assertions, anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These context-file tests verify VS Code imports with partial URI and private provider fixtures. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const vscodeMock = vi.hoisted(() => ({

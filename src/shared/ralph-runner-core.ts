@@ -4,7 +4,6 @@ import type {
   RalphIterationStatus,
   RalphRun,
   RalphStopReason,
-  RalphVerificationVerdict,
 } from './ralph';
 import { createOpenCodeMessageID } from './opencode-id';
 import {
@@ -18,7 +17,7 @@ import {
   buildRepairSubAgentPrompt,
   buildVerificationPrompt,
 } from './ralph-prompts';
-import { asRecord } from './type-utils';
+import { asRecord, isNumber, isString } from './type-utils';
 
 /**
  * Host-agnostic Ralph orchestration loop. All environment access goes
@@ -126,7 +125,7 @@ export type RalphRunnerPorts = {
   ): Promise<string | null>;
   /** Normalize a model variant name for a model id; null drops the variant. */
   normalizeVariant(modelID: string, variant: string): string | null;
-  logError(context: string, err: unknown): void;
+  logError<ErrorValue>(context: string, err: ErrorValue): void;
 };
 
 export type RalphRunner = {
@@ -180,7 +179,7 @@ function throwIfRunCancelled(state: ActiveRunState): void {
   }
 }
 
-function isRunCancelled(state: ActiveRunState, err: unknown): boolean {
+function isRunCancelled<ErrorValue>(state: ActiveRunState, err: ErrorValue): boolean {
   return state.abortController.signal.aborted || err instanceof RalphRunCancelledError;
 }
 
@@ -311,7 +310,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     state: ActiveRunState,
     operation: (signal: AbortSignal) => Promise<T>,
     onLateValue?: (value: T) => void,
-    onLateError?: (error: unknown) => void
+    onLateError?: <ErrorValue>(error: ErrorValue) => void
   ): Promise<T> {
     throwIfRunCancelled(state);
     let operationPromise: Promise<T>;
@@ -541,15 +540,20 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
     });
   }
 
-  function failIteration(managerSessionId: string, iteration: RalphIteration, err: unknown): void {
+  function failIteration<ErrorValue>(
+    managerSessionId: string,
+    iteration: RalphIteration,
+    err: ErrorValue
+  ): void {
     ports.logError(`iteration ${iteration.index} failed`, err);
     const note = err instanceof Error ? err.message : String(err);
-    ports.store.upsertIteration(managerSessionId, {
+    const failedIteration: RalphIteration = {
       ...iteration,
       status: 'failed',
       endedAt: Date.now(),
-      ...(note ? { note } : {}),
-    });
+    };
+    if (note) failedIteration.note = note;
+    ports.store.upsertIteration(managerSessionId, failedIteration);
     ports.store.setStatus(managerSessionId, 'failed', 'iteration_error');
   }
 
@@ -1060,7 +1064,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         (message) =>
           message.info.role === 'assistant' &&
           message.info.parentID === promptMessageID &&
-          typeof message.info.time?.completed === 'number' &&
+          message.info.time?.completed !== undefined &&
           Number.isFinite(message.info.time.completed)
       );
       if (assistantIndex < 0) return { type: 'none' };
@@ -1264,7 +1268,7 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         ? `No completed verification report was found for Ralph session ${childId}. Last output: ${lastAssistantText.slice(0, 200)}`
         : lastAssistantText.slice(0, 280);
 
-    return {
+    const settledIteration: RalphIteration = {
       index: iterationIndex,
       childSessionId: childId,
       status,
@@ -1272,11 +1276,12 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
       endedAt: Date.now(),
       filesChanged: Array.from(filesChangedSet),
       verification,
-      ...(phase ? { phase } : {}),
       tokens: tokens.total > 0 ? tokens : undefined,
       cost: cost > 0 ? cost : undefined,
       note,
     };
+    if (phase) settledIteration.phase = phase;
+    return settledIteration;
   }
 
   return runner;
@@ -1332,13 +1337,13 @@ function messageOccursAfter(
 
 function getMessageTime(message: RalphMessageEntry | undefined): number | null {
   const time = message?.info.time?.created ?? message?.info.time?.completed;
-  return typeof time === 'number' && Number.isFinite(time) ? time : null;
+  return isNumber(time) && Number.isFinite(time) ? time : null;
 }
 
 function getMessageText(message: RalphMessageEntry | undefined): string {
   return (
     message?.parts
-      .filter((part) => part.type === 'text' && typeof part.text === 'string')
+      .filter((part) => part.type === 'text')
       .map((part) => part.text)
       .join('\n') ?? ''
   );
@@ -1379,14 +1384,14 @@ function promptAssistantError(childId: string, message: string): Error {
   return new Error(`Ralph session ${childId} assistant failed for the current prompt: ${message}`);
 }
 
-function getRalphMessageError(value: unknown): string {
+function getRalphMessageError<T>(value: T): string {
   if (value instanceof Error) return value.message;
   const error = asRecord(value);
   const data = asRecord(error?.data);
   return (
-    (typeof data?.message === 'string' && data.message) ||
-    (typeof error?.message === 'string' && error.message) ||
-    (typeof error?.name === 'string' && error.name) ||
+    (isString(data?.message) && data.message) ||
+    (isString(error?.message) && error.message) ||
+    (isString(error?.name) && error.name) ||
     'The assistant completed with an unknown error'
   );
 }
@@ -1397,10 +1402,12 @@ function sessionMissingError(childId: string): Error {
   );
 }
 
-function createDeferred<T>(): {
+type Deferred<T> = {
   promise: Promise<T>;
   resolve(value: T | PromiseLike<T>): void;
-} {
+};
+
+function createDeferred<T>(): Deferred<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((promiseResolve) => {
     resolve = promiseResolve;
@@ -1525,7 +1532,15 @@ export function parseVerificationVerdicts(text: string): RalphIteration['verific
     if (!rawName || !verdict) continue;
     const name = normalizeVerificationName(rawName);
     if (!name) continue;
-    verdicts[name] = verdict.toLowerCase() as RalphVerificationVerdict;
+    const normalizedVerdict = verdict.toLowerCase();
+    if (
+      normalizedVerdict !== 'pass' &&
+      normalizedVerdict !== 'fail' &&
+      normalizedVerdict !== 'skipped'
+    ) {
+      continue;
+    }
+    verdicts[name] = normalizedVerdict;
   }
   return verdicts;
 }

@@ -52,6 +52,7 @@ const clientMocks = vi.hoisted(() => ({
   readWorkspaceFile: vi.fn(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise RalphForm integration across client, state, and runner modules. */
 vi.mock('../../lib/client', () => ({
   client: {
     session: {
@@ -278,6 +279,7 @@ describe('RalphForm', () => {
 
     const input = document.body.querySelector('input[type="text"]');
     expect(input).toBeInstanceOf(HTMLInputElement);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((input as HTMLInputElement | null)?.value).toBe('docs/RALPH.md');
     expect(clientMocks.pickWorkspaceFile).toHaveBeenCalledTimes(1);
   });
@@ -327,6 +329,7 @@ describe('RalphForm', () => {
 
     const input = document.body.querySelector('input[type="text"]');
     expect(input).toBeInstanceOf(HTMLInputElement);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((input as HTMLInputElement | null)?.value).toBe('RALPH.md');
   });
 

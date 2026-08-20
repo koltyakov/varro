@@ -723,10 +723,12 @@ describe('sendMessage', () => {
     stateModule.setSelectedModel({ providerID: 'openai', modelID: 'draft-model' });
     clientMocks.sessionCreate.mockReturnValue(created.promise);
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     clientMocks.sessionUpdate.mockImplementation(async (id, body) => ({
       ...session(id as string),
       ...(body as object),
     }));
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => session(id as string));
     clientMocks.sessionMessages.mockResolvedValue([]);
     clientMocks.sessionStatus.mockResolvedValue({});
@@ -776,10 +778,12 @@ describe('sendMessage', () => {
       .mockReturnValueOnce(oldCreation.promise)
       .mockReturnValueOnce(newCreation.promise);
     clientMocks.sessionSendAsync.mockResolvedValue(undefined);
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     clientMocks.sessionUpdate.mockImplementation(async (id, body) => ({
       ...sessionInWorkspace(id as string),
       ...(body as object),
     }));
+    // SAFETY: The fixture provides the string fields read by this statement.
     clientMocks.sessionGet.mockImplementation(async (id) => sessionInWorkspace(id as string));
     clientMocks.sessionMessages.mockImplementation(async (id) => [
       {

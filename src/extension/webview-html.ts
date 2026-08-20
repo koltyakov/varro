@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- Webview state serialization accepts protocol-owned values of varied concrete types. */
 import { randomBytes } from 'crypto';
 import type { InitialWebviewState } from '../shared/protocol';
 

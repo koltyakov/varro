@@ -10,6 +10,7 @@ const { messageRowPassCounts } = vi.hoisted(() => ({
   messageRowPassCounts: new Map<string, number>(),
 }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- This benchmark measures MessageList integration without MessageRows render cost. */
 vi.mock('../components/message-list/MessageRows', async () => {
   const { createRenderEffect } = await import('solid-js');
 

@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: This E2E callback mutates protocol-shaped session state owned by the controlled harness fixture. */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { getE2EState } from './helpers';
 

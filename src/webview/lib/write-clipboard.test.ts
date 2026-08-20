@@ -37,6 +37,7 @@ describe('writeClipboard', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
       configurable: true,
     });
+    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
     (document.execCommand as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
     const result = await writeClipboard('fallback text');
@@ -49,6 +50,7 @@ describe('writeClipboard', () => {
       value: undefined,
       configurable: true,
     });
+    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
     (document.execCommand as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
     const result = await writeClipboard('no clipboard');
@@ -67,6 +69,7 @@ describe('writeClipboard', () => {
     modal.appendChild(button);
     document.body.appendChild(modal);
     button.focus();
+    // SAFETY: The fixture provides the ReturnType<typeof vi.fn> fields read by this statement.
     (document.execCommand as ReturnType<typeof vi.fn>).mockImplementation(() => {
       expect(modal.querySelector('textarea')?.parentElement).toBe(modal);
       return true;

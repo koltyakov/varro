@@ -9,7 +9,9 @@ export function compareProviders(
   a: Pick<Provider, 'id' | 'name'>,
   b: Pick<Provider, 'id' | 'name'>
 ) {
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   const aPriority = PROVIDER_PRIORITY.indexOf(a.id as (typeof PROVIDER_PRIORITY)[number]);
+  // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
   const bPriority = PROVIDER_PRIORITY.indexOf(b.id as (typeof PROVIDER_PRIORITY)[number]);
   const priorityOrder =
     (aPriority < 0 ? PROVIDER_PRIORITY.length : aPriority) -

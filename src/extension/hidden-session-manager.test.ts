@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests inspect the manager's private state after exercising its public API. */
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEvent } from '../shared/protocol';
 import { HiddenSessionManager } from './hidden-session-manager';

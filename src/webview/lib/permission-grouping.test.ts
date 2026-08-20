@@ -6,6 +6,7 @@ import {
   normalizeInitialPermissions,
   normalizeInitialQuestions,
 } from './permission-grouping';
+import { fixture } from '../test-fixtures';
 
 function permission(overrides: Partial<Permission> = {}): Permission {
   return {
@@ -60,8 +61,9 @@ describe('getPermissionSignature', () => {
   });
 
   it('treats a missing pattern and an explicit null pattern alike', () => {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     expect(getPermissionSignature(permission({ pattern: undefined }))).toBe(
-      getPermissionSignature(permission({ pattern: null as unknown as string }))
+      getPermissionSignature(permission({ pattern: fixture<string>(null) }))
     );
   });
 

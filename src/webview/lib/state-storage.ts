@@ -35,7 +35,7 @@ export function readStored<T>(key: string): T | null {
   return browserPersistence.get<T>(key) ?? null;
 }
 
-export function writeStored(key: string, value: unknown) {
+export function writeStored<T>(key: string, value: T) {
   if (value === null || value === undefined) {
     browserPersistence.remove(key);
     return;

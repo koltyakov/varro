@@ -11,12 +11,16 @@ import {
   userMessage,
 } from './useOpenCode.test-support';
 
+interface ServerEvent {
+  properties?: unknown;
+}
+
 const clientMocks = getClientMocks();
 const bridgeMocks = getBridgeMocks();
 type BridgeOnMessage = typeof onMessage;
 type ServerEventsOn = (
   event: ServerEventName | '*',
-  handler: (data: unknown) => void
+  handler: (data: ServerEvent) => void
 ) => () => void;
 const bridgeOnMessage = vi.fn<BridgeOnMessage>();
 const serverEventsOn = vi.fn<ServerEventsOn>();
@@ -59,7 +63,7 @@ function permissionListItem(id = 'perm-1') {
 }
 
 function captureServerEventHandlers() {
-  const handlers = new Map<string, (data: unknown) => void>();
+  const handlers = new Map<string, (data: ServerEvent) => void>();
   serverEventsOn.mockImplementation((event, handler) => {
     handlers.set(event, handler);
     return () => {
@@ -1355,7 +1359,8 @@ describe('useOpenCode permission and config flows', () => {
       };
     });
 
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',
       serverStatus: { state: 'stopped' },
       editorContext: {
@@ -1432,7 +1437,8 @@ describe('useOpenCode permission and config flows', () => {
       };
     });
 
-    (window as unknown as { __initialWebviewState?: unknown }).__initialWebviewState = {
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    (window as { __initialWebviewState?: unknown }).__initialWebviewState = {
       theme: 'dark',
       serverStatus: { state: 'stopped' },
       editorContext: {
@@ -1509,7 +1515,7 @@ describe('useOpenCode permission and config flows', () => {
       };
     });
 
-    const serverEventHandlers = new Map<string, (data: unknown) => void>();
+    const serverEventHandlers = new Map<string, (data: ServerEvent) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
       serverEventHandlers.set(event, handler);
       return () => {

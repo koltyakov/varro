@@ -13,14 +13,16 @@ export type MaterialChipIconKind =
   | 'external-link'
   | 'git';
 
-const ICONS: Record<MaterialChipIconKind, string> = {
+type MaterialChipIconMap = Record<MaterialChipIconKind, string>;
+
+const ICONS = {
   agent: agentIcon,
   terminal: terminalIcon,
   image: imageIcon,
   session: sessionIcon,
   'external-link': externalLinkIcon,
   git: gitIcon,
-};
+} satisfies MaterialChipIconMap;
 
 export function getMaterialChipIcon(kind: MaterialChipIconKind): string {
   return ICONS[kind];

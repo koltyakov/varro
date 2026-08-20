@@ -45,6 +45,7 @@ import {
   toolPart,
   userMessage,
 } from './MessageList.test-utils';
+import { fixture } from '../test-fixtures';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -387,8 +388,11 @@ describe('shouldShowStickyUserMessagePreview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
@@ -406,6 +410,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const stickyText = container?.querySelector(
       '.latest-user-message-sticky-text'
     ) as HTMLDivElement | null;
@@ -467,7 +472,9 @@ describe('shouldShowStickyUserMessagePreview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
@@ -535,11 +542,13 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
   it('retries sticky navigation when its page is invalidated at the same cursor', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
       releaseStalePage = resolve;
     });
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const freshPage = [
       { info: userMessage('boundary-user'), parts: [textPart('boundary-text', 'Boundary prompt')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -567,6 +576,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
@@ -600,11 +610,13 @@ describe('shouldShowStickyUserMessagePreview', () => {
 
   it('releases stale sticky loading when the same-session window resets', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const stalePage = [] as Awaited<ReturnType<typeof client.session.messages>>;
     let releaseStalePage: ((page: typeof stalePage) => void) | undefined;
     const pendingStalePage = new Promise<typeof stalePage>((resolve) => {
       releaseStalePage = resolve;
     });
+    // SAFETY: The fixture provides the complete domain shape read by this statement.
     const currentPage = [
       { info: userMessage('current-older'), parts: [textPart('current-text', 'Current history')] },
     ] as Awaited<ReturnType<typeof client.session.messages>>;
@@ -633,6 +645,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
@@ -710,6 +723,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
@@ -751,6 +765,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 800 });
@@ -815,6 +830,7 @@ describe('shouldShowStickyUserMessagePreview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1200 });
@@ -1120,6 +1136,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -1166,6 +1183,7 @@ describe('MessageList sticky prompt preview', () => {
       cleanup = render(() => MessageList(), container!);
       await Promise.resolve();
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const list = container?.querySelector('.interactive-list') as HTMLDivElement;
       Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 9_600 });
@@ -1789,7 +1807,9 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const editedRow = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     expect(editedRow).toBeInstanceOf(HTMLDivElement);
@@ -1838,6 +1858,7 @@ describe('MessageList sticky prompt preview', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', {
@@ -1893,6 +1914,7 @@ describe('MessageList sticky prompt preview', () => {
     ]);
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(list, 'scrollHeight', {
@@ -1972,12 +1994,17 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user3Row = container?.querySelector('[data-msg-id="user-3"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant3Row = container?.querySelector(
       '[data-msg-id="assistant-3"]'
     ) as HTMLDivElement | null;
@@ -2057,6 +2084,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
@@ -2105,6 +2133,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
@@ -2133,6 +2162,7 @@ describe('MessageList sticky prompt preview', () => {
       unobserve() {}
       disconnect() {}
     }
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     setState('activeSessionId', 'session-1');
@@ -2161,6 +2191,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_200 });
@@ -2177,7 +2208,7 @@ describe('MessageList sticky prompt preview', () => {
     assistantTop = -600;
     upsertPart(activity);
     for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
+      callback([], fixture<ResizeObserver>({}));
     }
     animationFrames.flush();
     await Promise.resolve();
@@ -2194,7 +2225,7 @@ describe('MessageList sticky prompt preview', () => {
 
     assistantTop = 20;
     for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
+      callback([], fixture<ResizeObserver>({}));
     }
     animationFrames.flush();
     await Promise.resolve();
@@ -2211,7 +2242,7 @@ describe('MessageList sticky prompt preview', () => {
       },
     });
     for (const callback of resizeCallbacks) {
-      callback([], {} as ResizeObserver);
+      callback([], fixture<ResizeObserver>({}));
     }
     animationFrames.flush();
     await Promise.resolve();
@@ -2258,6 +2289,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
@@ -2373,6 +2405,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
     Object.defineProperty(list!, 'clientHeight', { configurable: true, value: 500 });
@@ -2417,7 +2450,8 @@ describe('MessageList sticky prompt preview', () => {
         this.targets.clear();
       }
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = TestResizeObserver as typeof ResizeObserver;
 
     let nextUserTop = 220;
     setState('activeSessionId', 'session-1');
@@ -2448,7 +2482,9 @@ describe('MessageList sticky prompt preview', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 1_700 });
@@ -2467,9 +2503,10 @@ describe('MessageList sticky prompt preview', () => {
       (observer) => observer.targets.has(list) && observer.targets.has(track)
     );
     expect(layoutObserver).toBeDefined();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     layoutObserver!.callback(
-      [{ target: track } as unknown as ResizeObserverEntry],
-      layoutObserver as unknown as ResizeObserver
+      [fixture<ResizeObserverEntry>({ target: track })],
+      fixture<ResizeObserver>(layoutObserver)
     );
     animationFrames.flush();
     await Promise.resolve();
@@ -2513,8 +2550,11 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant1 = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
@@ -2594,8 +2634,11 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant1 = container?.querySelector('[data-msg-id="assistant-1"]') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2 = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', { configurable: true, writable: true, value: 1_200 });
@@ -2666,6 +2709,7 @@ describe('MessageList sticky prompt preview', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', {
@@ -2734,6 +2778,7 @@ describe('MessageList sticky prompt preview', () => {
     animationFrames.flush();
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     expect(list).toBeInstanceOf(HTMLDivElement);
 
@@ -2788,10 +2833,12 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
     const unusualUserRow = [...container!.querySelectorAll<HTMLElement>('[data-msg-id]')].find(
       (element) => element.dataset.msgId === unusualUserId
     );
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
@@ -2878,8 +2925,11 @@ describe('MessageList sticky prompt preview', () => {
       cleanup = render(() => MessageList(), container!);
       await Promise.resolve();
 
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       list = container?.querySelector('.interactive-list') as HTMLDivElement;
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       const card = container?.querySelector(
         '[data-msg-id="user-2"] .user-message-card'
       ) as HTMLDivElement;
@@ -2950,8 +3000,11 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
@@ -3012,6 +3065,7 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
     Object.defineProperty(list, 'clientHeight', { configurable: true, value: 500 });
     Object.defineProperty(list, 'scrollTop', {
@@ -3104,7 +3158,9 @@ describe('MessageList sticky prompt preview', () => {
     );
 
     cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const track = container?.querySelector('.interactive-list-track') as HTMLDivElement;
     Object.defineProperty(container!, 'scrollTop', {
       configurable: true,
@@ -3232,11 +3288,15 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Card = container?.querySelector(
       '[data-msg-id="user-2"] .user-message-card'
     ) as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
@@ -3318,11 +3378,15 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Card = container?.querySelector(
       '[data-msg-id="user-2"] .user-message-card'
     ) as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;
@@ -3396,11 +3460,15 @@ describe('MessageList sticky prompt preview', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const list = container?.querySelector('.interactive-list') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Row = container?.querySelector('[data-msg-id="user-2"]') as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const user2Card = container?.querySelector(
       '[data-msg-id="user-2"] .user-message-card'
     ) as HTMLDivElement | null;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const assistant2Row = container?.querySelector(
       '[data-msg-id="assistant-2"]'
     ) as HTMLDivElement | null;

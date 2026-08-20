@@ -1,9 +1,10 @@
 import { appStore } from '../lib/stores/app-store';
 import { isTodoToolName } from '../lib/tool-normalization';
 import type { AssistantMessage, MessageEntry, NormalizedTodo, Part } from '../types';
+import { isNumber, isString, type UnknownRecord, isObject } from '../lib/runtime-values';
 
 type TodoSyncDependencies = {
-  loadSessionTodos?(sessionId: string): Promise<unknown>;
+  loadSessionTodos?(sessionId: string): Promise<void | boolean | object>;
 };
 
 export function resetTodoSync() {
@@ -21,7 +22,7 @@ function setStateTodos(todos: NormalizedTodo[], options?: { preserveAdvancedStat
 export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
   let nativeTodosEnabled = false;
 
-  const applyNativeTodos = (raw: unknown, options?: { preserveAdvancedStatuses?: boolean }) => {
+  const applyNativeTodos = <T>(raw: T, options?: { preserveAdvancedStatuses?: boolean }) => {
     const todos = extractTodos(raw);
     if (!todos) return false;
     nativeTodosEnabled = true;
@@ -29,9 +30,9 @@ export function createTodoSyncOperations(deps: TodoSyncDependencies = {}) {
     return true;
   };
 
-  const syncTodosFromMessagesWithState = (
+  const syncTodosFromMessagesWithState = <T>(
     messages: MessageEntry[] = appStore.state.messages,
-    latestEventPayload?: unknown
+    latestEventPayload?: T
   ) => {
     if (
       nativeTodosEnabled &&
@@ -119,14 +120,15 @@ function isStaleSettledNativeTodoSnapshot(todos: NormalizedTodo[], messages: Mes
   return !!latestAssistant?.info.time.completed && !latestAssistant.info.error;
 }
 
-export function extractTodos(raw: unknown): NormalizedTodo[] | null {
+export function extractTodos<T>(raw: T): NormalizedTodo[] | null {
   if (Array.isArray(raw)) {
     return raw.map(normalizeTodo).filter((todo): todo is NormalizedTodo => Boolean(todo));
   }
 
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || !isObject(raw)) return null;
 
-  const record = raw as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const record = raw as UnknownRecord;
   for (const key of ['todos', 'items', 'plan']) {
     const todos = extractTodos(record[key]);
     if (todos) return todos;
@@ -161,10 +163,10 @@ export function deriveTodosFromMessages(messages: MessageEntry[]): NormalizedTod
   return [];
 }
 
-export function syncTodosFromMessages(
+export function syncTodosFromMessages<T>(
   setTodos: (todos: NormalizedTodo[]) => void,
   messages: MessageEntry[],
-  latestEventPayload?: unknown
+  latestEventPayload?: T
 ) {
   const eventTodos = extractTodos(latestEventPayload);
   const messageTodos = deriveTodosFromMessages(messages);
@@ -241,18 +243,21 @@ export function handoffTodosToMessages(
   return true;
 }
 
-function extractTodosFromParallelTool(raw: unknown): NormalizedTodo[] | null {
-  if (!raw || typeof raw !== 'object') return null;
+function extractTodosFromParallelTool<T>(raw: T): NormalizedTodo[] | null {
+  if (!raw || !isObject(raw)) return null;
 
-  const toolUses = (raw as Record<string, unknown>).tool_uses;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const toolUses = (raw as UnknownRecord).tool_uses;
   if (!Array.isArray(toolUses)) return null;
 
   for (const toolUse of toolUses) {
-    if (!toolUse || typeof toolUse !== 'object') continue;
+    if (!toolUse || !isObject(toolUse)) continue;
 
-    const record = toolUse as Record<string, unknown>;
-    const recipientName =
-      typeof record.recipient_name === 'string' ? record.recipient_name.trim().toLowerCase() : '';
+    // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+    const record = toolUse as UnknownRecord;
+    const recipientName = isString(record.recipient_name)
+      ? record.recipient_name.trim().toLowerCase()
+      : '';
     if (!isTodoToolName(recipientName)) continue;
 
     const todos = extractTodos(record.parameters);
@@ -262,28 +267,27 @@ function extractTodosFromParallelTool(raw: unknown): NormalizedTodo[] | null {
   return null;
 }
 
-function normalizeTodo(raw: unknown): NormalizedTodo | null {
-  if (!raw || typeof raw !== 'object') return null;
+function normalizeTodo<T>(raw: T): NormalizedTodo | null {
+  if (!raw || !isObject(raw)) return null;
 
-  const record = raw as Record<string, unknown>;
-  const content =
-    typeof record.content === 'string'
-      ? record.content.trim()
-      : typeof record.title === 'string'
-        ? record.title.trim()
-        : typeof record.step === 'string'
-          ? record.step.trim()
-          : '';
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const record = raw as UnknownRecord;
+  const content = isString(record.content)
+    ? record.content.trim()
+    : isString(record.title)
+      ? record.title.trim()
+      : isString(record.step)
+        ? record.step.trim()
+        : '';
 
   if (!content) return null;
 
-  const id =
-    typeof record.id === 'string' || typeof record.id === 'number' ? String(record.id) : content;
+  const id = isString(record.id) || isNumber(record.id) ? String(record.id) : content;
 
   return {
     content,
-    status: typeof record.status === 'string' ? record.status : 'pending',
-    priority: typeof record.priority === 'string' ? record.priority : 'medium',
+    status: isString(record.status) ? record.status : 'pending',
+    priority: isString(record.priority) ? record.priority : 'medium',
     id,
   };
 }
@@ -303,7 +307,8 @@ function extractTodosFromPart(part: Part): NormalizedTodo[] | null {
   if (part.type !== 'tool') return null;
 
   const toolName = part.tool.trim().toLowerCase();
-  const toolState = part.state as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const toolState = part.state as UnknownRecord;
 
   if (toolName === 'parallel' || toolName.endsWith('.parallel')) {
     return (
@@ -324,8 +329,8 @@ function extractTodosFromPart(part: Part): NormalizedTodo[] | null {
   );
 }
 
-function extractTodosFromOutput(raw: unknown): NormalizedTodo[] | null {
-  if (typeof raw !== 'string') return extractTodos(raw);
+function extractTodosFromOutput<T>(raw: T): NormalizedTodo[] | null {
+  if (!isString(raw)) return extractTodos(raw);
 
   try {
     return extractTodos(JSON.parse(raw));

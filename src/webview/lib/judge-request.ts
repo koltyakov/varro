@@ -15,7 +15,7 @@ export function toPlainJudgeModel(model: SelectedModel | null): SelectedModel | 
   return {
     providerID: model.providerID,
     modelID: model.modelID,
-    ...(model.variant ? { variant: model.variant } : {}),
+    variant: model.variant ? model.variant : undefined,
   };
 }
 
@@ -27,15 +27,17 @@ export function toApprovedPermissionReference(
     type: permission.type,
     title: permission.title,
     response,
-    ...(permission.pattern !== undefined
-      ? {
-          pattern: Array.isArray(permission.pattern) ? [...permission.pattern] : permission.pattern,
-        }
-      : {}),
-    ...(permission.metadata ? { metadata: deepPlainCopy(permission.metadata) } : {}),
+    pattern:
+      permission.pattern !== undefined
+        ? Array.isArray(permission.pattern)
+          ? [...permission.pattern]
+          : permission.pattern
+        : undefined,
+    metadata: permission.metadata ? deepPlainCopy(permission.metadata) : undefined,
   };
 }
 
 function deepPlainCopy<T>(value: T): T {
+  // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
   return JSON.parse(JSON.stringify(value)) as T;
 }

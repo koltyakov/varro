@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof -- Error causes cross an untyped JavaScript boundary and are checked before access. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Error records are checked for object shape before fields are read. */
 import * as vscode from 'vscode';
 import { logger } from './logger';
 

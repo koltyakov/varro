@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- The browser callback receives synthetic window messages and deliberately forwards their opaque payloads. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access pagination controls installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 

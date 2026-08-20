@@ -3,6 +3,7 @@ import { setShowSessionPicker, showSessionPicker, state } from './app-state';
 import { getSelectedModelForSession, setSelectedModel } from './state-model-selection';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import { readStoredSelectedModel, readStoredString } from './state-stored-values';
+import { isNumber, isString, type UnknownRecord, isObject } from './runtime-values';
 
 export type LastOpenedView =
   | { type: 'new-session'; timestamp: number }
@@ -43,15 +44,16 @@ export function persistActiveSessionId(id: string | null) {
   writeStored(STORAGE_KEYS.lastActiveSessionId, id);
 }
 
-function normalizeLastOpenedView(value: unknown): LastOpenedView | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const timestamp = typeof record.timestamp === 'number' ? record.timestamp : null;
+function normalizeLastOpenedView<T>(value: T): LastOpenedView | null {
+  if (!value || !isObject(value)) return null;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const record = value as UnknownRecord;
+  const timestamp = isNumber(record.timestamp) ? record.timestamp : null;
   if (timestamp === null || !Number.isFinite(timestamp)) return null;
 
   if (record.type === 'new-session') return { type: 'new-session', timestamp };
   if (record.type === 'sessions-list') return { type: 'sessions-list', timestamp };
-  if (record.type === 'session' && typeof record.sessionId === 'string') {
+  if (record.type === 'session' && isString(record.sessionId)) {
     return { type: 'session', sessionId: record.sessionId, timestamp };
   }
   return null;

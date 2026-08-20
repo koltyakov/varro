@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: These tests deliberately pass open, malformed summary payloads through projection. */
 import { describe, expect, it } from 'vitest';
 import {
   SUMMARY_DIFF_BYTE_BUDGET,

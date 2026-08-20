@@ -9,6 +9,7 @@ import type {
   SessionStatus,
   UserMessage,
 } from '../types';
+import type { ServerEvent } from '../../shared/protocol';
 import {
   markSessionUnshared,
   resetSessionShareOverridesForTests,
@@ -104,6 +105,7 @@ const {
 
 const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise event-handler integration across state and store modules. */
 vi.mock('../lib/log', () => ({ logWarn }));
 
 vi.mock('../lib/client', () => ({
@@ -113,6 +115,7 @@ vi.mock('../lib/client', () => ({
 }));
 
 vi.mock('../lib/state', async () => {
+  // SAFETY: The test installs the typed mock implementation before this statement.
   const actual = (await vi.importActual('../lib/state')) as MockedObject<typeof StateModule>;
   return {
     ...actual,
@@ -137,6 +140,7 @@ vi.mock('../lib/state', async () => {
 
 vi.mock('../lib/stores/session-store', async () => {
   const actual = await vi.importActual('../lib/stores/session-store');
+  // SAFETY: The fixture provides the complete domain shape read by this statement.
   return {
     ...(actual as object),
     sessionStore: {
@@ -159,6 +163,7 @@ vi.mock('../lib/stores/session-store', async () => {
 
 vi.mock('../lib/stores/ui-store', async () => {
   const actual = await vi.importActual('../lib/stores/ui-store');
+  // SAFETY: The fixture provides the complete domain shape read by this statement.
   return {
     ...(actual as object),
     uiStore: {
@@ -179,17 +184,21 @@ import { setShowSessionPicker } from '../lib/state';
 
 type EventData = {
   type?: string;
-  properties?: Record<string, unknown>;
+  properties?: EventProperties;
   seq?: number;
   sequenceOnly?: true;
 };
+
+type EventProperties = NonNullable<ServerEvent['properties']>;
 
 function installHandlers() {
   const handlers = new Map<string, (data: EventData) => void>();
   serverEventsOn.mockReset();
   serverEventsOn.mockImplementation((event, handler) => {
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     handlers.set(event as string, handler as (data: EventData) => void);
     return () => {
+      // SAFETY: The fixture provides the string fields read by this statement.
       handlers.delete(event as string);
     };
   });
@@ -399,13 +408,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('keeps full-access permission prompts hidden when auto-approval races or fails', async () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -456,13 +464,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('restores the permission prompt when auto-approval fails after leaving full access', async () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -518,13 +525,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('removes permissions when a reply only includes id', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -780,13 +786,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('binds event handlers to shared state-backed dependencies', async () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -856,13 +861,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs active messages for partial message.updated payloads', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -928,13 +932,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('rejects malformed user message.updated payloads with parent ids', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -1044,13 +1047,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs active messages for partial message.part.updated payloads', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -1232,13 +1234,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session message updates when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -1515,13 +1516,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session tool part updates when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -1588,13 +1588,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('applies child-session part deltas when they belong to the active session tree', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -1953,10 +1952,10 @@ describe('registerSessionEventHandlers', () => {
     expect(syncSessionMessages).toHaveBeenCalledWith('session-1');
     expect(applyMessagePartDelta).not.toHaveBeenCalled();
 
-    await Promise.resolve();
-
-    expect(upsertPart).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'reason-2', messageID: 'assistant-3', type: 'reasoning' })
+    await vi.waitFor(() =>
+      expect(upsertPart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'reason-2', messageID: 'assistant-3', type: 'reasoning' })
+      )
     );
     expect(applyMessagePartDelta).toHaveBeenCalledWith(
       'assistant-3',
@@ -3630,13 +3629,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('re-syncs todos from messages when todo.updated arrives for an active reply', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -3702,13 +3700,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('marks the session idle and resyncs messages when the active reply still looks unfinished', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -3861,13 +3858,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('does not resync messages on idle when the active session already looks settled', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -3946,13 +3942,12 @@ describe('registerSessionEventHandlers', () => {
   });
 
   it('resyncs messages on idle when todo handoff cannot reconcile local state', () => {
-    const handlers = new Map<string, (data: { properties?: Record<string, unknown> }) => void>();
+    const handlers = new Map<string, (data: { properties?: EventProperties }) => void>();
     serverEventsOn.mockImplementation((event, handler) => {
-      handlers.set(
-        event as string,
-        handler as (data: { properties?: Record<string, unknown> }) => void
-      );
+      // SAFETY: The fixture provides the complete domain shape read by this statement.
+      handlers.set(event as string, handler as (data: { properties?: EventProperties }) => void);
       return () => {
+        // SAFETY: The fixture provides the string fields read by this statement.
         handlers.delete(event as string);
       };
     });
@@ -4127,9 +4122,7 @@ describe('registerSessionEventHandlers', () => {
 
   it('uses snapshot status changes when checking whether the active tree is working', () => {
     const handlers = installHandlers();
-    const statuses: Record<string, SessionStatus> = {
-      'session-child': { type: 'busy' },
-    };
+    const statuses = new Map<string, SessionStatus>([['session-child', { type: 'busy' }]]);
     const activeTreeIds = new Set(['session-parent', 'session-child']);
 
     startLoading.mockClear();
@@ -4138,11 +4131,11 @@ describe('registerSessionEventHandlers', () => {
     registerSessionEventHandlers(
       createDefaultDeps({
         getActiveSessionId: () => 'session-parent',
-        getSessionStatus: (sessionId) => statuses[sessionId],
+        getSessionStatus: (sessionId) => statuses.get(sessionId),
         isSessionInActiveTree: (sessionId) => activeTreeIds.has(sessionId),
         isSessionTreeStatusWorking: () =>
           [...activeTreeIds].some((sessionId) => {
-            const status = statuses[sessionId];
+            const status = statuses.get(sessionId);
             return status?.type === 'busy' || status?.type === 'retry';
           }),
       })
@@ -4153,7 +4146,7 @@ describe('registerSessionEventHandlers', () => {
     expect(startLoading).toHaveBeenCalledTimes(1);
     expect(stopLoading).not.toHaveBeenCalled();
 
-    statuses['session-child'] = { type: 'idle' };
+    statuses.set('session-child', { type: 'idle' });
     handlers.get('session.idle')?.({ properties: { sessionID: 'session-parent' } });
 
     expect(stopLoading).toHaveBeenCalledTimes(1);

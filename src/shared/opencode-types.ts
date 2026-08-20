@@ -1,10 +1,10 @@
+import type { UnknownRecord } from './type-utils';
+
 export type OutputFormatText = {
   type: 'text';
 };
 
-export type JsonSchema = {
-  [key: string]: unknown;
-};
+export type JsonSchema = UnknownRecord;
 
 export type OutputFormatJsonSchema = {
   type: 'json_schema';
@@ -58,7 +58,7 @@ export type UnknownError = {
 
 export type MessageOutputLengthError = {
   name: 'MessageOutputLengthError';
-  data: { message?: string; [key: string]: unknown };
+  data: { message?: string } & UnknownRecord;
 };
 
 export type MessageAbortedError = {
@@ -95,7 +95,7 @@ export type ApiError = {
 
 export type LegacyAssistantError = {
   name: string;
-  data?: { message?: string; [key: string]: unknown };
+  data?: { message?: string } & UnknownRecord;
 };
 
 export type AssistantMessageError =
@@ -146,7 +146,7 @@ export type TextPart = {
   synthetic?: boolean;
   ignored?: boolean;
   time?: { start: number; end?: number };
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
 };
 
 export type ReasoningPart = {
@@ -155,7 +155,7 @@ export type ReasoningPart = {
   messageID: string;
   type: 'reasoning';
   text: string;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
   time: { start: number; end?: number };
 };
 
@@ -184,33 +184,33 @@ export type FilePart = {
 
 export type ToolStatePending = {
   status: 'pending';
-  input: { [key: string]: unknown };
+  input: UnknownRecord;
   raw: string;
 };
 
 export type ToolStateRunning = {
   status: 'running';
-  input: { [key: string]: unknown };
+  input: UnknownRecord;
   title?: string;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
   time: { start: number };
 };
 
 export type ToolStateCompleted = {
   status: 'completed';
-  input: { [key: string]: unknown };
+  input: UnknownRecord;
   output: string;
   title: string;
-  metadata: { [key: string]: unknown };
+  metadata: UnknownRecord;
   time: { start: number; end: number; compacted?: number };
   attachments?: FilePart[];
 };
 
 export type ToolStateError = {
   status: 'error';
-  input: { [key: string]: unknown };
+  input: UnknownRecord;
   error: string;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
   time: { start: number; end: number };
 };
 
@@ -224,7 +224,7 @@ export type ToolPart = {
   callID: string;
   tool: string;
   state: ToolState;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
 };
 
 export type StepStartPart = {
@@ -296,7 +296,7 @@ export type RetryPart = {
   messageID: string;
   type: 'retry';
   attempt: number;
-  error: ApiError | { name: string; data: { message: string; [key: string]: unknown } };
+  error: ApiError | { name: string; data: { message: string } & UnknownRecord };
   time: { created: number };
 };
 
@@ -361,7 +361,7 @@ export type Session = {
   agent?: string;
   model?: { id: string; providerID: string; variant?: string };
   version: string;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
   time: { created: number; updated: number; compacting?: number; archived?: number };
   permission?: PermissionRule[];
   revert?: { messageID: string; partID?: string; snapshot?: string; diff?: string };
@@ -428,7 +428,7 @@ export type Permission = {
   messageID: string;
   callID?: string;
   title: string;
-  metadata: { [key: string]: unknown };
+  metadata: UnknownRecord;
   time: { created: number };
   autoApproveReason?: string;
   actionSummary?: string;
@@ -524,7 +524,7 @@ export type Agent = {
   variant?: string;
   prompt?: string;
   tools?: { [key: string]: boolean };
-  options?: { [key: string]: unknown };
+  options?: UnknownRecord;
   steps?: number;
   maxSteps?: number;
   topP?: number;
@@ -537,7 +537,7 @@ export type Provider = {
   source: 'env' | 'config' | 'custom' | 'api';
   env?: string[];
   key?: string;
-  options?: { [key: string]: unknown };
+  options?: UnknownRecord;
   models: {
     [key: string]: {
       id: string;
@@ -553,11 +553,11 @@ export type Provider = {
         output: number;
       };
       status?: 'alpha' | 'beta' | 'deprecated' | 'active';
-      options?: { [key: string]: unknown };
+      options?: UnknownRecord;
       headers?: { [key: string]: string };
       release_date?: string;
       variants?: {
-        [key: string]: { [key: string]: unknown };
+        [key: string]: UnknownRecord;
       };
     };
   };
@@ -598,7 +598,7 @@ export type PermissionEventProperties =
       messageID?: string;
       callID?: string;
       title?: string;
-      metadata?: Record<string, unknown>;
+      metadata?: UnknownRecord;
       time?: { created: number };
       tool?: { messageID?: string; callID?: string };
       type?: string;
@@ -617,7 +617,7 @@ export type PermissionV2AskedProperties = {
   action: string;
   resources: string[];
   save?: string[];
-  metadata?: Record<string, unknown>;
+  metadata?: UnknownRecord;
   source?: { type: 'tool'; messageID: string; callID: string };
 };
 
@@ -694,16 +694,16 @@ export type WorkspaceStatusEntry = {
   status: WorkspaceConnectionState;
 };
 
-export type ServerLifecycleEventProperties = Record<string, unknown>;
+export type ServerLifecycleEventProperties = UnknownRecord;
 
 export type ProjectUpdatedProperties = {
   id: string;
   worktree?: string;
   name?: string;
   vcs?: string;
-  icon?: Record<string, unknown>;
-  commands?: Record<string, unknown>;
-  time?: Record<string, unknown>;
+  icon?: UnknownRecord;
+  commands?: UnknownRecord;
+  time?: UnknownRecord;
   sandboxes?: string[];
 };
 
@@ -723,7 +723,7 @@ export type ToolOutputContent =
 
 export type SessionNextProviderResult = {
   executed: boolean;
-  metadata?: { [key: string]: unknown };
+  metadata?: UnknownRecord;
 };
 
 export type SessionNextUnknownError = {
@@ -786,18 +786,18 @@ export type ServerEventPropertiesByName = {
   'server.connected': ServerLifecycleEventProperties;
   'server.heartbeat': ServerLifecycleEventProperties;
   'server.instance.disposed': ServerLifecycleEventProperties;
-  'global.disposed': Record<string, unknown>;
-  'catalog.updated': Record<string, unknown>;
-  'models-dev.refreshed': Record<string, unknown>;
-  'installation.updated': Record<string, unknown>;
-  'installation.update-available': Record<string, unknown>;
-  'integration.updated': Record<string, unknown>;
-  'integration.connection.updated': Record<string, unknown>;
-  'file.edited': Record<string, unknown>;
-  'file.watcher.updated': Record<string, unknown>;
-  'reference.updated': Record<string, unknown>;
-  'plugin.added': Record<string, unknown>;
-  'project.directories.updated': Record<string, unknown>;
+  'global.disposed': UnknownRecord;
+  'catalog.updated': UnknownRecord;
+  'models-dev.refreshed': UnknownRecord;
+  'installation.updated': UnknownRecord;
+  'installation.update-available': UnknownRecord;
+  'integration.updated': UnknownRecord;
+  'integration.connection.updated': UnknownRecord;
+  'file.edited': UnknownRecord;
+  'file.watcher.updated': UnknownRecord;
+  'reference.updated': UnknownRecord;
+  'plugin.added': UnknownRecord;
+  'project.directories.updated': UnknownRecord;
   'project.updated': ProjectUpdatedProperties;
   'session.created': { sessionID?: string; info: SessionEventInfo };
   'session.updated': { sessionID?: string; info: SessionEventInfo };
@@ -824,25 +824,25 @@ export type ServerEventPropertiesByName = {
   'question.v2.replied': QuestionV2ReplyProperties;
   'question.v2.rejected': QuestionV2ReplyProperties;
   'todo.updated': TodoUpdatedProperties;
-  'command.executed': Record<string, unknown>;
-  'lsp.client.diagnostics': Record<string, unknown>;
-  'lsp.updated': Record<string, unknown>;
+  'command.executed': UnknownRecord;
+  'lsp.client.diagnostics': UnknownRecord;
+  'lsp.updated': UnknownRecord;
   'vcs.branch.updated': { branch?: string };
   'mcp.tools.changed': { server?: string };
   'mcp.browser.open.failed': { mcpName?: string; url?: string };
-  'pty.created': Record<string, unknown>;
-  'pty.updated': Record<string, unknown>;
-  'pty.exited': Record<string, unknown>;
-  'pty.deleted': Record<string, unknown>;
-  'tui.prompt.append': Record<string, unknown>;
-  'tui.command.execute': Record<string, unknown>;
-  'tui.toast.show': Record<string, unknown>;
-  'tui.session.select': Record<string, unknown>;
+  'pty.created': UnknownRecord;
+  'pty.updated': UnknownRecord;
+  'pty.exited': UnknownRecord;
+  'pty.deleted': UnknownRecord;
+  'tui.prompt.append': UnknownRecord;
+  'tui.command.execute': UnknownRecord;
+  'tui.toast.show': UnknownRecord;
+  'tui.session.select': UnknownRecord;
   'workspace.ready': { name?: string };
   'workspace.failed': { message?: string };
   'workspace.status': WorkspaceStatusEntry;
-  'worktree.ready': Record<string, unknown>;
-  'worktree.failed': Record<string, unknown>;
+  'worktree.ready': UnknownRecord;
+  'worktree.failed': UnknownRecord;
   'session.next.agent.switched': {
     timestamp?: number;
     sessionID: string;
@@ -858,21 +858,21 @@ export type ServerEventPropertiesByName = {
   'session.next.moved': {
     timestamp?: number;
     sessionID: string;
-    location?: Record<string, unknown>;
+    location?: UnknownRecord;
     subdirectory?: string;
   };
   'session.next.prompted': {
     timestamp?: number;
     sessionID: string;
     messageID?: string;
-    prompt?: Record<string, unknown>;
+    prompt?: UnknownRecord;
     delivery?: 'steer' | 'queue';
   };
   'session.next.prompt.admitted': {
     timestamp?: number;
     sessionID: string;
     messageID?: string;
-    prompt?: Record<string, unknown>;
+    prompt?: UnknownRecord;
     delivery?: 'steer' | 'queue';
   };
   'session.next.context.updated': {
@@ -914,7 +914,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     finish?: string;
     cost?: number;
-    tokens?: Record<string, unknown>;
+    tokens?: UnknownRecord;
     snapshot?: string;
     files?: string[];
   };
@@ -950,7 +950,7 @@ export type ServerEventPropertiesByName = {
     sessionID: string;
     assistantMessageID?: string;
     reasoningID?: string;
-    providerMetadata?: Record<string, unknown>;
+    providerMetadata?: UnknownRecord;
   };
   'session.next.reasoning.delta': {
     timestamp?: number;
@@ -966,7 +966,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     reasoningID?: string;
     text?: string;
-    providerMetadata?: Record<string, unknown>;
+    providerMetadata?: UnknownRecord;
   };
   'session.next.tool.input.started': {
     timestamp?: number;
@@ -997,7 +997,7 @@ export type ServerEventPropertiesByName = {
     callID?: string;
     tool?: string;
     title?: string;
-    input?: Record<string, unknown>;
+    input?: UnknownRecord;
     provider?: SessionNextProviderResult;
   };
   'session.next.tool.progress': {
@@ -1006,7 +1006,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     callID?: string;
     progress?: string;
-    structured?: Record<string, unknown>;
+    structured?: UnknownRecord;
     content?: ToolOutputContent[];
   };
   'session.next.tool.success': {
@@ -1015,7 +1015,7 @@ export type ServerEventPropertiesByName = {
     assistantMessageID?: string;
     callID?: string;
     output?: string;
-    structured?: Record<string, unknown>;
+    structured?: UnknownRecord;
     content?: ToolOutputContent[];
     outputPaths?: string[];
     result?: unknown;
@@ -1060,7 +1060,7 @@ export type ServerEventPropertiesByName = {
   'session.next.revert.staged': {
     timestamp?: number;
     sessionID: string;
-    revert?: Record<string, unknown>;
+    revert?: UnknownRecord;
   };
   'session.next.revert.cleared': {
     timestamp?: number;

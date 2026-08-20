@@ -80,7 +80,7 @@ export function RalphDashboard(props: { sessionId: string }) {
     const listScroll = listScrollRef;
     if (!listScroll) return;
     updateScrollbarInset();
-    if (typeof ResizeObserver === 'undefined') return;
+    if (globalThis.ResizeObserver === undefined) return;
     const observer = new ResizeObserver(() => updateScrollbarInset());
     observer.observe(listScroll);
     onCleanup(() => observer.disconnect());

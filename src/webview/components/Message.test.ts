@@ -22,10 +22,13 @@ import {
   stripCompactionBoundaryMarkdown,
 } from './Message';
 import { resetToolCallExpansionState } from './ToolCall';
+import { fixture } from '../test-fixtures';
+import type { UnknownRecord } from '../../shared/type-utils';
 
 const retryMessageMock = vi.hoisted(() => vi.fn());
 const selectSessionMock = vi.hoisted(() => vi.fn());
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise Message actions through the useOpenCode module boundary. */
 vi.mock('../hooks/useOpenCode', () => ({
   retryMessage: retryMessageMock,
   selectSession: selectSessionMock,
@@ -69,7 +72,8 @@ afterEach(() => {
   setAppState('sessions', []);
   setAppState('allAgents', []);
   resetToolCallExpansionState();
-  delete (window as unknown as Record<string, unknown>).__sendToExtension;
+  // SAFETY: The fixture provides the unknown fields read by this statement.
+  delete window.__sendToExtension;
 });
 
 function textPart(id: string, text: string): Part {
@@ -83,13 +87,15 @@ function textPart(id: string, text: string): Part {
 }
 
 function reasoningPart(id: string, text: string, completed = false): Part {
+  const time: Extract<Part, { type: 'reasoning' }>['time'] = { start: 0 };
+  if (completed) time.end = 1;
   return {
     id,
     sessionID: 'session-1',
     messageID: 'message-1',
     type: 'reasoning',
     text,
-    time: { start: 0, ...(completed ? { end: 1 } : {}) },
+    time,
   };
 }
 
@@ -188,7 +194,7 @@ function toolPart(id: string, state: ToolPart['state']): ToolPart {
 }
 
 function completedToolState(
-  input: Record<string, unknown>,
+  input: ToolPart['state']['input'],
   output: string,
   title = ''
 ): Extract<ToolPart['state'], { status: 'completed' }> {
@@ -453,7 +459,8 @@ describe('Message user prompt rendering', () => {
   it('compacts standalone SVG prompt markup into a chip that opens in an editor', () => {
     const svg = '<svg viewBox="0 0 10 10">\n  <path d="M0 0h10v10z" />\n</svg>';
     const send = vi.fn();
-    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    fixture<UnknownRecord>(window).__sendToExtension = send;
     cleanup = render(
       () =>
         Message({
@@ -468,6 +475,7 @@ describe('Message user prompt rendering', () => {
     expect(chip?.getAttribute('data-copy-marker')).toBe(svg);
     expect(container?.querySelector('.user-message-text')?.textContent).not.toContain('<svg');
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     (chip as HTMLButtonElement | null)?.click();
     expect(send).toHaveBeenCalledWith({
       type: 'vscode/open-text',
@@ -597,7 +605,8 @@ describe('Message user prompt rendering', () => {
 
   it('expands a terminal-only message with its terminal name and line count', () => {
     const send = vi.fn();
-    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    fixture<UnknownRecord>(window).__sendToExtension = send;
     cleanup = render(
       () =>
         Message({
@@ -701,7 +710,8 @@ describe('Message user prompt rendering', () => {
 
   it('renders HTTPS URLs as icon-prefixed external links in user messages', () => {
     const send = vi.fn();
-    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    fixture<UnknownRecord>(window).__sendToExtension = send;
     cleanup = render(
       () =>
         Message({
@@ -1587,7 +1597,7 @@ describe('Message user editing', () => {
 
   it('edits from a terminal header and opens terminal content from its body', () => {
     const send = vi.fn();
-    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    fixture<UnknownRecord>(window).__sendToExtension = send;
     setAppState('activeSessionId', 'session-1');
     cleanup = render(
       () =>
@@ -1911,7 +1921,7 @@ describe('Message assistant final answer rendering', () => {
 
     pressAlt();
 
-    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    const toggle = container?.querySelector<HTMLButtonElement>('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
     releaseAlt();
@@ -1965,10 +1975,10 @@ describe('Message assistant final answer rendering', () => {
 
     pressAlt();
 
-    const toggle = container?.querySelector('.assistant-read-mode-toggle');
+    const toggle = container?.querySelector<HTMLButtonElement>('.assistant-read-mode-toggle');
     expect(toggle).toBeInstanceOf(HTMLButtonElement);
 
-    (toggle as HTMLButtonElement).click();
+    toggle?.click();
 
     const overlay = document.querySelector('.assistant-read-overlay');
     const overlayContent = document.querySelector('.assistant-read-mode-content');
@@ -2424,12 +2434,14 @@ describe('Message assistant final answer rendering', () => {
       container!
     );
 
-    const retryButton = container?.querySelector('.assistant-message-flow-item-error-action');
+    const retryButton = container?.querySelector<HTMLButtonElement>(
+      '.assistant-message-flow-item-error-action'
+    );
 
     expect(retryButton).toBeInstanceOf(HTMLButtonElement);
     expect(retryButton?.textContent).toContain('Retry');
 
-    (retryButton as HTMLButtonElement).click();
+    retryButton?.click();
 
     expect(retryMessageMock).toHaveBeenCalledWith('message-3', 'session-1');
   });
@@ -2516,7 +2528,7 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const errorBlock = container?.querySelector('.assistant-message-flow-item-error');
-    const reauthenticateButton = container?.querySelector(
+    const reauthenticateButton = container?.querySelector<HTMLButtonElement>(
       '.assistant-message-flow-item-error-action'
     );
 
@@ -2527,7 +2539,7 @@ describe('Message assistant final answer rendering', () => {
     expect(reauthenticateButton).toBeInstanceOf(HTMLButtonElement);
     expect(reauthenticateButton?.textContent).toContain('Re-authenticate');
 
-    (reauthenticateButton as HTMLButtonElement).click();
+    reauthenticateButton?.click();
 
     expect(providerConnectionRequest()?.providerID).toBe('github-copilot');
     expect(providerRequiresReconnection('github-copilot')).toBe(true);

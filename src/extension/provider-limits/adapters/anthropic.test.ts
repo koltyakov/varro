@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These adapter tests model external credential and response dictionaries at the module boundary. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { readFileMock } = vi.hoisted(() => ({

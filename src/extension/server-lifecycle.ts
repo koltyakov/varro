@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Transition return types are selected by the discriminant checked in each branch. */
 export type ServerLifecyclePhase = 'idle' | 'starting' | 'restarting' | 'disposing';
 
 type LifecycleOperation = {

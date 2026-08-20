@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These proxy tests deliberately exercise malformed HTTP payloads and partial VS Code and service boundaries. */
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
 const mocks = vi.hoisted(() => ({

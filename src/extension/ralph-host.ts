@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- Server events and persisted Ralph runs are validated before entering host state. */
+/* oxlint-disable anti-slop/no-known-value-widening, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Persisted run assertions follow bounded structural validation. */
 import type { RalphConfig, RalphIteration, RalphRun, RalphStopReason } from '../shared/ralph';
 import {
   MAX_RALPH_ITERATIONS,
@@ -12,6 +14,7 @@ import {
   type WebviewMessage,
 } from '../shared/protocol';
 import type { Persistence } from '../shared/persistence';
+import type { PermissionRule } from '../shared/opencode-types';
 import { isSameWorkspacePath } from '../shared/workspace-path';
 import { normalizeModelVariant } from '../shared/model-variant';
 import {
@@ -34,6 +37,12 @@ const MAX_PERSISTED_RALPH_ITERATIONS = MAX_RALPH_ITERATIONS;
 const MAX_RALPH_ID_LENGTH = 512;
 const MAX_RALPH_PATH_LENGTH = 4_096;
 const MAX_RALPH_PROMPT_LENGTH = 100_000;
+
+interface RalphSessionCreateBody {
+  title: string;
+  parentID: string;
+  permission?: PermissionRule[];
+}
 const MAX_RALPH_FILES_CHANGED = 500;
 const MAX_RALPH_VERIFICATIONS = 100;
 const MAX_RALPH_REPAIR_SESSIONS = 100;
@@ -312,16 +321,9 @@ export class RalphHost {
       createSession: async ({ title, permission, parentID }, _signal, workspaceDirectory) => {
         // Core retains this promise after cancellation so a late successful
         // creation can still be identified and aborted.
-        const session = await this.request(
-          'POST',
-          '/session',
-          {
-            title,
-            parentID,
-            ...(permission.length > 0 ? { permission } : {}),
-          },
-          workspaceDirectory
-        );
+        const body: RalphSessionCreateBody = { title, parentID };
+        if (permission.length > 0) body.permission = permission;
+        const session = await this.request('POST', '/session', body, workspaceDirectory);
         const sessionID = getString(asRecord(session)?.id);
         if (!sessionID) throw new Error('Ralph child session was not created');
         return sessionID;
@@ -755,13 +757,14 @@ function getRalphSessionSignal(
   const completed = asRecord(info?.time)?.completed;
   if (info?.role === 'assistant' && typeof completed === 'number' && Number.isFinite(completed)) {
     const error = info.error === undefined ? undefined : getRalphSessionErrorMessage(info.error);
+    const status: RalphSessionStatus = {
+      type: 'completed',
+      messageID: getString(info.parentID),
+    };
+    if (error) status.error = error;
     return {
       sessionID,
-      status: {
-        type: 'completed',
-        messageID: getString(info.parentID),
-        ...(error ? { error } : {}),
-      },
+      status,
     };
   }
   return null;
@@ -1030,8 +1033,8 @@ function normalizePersistedRalphIteration(value: unknown, maxIndex: number): Ral
     endedAt: record.endedAt,
     filesChanged,
     verification,
-    ...(phase ? { phase } : {}),
   };
+  if (phase) iteration.phase = phase;
   if (record.tokens !== undefined) {
     const tokens = normalizePersistedRalphTokens(record.tokens);
     if (!tokens) return null;

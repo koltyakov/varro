@@ -10,6 +10,7 @@ const { assistantDialogSummaryPasses, stickyPreviewMessageReads, stickyPreviewSe
     stickyPreviewSelectionPasses: { value: 0 },
   }));
 
+/* oxlint-disable anti-slop/no-module-mocking -- This benchmark isolates MessageList module integration from unrelated render work. */
 vi.mock('../components/message-list/assistant-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof AssistantDialogModule>();
   return {
@@ -32,11 +33,12 @@ vi.mock('../components/message-list/sticky-preview', async (importOriginal) => {
     ) => {
       stickyPreviewSelectionPasses.value += 1;
       const countedMessages = new Proxy(args[0], {
-        get(target, property, receiver) {
-          if (typeof property === 'string' && /^\d+$/.test(property)) {
+        get(target, property, _receiver) {
+          if (/^\d+$/.test(String(property))) {
             stickyPreviewMessageReads.value += 1;
           }
-          return Reflect.get(target, property, receiver);
+          // SAFETY: Proxy keys follow the target array's own property contract.
+          return target[property as keyof typeof target];
         },
       });
       return actual.getStickyUserMessagePreview(countedMessages, args[1], args[2]);
@@ -50,15 +52,17 @@ import { resetMessageEditState, startEditingMessage } from '../lib/message-edit-
 import { replaceMessages, resetDefaultAppState, setState, upsertMessageInfo } from '../lib/state';
 import type { AssistantMessage, Message, Part, TextPart, UserMessage } from '../types';
 import { settlePerfEffects } from './harness';
+import { fixture } from '../test-fixtures';
 
 describe('Virtual metrics perf guards', () => {
   it('does not scan same-reference IDs for a late height-only rebuild', () => {
     const rawIds = Array.from({ length: 20_000 }, (_, index) => `message-${index}`);
     let numericReads = 0;
     const itemIds = new Proxy(rawIds, {
-      get(target, property, receiver) {
-        if (typeof property === 'string' && /^\d+$/.test(property)) numericReads += 1;
-        return Reflect.get(target, property, receiver);
+      get(target, property, _receiver) {
+        if (/^\d+$/.test(String(property))) numericReads += 1;
+        // SAFETY: Proxy keys follow the target array's own property contract.
+        return target[property as keyof typeof target];
       },
     });
     const measuredHeights = new Map(rawIds.map((id) => [id, 40]));
@@ -559,18 +563,20 @@ describe('MessageList virtualization perf guards', () => {
 
     for (let step = 1; step <= 20; step += 1) {
       listWidth = 500 - step * 4;
+      // SAFETY: The fixture provides the unknown fields read by this statement.
       layoutObserver!.callback(
         [
           resizeObserverEntry(list, listWidth, 500),
           resizeObserverEntry(track, listWidth, getRowHeight() * 200),
         ],
-        layoutObserver as unknown as ResizeObserver
+        fixture<ResizeObserver>(layoutObserver)
       );
+      // SAFETY: The fixture provides the unknown fields read by this statement.
       rowObserver!.callback(
         [...rowObserver!.targets]
           .filter((target) => target.isConnected)
           .map((target) => resizeObserverEntry(target, listWidth, getRowHeight())),
-        rowObserver as unknown as ResizeObserver
+        fixture<ResizeObserver>(rowObserver)
       );
       await vi.advanceTimersByTimeAsync(16);
     }
@@ -598,15 +604,17 @@ describe('MessageList virtualization perf guards', () => {
     // It must still enter the settled width path rather than publishing once per row delivery.
     fontHeightAdjustment = 20;
     list.style.fontSize = '18px';
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     rowObserver!.callback(
       [...rowObserver!.targets]
         .filter((target) => target.isConnected)
         .map((target) => resizeObserverEntry(target, listWidth, getRowHeight())),
-      rowObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(rowObserver)
     );
+    // SAFETY: The fixture provides the unknown fields read by this statement.
     layoutObserver!.callback(
       [resizeObserverEntry(track, listWidth, getRowHeight() * 200)],
-      layoutObserver as unknown as ResizeObserver
+      fixture<ResizeObserver>(layoutObserver)
     );
     await vi.advanceTimersByTimeAsync(99);
     expect(container?.querySelector<HTMLElement>('.virtual-spacer-bottom')?.style.height).toBe(

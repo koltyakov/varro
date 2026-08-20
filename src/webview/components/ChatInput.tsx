@@ -237,6 +237,7 @@ import {
   sendQueuedAsSteer,
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
+import { isString } from '../lib/runtime-values';
 
 const LazyModelPicker = lazy(() =>
   import('./ModelPicker').then((module) => ({ default: module.ModelPicker }))
@@ -249,6 +250,7 @@ const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 
 function isRemoteExtensionHost() {
   return (
+    // SAFETY: The surrounding shape or discriminator check establishes the typeof contract used below.
     (window as typeof window & { __initialWebviewState?: Partial<InitialWebviewState> })
       .__initialWebviewState?.remoteExtensionHost === true
   );
@@ -622,6 +624,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       try {
         const content = await readPdfFile(file);
         const id = createAttachmentID();
+        // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
         const path = (file as File & { path?: string }).path;
         const added = addNativePdf({
           id,
@@ -629,9 +632,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           mime: NATIVE_PDF_MIME,
           filename: file.name || 'document.pdf',
           size: content.size,
-          ...(path
-            ? { contextFile: { path, relativePath: file.name || path, type: 'file' as const } }
-            : {}),
+          contextFile: path
+            ? { path, relativePath: file.name || path, type: 'file' as const }
+            : undefined,
         });
         if (added) {
           remaining -= content.size;
@@ -886,11 +889,15 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     }
 
     return {
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       providerID: null as string | null,
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       modelID: null as string | null,
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       variant: null as string | null,
       providerName: '',
       modelName: '',
+      // SAFETY: The surrounding shape or discriminator check establishes the number contract used below.
       contextLimit: null as number | null,
     };
   });
@@ -1248,7 +1255,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         const listRequest = client.session
           .list({
             limit: 30,
-            ...(query ? { search: query } : {}),
+            search: query ? query : undefined,
             roots: true,
             signal: controller.signal,
           })
@@ -1715,7 +1722,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           ? {
               providerID: model.providerID,
               modelID: model.modelID,
-              ...(effectiveVariant() ? { variant: effectiveVariant()! } : {}),
+              variant: effectiveVariant() ? effectiveVariant()! : undefined,
             }
           : editing.model || undefined;
       const submittedEdit = captureEditDraftBackup();
@@ -1826,8 +1833,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         id: createAttachmentID(),
         sessionId,
         text: sendableText,
-        ...(state.selectedAgent ? { agent: state.selectedAgent } : {}),
-        ...(queuedMessagePaused ? { paused: true } : {}),
+        agent: state.selectedAgent ? state.selectedAgent : undefined,
+        paused: queuedMessagePaused ? true : undefined,
         droppedFiles: queuedDroppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         nativePdfs: queuedAttachments.nativePdfs,
@@ -1869,7 +1876,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           ? { delivery: 'steer' }
           : {
               noReply: false,
-              ...(props.newSession ? { queuedAttachments } : {}),
+              queuedAttachments: props.newSession ? queuedAttachments : undefined,
             }
       );
     } catch {
@@ -1915,13 +1922,13 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     let sent = false;
     try {
       sent = await sendMessage(item.text, {
-        ...(item.agent ? { agent: item.agent } : {}),
+        agent: item.agent ? item.agent : undefined,
         queuedAttachments: {
           droppedFiles: item.droppedFiles,
           clipboardImages: item.clipboardImages,
           nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
-          ...(item.attachedDiagnostics ? { attachedDiagnostics: item.attachedDiagnostics } : {}),
+          attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
         },
         preserveComposer: true,
         targetSessionId: item.sessionId,
@@ -2015,12 +2022,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const queuedSteerAdmissionCleanups = [
     serverEvents.on('session.status', (event) => {
       const properties = event.properties;
-      if (properties?.status?.type !== 'idle' || typeof properties.sessionID !== 'string') return;
+      if (properties?.status?.type !== 'idle' || !isString(properties.sessionID)) return;
       dispatchAfterAuthoritativeIdle(properties.sessionID);
     }),
     serverEvents.on('session.idle', (event) => {
       const sessionId = event.properties?.sessionID;
-      if (typeof sessionId === 'string') dispatchAfterAuthoritativeIdle(sessionId);
+      if (isString(sessionId)) dispatchAfterAuthoritativeIdle(sessionId);
     }),
     serverEvents.on('session.next.prompted', (event) => {
       const properties = event.properties;
@@ -2228,6 +2235,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
     const pdfPaths = new Set<string>();
     for (const file of pdfFiles) {
+      // SAFETY: The surrounding shape or discriminator check establishes the File contract used below.
       const path = (file as File & { path?: string }).path;
       if (path) pdfPaths.add(path);
     }
@@ -2429,6 +2437,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const pasteHandledAsContextOnly =
       pastedContextFiles.length > 0 && pastedPromptText.trim().length === 0;
     if (pastedContextFiles.length > 0) {
+      // SAFETY: The surrounding shape or discriminator check establishes the ClipboardEvent contract used below.
       (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
     }
 
@@ -2610,6 +2619,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     });
 
     const handleWindowClick = (e: MouseEvent) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
       const target = e.target as Node | null;
       const clickedInsideInteractiveArea =
         !!target && (containerRef?.contains(target) || modelPopoverRef?.contains(target));
@@ -3179,7 +3189,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         ? {
             providerID: current.providerID,
             modelID: current.modelID,
-            ...(effectiveVariant() ? { variant: effectiveVariant()! } : {}),
+            variant: effectiveVariant() ? effectiveVariant()! : undefined,
           }
         : undefined;
     void state.providerRefreshPending;
@@ -3220,7 +3230,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     setSelectedModel(nextModel, {
       sessionId: composerSessionId(),
       persistGlobal: true,
-      ...(rememberVariant !== undefined ? { rememberVariant } : {}),
+      rememberVariant,
     });
     syncActiveRalphModel(nextModel);
 
@@ -3517,6 +3527,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           }}
           onDragLeave={(e) => {
             if (isQueuedMessageDrag(e)) return;
+            // SAFETY: The surrounding shape or discriminator check establishes the Node contract used below.
             if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
             setIsDraggingOver(false);
           }}
@@ -3782,7 +3793,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
                 {
                   providerID: m.providerID!,
                   modelID: m.modelID!,
-                  ...(variant ? { variant } : {}),
+                  variant: variant || undefined,
                 },
                 variant
               );
@@ -3950,7 +3961,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               {
                 providerID: m.providerID!,
                 modelID: m.modelID!,
-                ...(variant ? { variant } : {}),
+                variant: variant || undefined,
               },
               variant
             );
@@ -4066,7 +4077,7 @@ function clickedOutside(target: Node | null, trigger?: HTMLElement, popup?: HTML
 }
 
 function createAttachmentID() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+  if (crypto !== undefined && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

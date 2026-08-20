@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/require-safety-comment-for-type-assertion -- These tests verify router dispatch across its imported command handlers and inspect registered callbacks. */
 import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({

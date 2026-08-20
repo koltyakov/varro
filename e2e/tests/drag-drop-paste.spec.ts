@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-returns -- Playwright callbacks inspect browser clipboard and request payloads whose values cross an untyped browser boundary. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions bridge controlled clipboard, drag, and harness request fixtures to the shapes under test. */
 import { expect, test } from '@playwright/test';
 import { getE2EState } from './helpers';
 

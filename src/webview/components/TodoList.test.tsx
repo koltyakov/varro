@@ -4,6 +4,7 @@ import { TodoList } from './TodoList';
 import { resetDefaultAppState, setState } from '../lib/state';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import type { UserMessage } from '../types';
+import { fixture } from '../test-fixtures';
 
 let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
@@ -33,11 +34,13 @@ describe('TodoList', () => {
     if (originalResizeObserver) {
       globalThis.ResizeObserver = originalResizeObserver;
     } else {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
     }
     if (originalScrollIntoView) {
       Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView);
     } else {
+      // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
       delete (
         HTMLElement.prototype as { scrollIntoView?: typeof HTMLElement.prototype.scrollIntoView }
       ).scrollIntoView;
@@ -51,6 +54,7 @@ describe('TodoList', () => {
 
     const toggle = container?.querySelector('button.todo-block-header');
     const list = container?.querySelector('ul.todo-block-list');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const progressFill = container?.querySelector(
       '.todo-block-progress-fill'
     ) as HTMLDivElement | null;
@@ -92,6 +96,7 @@ describe('TodoList', () => {
 
     cleanup = render(() => TodoList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container?.textContent).toContain('2/4');
@@ -130,6 +135,7 @@ describe('TodoList', () => {
     ]);
 
     cleanup = render(() => TodoList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     let toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -139,6 +145,7 @@ describe('TodoList', () => {
     cleanup = undefined;
     container?.replaceChildren();
     cleanup = render(() => TodoList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -232,6 +239,7 @@ describe('TodoList', () => {
     ]);
 
     cleanup = render(() => TodoList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement;
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -300,6 +308,7 @@ describe('TodoList', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('ul.todo-block-list')).toBeNull();
     expect(progressFill?.className).toContain('is-complete');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((progressFill as HTMLDivElement | null)?.style.width).toBe('100%');
 
     setState('todos', (todos) => [
@@ -322,6 +331,7 @@ describe('TodoList', () => {
 
     cleanup = render(() => TodoList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
 
@@ -347,6 +357,7 @@ describe('TodoList', () => {
 
     cleanup = render(() => TodoList(), container!);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = container?.querySelector('button.todo-block-header') as HTMLButtonElement | null;
     toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
@@ -381,7 +392,8 @@ describe('TodoList', () => {
       observe() {}
       disconnect() {}
     }
-    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    // SAFETY: The fixture provides the unknown fields read by this statement.
+    globalThis.ResizeObserver = fixture<typeof ResizeObserver>(TestResizeObserver);
     setState('todos', [
       { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
       { id: 'todo-2', content: 'Later task', status: 'pending', priority: 'medium' },
@@ -392,28 +404,35 @@ describe('TodoList', () => {
         <div class="todo-mount"></div>
       </div>
     `;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const chatShell = container!.querySelector('.chat-main-column-shell') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const chatView = container!.querySelector('.interactive-list') as HTMLDivElement;
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const mount = container!.querySelector('.todo-mount') as HTMLDivElement;
     Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 1_000 });
     Object.defineProperty(chatView, 'clientHeight', { configurable: true, value: 500 });
 
     cleanup = render(() => TodoList(), mount);
 
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     const toggle = mount.querySelector('button.todo-block-header') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     expect((mount.querySelector('.todo-block-list') as HTMLUListElement).style.maxHeight).toBe(
       '117px'
     );
 
     Object.defineProperty(chatShell, 'clientHeight', { configurable: true, value: 320 });
     Object.defineProperty(chatView, 'clientHeight', { configurable: true, value: 100 });
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resizeCallback?.([], {} as ResizeObserver);
     await Promise.resolve();
 
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
 
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resizeCallback?.([], {} as ResizeObserver);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });

@@ -1,12 +1,18 @@
 import type { Message, Session, SessionStatus } from '../../types';
 import type { QueuedAttachmentSnapshot } from './session-send';
+import type { UsageLimitNotice } from '../../lib/usage-limit';
 
 type ResolvedModel = { providerID: string; modelID: string; variant?: string };
+type SessionUsageLimitSnapshot =
+  | UsageLimitNotice
+  | Pick<UsageLimitNotice, 'sessionID' | 'attempt'>
+  | null
+  | undefined;
 
 export async function reviewSessionWithDependencies(
   deps: {
     getActiveSessionId(): string | null;
-    sendMessage(prompt: string): Promise<unknown>;
+    sendMessage(prompt: string): Promise<void | boolean | object>;
   },
   prompt = 'review the current changes in my code and provide feedback'
 ) {
@@ -22,15 +28,15 @@ export async function abortSessionWithDependencies(
     getSelectedAgentForSession(sessionId: string): string | null;
     skipPlanSession(sessionId: string): void;
     getSessionStatus(sessionId: string): SessionStatus | undefined;
-    getSessionUsageLimit(sessionId: string): unknown;
+    getSessionUsageLimit(sessionId: string): SessionUsageLimitSnapshot;
     markPendingAbortTree(sessionIds: string[]): void;
     setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
     stopLoading(): void;
-    abortRemoteSession(sessionId: string): Promise<unknown>;
+    abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
     clearPendingAbortTree(sessionIds: string[]): void;
-    setSessionUsageLimit(sessionId: string, notice: unknown): void;
+    setSessionUsageLimit(sessionId: string, notice: SessionUsageLimitSnapshot): void;
     setError?(message: string): void;
-    logError(context: string, err: unknown): void;
+    logError(context: string, cause: unknown): void;
   },
   targetSessionId = deps.getActiveSessionId()
 ) {
@@ -79,9 +85,9 @@ export async function undoSessionWithDependencies(deps: {
   getActiveSessionId(): string | null;
   getMessages(): Array<{ info: Message }>;
   startLoading(): void;
-  revertSession(sessionId: string, messageId: string): Promise<unknown>;
-  syncSession(sessionId: string): Promise<void>;
-  syncSessionMessages(sessionId: string): Promise<void>;
+  revertSession(sessionId: string, messageId: string): Promise<void | boolean | object>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
   stopLoading(): void;
   setError(message: string): void;
 }) {
@@ -109,13 +115,13 @@ export async function editMessageWithDependencies(
     getActiveSessionId(): string | null;
     getMessages(): Array<{ info: Message }>;
     isSessionWorking(sessionId: string): boolean;
-    abortSession(sessionId: string): Promise<void>;
+    abortSession(sessionId: string): Promise<void | boolean | object>;
     startLoading(): void;
     invalidateMessageSync?(sessionId: string): void;
     deferMessageRemovals?(sessionId: string, messageIds: string[]): () => void;
     pruneMessagesFrom?(sessionId: string, messageId: string): (() => void) | null;
-    deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
-    syncSessionMessages(sessionId: string): Promise<void>;
+    deleteMessage(sessionId: string, messageId: string): Promise<void | boolean | object>;
+    syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
     sendEditedMessage(
       text: string,
       sessionId: string,
@@ -223,8 +229,8 @@ export async function redoSessionWithDependencies(deps: {
   startLoading(): void;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
-  syncSession(sessionId: string): Promise<void>;
-  syncSessionMessages(sessionId: string): Promise<void>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
   stopLoading(): void;
   setError(message: string): void;
 }) {
@@ -253,9 +259,9 @@ export async function compactSessionWithDependencies(deps: {
   compactRemoteSession(
     sessionId: string,
     input: { providerID: string; modelID: string }
-  ): Promise<unknown>;
-  syncSession(sessionId: string): Promise<void>;
-  syncSessionMessages(sessionId: string): Promise<void>;
+  ): Promise<void | boolean | object>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
   getSession(sessionId: string): Session | undefined;
   stopLoading(): void;
 }) {
@@ -291,25 +297,25 @@ export async function compactSessionWithDependencies(deps: {
 
 type SessionControlDependencies = {
   getActiveSessionId(): string | null;
-  sendMessage(prompt: string): Promise<unknown>;
+  sendMessage(prompt: string): Promise<void | boolean | object>;
   getSessionTreeRootId(sessionId: string): string | null;
   getSessionTreeIds(sessionId: string): string[];
   getSelectedAgentForSession(sessionId: string): string | null;
   skipPlanSession(sessionId: string): void;
   getSessionStatus(sessionId: string): SessionStatus | undefined;
-  getSessionUsageLimit(sessionId: string): unknown;
+  getSessionUsageLimit(sessionId: string): SessionUsageLimitSnapshot;
   markPendingAbortTree(sessionIds: string[]): void;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   stopLoading(): void;
-  abortRemoteSession(sessionId: string): Promise<unknown>;
+  abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
   clearPendingAbortTree(sessionIds: string[]): void;
-  setSessionUsageLimit(sessionId: string, notice: unknown): void;
-  logError(context: string, err: unknown): void;
+  setSessionUsageLimit(sessionId: string, notice: SessionUsageLimitSnapshot): void;
+  logError(context: string, cause: unknown): void;
   getMessages(): Array<{ info: Message }>;
   startLoading(): void;
-  revertSession(sessionId: string, messageId: string): Promise<unknown>;
-  syncSession(sessionId: string): Promise<void>;
-  syncSessionMessages(sessionId: string): Promise<void>;
+  revertSession(sessionId: string, messageId: string): Promise<void | boolean | object>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
   setError(message: string): void;
   isSessionWorking(sessionId: string): boolean;
   sendEditedMessage(
@@ -326,7 +332,7 @@ type SessionControlDependencies = {
   invalidateMessageSync(sessionId: string): void;
   deferMessageRemovals(sessionId: string, messageIds: string[]): () => void;
   pruneMessagesFrom(sessionId: string, messageId: string): (() => void) | null;
-  deleteMessage(sessionId: string, messageId: string): Promise<unknown>;
+  deleteMessage(sessionId: string, messageId: string): Promise<void | boolean | object>;
   unrevertSession(sessionId: string): Promise<Session>;
   upsertSession(session: Session): void;
   clearPendingAbort(sessionId: string): void;
@@ -335,7 +341,7 @@ type SessionControlDependencies = {
   compactRemoteSession(
     sessionId: string,
     input: { providerID: string; modelID: string }
-  ): Promise<unknown>;
+  ): Promise<void | boolean | object>;
   getSession(sessionId: string): Session | undefined;
 };
 

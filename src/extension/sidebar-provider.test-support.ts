@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/no-module-mocking, anti-slop/no-object-parameters, anti-slop/no-unknown-parameters, anti-slop/require-safety-comment-for-type-assertion -- This support module supplies extension-host import fakes and protocol-shaped fixtures shared by sidebar tests. */
 import { beforeEach, vi } from 'vitest';
 import type * as FsPromises from 'fs/promises';
 

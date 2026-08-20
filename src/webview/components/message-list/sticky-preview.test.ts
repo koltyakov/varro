@@ -8,6 +8,7 @@ import {
   isMessageHiddenBehindStickyPreview,
 } from './sticky-preview';
 
+/* oxlint-disable anti-slop/no-module-mocking -- These tests exercise sticky-preview integration with the Message renderer. */
 vi.mock('../Message', () => ({
   getUserMessagePreviewText: vi.fn((parts: { text?: string }[]) => {
     const first = parts[0];
@@ -291,6 +292,7 @@ describe('getNextVisibleUserMessageTopMap', () => {
 });
 
 describe('shouldShowStickyUserMessagePreview', () => {
+  // SAFETY: The fixture provides the complete domain shape read by this statement.
   const baseArgs = {
     preview: { id: 'u1', index: 0, text: 'hello', attachmentCount: 0, imageCount: 0 } as const,
     shouldVirtualize: true,

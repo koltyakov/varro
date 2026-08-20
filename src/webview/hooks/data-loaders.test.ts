@@ -634,10 +634,10 @@ describe('data loaders', () => {
     const setSessionStatuses = vi.fn();
     const updateUsageLimitState = vi.fn();
     const logError = vi.fn();
-    const statuses: Record<string, SessionStatus> = {
+    const statuses = {
       'session-1': { type: 'retry', attempt: 2, message: '429 usage limit reached', next: 8 },
       'session-2': { type: 'idle' },
-    };
+    } satisfies Record<string, SessionStatus>;
     const sessions: Session[] = [session('session-1'), session('session-2')];
 
     await hydrateSessionStatusesWithDependencies(

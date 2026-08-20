@@ -8,6 +8,7 @@ import { sessionStore } from '../lib/stores/session-store';
 import { uiStore } from '../lib/stores/ui-store';
 import { postMessage } from '../lib/bridge';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
+import { isString } from '../lib/runtime-values';
 import { syncSessionMarkersForWorkspace } from '../lib/state';
 import { normalizeProjectPath } from './session/session-lifecycle';
 
@@ -233,10 +234,7 @@ export function handleExtensionMessageWithDependencies(
       ) {
         deps.refreshMcps();
       }
-      if (
-        msg.payload.type === 'mcp.browser.open.failed' &&
-        typeof msg.payload.properties?.url === 'string'
-      ) {
+      if (msg.payload.type === 'mcp.browser.open.failed' && isString(msg.payload.properties?.url)) {
         deps.openExternal?.(msg.payload.properties.url);
       }
       if (

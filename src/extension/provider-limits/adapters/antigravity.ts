@@ -1,6 +1,10 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- Antigravity HTTP and process responses are validated before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API records are asserted only after required-field checks. */
 import { execFile } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
+import type { OutgoingHttpHeaders } from 'http';
+import type { RequestOptions } from 'https';
 import type { ProviderLimitWindow } from '../../../shared/protocol';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
@@ -35,6 +39,13 @@ type AntigravityConnection = {
   port: number;
   protocol: 'http' | 'https';
 };
+
+interface AntigravityRequestHeaders extends OutgoingHttpHeaders {
+  'Content-Type': string;
+  'Connect-Protocol-Version': string;
+  'Content-Length': string;
+  'X-Codeium-Csrf-Token'?: string;
+}
 
 type AntigravityProcessInfo = {
   pid: number;
@@ -311,20 +322,22 @@ async function postAntigravityRequest(
   timeoutMs: number
 ) {
   const url = new URL(path, connection.baseURL);
-  const headers = {
+  const headers: AntigravityRequestHeaders = {
     ...ANTIGRAVITY_REQUEST_HEADERS,
     'Content-Length': String(Buffer.byteLength(body)),
-    ...(connection.csrfToken ? { 'X-Codeium-Csrf-Token': connection.csrfToken } : {}),
   };
+  if (connection.csrfToken) headers['X-Codeium-Csrf-Token'] = connection.csrfToken;
+
+  const options: RequestOptions = {
+    method: 'POST',
+    headers,
+  };
+  if (url.protocol === 'https:') options.rejectUnauthorized = false;
 
   return new Promise<{ status: number; bodyText: string }>((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
       url,
-      {
-        method: 'POST',
-        headers,
-        ...(url.protocol === 'https:' ? { rejectUnauthorized: false } : {}),
-      },
+      options,
       (response) => {
         const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer | string) => {

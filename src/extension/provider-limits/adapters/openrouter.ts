@@ -1,4 +1,6 @@
-import type { ProviderLimitWindow } from '../../../shared/protocol';
+/* oxlint-disable anti-slop/no-unknown-parameters -- OpenRouter API payloads are decoded before quota extraction. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: API JSON remains opaque until adapter validation. */
+import type { ProviderLimitStatus, ProviderLimitWindow } from '../../../shared/protocol';
 import type { ProviderAuthRecord, ProviderMetadata } from '../../util/provider-limit';
 import type { ProviderLimitAdapter, ProviderLimitAdapterContext } from '../types';
 import {
@@ -72,16 +74,17 @@ export function createOpenRouterAdapter(): ProviderLimitAdapter {
           );
         }
 
-        return {
+        const status: ProviderLimitStatus = {
           providerID: provider.id,
           modelID,
           status: 'available',
           source: 'provider',
           checkedAt,
           windows: [window],
-          ...(isOpenRouterFreeTier(payload) ? { planName: 'Free' } : {}),
           note: 'Polled OpenRouter auth key endpoint',
         };
+        if (isOpenRouterFreeTier(payload)) status.planName = 'Free';
+        return status;
       } catch {
         return {
           providerID: provider.id,
@@ -115,15 +118,16 @@ function extractOpenRouterSpendWindow(payload: unknown): ProviderLimitWindow | n
   const percent =
     limit != null && limit > 0 && usage != null ? clampPercent((usage / limit) * 100) : null;
 
-  return {
+  const window: ProviderLimitWindow = {
     id: 'spend',
     label: 'Spend',
     unit: 'usd',
     remaining,
     limit: limit != null && limit > 0 ? limit : null,
     resetAt: null,
-    ...(percent == null ? {} : { percent }),
-  } satisfies ProviderLimitWindow;
+  };
+  if (percent != null) window.percent = percent;
+  return window;
 }
 
 function resolveOpenRouterAuthToken(

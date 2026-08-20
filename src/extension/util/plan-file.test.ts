@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Each fixture supplies the minimal extension context fields read by plan-file resolution. */
 import { describe, expect, it } from 'vitest';
 import {
   getOpenCodeConfigDir,

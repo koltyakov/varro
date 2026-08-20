@@ -53,6 +53,7 @@ import type {
   SessionStatus,
 } from '../../types';
 import { canDelegateVision } from '../../lib/vision-delegation';
+import { isString } from '../../lib/runtime-values';
 
 type ComposerState = {
   selectedAgent: string | null;
@@ -133,15 +134,15 @@ type StateBoundSendDependencies = {
   ensureSessionPermission?(sessionId: string): Promise<boolean>;
   clearPendingAbort(sessionId: string): void;
   resetTodoSync(): void;
-  syncSessionMcps(sessionId: string): Promise<void>;
-  sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
-  syncSession(sessionId: string): Promise<void>;
-  syncSessionMessages(sessionId: string): Promise<void>;
-  recheckSessionStatus(sessionId: string): Promise<void>;
+  syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
+  sendAsync(sessionId: string, body: SessionSendBody): Promise<void | boolean | object>;
+  syncSession(sessionId: string): Promise<void | boolean | object>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
+  recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   getMessageCount(sessionId: string): number;
-  continueInterruptedSession(sessionId: string): Promise<void>;
-  logError?(context: string, err: unknown): void;
+  continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
+  logError?(context: string, cause: unknown): void;
 };
 
 type OptimisticMessageEntry = MessageEntry;
@@ -385,19 +386,18 @@ export function buildSessionSendBody(
   if (options?.noReply) body.noReply = true;
   if (options?.delivery) body.delivery = options.delivery;
 
-  return {
-    body,
-    effectiveModel,
-    ...(delegateClipboardImages
-      ? {
-          optimisticImages: composerState.clipboardImages.map(({ url, mime, filename }) => ({
-            url,
-            mime,
-            filename,
-          })),
-        }
-      : {}),
-  };
+  if (delegateClipboardImages) {
+    return {
+      body,
+      effectiveModel,
+      optimisticImages: composerState.clipboardImages.map(({ url, mime, filename }) => ({
+        url,
+        mime,
+        filename,
+      })),
+    };
+  }
+  return { body, effectiveModel };
 }
 
 export function getQueuedAttachmentSnapshot(composerState: {
@@ -424,8 +424,8 @@ export function getQueuedAttachmentSnapshot(composerState: {
       mime: image.mime,
       filename: image.filename,
       size: image.size,
-      ...(image.contentKey ? { contentKey: image.contentKey } : {}),
-      ...(image.contextFile ? { contextFile: { ...image.contextFile } } : {}),
+      contentKey: image.contentKey ? image.contentKey : undefined,
+      contextFile: image.contextFile ? { ...image.contextFile } : undefined,
       attachmentSequence: image.attachmentSequence ?? getClipboardImageAttachmentSequence(image.id),
     })),
     nativePdfs: (composerState.nativePdfs ?? []).map((pdf) => ({
@@ -438,16 +438,14 @@ export function getQueuedAttachmentSnapshot(composerState: {
           terminalName: composerState.terminalSelection.terminalName,
         }
       : null,
-    ...(composerState.attachedDiagnostics
+    attachedDiagnostics: composerState.attachedDiagnostics
       ? {
-          attachedDiagnostics: {
-            diagnostics: composerState.attachedDiagnostics.diagnostics.map((diagnostic) => ({
-              ...diagnostic,
-            })),
-            total: composerState.attachedDiagnostics.total,
-          },
+          diagnostics: composerState.attachedDiagnostics.diagnostics.map((diagnostic) => ({
+            ...diagnostic,
+          })),
+          total: composerState.attachedDiagnostics.total,
         }
-      : {}),
+      : undefined,
   };
 }
 
@@ -480,9 +478,9 @@ function captureComposerAttachments(
     clipboardImages: queuedSnapshot.clipboardImages ?? [],
     nativePdfs: queuedSnapshot.nativePdfs ?? [],
     terminalSelection: queuedSnapshot.terminalSelection ?? null,
-    ...(queuedSnapshot.attachedDiagnostics
-      ? { attachedDiagnostics: queuedSnapshot.attachedDiagnostics }
-      : {}),
+    attachedDiagnostics: queuedSnapshot.attachedDiagnostics
+      ? queuedSnapshot.attachedDiagnostics
+      : undefined,
   };
   const droppedFileIdentities = new Map<string, DroppedFile>();
   for (const sent of snapshot.droppedFiles) {
@@ -783,7 +781,7 @@ export class SessionSendOperations {
       ...capturedAttachments.snapshot,
       allAgents: appStore.state.allAgents.map((agent) => ({
         ...agent,
-        ...(agent.model ? { model: { ...agent.model } } : {}),
+        model: agent.model ? { ...agent.model } : undefined,
       })),
       visionDelegationTexts: targetSessionId
         ? appStore.state.messages.flatMap((entry) =>
@@ -921,7 +919,7 @@ export async function sendMessageWithDependencies(
     createSession(initialPermissionMode: PermissionMode): Promise<string | null>;
     ensureSessionPermission?(sessionId: string): Promise<boolean>;
     clearPendingAbort(sessionId: string): void;
-    syncSessionMcps(sessionId: string): Promise<void>;
+    syncSessionMcps(sessionId: string): Promise<void | boolean | object>;
     buildSendPayload(
       sessionId: string,
       text: string,
@@ -938,7 +936,7 @@ export async function sendMessageWithDependencies(
     beforeOptimisticPublish?(): void;
     appendOptimisticMessage?(entry: OptimisticMessageEntry): void;
     removeOptimisticMessage?(messageId: string): void;
-    sendAsync(sessionId: string, body: SessionSendBody): Promise<unknown>;
+    sendAsync(sessionId: string, body: SessionSendBody): Promise<void | boolean | object>;
     getMessageCount(sessionId: string): number;
     clearDroppedFiles(): void;
     clearTerminalSelection(): void;
@@ -948,13 +946,13 @@ export async function sendMessageWithDependencies(
     clearSentComposerAttachments?(): void;
     commitSentComposerAttachments?(sessionId: string): void;
     restoreSentComposerAttachments?(): void;
-    syncSession(sessionId: string): Promise<void>;
-    syncSessionMessages(sessionId: string): Promise<void>;
-    recheckSessionStatus(sessionId: string): Promise<void>;
+    syncSession(sessionId: string): Promise<void | boolean | object>;
+    syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
+    recheckSessionStatus(sessionId: string): Promise<void | boolean | object>;
     setSessionStatusEntry?(sessionId: string, status: SessionStatus): void;
     stopLoading(): void;
     shouldClearComposerAfterSend(): boolean;
-    logError?(context: string, err: unknown): void;
+    logError?(context: string, cause: unknown): void;
   },
   text: string,
   options?: SessionSendOptions
@@ -1171,13 +1169,12 @@ function createOptimisticUserMessage(
   );
   if (parts.length === 0) return null;
 
-  const modelVariant =
-    'variant' in model && typeof model.variant === 'string' ? model.variant : undefined;
+  const modelVariant = 'variant' in model && isString(model.variant) ? model.variant : undefined;
   const variant = body.variant ?? modelVariant;
   const optimisticModel = {
     providerID: model.providerID,
     modelID: model.modelID,
-    ...(variant ? { variant } : {}),
+    variant: variant || undefined,
   };
 
   return {
@@ -1237,8 +1234,8 @@ function hasPermissionRules(current: PermissionRule[] | undefined, required: Per
 async function retryPostSendMessageSync(
   deps: {
     getMessageCount(sessionId: string): number;
-    syncSessionMessages(sessionId: string): Promise<void>;
-    logError?(context: string, err: unknown): void;
+    syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
+    logError?(context: string, cause: unknown): void;
   },
   sessionId: string
 ) {
@@ -1262,7 +1259,7 @@ export async function retryMessageWithDependencies(
     clearPendingAbort(sessionId: string): void;
     clearSessionUsageLimit(sessionId: string): void;
     setSessionFailed(sessionId: string, failed: boolean): void;
-    continueInterruptedSession(sessionId: string): Promise<void>;
+    continueInterruptedSession(sessionId: string): Promise<void | boolean | object>;
     stopLoading(): void;
   },
   messageId: string,
@@ -1290,7 +1287,7 @@ export function revalidateProviderAuthWithDependencies(deps: {
   getActiveSessionId(): string | null;
   getMessages(): MessageEntry[];
   isSessionWorking(sessionId: string): boolean;
-  retryMessage(messageId: string, sessionId: string): Promise<void>;
+  retryMessage(messageId: string, sessionId: string): Promise<void | boolean | object>;
 }) {
   const sessionId = deps.getActiveSessionId();
   if (!sessionId || deps.isSessionWorking(sessionId)) return false;

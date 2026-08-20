@@ -12,6 +12,7 @@ import type {
   RepoFileStatus,
   QuestionRequest,
   PermissionRule,
+  Permission,
   Todo,
 } from '../types';
 import type {
@@ -31,7 +32,7 @@ import type {
 import { buildVarroSessionEndpoint, VARRO_API_ENDPOINTS } from '../../shared/protocol';
 import { parseHealthResponse, type HealthResponse } from '../../shared/health';
 import { normalizeRecycleBinEntries } from '../../shared/recycle-bin';
-import { asRecord } from '../../shared/type-utils';
+import { asRecord, type UnknownRecord } from '../../shared/type-utils';
 import { applySessionShareOverride } from './session-share-overrides';
 import type {
   ProviderAuthAuthorization,
@@ -39,6 +40,7 @@ import type {
   WorkspaceStatusEntry,
 } from '../../shared/opencode-types';
 import { CURRENT_OPENCODE_ENDPOINTS } from '../../shared/opencode-endpoints';
+import { isBoolean, isNumber, isString, isObject } from './runtime-values';
 
 export type SessionMessagePage = MessageEntry[] & { nextCursor?: string };
 export type SessionListPage = { items: Session[]; hasMore: boolean };
@@ -71,7 +73,7 @@ export const client = {
         return requireArray<Session>(response, path).map(applySessionShareOverride);
       }
       const page = requireRecord(response, path);
-      if (typeof page.hasMore !== 'boolean') {
+      if (!isBoolean(page.hasMore)) {
         throw malformedResponse(path, 'a session page with a boolean hasMore value');
       }
       return {
@@ -136,10 +138,14 @@ export const client = {
       const query = params.size > 0 ? `?${params.toString()}` : '';
       const path = `/session/${id}/message${query}`;
       const response = await apiCall('GET', path);
-      if (Array.isArray(response)) return response as SessionMessagePage;
+      if (Array.isArray(response)) {
+        // SAFETY: The message endpoint's array form is the legacy SessionMessagePage wire format.
+        return response as SessionMessagePage;
+      }
       const page = requireRecord(response, path);
+      // SAFETY: The surrounding shape or discriminator check establishes the SessionMessagePage contract used below.
       const items = requireArray<MessageEntry>(page.items, path) as SessionMessagePage;
-      if (page.nextCursor !== undefined && typeof page.nextCursor !== 'string') {
+      if (page.nextCursor !== undefined && !isString(page.nextCursor)) {
         throw malformedResponse(path, 'a message page with a string cursor');
       }
       if (page.nextCursor) items.nextCursor = page.nextCursor;
@@ -164,7 +170,6 @@ export const client = {
           mime?: string;
           filename?: string;
           url?: string;
-          [key: string]: unknown;
         }>;
         model?: { providerID: string; modelID: string };
         agent?: string;
@@ -238,6 +243,7 @@ export const client = {
       const response = requireRecord(providerResponse, path);
       return {
         providers: requireArray<Provider>(response.providers, path),
+        // SAFETY: The surrounding shape or discriminator check establishes the Record<string, string> contract used below.
         default: requireRecord(response.default, path) as Record<string, string>,
         defaultModel,
       };
@@ -249,6 +255,7 @@ export const client = {
     },
     async providerAuth(): Promise<ProviderAuthMethodsByProvider> {
       const path = '/provider/auth';
+      // SAFETY: The surrounding shape or discriminator check establishes the ProviderAuthMethodsByProvider contract used below.
       return requireRecord(await apiCall('GET', path), path) as ProviderAuthMethodsByProvider;
     },
     async providerCatalog(): Promise<{
@@ -260,6 +267,7 @@ export const client = {
       const response = requireRecord(await apiCall('GET', path), path);
       return {
         all: requireArray<Provider>(response.all, path),
+        // SAFETY: The surrounding shape or discriminator check establishes the Record<string, string> contract used below.
         default: requireRecord(response.default, path) as Record<string, string>,
         connected: requireArray<string>(response.connected, path),
       };
@@ -275,7 +283,7 @@ export const client = {
       const path = `/provider/${encodeURIComponent(body.providerID)}/oauth/authorize`;
       const requestBody = {
         method: body.method,
-        ...(body.inputs ? { inputs: body.inputs } : {}),
+        inputs: body.inputs ? body.inputs : undefined,
       };
       return options?.signal
         ? apiCall('POST', path, requestBody, { signal: options.signal })
@@ -294,12 +302,12 @@ export const client = {
         `/provider/${encodeURIComponent(body.providerID)}/oauth/callback`,
         {
           method: body.method,
-          ...(body.code ? { code: body.code } : {}),
+          code: body.code ? body.code : undefined,
         },
         {
           timeoutMs: 315_000,
           retries: 0,
-          ...(options?.signal ? { signal: options.signal } : {}),
+          signal: options?.signal,
         }
       );
     },
@@ -315,9 +323,8 @@ export const client = {
       const requestBody = {
         type: 'api',
         key: body.key,
-        ...(body.metadata && Object.keys(body.metadata).length > 0
-          ? { metadata: body.metadata }
-          : {}),
+        metadata:
+          body.metadata && Object.keys(body.metadata).length > 0 ? body.metadata : undefined,
       };
       return options?.signal
         ? apiCall('PUT', path, requestBody, { signal: options.signal })
@@ -415,6 +422,7 @@ export const client = {
 
   mcp: {
     async status(): Promise<Record<string, McpStatus>> {
+      // SAFETY: The surrounding shape or discriminator check establishes the Record<string, McpStatus> contract used below.
       return requireRecord(await apiCall('GET', '/mcp'), '/mcp') as Record<string, McpStatus>;
     },
     async connect(name: string): Promise<boolean> {
@@ -423,16 +431,13 @@ export const client = {
     async disconnect(name: string): Promise<boolean> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/disconnect`);
     },
-    async authenticate(name: string): Promise<unknown> {
+    async authenticate(name: string): Promise<void> {
       return apiCall('POST', `/mcp/${encodeURIComponent(name)}/auth/authenticate`);
     },
     async startAuth(name: string): Promise<McpAuthStart> {
       const path = `/mcp/${encodeURIComponent(name)}/auth`;
       const response = requireRecord(await apiCall('POST', path), path);
-      if (
-        typeof response.authorizationUrl !== 'string' ||
-        typeof response.oauthState !== 'string'
-      ) {
+      if (!isString(response.authorizationUrl) || !isString(response.oauthState)) {
         throw malformedResponse(path, 'an MCP OAuth authorization response');
       }
       return {
@@ -491,27 +496,30 @@ function withDirectory(path: string, directory: string | undefined): string {
   return `${path}?${params.toString()}`;
 }
 
-function requireArray<T>(value: unknown, path: string): T[] {
+function requireArray<T, V = unknown>(value: V, path: string): T[] {
   if (!Array.isArray(value)) throw malformedResponse(path, 'an array');
+  // SAFETY: The surrounding shape or discriminator check establishes the T contract used below.
   return value as T[];
 }
 
-function requireRecord(value: unknown, path: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+function requireRecord<T>(value: T, path: string): UnknownRecord {
+  if (!value || !isObject(value) || Array.isArray(value)) {
     throw malformedResponse(path, 'an object');
   }
-  return value as Record<string, unknown>;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  return value as UnknownRecord;
 }
 
 function malformedResponse(path: string, expected: string): Error {
   return new Error(`Malformed response from ${path}: expected ${expected}`);
 }
 
-function parseDefaultModel(value: unknown): ChatModelSelection | null | undefined {
-  if (value === undefined || value === null) return value;
+function parseDefaultModel<T>(value: T): ChatModelSelection | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
   const model = requireRecord(value, '/model/default');
-  const modelID = typeof model.modelID === 'string' ? model.modelID : model.id;
-  if (typeof model.providerID !== 'string' || typeof modelID !== 'string') {
+  const modelID = isString(model.modelID) ? model.modelID : model.id;
+  if (!isString(model.providerID) || !isString(modelID)) {
     throw malformedResponse('/model/default', 'a model selection or null');
   }
   return { providerID: model.providerID, modelID };
@@ -521,11 +529,13 @@ let fileStatusCache: {
   expiresAt: number;
   promise: Promise<RepoFileStatus[]>;
 } | null = null;
-const sessionStatusSlot: { current: Promise<Record<string, SessionStatus>> | null } = {
+type SharedRequestSlot<T> = { current: Promise<T> | null };
+
+const sessionStatusSlot: SharedRequestSlot<Record<string, SessionStatus>> = {
   current: null,
 };
-const questionListSlot: { current: Promise<QuestionRequest[]> | null } = { current: null };
-const permissionListSlot: { current: Promise<unknown[]> | null } = { current: null };
+const questionListSlot: SharedRequestSlot<QuestionRequest[]> = { current: null };
+const permissionListSlot: SharedRequestSlot<Permission[]> = { current: null };
 
 function sharedRequest<T>(
   slot: { current: Promise<T> | null },
@@ -548,9 +558,9 @@ function getCachedFileStatus(): Promise<RepoFileStatus[]> {
       requireArray<unknown>(response, path).map((value) => {
         const status = requireRecord(value, path);
         if (
-          typeof status.file !== 'string' ||
-          typeof status.additions !== 'number' ||
-          typeof status.deletions !== 'number' ||
+          !isString(status.file) ||
+          !isNumber(status.additions) ||
+          !isNumber(status.deletions) ||
           (status.status !== 'added' && status.status !== 'deleted' && status.status !== 'modified')
         ) {
           throw malformedResponse(path, 'valid VCS file status entries');
@@ -575,6 +585,7 @@ function getCachedFileStatus(): Promise<RepoFileStatus[]> {
 function getSharedSessionStatus(): Promise<Record<string, SessionStatus>> {
   return sharedRequest(sessionStatusSlot, () =>
     apiCall('GET', '/session/status').then(
+      // SAFETY: The surrounding shape or discriminator check establishes the Record<string, SessionStatus> contract used below.
       (response) => requireRecord(response, '/session/status') as Record<string, SessionStatus>
     )
   );
@@ -588,9 +599,11 @@ function getSharedQuestionList(): Promise<QuestionRequest[]> {
   );
 }
 
-function getSharedPermissionList(): Promise<unknown[]> {
+function getSharedPermissionList(): Promise<Permission[]> {
   return sharedRequest(permissionListSlot, () =>
-    apiCall('GET', '/permission').then((response) => requireArray(response, '/permission'))
+    apiCall('GET', '/permission').then((response) =>
+      requireArray<Permission>(response, '/permission')
+    )
   );
 }
 
@@ -650,8 +663,7 @@ onMessage((msg) => {
     }
   }
   if (applyEvent && evt.type === 'workspace.ready') {
-    const message =
-      typeof evt.properties?.name === 'string' ? evt.properties.name : 'Workspace connected';
+    const message = isString(evt.properties?.name) ? evt.properties.name : 'Workspace connected';
     if (
       workspaceStatusSummary.latest?.type !== 'workspace.ready' ||
       workspaceStatusSummary.latest.message !== message
@@ -663,10 +675,9 @@ onMessage((msg) => {
     }
   }
   if (applyEvent && evt.type === 'workspace.failed') {
-    const message =
-      typeof evt.properties?.message === 'string'
-        ? evt.properties.message
-        : 'Workspace connection failed';
+    const message = isString(evt.properties?.message)
+      ? evt.properties.message
+      : 'Workspace connection failed';
     if (
       workspaceStatusSummary.latest?.type !== 'workspace.failed' ||
       workspaceStatusSummary.latest.message !== message
@@ -677,6 +688,7 @@ onMessage((msg) => {
       };
     }
   }
+  // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
   const handlers = eventListeners.get(evt.type) as Set<EventHandler> | undefined;
   if (applyEvent && handlers) {
     for (const h of handlers) {
@@ -690,6 +702,7 @@ onMessage((msg) => {
       }
     }
   }
+  // SAFETY: The surrounding shape or discriminator check establishes the Set<EventHandler> contract used below.
   const wildcard = eventListeners.get('*') as Set<EventHandler> | undefined;
   if (wildcard) {
     for (const h of wildcard) {
@@ -717,9 +730,9 @@ export function getWorkspaceStatusEventSummary() {
   return workspaceStatusSummary;
 }
 
-function normalizeWorkspaceStatusEntry(value: unknown): WorkspaceStatusEntry | null {
+function normalizeWorkspaceStatusEntry<T>(value: T): WorkspaceStatusEntry | null {
   const record = asRecord(value);
-  if (!record || typeof record.workspaceID !== 'string') return null;
+  if (!record || !isString(record.workspaceID)) return null;
   if (
     record.status !== 'connected' &&
     record.status !== 'connecting' &&

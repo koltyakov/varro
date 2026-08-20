@@ -45,7 +45,7 @@ export type StuckSessionReconcileDeps = {
   /** The abort flow owns its own busy->idle transition; don't fight it. */
   hasPendingAbort(sessionId: string): boolean;
   forceReconcileIdleSession(sessionId: string): Promise<void>;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
   /** Loaded messages for the active tree; used to detect streamed completion. */
   getMessages(): MessageEntry[];
   /**
@@ -146,7 +146,7 @@ export type ForceReconcileIdleSessionDeps = {
   isActiveSession(sessionId: string): boolean;
   isTreeWorking(sessionId: string): boolean;
   stopLoading(): void;
-  logError(context: string, err: unknown): void;
+  logError(context: string, cause: unknown): void;
 };
 
 /**
@@ -187,6 +187,7 @@ export function selectUnsettledLatestAssistant(
     const entry = messages[index];
     if (!entry || entry.info.sessionID !== sessionId) continue;
     if (entry.info.role !== 'assistant') return null;
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     const info = entry.info as AssistantMessage;
     if (info.error || info.time.completed) return null;
     return info;
@@ -209,6 +210,7 @@ export function hasStreamedFinalResponse(
     const entry = messages[index];
     if (!entry || entry.info.sessionID !== sessionId) continue;
     if (entry.info.role !== 'assistant') return false;
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     const info = entry.info as AssistantMessage;
     if (info.error || info.time.completed) return false;
     const hasCommittedText = entry.parts.some(
@@ -251,6 +253,7 @@ export function hasLocalEvidenceTurnDone(
     const entry = messages[index];
     if (!entry || entry.info.sessionID !== sessionId) continue;
     if (entry.info.role !== 'assistant') return false;
+    // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
     const info = entry.info as AssistantMessage;
     if (info.error || info.time.completed) return true;
     return hasStreamedFinalResponse(messages, sessionId, streaming);

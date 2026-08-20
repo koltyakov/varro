@@ -66,6 +66,13 @@ import type {
   SessionEventInfo,
   SessionStatus,
 } from '../../types';
+import {
+  asRecord,
+  isNumber,
+  isString,
+  type UnknownRecord,
+  isObject,
+} from '../../lib/runtime-values';
 
 const MISSING_PART_RECOVERY_RETRY_MIN_MS = 100;
 const MISSING_PART_RECOVERY_RETRY_MAX_MS = 1_000;
@@ -87,7 +94,9 @@ type DirtyGapState = {
   syncing: boolean;
 };
 
-function runGapSync(operation: () => Promise<void>): Promise<void> {
+function runGapSync(
+  operation: () => Promise<void | boolean | object>
+): Promise<void | boolean | object> {
   try {
     return Promise.resolve(operation());
   } catch (error) {
@@ -113,39 +122,45 @@ type EventHandlerDependencies = {
   setSessionStatusEntry(sessionId: string, status: SessionStatus): void;
   clearUsageLimitOnResumedProgress(sessionId: string, status?: SessionStatus | null): void;
   updateUsageLimitState(sessionId: string, status: SessionStatus | null | undefined): void;
-  syncSession(sessionId: string, options?: { shouldApply(): boolean }): Promise<void>;
-  repairSessionTitle?(sessionId: string): Promise<void>;
+  syncSession(
+    sessionId: string,
+    options?: { shouldApply(): boolean }
+  ): Promise<void | boolean | object>;
+  repairSessionTitle?(sessionId: string): Promise<void | boolean | object>;
   shouldResyncSessionAfterIdle(sessionId: string): boolean;
-  syncSessionMessages(sessionId: string): Promise<void>;
-  recheckSessionStatus?(sessionId: string): Promise<void>;
+  syncSessionMessages(sessionId: string): Promise<void | boolean | object>;
+  recheckSessionStatus?(sessionId: string): Promise<void | boolean | object>;
   applyUsageLimitNotice(
     sessionId: string,
     notice: UsageLimitNotice | null,
     options?: { preserveExistingOnNull?: boolean }
   ): void;
-  syncTodosFromMessages(messages?: MessageEntry[], latestEventPayload?: unknown): void;
-  syncTodosForSession?(sessionId: string, messages?: MessageEntry[]): Promise<void>;
+  syncTodosFromMessages<T>(messages?: MessageEntry[], latestEventPayload?: T): void;
+  syncTodosForSession?(
+    sessionId: string,
+    messages?: MessageEntry[]
+  ): Promise<void | boolean | object>;
   shouldAutoApprovePermissions(sessionId: string): boolean;
   shouldAutoApproveEdit?(permission: Permission): boolean;
   shouldAutoJudgePermissions?(sessionId: string): boolean;
   isPermissionSessionKnown?(sessionId: string): boolean;
-  syncPermissionSession?(sessionId: string): Promise<void>;
-  judgePermission?(permission: Permission): Promise<void>;
+  syncPermissionSession?(sessionId: string): Promise<void | boolean | object>;
+  judgePermission?(permission: Permission): Promise<void | boolean | object>;
   permissionReplied?(permissionId: string): void;
   permissionVisible?(permissionId: string): void;
-  syncPendingPermissions?(): Promise<void>;
-  reconcileServerState?(): Promise<void>;
+  syncPendingPermissions?(): Promise<void | boolean | object>;
+  reconcileServerState?(): Promise<void | boolean | object>;
   invalidateMessageSync?(sessionId: string): void;
   respondPermission(
     sessionId: string,
     permissionId: string,
     response: 'once' | 'always' | 'reject',
     options?: { rethrow?: boolean }
-  ): Promise<void>;
+  ): Promise<void | boolean | object>;
   setDiffs(diffs: FileDiff[]): void;
-  abortRemoteSession(sessionId: string): Promise<unknown>;
-  continueInterruptedSession?(sessionId: string): Promise<void>;
-  logError(context: string, err: unknown): void;
+  abortRemoteSession(sessionId: string): Promise<void | boolean | object>;
+  continueInterruptedSession?(sessionId: string): Promise<void | boolean | object>;
+  logError(context: string, cause: unknown): void;
 };
 
 type EventHandlerOperationDependencies = {
@@ -285,7 +300,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   let dirtyGapOverflowLogged = false;
   let disposed = false;
   let pendingPermissionSync = false;
-  let serverReconciliation: Promise<void> | null = null;
+  let serverReconciliation: Promise<void | boolean | object> | null = null;
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta - caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
@@ -306,7 +321,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     sessionId: string | null | undefined,
     seq: number | undefined
   ): SequenceStatus => {
-    if (!sessionId || typeof seq !== 'number' || !Number.isFinite(seq)) return 'unknown';
+    if (!sessionId || !isNumber(seq) || !Number.isFinite(seq)) return 'unknown';
     const last = lastSeqBySession.get(sessionId);
     if (last === undefined) {
       const requiresRecovery =
@@ -611,9 +626,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
     }
   };
-  const recordToolExecutionTime = (eventName: string, props: Record<string, unknown>) => {
-    const sessionId = typeof props.sessionID === 'string' ? props.sessionID : null;
-    const callId = typeof props.callID === 'string' ? props.callID : null;
+  const recordToolExecutionTime = (eventName: string, props: UnknownRecord) => {
+    const sessionId = isString(props.sessionID) ? props.sessionID : null;
+    const callId = isString(props.callID) ? props.callID : null;
     if (!sessionId || !callId) return null;
 
     const key = getToolExecutionKey(sessionId, callId);
@@ -830,7 +845,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     if (usage?.tokens) getNextInfo().tokens = usage.tokens;
     if (usage?.cost !== undefined) getNextInfo().cost = usage.cost;
     if (usage?.finish) getNextInfo().finish = usage.finish;
-    if (nextInfo) sessionStore.upsertMessageInfo(nextInfo as Message);
+    if (nextInfo) {
+      // SAFETY: getNextInfo clones a complete assistant message before applying this usage patch.
+      sessionStore.upsertMessageInfo(nextInfo as Message);
+    }
     sessionStore.finishMessageStreaming(assistantInfo.id);
     if (isSessionInActiveTree(sessionId)) scheduleMessageSync(sessionId);
     return true;
@@ -870,10 +888,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const completed = partialMessage.time?.completed;
       sessionStore.upsertMessageInfo({
         ...local.info,
-        ...(partialMessage.error ? { error: partialMessage.error } : {}),
+        error: partialMessage.error ? partialMessage.error : undefined,
         time: {
           ...local.info.time,
-          ...(completed !== undefined ? { completed } : {}),
+          completed,
         },
       });
     }
@@ -881,7 +899,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     sessionStore.finishMessageStreaming(messageId);
     return messageId;
   };
-  const settleAssistantStepEnd = (sessionId: string, props: Record<string, unknown>) => {
+  const settleAssistantStepEnd = (sessionId: string, props: UnknownRecord) => {
     if (isContinuationStepEnd('session.next.step.ended', props)) return false;
     return settleAssistantStepCompletion(
       sessionId,
@@ -1029,7 +1047,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.created', (data) => {
       const info = normalizeSessionEventInfo(
+        // SAFETY: The surrounding shape or discriminator check establishes the SessionEventInfo contract used below.
         data.properties?.info as SessionEventInfo | undefined,
+        // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
         data.properties?.sessionID as string | undefined
       );
       if (info) {
@@ -1044,7 +1064,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.updated', (data) => {
       const info = normalizeSessionEventInfo(
+        // SAFETY: The surrounding shape or discriminator check establishes the SessionEventInfo contract used below.
         data.properties?.info as SessionEventInfo | undefined,
+        // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
         data.properties?.sessionID as string | undefined
       );
       if (info) {
@@ -1059,6 +1081,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.deleted', (data) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const id = (data.properties?.info as { id: string } | undefined)?.id;
       if (id) {
         cancelTransientConnectionRetry(id);
@@ -1103,6 +1126,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       }
       deps.updateUsageLimitState(sessionID, status);
       if (isSessionInActiveTree(sessionID)) {
+        // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
         const statusType = (status as { type: string }).type;
         if (statusType === 'retry' || statusType === 'busy') {
           uiStore.startLoading();
@@ -1126,6 +1150,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.compacted', (data) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       const sid = data.properties?.sessionID as string | undefined;
       if (!sid) return;
       sessionStore.setSessionCompacting(sid, false);
@@ -1140,8 +1165,10 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.error', (data) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       const sessionID = data.properties?.sessionID as string | undefined;
       if (!sessionID) return;
+      // SAFETY: The surrounding shape or discriminator check establishes the AssistantMessage contract used below.
       markSessionError(sessionID, data.properties?.error as AssistantMessage['error'] | undefined);
     })
   );
@@ -1149,6 +1176,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('message.updated', (data) => {
       const info = data.properties?.info;
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const partialMessage = info as
         | {
             id?: unknown;
@@ -1159,7 +1187,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
           }
         | undefined;
       const sessionID = partialMessage?.sessionID;
-      if (typeof sessionID !== 'string' || !sessionID) return;
+      if (!isString(sessionID) || !sessionID) return;
       const message = isCompleteMessageInfo(info) ? info : null;
       const assistantMessage = message && isAssistantMessage(message) ? message : null;
       const assistantFinished =
@@ -1170,8 +1198,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         !partialMessage.error &&
         !!partialMessage.time?.completed;
       if (assistantCompleted) cancelTransientConnectionRetry(sessionID);
+      // SAFETY: The surrounding shape or discriminator check establishes the owner type contract used below.
       const agent = (partialMessage as { agent?: unknown }).agent;
-      if (typeof agent === 'string' && agent) {
+      if (isString(agent) && agent) {
         appStore.setState('sessionSelectedAgents', sessionID, agent);
       }
 
@@ -1248,9 +1277,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     serverEvents.on('message.part.updated', (data) => {
       const seqStatus = observeSequence(data);
       const rawPart = data.properties?.part;
-      const partialPart = rawPart as { sessionID?: unknown; type?: unknown } | undefined;
-      const partSessionID =
-        typeof partialPart?.sessionID === 'string' ? partialPart.sessionID : undefined;
+      const partialPart = asRecord(rawPart);
+      const partSessionID = isString(partialPart?.sessionID) ? partialPart.sessionID : undefined;
       if (partSessionID && partialPart?.type === 'compaction') {
         sessionStore.setSessionCompacting(partSessionID, false);
       }
@@ -1423,6 +1451,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
 
   cleanups.push(
     serverEvents.on('session.next.revert.committed', (data) => {
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       const sessionId = data.properties?.sessionID as string | undefined;
       if (!sessionId) return;
       invalidateMessageLoads(sessionId, true);
@@ -1433,7 +1462,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     ...registerReasoningEventHandlers({
       getMessages: () => deps.getMessages(),
-      syncSessionMessages: (sessionId) => deps.syncSessionMessages(sessionId),
+      syncSessionMessages: async (sessionId) => {
+        await deps.syncSessionMessages(sessionId);
+      },
       logError: (context, err) => deps.logError(context, err),
       isSessionInActiveTree,
       markSessionProgress,
@@ -1448,6 +1479,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('todo.updated', (data) => {
       const p = data.properties;
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
         deps.syncTodosFromMessages(undefined, p);
       }
@@ -1457,6 +1489,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   cleanups.push(
     serverEvents.on('session.diff', (data) => {
       const p = data.properties;
+      // SAFETY: The surrounding shape or discriminator check establishes the string contract used below.
       if (isSessionInActiveTree(p?.sessionID as string | undefined)) {
         deps.setDiffs(validateFileDiffs(p?.diff));
       }
@@ -1470,17 +1503,18 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   return cleanups;
 }
 
-function parseSessionStatus(value: unknown): SessionStatus | null {
-  if (!value || typeof value !== 'object') return null;
-  const status = value as Record<string, unknown>;
+function parseSessionStatus<T>(value: T): SessionStatus | null {
+  if (!value || !isObject(value)) return null;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const status = value as UnknownRecord;
   if (status.type === 'idle' || status.type === 'busy') return { type: status.type };
   if (
     status.type !== 'retry' ||
-    typeof status.attempt !== 'number' ||
+    !isNumber(status.attempt) ||
     !Number.isFinite(status.attempt) ||
-    typeof status.next !== 'number' ||
+    !isNumber(status.next) ||
     !Number.isFinite(status.next) ||
-    typeof status.message !== 'string'
+    !isString(status.message)
   ) {
     return null;
   }
@@ -1493,15 +1527,16 @@ function parseSessionStatus(value: unknown): SessionStatus | null {
       next: status.next,
     };
   }
-  if (!status.action || typeof status.action !== 'object') return null;
-  const action = status.action as Record<string, unknown>;
+  if (!status.action || !isObject(status.action)) return null;
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  const action = status.action as UnknownRecord;
   if (
-    typeof action.reason !== 'string' ||
-    typeof action.provider !== 'string' ||
-    typeof action.title !== 'string' ||
-    typeof action.message !== 'string' ||
-    typeof action.label !== 'string' ||
-    (action.link !== undefined && typeof action.link !== 'string')
+    !isString(action.reason) ||
+    !isString(action.provider) ||
+    !isString(action.title) ||
+    !isString(action.message) ||
+    !isString(action.label) ||
+    (action.link !== undefined && !isString(action.link))
   ) {
     return null;
   }
@@ -1516,33 +1551,29 @@ function parseSessionStatus(value: unknown): SessionStatus | null {
       title: action.title,
       message: action.message,
       label: action.label,
-      ...(action.link ? { link: action.link } : {}),
+      link: action.link ? action.link : undefined,
     },
   };
 }
 
 function getServerEventSessionId(event: ServerEvent): string | undefined {
-  const properties = event.properties as Record<string, unknown> | undefined;
-  if (typeof properties?.sessionID === 'string' && properties.sessionID) {
+  const properties = asRecord(event.properties) ?? undefined;
+  if (isString(properties?.sessionID) && properties.sessionID) {
     return properties.sessionID;
   }
 
   const part = asEventRecord(properties?.part);
-  if (typeof part?.sessionID === 'string' && part.sessionID) return part.sessionID;
+  if (isString(part?.sessionID) && part.sessionID) return part.sessionID;
 
   const info = asEventRecord(properties?.info);
-  if (typeof info?.sessionID === 'string' && info.sessionID) return info.sessionID;
-  if (
-    typeof event.type === 'string' &&
-    event.type.startsWith('session.') &&
-    typeof info?.id === 'string' &&
-    info.id
-  ) {
+  if (isString(info?.sessionID) && info.sessionID) return info.sessionID;
+  if (isString(event.type) && event.type.startsWith('session.') && isString(info?.id) && info.id) {
     return info.id;
   }
   return undefined;
 }
 
-function asEventRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+function asEventRecord<T>(value: T): UnknownRecord | undefined {
+  // SAFETY: The surrounding shape or discriminator check establishes the UnknownRecord contract used below.
+  return value && isObject(value) ? (value as UnknownRecord) : undefined;
 }

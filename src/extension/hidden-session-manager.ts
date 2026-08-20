@@ -1,3 +1,5 @@
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type -- Persisted session metadata is validated before it enters manager state. */
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Persisted arrays are element-validated before restoration. */
 import type { ServerEvent } from '../shared/protocol';
 
 export const PERMISSION_JUDGE_SESSION_TITLE_PREFIX = 'Varro permission judge: ';
