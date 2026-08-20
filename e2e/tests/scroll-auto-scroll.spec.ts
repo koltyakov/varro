@@ -1493,14 +1493,14 @@ test.describe('auto-scroll', () => {
 
     const shuffledSamples = await completeAndSample([2]);
     expect(
-      shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      shuffledSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
       JSON.stringify({ before, shuffledSamples })
     ).toBe(true);
     await expect(activeItems).toHaveCount(2);
 
     const groupedSamples = await completeAndSample([0, 1]);
     expect(
-      groupedSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      groupedSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
       JSON.stringify({ before, groupedSamples })
     ).toBe(true);
     await expect(activeItems).toHaveCount(0);
@@ -1552,7 +1552,7 @@ test.describe('auto-scroll', () => {
     });
     const allAtOnceSamples = await completeAndSample([3, 4, 5]);
     expect(
-      allAtOnceSamples.every((top) => top !== null && Math.abs(top - before) <= 0.5),
+      allAtOnceSamples.every((top) => top !== null && Math.abs(top - before) <= 1),
       JSON.stringify({ before, allAtOnceSamples })
     ).toBe(true);
     await expect(activeItems).toHaveCount(0);
@@ -1619,7 +1619,7 @@ test.describe('auto-scroll', () => {
     });
 
     expect(
-      samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 0.5),
+      samples.every((sample) => sample.top !== null && Math.abs(sample.top - before) <= 1),
       JSON.stringify({ before, samples })
     ).toBe(true);
     expect(

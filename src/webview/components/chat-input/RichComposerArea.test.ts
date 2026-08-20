@@ -443,6 +443,26 @@ describe('RichComposerArea', () => {
     });
   });
 
+  it('inserts exactly one controlled newline on Shift+Enter', () => {
+    const onInput = vi.fn();
+    const value = 'something';
+    renderComposer({ value, cursorOffset: value.length, chips: [], onInput });
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+    setCollapsedSelection(editor.firstChild, value.length);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
+  });
+
   it('continues a hyphen bullet on Shift+Enter', () => {
     const onInput = vi.fn();
     const value = '- Bullet item 1';
@@ -570,6 +590,44 @@ describe('RichComposerArea', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(onInput).toHaveBeenCalledWith(`Tests${marker}`, 'Tests'.length);
+  });
+
+  it('removes a whole atomic chip with Backspace from its trailing caret stop', () => {
+    const marker = '[Image 4]';
+    const value = `sdsds ${marker}`;
+    const onInput = vi.fn();
+    const onRemoveChip = vi.fn();
+    renderComposer({
+      value,
+      cursorOffset: value.length,
+      chips: [
+        {
+          id: 'img:4',
+          type: 'image',
+          label: 'Image 4',
+          icon: 'image',
+          textMarker: marker,
+        },
+      ],
+      onInput,
+      onRemoveChip,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const target = findNodeAtOffset(editor, value.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith('sdsds ', 'sdsds '.length);
+    expect(onRemoveChip).toHaveBeenCalledWith('img:4');
   });
 
   it('replaces a selection spanning a session reference when pasting', () => {

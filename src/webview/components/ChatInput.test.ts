@@ -4365,7 +4365,7 @@ describe('ChatInput', () => {
       fileReader.resolve('mixed.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Pasted description [Image 1] ');
+      expect(inputText()).toBe('Pasted description [Image 1]');
       expect(inputText().match(/Pasted description/g)).toHaveLength(1);
       expect(state.clipboardImages.map((image) => image.filename)).toEqual(['Image 1']);
     } finally {
@@ -4580,7 +4580,7 @@ describe('ChatInput', () => {
         }
         await flushAsyncWork();
 
-        expect(inputText()).toBe('[Image 1] ');
+        expect(inputText()).toBe('[Image 1]');
         expect(state.droppedFiles).toEqual([expect.objectContaining({ path: '/repo/README.md' })]);
         expect(state.clipboardImages).toEqual([
           expect.objectContaining({
@@ -4618,7 +4618,7 @@ describe('ChatInput', () => {
       fileReader.resolve('context.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Inspect this [Image 1] ');
+      expect(inputText()).toBe('Inspect this [Image 1]');
       expect(state.droppedFiles).toEqual([
         expect.objectContaining({
           path: '/repo/src/app.ts',
@@ -4673,7 +4673,7 @@ describe('ChatInput', () => {
           await flushAsyncWork();
         }
 
-        expect(inputText()).toBe('First [Image 1] Second [Image 2] ');
+        expect(inputText()).toBe('First [Image 1] Second [Image 2]');
         expect(
           state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
         ).toEqual([
@@ -4682,7 +4682,7 @@ describe('ChatInput', () => {
         ]);
 
         pressKey(editor, { key: 'z', metaKey: true });
-        expect(inputText()).toBe('First [Image 1] ');
+        expect(inputText()).toBe('First [Image 1]');
         expect(state.clipboardImages).toEqual([
           expect.objectContaining({ url: 'data:image/png;base64,first-mixed.png' }),
         ]);
@@ -4714,7 +4714,7 @@ describe('ChatInput', () => {
       fileReader.resolve('undo-mixed.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Pasted description [Image 1] ');
+      expect(inputText()).toBe('Pasted description [Image 1]');
       expect(state.clipboardImages).toHaveLength(1);
 
       pressKey(editor, { key: 'z', metaKey: true });
@@ -4722,7 +4722,7 @@ describe('ChatInput', () => {
       expect(state.clipboardImages).toEqual([]);
 
       pressKey(editor, { key: 'z', metaKey: true, shiftKey: true });
-      expect(inputText()).toBe('Pasted description [Image 1] ');
+      expect(inputText()).toBe('Pasted description [Image 1]');
       expect(state.clipboardImages).toHaveLength(1);
     } finally {
       fileReader.restore();
@@ -5048,7 +5048,7 @@ describe('ChatInput', () => {
       fileReader.resolve('first.png');
       await flushAsyncWork();
 
-      expect(inputText()).toBe('Review this [Image 1] [Image 2] ');
+      expect(inputText()).toBe('Review this [Image 1] [Image 2]');
       expect(
         state.clipboardImages.map((image) => ({ filename: image.filename, url: image.url }))
       ).toEqual([
@@ -5056,6 +5056,45 @@ describe('ChatInput', () => {
         { filename: 'Image 2', url: 'data:image/png;base64,second.png' },
       ]);
       expect(nextPastedImageIndex()).toBe(3);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('pastes an image after an inline image chip without adding a newline', async () => {
+    const fileReader = installControllableFileReader();
+    try {
+      addClipboardImage({
+        id: 'existing-image',
+        url: 'data:image/png;base64,existing',
+        mime: 'image/png',
+        filename: 'Image 1',
+        size: 8,
+      });
+      setInputText('sdsds [Image 1] ');
+      cleanup = render(() => ChatInput(), container!);
+      await flushAsyncWork();
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      const chip = editor?.querySelector<HTMLElement>('[data-chip-type="image"]');
+      const trailingSpacer = chip?.nextSibling;
+      if (!editor || trailingSpacer?.nodeType !== Node.TEXT_NODE) {
+        throw new Error('Expected inline image chip with a trailing caret spacer');
+      }
+      editor.focus();
+      setCollapsedSelection(trailingSpacer, 1);
+      editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', bubbles: true }));
+
+      dispatchImagePaste(editor, [new File(['next'], 'next.png', { type: 'image/png' })], '\n');
+      fileReader.resolve('next.png');
+      await flushAsyncWork();
+
+      expect(inputText()).toBe('sdsds [Image 1] [Image 2] ');
+      expect(editor.querySelectorAll('br')).toHaveLength(0);
+      const pastedChip = Array.from(
+        editor.querySelectorAll<HTMLElement>('[data-chip-type="image"]')
+      ).at(-1);
+      expect(pastedChip?.nextSibling?.textContent).toBe('\u200B ');
     } finally {
       fileReader.restore();
     }

@@ -481,9 +481,10 @@ function applyPasteTransactionText(
     marker.length > 0 && (insertion !== null || textWithoutMarker.trim().length > 0);
   const prefix =
     shouldInsertMarker && shouldPadInlineInsertion(textWithoutMarker[markerOffset - 1]) ? ' ' : '';
-  const suffix = shouldInsertMarker
-    ? getInlineInsertionSuffix(textWithoutMarker, markerOffset)
-    : '';
+  const suffix =
+    shouldInsertMarker && markerOffset < textWithoutMarker.length
+      ? getInlineInsertionSuffix(textWithoutMarker, markerOffset)
+      : '';
   const replacement = `${sourceText}${prefix}${shouldInsertMarker ? marker : ''}${suffix}`;
   const nextText = `${before}${replacement}${after}`;
   const delta = replacement.length - (end - start);
@@ -2404,7 +2405,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const pastedContextFiles = getPastedContextFiles(pastedText, state.editorContext.workspacePath);
     const pastedPromptText = getPromptTextWithoutContextReferences(pastedText);
     const pasteHandledAsContextOnly =
-      pastedContextFiles.length > 0 && pastedPromptText.length === 0;
+      pastedContextFiles.length > 0 && pastedPromptText.trim().length === 0;
     if (pastedContextFiles.length > 0) {
       (e as ClipboardEvent & { __varroPasteText?: string }).__varroPasteText = pastedPromptText;
     }
@@ -2437,7 +2438,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       );
     }
 
-    if (!pastedText || pasteHandledAsContextOnly) e.preventDefault();
+    if (pastedText.trim().length === 0 || pasteHandledAsContextOnly) e.preventDefault();
     const transaction: PasteTransaction = {
       event: e,
       sessionId: composerSessionId(),

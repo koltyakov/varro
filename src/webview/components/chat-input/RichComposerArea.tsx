@@ -223,6 +223,27 @@ export function RichComposerArea(props: {
       return true;
     }
 
+    for (const chip of props.chips) {
+      if (chip.type === 'external-link' || chip.type === 'mention-session') continue;
+      let markerStart = props.value.indexOf(chip.textMarker);
+      while (markerStart !== -1) {
+        const markerEnd = markerStart + chip.textMarker.length;
+        const shouldRemove =
+          (event.key === 'Backspace' && selection.start === markerEnd) ||
+          (event.key === 'Delete' && selection.start === markerStart);
+        if (shouldRemove) {
+          event.preventDefault();
+          props.onInput(
+            `${props.value.slice(0, markerStart)}${props.value.slice(markerEnd)}`,
+            markerStart
+          );
+          props.onRemoveChip?.(chip.id);
+          return true;
+        }
+        markerStart = props.value.indexOf(chip.textMarker, markerEnd);
+      }
+    }
+
     if (removeSessionReferenceAtSelection()) {
       event.preventDefault();
       return true;
@@ -541,7 +562,7 @@ export function RichComposerArea(props: {
     e.preventDefault();
   }
 
-  function handleBulletLineBreak(e: KeyboardEvent): boolean {
+  function handleLineBreak(e: KeyboardEvent): boolean {
     if (e.key !== 'Enter' || !e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) {
       return false;
     }
@@ -563,7 +584,12 @@ export function RichComposerArea(props: {
     }
 
     const bulletPrefix = line.match(/^(\s*-\s+)/)?.[1];
-    if (!bulletPrefix || selection.start < lineStart + bulletPrefix.length) return false;
+    if (!bulletPrefix || selection.start < lineStart + bulletPrefix.length) {
+      e.preventDefault();
+      const nextValue = `${props.value.slice(0, selection.start)}\n${props.value.slice(selection.end)}`;
+      props.onInput(nextValue, selection.start + 1);
+      return true;
+    }
 
     e.preventDefault();
     const insertion = `\n${bulletPrefix}`;
@@ -689,7 +715,7 @@ export function RichComposerArea(props: {
         onKeyDown={(e) => {
           if (!removeAtomicReference(e)) {
             props.onKeyDown(e);
-            if (!e.defaultPrevented) handleBulletLineBreak(e);
+            if (!e.defaultPrevented) handleLineBreak(e);
             const key = e.key.toLowerCase();
             historyHandledByKeydown =
               e.defaultPrevented &&
@@ -764,7 +790,14 @@ function appendTextWithLineBreaks(parent: Node, text: string, addTrailingPlaceho
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (i > 0) parent.appendChild(document.createElement('br'));
-    if (lines[i]) parent.appendChild(document.createTextNode(lines[i]!));
+    if (lines[i]) {
+      const previousNode = parent.lastChild;
+      if (previousNode?.nodeType === Node.TEXT_NODE) {
+        previousNode.textContent = `${previousNode.textContent || ''}${lines[i]}`;
+      } else {
+        parent.appendChild(document.createTextNode(lines[i]!));
+      }
+    }
   }
   if (addTrailingPlaceholder && text.endsWith('\n')) {
     const placeholder = document.createElement('br');

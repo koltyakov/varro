@@ -176,6 +176,64 @@ test('pastes an image, sends it as a file part, and clears the chip', async ({ p
   await expect(page.locator('.chat-attachment-chip').filter({ hasText: 'Image' })).toHaveCount(0);
 });
 
+test('keeps a line-start pasted image from creating a trailing line', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('something');
+  await composer.press('Shift+Enter');
+  const pasteImage = (name: string, text = '') =>
+    composer.evaluate(
+      (node, { filename, plainText }) => {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(
+          new File([new TextEncoder().encode(filename)], filename, { type: 'image/png' })
+        );
+        if (plainText) dataTransfer.setData('text/plain', plainText);
+        const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+        Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+        node.dispatchEvent(event);
+      },
+      { filename: name, plainText: text }
+    );
+
+  await pasteImage('first.png', '\n');
+  await expect(composer.locator('[data-chip-type="image"]')).toHaveCount(1);
+
+  const linePositions = await composer.evaluate((editor) => {
+    const chips = editor.querySelectorAll<HTMLElement>('[data-chip-type="image"]');
+    const pastedChip = chips.item(chips.length - 1);
+    const selection = window.getSelection();
+    const caretRect = selection?.rangeCount
+      ? selection.getRangeAt(0).getBoundingClientRect()
+      : null;
+    return {
+      chipTop: pastedChip.getBoundingClientRect().top,
+      caretTop: caretRect?.top ?? null,
+      brCount: editor.querySelectorAll('br').length,
+      trailingText: pastedChip.nextSibling?.textContent,
+    };
+  });
+  expect(linePositions.brCount).toBe(1);
+  expect(linePositions.caretTop).not.toBeNull();
+  expect(Math.abs(linePositions.caretTop! - linePositions.chipTop)).toBeLessThan(8);
+  expect(linePositions.trailingText).toBe('\u200B');
+
+  await composer.locator('[data-chip-type="image"]').evaluate((chip) => {
+    const range = document.createRange();
+    range.selectNode(chip);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await composer.press('Backspace');
+  await expect(composer.locator('[data-chip-type="image"]')).toHaveCount(0);
+
+  await expect
+    .poll(() => composer.evaluate((editor) => editor.querySelectorAll('br').length))
+    .toBe(2);
+});
+
 test('paints a sent portrait carousel at its final presentation without blinking', async ({
   page,
 }) => {
