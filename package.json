@@ -66,6 +66,7 @@
     "solid-js": "1.9.15"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.79.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/css.escape": "1.5.2",
