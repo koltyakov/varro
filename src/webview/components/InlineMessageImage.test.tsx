@@ -36,6 +36,14 @@ afterEach(() => {
 });
 
 describe('InlineMessageImage', () => {
+  it('skips preloading when Image is unavailable', async () => {
+    vi.stubGlobal('Image', undefined);
+
+    await expect(
+      preloadInlineImageDimensions('https://example.test/no-image-global.png')
+    ).resolves.toBeUndefined();
+  });
+
   it('uses cover for a sufficiently large image with a compatible crop', () => {
     const image = renderImage();
 

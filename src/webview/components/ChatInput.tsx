@@ -4077,8 +4077,8 @@ function clickedOutside(target: Node | null, trigger?: HTMLElement, popup?: HTML
 }
 
 function createAttachmentID() {
-  if (crypto !== undefined && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
+  if (globalThis.crypto !== undefined && 'randomUUID' in globalThis.crypto) {
+    return globalThis.crypto.randomUUID();
   }
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }

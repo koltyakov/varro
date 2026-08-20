@@ -63,8 +63,8 @@ export function createStreamingDeltaQueue(
 }
 
 function defaultScheduleFrame(callback: () => void) {
-  if (isFunction(requestAnimationFrame)) {
-    requestAnimationFrame(callback);
+  if (isFunction(globalThis.requestAnimationFrame)) {
+    globalThis.requestAnimationFrame(callback);
     return;
   }
   setTimeout(callback, 16);

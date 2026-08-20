@@ -1,5 +1,5 @@
 export async function writeClipboard(text: string): Promise<boolean> {
-  const clipboard = navigator === undefined ? undefined : navigator.clipboard;
+  const clipboard = globalThis.navigator?.clipboard;
   if (clipboard?.writeText) {
     try {
       await clipboard.writeText(text);
@@ -9,7 +9,8 @@ export async function writeClipboard(text: string): Promise<boolean> {
     }
   }
 
-  const body = document === undefined ? undefined : document.body;
+  const document = globalThis.document;
+  const body = document?.body;
   if (body) {
     const activeElement = document.activeElement;
     const modal =

@@ -2597,8 +2597,8 @@ export function MessageList() {
 
     // A replacement can temporarily shorten the track and clamp scrollTop. Restore on each DOM
     // mutation before paint; the frame loop below bounds ownership and handles measurement-only work.
-    if (trackRef && MutationObserver !== undefined) {
-      const observer = new MutationObserver(() => {
+    if (trackRef && globalThis.MutationObserver !== undefined) {
+      const observer = new globalThis.MutationObserver(() => {
         if (
           pendingStructuralScrollAnchor !== pending ||
           state.activeSessionId !== sessionId ||

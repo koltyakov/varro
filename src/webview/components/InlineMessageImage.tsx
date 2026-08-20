@@ -34,9 +34,9 @@ function getCachedImageDimensions(src: string) {
 }
 
 export async function preloadInlineImageDimensions(src: string) {
-  if (getCachedImageDimensions(src) || Image === undefined) return;
+  if (getCachedImageDimensions(src) || globalThis.Image === undefined) return;
 
-  const image = new Image();
+  const image = new globalThis.Image();
   image.src = src;
   if (!isFunction(image.decode)) return;
   try {

@@ -91,4 +91,15 @@ describe('writeClipboard', () => {
     const result = await writeClipboard('nothing works');
     expect(result).toBe(false);
   });
+
+  it('returns false when browser globals are unavailable', async () => {
+    vi.stubGlobal('navigator', undefined);
+    vi.stubGlobal('document', undefined);
+
+    try {
+      await expect(writeClipboard('no browser')).resolves.toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

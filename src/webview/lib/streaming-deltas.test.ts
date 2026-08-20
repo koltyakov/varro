@@ -14,6 +14,23 @@ function captureSchedule() {
 }
 
 describe('createStreamingDeltaQueue', () => {
+  it('uses a timer when requestAnimationFrame is unavailable', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestAnimationFrame', undefined);
+    const flush = vi.fn();
+    const q = createStreamingDeltaQueue(flush);
+
+    try {
+      q.scheduleFlush();
+      expect(flush).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(16);
+      expect(flush).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('stores and retrieves deltas by partId', () => {
     const flush = vi.fn();
     const q = createStreamingDeltaQueue(flush);
