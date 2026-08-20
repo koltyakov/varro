@@ -1229,10 +1229,10 @@ describe('header status badges', () => {
     expect(desktopHeader?.querySelector('.chat-header-attention-badge')).toBeNull();
     expect(desktopHeader?.querySelector('.chat-header-plan-badge')).toBeNull();
     expect(desktopHeader?.querySelector('.chat-header-completed-badge')).toBeNull();
-    expect(desktopHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeInstanceOf(
+    expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeInstanceOf(
       HTMLButtonElement
     );
-    expect(desktopHeader?.querySelector('.chat-header-btn[title="Fork session"]')).toBeNull();
+    expect(desktopHeader?.querySelector('.chat-header-btn[aria-label="Fork session"]')).toBeNull();
   });
 
   it('shows the active session subagent button beside the title and opens its sub-agent list', async () => {
@@ -1254,11 +1254,11 @@ describe('header status badges', () => {
     const headerChildren = Array.from(headerLeft?.children ?? []);
 
     expect(title?.textContent).toBe('parent');
-    expect(subagentsButton?.getAttribute('title')).toBe('Show 2 sub-agent sessions');
+    expect(subagentsButton?.getAttribute('aria-label')).toBe('Show 2 sub-agent sessions');
     expect(subagentsButton?.textContent?.trim()).toBe('2');
-    expect(headerChildren.indexOf(title as Element)).toBeLessThan(
-      headerChildren.indexOf(subagentsButton as Element)
-    );
+    expect(
+      headerChildren.indexOf(title?.closest('.chat-header-session-title') as Element)
+    ).toBeLessThan(headerChildren.indexOf(subagentsButton as Element));
 
     subagentsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1415,11 +1415,11 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to sub-agent sessions"]'
+      '.chat-header .chat-header-btn[aria-label="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
     expect(
-      container?.querySelectorAll('.chat-header-btn[title="Back to sub-agent sessions"]')
+      container?.querySelectorAll('.chat-header-btn[aria-label="Back to sub-agent sessions"]')
     ).toHaveLength(1);
 
     backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1447,7 +1447,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to parent session"]'
+      '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1476,19 +1476,19 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const desktopBackButton = container?.querySelector(
-      '.chat-header-chat-desktop .chat-header-btn[title="Back to parent session"]'
+      '.chat-header-chat-desktop .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
     const sidebar = container?.querySelector('.session-list-view-sidebar');
     const sidebarHeader = container?.querySelector('.chat-session-sidebar-header');
     expect(desktopBackButton).toBeInstanceOf(HTMLButtonElement);
     expect(
-      container?.querySelectorAll('.chat-header-btn[title="Back to parent session"]')
+      container?.querySelectorAll('.chat-header-btn[aria-label="Back to parent session"]')
     ).toHaveLength(1);
     expect(sidebarHeader?.querySelector('.chat-header-filter-chip-label')?.textContent).toBe(
       'Sub-agents for parent'
     );
     expect(
-      sidebarHeader?.querySelector('.chat-header-btn[title="Back to sessions"]')
+      sidebarHeader?.querySelector('.chat-header-btn[aria-label="Back to sessions"]')
     ).toBeInstanceOf(HTMLButtonElement);
     expect(
       Array.from(sidebar?.querySelectorAll('.session-item-title') ?? []).map((item) =>
@@ -1497,7 +1497,7 @@ describe('header status badges', () => {
     ).toEqual(['child', 'sibling']);
 
     sidebarHeader
-      ?.querySelector<HTMLButtonElement>('.chat-header-btn[title="Back to sessions"]')
+      ?.querySelector<HTMLButtonElement>('.chat-header-btn[aria-label="Back to sessions"]')
       ?.click();
     await Promise.resolve();
 
@@ -1529,7 +1529,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const topButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to sub-agent sessions"]'
+      '.chat-header .chat-header-btn[aria-label="Back to sub-agent sessions"]'
     ) as HTMLButtonElement | null;
     expect(topButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1563,7 +1563,7 @@ describe('header status badges', () => {
     await Promise.resolve();
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to parent session"]'
+      '.chat-header .chat-header-btn[aria-label="Back to parent session"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1615,7 +1615,7 @@ describe('header status badges', () => {
       HTMLButtonElement
     );
     expect(sidebarHeader?.querySelector('.chat-header-running-count')?.textContent).toBe('1');
-    expect(sidebarHeader?.querySelector('.chat-header-btn[title="New chat"]')).toBeInstanceOf(
+    expect(sidebarHeader?.querySelector('.chat-header-btn[aria-label="New chat"]')).toBeInstanceOf(
       HTMLButtonElement
     );
   });
@@ -1655,7 +1655,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const newChatButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="New chat"]'
+      '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1693,7 +1693,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const newChatButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="New chat"]'
+      '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1727,7 +1727,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const newChatButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="New chat"]'
+      '.chat-header .chat-header-btn[aria-label="New chat"]'
     ) as HTMLButtonElement | null;
     expect(newChatButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1760,7 +1760,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to sessions"]'
+      '.chat-header .chat-header-btn[aria-label="Back to sessions"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 
@@ -1918,7 +1918,7 @@ describe('header status badges', () => {
     cleanup = render(() => Chat(), container!);
 
     const backButton = container?.querySelector(
-      '.chat-header .chat-header-btn[title="Back to sessions"]'
+      '.chat-header .chat-header-btn[aria-label="Back to sessions"]'
     ) as HTMLButtonElement | null;
     expect(backButton).toBeInstanceOf(HTMLButtonElement);
 

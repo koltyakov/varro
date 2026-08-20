@@ -14,7 +14,7 @@ test('clears the reconnect banner after live updates recover for an active sessi
   await page.clock.install();
   await page.goto('/e2e/harness/index.html?scenario=restored-session');
 
-  await expect(page.getByTitle('Back to sessions').locator('..').getByText('Restored Session')).toBeVisible();
+  await expect(page.getByLabel('Back to sessions').locator('..').getByText('Restored Session')).toBeVisible();
 
   const banner = page.getByRole('status').filter({ hasText: 'Live updates are reconnecting' });
   await expect(banner).toHaveCount(0);
@@ -58,7 +58,7 @@ test('keeps the active session visible through a maintenance reconnect cycle', a
   await page.goto('/e2e/harness/index.html?scenario=maintenance-reconnect');
 
   await expect(
-    page.getByTitle('Back to sessions').locator('..').getByText('Maintenance reconnect')
+    page.getByLabel('Back to sessions').locator('..').getByText('Maintenance reconnect')
   ).toBeVisible();
   await expect(
     page.getByText('The previous response should stay visible while the stream reconnects.', {

@@ -125,9 +125,9 @@ test('includes dropped file references in the prompt body', async ({ page }) => 
 test('pastes an image, sends it as a file part, and clears the chip', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByText('GPT-4.1', { exact: true }).click();
-  await expect(page.getByTitle('OpenAI / GPT-4.1')).toBeVisible();
+  await expect(page.getByLabel('OpenAI / GPT-4.1')).toBeVisible();
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();
@@ -238,7 +238,7 @@ test('paints a sent portrait carousel at its final presentation without blinking
   page,
 }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByText('GPT-4.1', { exact: true }).click();
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
@@ -279,7 +279,7 @@ test('paints a sent portrait carousel at its final presentation without blinking
     }).observe(document.body, { childList: true, subtree: true, attributes: true });
   }, prompt);
 
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
   await expect(page.locator('.user-message-card').filter({ hasText: prompt })).toBeVisible();
   await expect
     .poll(() =>
@@ -330,7 +330,7 @@ test('reloads and inline-edits an image prompt without losing its attachment', a
     }, sessionId);
 
   await page.goto('/e2e/harness/index.html?scenario=reload-persistence');
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByText('GPT-4.1', { exact: true }).click();
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();

@@ -2,6 +2,7 @@ import { Show, createEffect, onCleanup } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { trapModalFocus } from '../lib/modal-focus';
+import { Tooltip } from './Tooltip';
 
 export type PreviewImage = {
   url: string;
@@ -75,18 +76,19 @@ export function ImagePreviewOverlay(props: {
             aria-label={`Image preview: ${image().title}`}
             onClick={props.onClose}
           >
-            <button
-              type="button"
-              class="chat-image-preview-close"
-              aria-label="Close image preview"
-              title="Close image preview"
-              onClick={(event) => {
-                event.stopPropagation();
-                props.onClose();
-              }}
-            >
-              <CloseIcon />
-            </button>
+            <Tooltip content="Close image preview">
+              <button
+                type="button"
+                class="chat-image-preview-close"
+                aria-label="Close image preview"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  props.onClose();
+                }}
+              >
+                <CloseIcon />
+              </button>
+            </Tooltip>
             <div class="chat-image-preview-overlay-scroll">
               <div class="chat-image-preview-overlay-inner">
                 <figure
@@ -96,30 +98,32 @@ export function ImagePreviewOverlay(props: {
                   <img src={image().url} alt={image().alt} class="chat-image-preview-img" />
                   <Show when={props.showNavigation}>
                     <div class="chat-image-preview-nav-group">
-                      <button
-                        type="button"
-                        class="chat-image-preview-nav chat-image-preview-nav-prev"
-                        aria-label="Previous image"
-                        title="Previous image"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          props.onPrevious?.();
-                        }}
-                      >
-                        <ChevronLeftIcon />
-                      </button>
-                      <button
-                        type="button"
-                        class="chat-image-preview-nav chat-image-preview-nav-next"
-                        aria-label="Next image"
-                        title="Next image"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          props.onNext?.();
-                        }}
-                      >
-                        <ChevronRightIcon />
-                      </button>
+                      <Tooltip content="Previous image">
+                        <button
+                          type="button"
+                          class="chat-image-preview-nav chat-image-preview-nav-prev"
+                          aria-label="Previous image"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.onPrevious?.();
+                          }}
+                        >
+                          <ChevronLeftIcon />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Next image">
+                        <button
+                          type="button"
+                          class="chat-image-preview-nav chat-image-preview-nav-next"
+                          aria-label="Next image"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            props.onNext?.();
+                          }}
+                        >
+                          <ChevronRightIcon />
+                        </button>
+                      </Tooltip>
                     </div>
                   </Show>
                   <figcaption class="chat-image-preview-caption">

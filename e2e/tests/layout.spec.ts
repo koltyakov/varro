@@ -1456,9 +1456,9 @@ test('the first image message does not overlap the sticky prompt', async ({ page
   });
   await expect(page.locator('.latest-user-message-sticky')).toBeVisible();
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByText('GPT-4.1', { exact: true }).click();
-  await expect(page.getByTitle('OpenAI / GPT-4.1')).toBeVisible();
+  await expect(page.getByLabel('OpenAI / GPT-4.1')).toBeVisible();
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.click();

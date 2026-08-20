@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('filters models in the model picker and shows a no-match state', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=model-search');
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   const search = page.getByLabel('Search models');
   await expect(search).toBeVisible();
 
@@ -21,7 +21,7 @@ test('filters models in the model picker and shows a no-match state', async ({ p
 test('supports keyboard navigation and escape in the model picker', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=model-search');
 
-  const pickerButton = page.getByTitle('GitHub Copilot / GPT-5 mini');
+  const pickerButton = page.getByLabel('GitHub Copilot / GPT-5 mini');
   await pickerButton.click();
 
   const search = page.getByLabel('Search models');
@@ -30,7 +30,7 @@ test('supports keyboard navigation and escape in the model picker', async ({ pag
   await search.press('ArrowDown');
   await search.press('Enter');
 
-  await expect(page.getByTitle('OpenCode Go / Go Fast')).toBeVisible();
+  await expect(page.getByLabel('OpenCode Go / Go Fast')).toBeVisible();
 
   await page.locator('.model-picker-btn').click();
   await expect(search).toBeVisible();

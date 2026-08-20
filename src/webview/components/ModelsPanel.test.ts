@@ -226,7 +226,7 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     const fastSymbol = container?.querySelector(
-      '.settings-model-name [title="Fast (more expensive)"]'
+      '.settings-model-name [aria-label="Fast (more expensive)"]'
     );
     expect(fastSymbol?.textContent).toBe('⚡');
   });
@@ -831,7 +831,7 @@ describe('ModelsPanel', () => {
     ).map((tag) => tag.textContent?.trim());
 
     expect(capabilityLabels).toEqual(['Tools', 'Vision', 'PDF', 'Audio', 'Video']);
-    expect(fullRow?.querySelector('.model-capability-tag-tools')?.getAttribute('title')).toBe(
+    expect(fullRow?.querySelector('.model-capability-tag-tools')?.getAttribute('aria-label')).toBe(
       'Tools'
     );
     expect(fullRow?.querySelector('.model-capability-tag-vision')?.getAttribute('aria-label')).toBe(
@@ -860,9 +860,8 @@ describe('ModelsPanel', () => {
         'Auto-approve model',
       ])
     );
-    expect(tags.every((tag) => tag.getAttribute('title') === tag.getAttribute('aria-label'))).toBe(
-      true
-    );
+    expect(tags.every((tag) => tag.getAttribute('aria-label'))).toBe(true);
+    expect(tags.every((tag) => !tag.hasAttribute('title'))).toBe(true);
     expect(tags.map((tag) => tag.textContent)).toEqual(
       expect.arrayContaining(['small', 'commit', 'approve', 'build'])
     );
@@ -1031,7 +1030,8 @@ describe('ModelsPanel', () => {
     expect(renamedRow).toBeTruthy();
     const renamedMarker = renamedRow.querySelector('.settings-model-renamed-marker');
     expect(renamedMarker?.textContent).toBe('renamed');
-    expect(renamedMarker?.getAttribute('title')).toBe('Original name: GPT-5');
+    expect(renamedMarker?.getAttribute('aria-label')).toBe('Renamed model. Original name: GPT-5');
+    expect(renamedMarker?.getAttribute('title')).toBeNull();
     expect(renamedMarker?.getAttribute('aria-label')).toBe('Renamed model. Original name: GPT-5');
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.modelDisplayNames)!)).toEqual({
       'openai:gpt-5': 'Primary coder',

@@ -11,9 +11,9 @@ test('exhausted provider limit shows retry context and a descriptive toolbar chi
   await expect(chip).toBeVisible();
   await expect(badge).toHaveClass(/\berror\b/);
   await expect(chip).toContainText('0%');
-  await expect(chip).toHaveAttribute('title', /Messages/);
-  await expect(chip).toHaveAttribute('title', /0/);
-  await expect(chip).toHaveAttribute('title', /40/);
+  await expect(chip).toHaveAttribute('aria-label', /Messages/);
+  await expect(chip).toHaveAttribute('aria-label', /0/);
+  await expect(chip).toHaveAttribute('aria-label', /40/);
 });
 
 test('provider limit popup responds to repeated clicks', async ({ page }) => {
@@ -58,7 +58,9 @@ test('narrow toolbar keeps provider limit and composer controls within their row
           const left = row.querySelector<HTMLElement>('.toolbar-meta-left');
           const right = row.querySelector<HTMLElement>('.toolbar-meta-right');
           if (!left || !right) return false;
-          return Math.abs(left.getBoundingClientRect().top - right.getBoundingClientRect().top) <= 1;
+          return (
+            Math.abs(left.getBoundingClientRect().top - right.getBoundingClientRect().top) <= 1
+          );
         })
       )
       .toBe(true);
@@ -68,12 +70,14 @@ test('narrow toolbar keeps provider limit and composer controls within their row
     );
     await expect(compactLimitLabel).toBeVisible();
     await expect(compactLimitLabel).toHaveText('L');
-    await expect(metaRow.locator('.toolbar-limit-chip-label .toolbar-meta-full-label')).toBeHidden();
+    await expect(
+      metaRow.locator('.toolbar-limit-chip-label .toolbar-meta-full-label')
+    ).toBeHidden();
     await expect
       .poll(() =>
-        page.locator('.chat-input-toolbars').evaluateAll((rows) =>
-          rows.every((row) => row.scrollWidth <= row.clientWidth + 1)
-        )
+        page
+          .locator('.chat-input-toolbars')
+          .evaluateAll((rows) => rows.every((row) => row.scrollWidth <= row.clientWidth + 1))
       )
       .toBe(true);
   }

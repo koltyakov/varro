@@ -638,7 +638,7 @@ test.describe('auto-scroll', () => {
       observer.observe(container, { childList: true, subtree: true });
     });
 
-    await page.getByTitle('Send (Enter)').click();
+    await page.getByLabel('Send (Enter)').click();
     await expect
       .poll(() =>
         page.evaluate(
@@ -1424,7 +1424,7 @@ test.describe('auto-scroll', () => {
         (_, index) => `Keep Explored fixed through first-turn completion, line ${index + 1}.`
       ).join('\n')
     );
-    await page.getByTitle('Send (Enter)').click();
+    await page.getByLabel('Send (Enter)').click();
 
     const list = page.locator('.interactive-list');
     const summary = page.locator('.assistant-activity-summary').last();
@@ -2390,10 +2390,10 @@ test.describe('auto-scroll', () => {
     expect(result.peakMountedRows).toBeLessThan(100);
     expect(result.pinnedGapMounts).toBeGreaterThanOrEqual(2);
 
-    await page.getByTitle('Back to sessions').click();
+    await page.getByLabel('Back to sessions').click();
     await page.locator('.session-item').filter({ hasText: 'History switch target' }).click();
     await expect(page.getByText('The history switch target is ready.', { exact: true })).toBeVisible();
-    await page.getByTitle('Back to sessions').click();
+    await page.getByLabel('Back to sessions').click();
     await page
       .locator('.session-item')
       .filter({ hasText: 'Cold large paginated history' })

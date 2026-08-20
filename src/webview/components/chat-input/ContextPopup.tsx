@@ -10,6 +10,7 @@ import type {
   ContextBreakdownKey,
   ContextBreakdownSegment,
 } from '../../../shared/context-breakdown';
+import { Tooltip } from '../Tooltip';
 
 const CONTEXT_USAGE_WARNING_PERCENT = 70;
 const CONTEXT_USAGE_ERROR_PERCENT = 90;
@@ -302,26 +303,29 @@ export function ContextUsageButton(props: {
   title?: string;
   onClick: () => void;
 }) {
+  const label = () => formatContextUsageTitle(props.percent, props.available);
+
   return (
-    <button
-      ref={props.ref}
-      class={`chat-context-usage ${getContextUsageTone(props.percent)}`}
-      onClick={props.onClick}
-      title={props.title}
-      aria-label={formatContextUsageTitle(props.percent, props.available)}
-    >
-      <svg class="circular-progress" viewBox="0 0 36 36">
-        <circle class="progress-bg" cx="18" cy="18" r="14" />
-        <circle
-          class="progress-arc"
-          cx="18"
-          cy="18"
-          r="14"
-          stroke-dasharray="87.96"
-          stroke-dashoffset={`${87.96 - (props.percent / 100) * 87.96}`}
-        />
-      </svg>
-    </button>
+    <Tooltip content={props.title ?? label()} disabled={!props.title}>
+      <button
+        ref={props.ref}
+        class={`chat-context-usage ${getContextUsageTone(props.percent)}`}
+        onClick={props.onClick}
+        aria-label={label()}
+      >
+        <svg class="circular-progress" viewBox="0 0 36 36">
+          <circle class="progress-bg" cx="18" cy="18" r="14" />
+          <circle
+            class="progress-arc"
+            cx="18"
+            cy="18"
+            r="14"
+            stroke-dasharray="87.96"
+            stroke-dashoffset={`${87.96 - (props.percent / 100) * 87.96}`}
+          />
+        </svg>
+      </button>
+    </Tooltip>
   );
 }
 

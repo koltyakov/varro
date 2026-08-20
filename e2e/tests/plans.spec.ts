@@ -5,7 +5,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
   await page.goto('/e2e/harness/index.html?scenario=plan-ready');
 
   await expect(
-    page.getByTitle('Back to sessions').locator('..').getByText('Plan migration rollout')
+    page.getByLabel('Back to sessions').locator('..').getByText('Plan migration rollout')
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open plan' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Implement the plan' })).toBeVisible();
@@ -27,7 +27,7 @@ test('planning mode ends up with a plan using realistic provider models', async 
   await expect(page.locator('.dropdown-item').filter({ hasText: 'GLM 5.1' })).toBeVisible();
   await page.keyboard.press('Escape');
 
-  await page.getByTitle('Select agent').click();
+  await page.getByLabel('Select agent').click();
   await expect(
     page.getByRole('button', { name: /Plan Draft implementation plans/i })
   ).toBeVisible();

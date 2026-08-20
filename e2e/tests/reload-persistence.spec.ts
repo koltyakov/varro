@@ -6,14 +6,14 @@ const SESSION_ID = 'session-reload-persistence';
 test('keeps selected model, agent, MCP, and permission mode after reload', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=reload-persistence');
 
-  await page.getByTitle('Select agent').click();
+  await page.getByLabel('Select agent').click();
   await page.getByRole('button', { name: /Plan Draft implementation plans/i }).click();
-  await expect(page.getByTitle('Select agent')).toContainText('Plan');
+  await expect(page.getByLabel('Select agent')).toContainText('Plan');
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByRole('button', { name: 'GLM 5.1', exact: true }).click();
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
-  await expect(page.getByTitle('Thinking level')).toContainText('Default');
+  await expect(page.getByLabel('Thinking level')).toContainText('Default');
 
   await page.getByRole('button', { name: 'Default permissions' }).click();
   await page.getByRole('button', { name: 'Full access' }).click();
@@ -47,9 +47,9 @@ test('keeps selected model, agent, MCP, and permission mode after reload', async
 
   await page.reload();
 
-  await expect(page.getByTitle('Select agent')).toContainText('Plan');
+  await expect(page.getByLabel('Select agent')).toContainText('Plan');
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
-  await expect(page.getByTitle('Thinking level')).toContainText('Default');
+  await expect(page.getByLabel('Thinking level')).toContainText('Default');
   await expect(page.getByRole('button', { name: 'Full access permissions' })).toBeVisible();
 
   await composer.click();

@@ -7,6 +7,7 @@ import type {
   ProviderLimitStatus,
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
+import { Tooltip } from '../Tooltip';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
@@ -278,22 +279,25 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
 
         <div class="toolbar-meta-right">
           <Show when={props.showMcpControl}>
-            <button
-              ref={props.mcpButtonRef}
-              type="button"
-              class="toolbar-mcp-count"
-              title={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
-              aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
-              onClick={props.onToggleMcps}
+            <Tooltip
+              content={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
             >
-              <span class="toolbar-mcp-count-label">
-                <span class="toolbar-meta-full-label">MCPs:</span>
-                <span class="toolbar-meta-compact-label" aria-hidden="true">
-                  M
+              <button
+                ref={props.mcpButtonRef}
+                type="button"
+                class="toolbar-mcp-count"
+                aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
+                onClick={props.onToggleMcps}
+              >
+                <span class="toolbar-mcp-count-label">
+                  <span class="toolbar-meta-full-label">MCPs:</span>
+                  <span class="toolbar-meta-compact-label" aria-hidden="true">
+                    M
+                  </span>
                 </span>
-              </span>
-              <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
-            </button>
+                <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
+              </button>
+            </Tooltip>
           </Show>
 
           <Show when={props.providerLimitBadges.length > 0}>

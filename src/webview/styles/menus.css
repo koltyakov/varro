@@ -1,4 +1,51 @@
 /* Unified dropdown menus */
+.themed-tooltip {
+  position: fixed;
+  z-index: var(--z-topmost);
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-radius: var(--chat-radius-control);
+  background: var(--color-vscode-surface-raised);
+  box-shadow: var(--chat-shadow-popover);
+  color: var(--color-vscode-fg);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 80ms ease,
+    transform 80ms ease;
+}
+
+.themed-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.themed-tooltip-arrow {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: var(--color-vscode-surface-raised);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.themed-tooltip.top .themed-tooltip-arrow {
+  bottom: -4px;
+  border-right: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+}
+
+.themed-tooltip.bottom .themed-tooltip-arrow {
+  top: -4px;
+  border-top: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--color-vscode-border-strong) 82%, transparent);
+}
+
 .dropdown-menu {
   display: flex;
   flex-direction: column;

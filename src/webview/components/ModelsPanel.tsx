@@ -35,6 +35,7 @@ import type { OpenCodeModelRouting, Provider } from '../types';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
 import { ProviderConnectionDialog } from './ProviderConnectionDialog';
 import { ProviderDisconnectionDialog } from './ProviderDisconnectionDialog';
+import { Tooltip } from './Tooltip';
 
 type SettingsProvider = (typeof state.providers)[number];
 type SettingsModel = SettingsProvider['models'][string];
@@ -327,63 +328,72 @@ export function ModelsPanel() {
       <div class="settings-header">
         <div class="settings-header-inner">
           <div class="settings-header-left">
-            <button class="chat-header-btn" onClick={() => setShowSettings(false)} title="Back">
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-              </svg>
-            </button>
+            <Tooltip content="Back">
+              <button
+                class="chat-header-btn"
+                onClick={() => setShowSettings(false)}
+                aria-label="Back"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+                </svg>
+              </button>
+            </Tooltip>
             <span class="settings-header-title">Models</span>
           </div>
           <div class="settings-header-actions">
-            <button
-              type="button"
-              class={`chat-header-btn ${isReloading() ? 'is-loading' : ''}`}
-              onClick={reloadProviders}
-              title={isReloading() ? 'Reloading providers' : 'Reload providers'}
-              aria-label={isReloading() ? 'Reloading providers' : 'Reload providers'}
-              aria-busy={isReloading()}
-              disabled={isReloading()}
-            >
-              <svg
-                class="settings-reload-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
+            <Tooltip content={isReloading() ? 'Reloading providers' : 'Reload providers'}>
+              <button
+                type="button"
+                class={`chat-header-btn ${isReloading() ? 'is-loading' : ''}`}
+                onClick={reloadProviders}
+                aria-label={isReloading() ? 'Reloading providers' : 'Reload providers'}
+                aria-busy={isReloading()}
+                disabled={isReloading()}
               >
-                <path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8" />
-                <path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="chat-header-btn"
-              onClick={(event) =>
-                event.altKey ? openProviderLogout() : void openProviderDisconnection()
-              }
-              title="Disconnect provider (Option-click for terminal manager)"
-              aria-label="Remove provider"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M3 7.25h10a.75.75 0 010 1.5H3a.75.75 0 010-1.5z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="chat-header-btn"
-              onClick={(event) =>
-                event.altKey ? openProviderSetup() : void openProviderConnection()
-              }
-              title="Connect provider (Option-click for terminal setup)"
-              aria-label="Add provider"
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
-              </svg>
-            </button>
+                <svg
+                  class="settings-reload-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8" />
+                  <path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3" />
+                </svg>
+              </button>
+            </Tooltip>
+            <Tooltip content="Disconnect provider (Option-click for terminal manager)">
+              <button
+                type="button"
+                class="chat-header-btn"
+                onClick={(event) =>
+                  event.altKey ? openProviderLogout() : void openProviderDisconnection()
+                }
+                aria-label="Remove provider"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3 7.25h10a.75.75 0 010 1.5H3a.75.75 0 010-1.5z" />
+                </svg>
+              </button>
+            </Tooltip>
+            <Tooltip content="Connect provider (Option-click for terminal setup)">
+              <button
+                type="button"
+                class="chat-header-btn"
+                onClick={(event) =>
+                  event.altKey ? openProviderSetup() : void openProviderConnection()
+                }
+                aria-label="Add provider"
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 2.25a.75.75 0 01.75.75v4.25H13a.75.75 0 010 1.5H8.75V13a.75.75 0 01-1.5 0V8.75H3a.75.75 0 010-1.5h4.25V3A.75.75 0 018 2.25z" />
+                </svg>
+              </button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -439,17 +449,18 @@ export function ModelsPanel() {
                 spellcheck={false}
               />
               <Show when={query().length > 0}>
-                <button
-                  type="button"
-                  class="settings-search-clear"
-                  onClick={() => setQuery('')}
-                  aria-label="Clear filter"
-                  title="Clear filter"
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-                  </svg>
-                </button>
+                <Tooltip content="Clear filter">
+                  <button
+                    type="button"
+                    class="settings-search-clear"
+                    onClick={() => setQuery('')}
+                    aria-label="Clear filter"
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </Tooltip>
               </Show>
             </div>
           </div>
@@ -860,29 +871,28 @@ function ProviderSection(props: {
                         />
                       </span>
                       <Show when={state.modelDisplayNames[`${props.provider.id}:${model.id}`]}>
-                        <span
-                          class="settings-model-renamed-marker"
-                          title={`Original name: ${model.name}`}
-                          aria-label={`Renamed model. Original name: ${model.name}`}
-                        >
-                          renamed
-                        </span>
+                        <Tooltip content={`Original name: ${model.name}`}>
+                          <span
+                            class="settings-model-renamed-marker"
+                            aria-label={`Renamed model. Original name: ${model.name}`}
+                          >
+                            renamed
+                          </span>
+                        </Tooltip>
                       </Show>
                       <Show when={isModelPinned(props.provider.id, model.id)}>
-                        <span
-                          class="settings-model-pinned-marker"
-                          title="Pinned model"
-                          aria-label="Pinned model"
-                        >
-                          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path
-                              d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
-                              stroke="currentColor"
-                              stroke-width="1.1"
-                              stroke-linejoin="round"
-                            />
-                          </svg>
-                        </span>
+                        <Tooltip content="Pinned model">
+                          <span class="settings-model-pinned-marker" aria-label="Pinned model">
+                            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                              <path
+                                d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
+                                stroke="currentColor"
+                                stroke-width="1.1"
+                                stroke-linejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        </Tooltip>
                       </Show>
                       <Show when={routeTags().length > 0}>
                         <span class="settings-model-routes">
@@ -897,19 +907,17 @@ function ProviderSection(props: {
                       <span class="settings-model-date-cell">
                         <Show when={releaseDate()}>
                           {(date) => (
-                            <span
-                              class="model-release-date"
-                              title={`Released ${date()}`}
-                              aria-label={`Released ${date()}`}
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path d="M15 4V2M15 4V6M15 4H10.5M3 10V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V10H3Z" />
-                                <path d="M3 10V6C3 4.89543 3.89543 4 5 4H7" />
-                                <path d="M7 2V6" />
-                                <path d="M21 10V6C21 4.89543 20.1046 4 19 4H18.5" />
-                              </svg>
-                              {date()}
-                            </span>
+                            <Tooltip content={`Released ${date()}`}>
+                              <span class="model-release-date" aria-label={`Released ${date()}`}>
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                  <path d="M15 4V2M15 4V6M15 4H10.5M3 10V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V10H3Z" />
+                                  <path d="M3 10V6C3 4.89543 3.89543 4 5 4H7" />
+                                  <path d="M7 2V6" />
+                                  <path d="M21 10V6C21 4.89543 20.1046 4 19 4H18.5" />
+                                </svg>
+                                {date()}
+                              </span>
+                            </Tooltip>
                           )}
                         </Show>
                       </span>
@@ -957,18 +965,19 @@ type ModelCapability = 'tools' | 'variants' | 'vision' | 'pdf' | 'audio' | 'vide
 
 function ModelCapabilityBadge(props: { capability: ModelCapability; label: string }) {
   return (
-    <span
-      class={`model-capability-tag model-capability-tag-${props.capability}`}
-      title={props.label}
-      aria-label={props.label}
-    >
-      <span class="settings-capability-icon" aria-hidden="true">
-        <CapabilityIcon capability={props.capability} />
+    <Tooltip content={props.label}>
+      <span
+        class={`model-capability-tag model-capability-tag-${props.capability}`}
+        aria-label={props.label}
+      >
+        <span class="settings-capability-icon" aria-hidden="true">
+          <CapabilityIcon capability={props.capability} />
+        </span>
+        <span class="settings-capability-label">
+          {props.capability === 'variants' ? 'Variants' : props.label}
+        </span>
       </span>
-      <span class="settings-capability-label">
-        {props.capability === 'variants' ? 'Variants' : props.label}
-      </span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -1111,18 +1120,19 @@ function areModelRoutesEqual(
 
 function ModelRouteBadge(props: { tag: ModelRouteTag }) {
   return (
-    <span
-      class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}${
-        props.tag.change ? ` settings-route-tag-${props.tag.change}` : ''
-      }`}
-      title={props.tag.label}
-      aria-label={props.tag.label}
-    >
-      {props.tag.text}
-      <Show when={props.tag.change !== 'removed' ? props.tag.change : undefined}>
-        {(change) => <span class="settings-route-tag-change">{change()}</span>}
-      </Show>
-    </span>
+    <Tooltip content={props.tag.label}>
+      <span
+        class={`model-capability-tag settings-route-tag settings-route-tag-${props.tag.kind}${
+          props.tag.change ? ` settings-route-tag-${props.tag.change}` : ''
+        }`}
+        aria-label={props.tag.label}
+      >
+        {props.tag.text}
+        <Show when={props.tag.change !== 'removed' ? props.tag.change : undefined}>
+          {(change) => <span class="settings-route-tag-change">{change()}</span>}
+        </Show>
+      </span>
+    </Tooltip>
   );
 }
 
@@ -1198,7 +1208,7 @@ function ProviderCheckbox(props: {
   });
 
   return (
-    <label class="settings-checkbox-label" title="Toggle all">
+    <label class="settings-checkbox-label">
       <input
         ref={ref}
         type="checkbox"

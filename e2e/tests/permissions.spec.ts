@@ -15,7 +15,7 @@ test('renders a child permission in its active parent and completes child work a
   await expect(page.locator('.permission-meta-value')).toHaveText(
     'npm run test:e2e -- child-verification'
   );
-  await expect(page.getByTitle('Send (Enter)')).toBeDisabled();
+  await expect(page.getByLabel('Send (Enter)')).toBeDisabled();
   await page.getByRole('button', { name: 'Allow once' }).click();
 
   await expect(page.locator('.permission-prompt')).toHaveCount(0);
@@ -55,7 +55,7 @@ test('renders a child permission in its active parent and completes child work a
       completed: true,
       toolStatus: 'completed',
     });
-  await page.getByTitle('Back to sessions').click();
+  await page.getByLabel('Back to sessions').click();
   await expect(
     page
       .locator('.session-item')
@@ -220,11 +220,11 @@ test('default permissions defer to OpenCode and surface its bash request', async
   await expect(page.getByRole('button', { name: 'Default permissions' })).toBeVisible();
   await expect(page.locator('.model-name-text')).toContainText('GPT-5 mini');
 
-  await page.getByTitle('Select agent').click();
+  await page.getByLabel('Select agent').click();
   await page.getByRole('button', { name: /Plan Draft implementation plans/i }).click();
-  await expect(page.getByTitle('Select agent')).toContainText('Plan');
+  await expect(page.getByLabel('Select agent')).toContainText('Plan');
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await page.getByRole('button', { name: 'GLM 5.1', exact: true }).click();
   await expect(page.locator('.model-name-text')).toContainText('GLM 5.1');
 
@@ -232,7 +232,7 @@ test('default permissions defer to OpenCode and surface its bash request', async
   await composer.fill(
     'In default permissions mode, get opencode version using bash by running opencode --version.'
   );
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
 
   await expect(page.getByText('Permission Required')).toBeVisible();
   await expect(page.locator('.permission-prompt-text')).toHaveText('Run command');

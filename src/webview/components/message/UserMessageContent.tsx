@@ -874,17 +874,42 @@ function UserMessageCodeBlock(props: { content: string; language?: string }) {
 function TerminalMessageCodeBlock(props: {
   attachment: Extract<MessageAttachment, { type: 'terminal-selection' }>;
 }) {
-  const html = createMemo(() =>
-    renderCodeBlockHtml({
-      text: props.attachment.text ?? '',
-      lang: 'text',
-      headerLabel: props.attachment.terminalName,
-      headerDetail: getTerminalLineCountLabel(props.attachment.text) ?? undefined,
-      className: 'user-message-code-block user-message-terminal-code-block',
-      showCopyButton: false,
-    })
+  const openTerminalSelection = () => openAttachment(props.attachment);
+  const handleClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('.code-block-header')) return;
+    event.stopPropagation();
+    if (window.getSelection()?.toString()) return;
+    openTerminalSelection();
+  };
+
+  return (
+    <div
+      class="user-message-terminal-preview"
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openTerminalSelection();
+      }}
+    >
+      <div
+        class="interactive-result-code-block user-message-code-block user-message-terminal-code-block"
+        data-lang="text"
+      >
+        <div class="code-block-header">
+          <MaterialChipIcon kind="terminal" class="user-message-terminal-header-icon" />
+          <span class="code-block-lang">{props.attachment.terminalName}</span>
+          <span class="code-block-detail">{getTerminalLineCountLabel(props.attachment.text)}</span>
+        </div>
+        <pre class="code-block">
+          <code class="hljs">{props.attachment.text ?? ''}</code>
+        </pre>
+      </div>
+    </div>
   );
-  return <div innerHTML={html()} />;
 }
 
 function InlineAttachmentText(props: {

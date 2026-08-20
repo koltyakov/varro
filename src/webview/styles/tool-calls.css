@@ -2711,6 +2711,12 @@ kbd {
   margin: 0;
 }
 
+.interactive-result-code-block.user-message-terminal-code-block .code-block-header {
+  height: 24px;
+  box-sizing: border-box;
+  padding-block: 0;
+}
+
 .interactive-result-code-block.user-message-terminal-code-block
   .code-block-header
   .code-block-lang {
@@ -2721,6 +2727,14 @@ kbd {
   line-height: 14px;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.user-message-terminal-header-icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 
 .interactive-result-code-block.user-message-terminal-code-block
@@ -2734,7 +2748,29 @@ kbd {
 }
 
 .interactive-result-code-block.user-message-terminal-code-block {
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 16 / 9;
+  margin: 0;
   border-color: color-mix(in srgb, var(--color-vscode-border) 62%, transparent);
+}
+
+.user-message-terminal-preview {
+  cursor: default;
+}
+
+.user-message-terminal-preview .code-block-header {
+  cursor: pointer;
+}
+
+.user-message-card-wrapperless:has(.user-message-terminal-preview) {
+  width: min(78%, 720px);
+}
+
+.user-message-terminal-preview:focus-visible {
+  outline: 2px solid var(--color-vscode-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-card);
 }
 
 .user-message-text-scroll > .user-message-code-block:not(:last-child) {
@@ -2748,7 +2784,14 @@ kbd {
 }
 
 .user-message-terminal-code-block pre.code-block {
+  min-height: 0;
+  flex: 1;
+  max-height: none;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+  cursor: pointer;
   font-size: calc(var(--vscode-font-size, 13px) - 2px);
+  mask-image: linear-gradient(to bottom, black calc(100% - 2.6em), transparent calc(100% - 8px));
 }
 
 .user-message-empty {

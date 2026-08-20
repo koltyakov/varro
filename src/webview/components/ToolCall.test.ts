@@ -523,7 +523,8 @@ describe('ToolCall', () => {
     expect(writeText).toHaveBeenCalledWith(command);
     await vi.waitFor(() => {
       expect(copy?.classList).toContain('is-copied');
-      expect(copy?.title).toBe('Copied');
+      expect(copy?.getAttribute('aria-label')).toBe('Copied');
+      expect(copy?.getAttribute('title')).toBeNull();
     });
     vi.unstubAllGlobals();
   });

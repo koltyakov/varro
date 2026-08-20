@@ -167,7 +167,7 @@ test.describe('diff preview anchoring', () => {
 
     const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
     await composer.fill('Make one more change');
-    await page.getByTitle('Send (Enter)').click();
+    await page.getByLabel('Send (Enter)').click();
 
     await expect(page.locator('.chat-turn-user').last()).toContainText('Make one more change');
     await expect

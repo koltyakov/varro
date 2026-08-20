@@ -270,7 +270,8 @@ describe('UserMessageContent', () => {
     expect(document.body.querySelector('.message-attachment-overflow-menu')).toBeNull();
   });
 
-  it('expands a standalone terminal selection into a terminal code block', () => {
+  it('expands a standalone terminal selection into an editor-backed terminal preview', () => {
+    const send = installSendToExtension();
     renderUserContent([
       textPart(
         'text-terminal-selection',
@@ -280,11 +281,34 @@ describe('UserMessageContent', () => {
 
     const terminalBlock = container?.querySelector('.user-message-terminal-code-block');
     expect(terminalBlock).toBeInstanceOf(HTMLDivElement);
+    expect(
+      terminalBlock?.querySelector('.code-block-header .user-message-terminal-header-icon')
+    ).toBeInstanceOf(HTMLImageElement);
     expect(terminalBlock?.querySelector('.code-block-lang')?.textContent).toBe('zsh');
     expect(terminalBlock?.querySelector('.code-block-detail')?.textContent).toBe('2 lines');
     expect(terminalBlock?.querySelector('code')?.textContent).toBe('npm test\nfailed output');
     expect(container?.querySelector('.message-attachment-chip')).toBeNull();
     expect(container?.querySelector('.user-message-text-scroll')).toBeNull();
+
+    const preview = container?.querySelector<HTMLElement>('.user-message-terminal-preview');
+    expect(preview?.getAttribute('role')).toBe('button');
+    expect(preview?.getAttribute('tabindex')).toBe('0');
+    const bubbledClick = vi.fn();
+    container?.addEventListener('click', bubbledClick);
+
+    terminalBlock?.querySelector<HTMLElement>('.code-block-header')?.click();
+    expect(send).not.toHaveBeenCalled();
+    expect(bubbledClick).toHaveBeenCalledTimes(1);
+
+    terminalBlock?.querySelector<HTMLElement>('pre.code-block')?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'npm test\nfailed output',
+        title: 'zsh terminal selection',
+        language: 'shellscript',
+      },
+    });
   });
 
   it('expands a terminal selection below other attachments when there is no message or image', () => {

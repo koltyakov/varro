@@ -4,7 +4,7 @@ import { getE2EState } from './helpers';
 test('host abort command stops the active busy session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=abort-command');
 
-  await expect(page.getByTitle('Stop')).toHaveCount(0);
+  await expect(page.getByLabel('Stop')).toHaveCount(0);
   await expect(page.locator('[role="textbox"][aria-multiline="true"]').first()).toBeVisible();
 
   await expect

@@ -39,7 +39,7 @@ test('recovers when the webview reloads while startup is still in progress', asy
   await page.reload();
 
   await expect(page.getByText('Starting OpenCode...', { exact: true })).toBeVisible();
-  await expect(page.getByTitle('Back to sessions').locator('..').getByText('Startup handoff')).toBeVisible();
+  await expect(page.getByLabel('Back to sessions').locator('..').getByText('Startup handoff')).toBeVisible();
   await expect(
     page.getByText('Startup completed without losing the restored session.', { exact: true })
   ).toBeVisible();
@@ -81,8 +81,8 @@ test('recovers when the first startup connection attempt loses the race', async 
     );
 
   await expect(page.getByText('Failed to connect to OpenCode server', { exact: true })).toHaveCount(0);
-  await expect(page.getByTitle('Back to sessions')).toBeVisible();
-  await expect(page.getByTitle('Back to sessions').locator('..').getByText('Startup race recovery')).toBeVisible();
+  await expect(page.getByLabel('Back to sessions')).toBeVisible();
+  await expect(page.getByLabel('Back to sessions').locator('..').getByText('Startup race recovery')).toBeVisible();
   await expect(
     page.getByText('The second startup attempt connected and restored the session state.', {
       exact: true,

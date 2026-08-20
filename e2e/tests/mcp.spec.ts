@@ -13,19 +13,17 @@ test('opens the MCP picker and syncs connection requests', async ({ page }) => {
   await expect(page.getByText('chrome', { exact: true })).toBeVisible();
   await expect(page.getByText('needs auth', { exact: true })).toBeVisible();
   await expect(page.getByText('cli not authenticated', { exact: false })).toBeVisible();
-  await expect(page.locator('.model-picker-list .dropdown-item').first()).toHaveCSS(
-    'border-radius',
-    '0px'
-  );
+  const mcpList = page.locator('.model-picker-list');
+  await expect(mcpList.locator('.dropdown-item').first()).toHaveCSS('border-radius', '0px');
 
-  await page.getByRole('button', { name: /github/i }).click();
+  await mcpList.getByRole('button', { name: /github/i }).click();
 
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('varro.sessionSelectedMcps')))
     .toContain('github');
-  await expect(page.getByRole('button', { name: /github connected/i })).toBeVisible();
+  await expect(mcpList.getByRole('button', { name: /github connected/i })).toBeVisible();
 
-  await page.getByRole('button', { name: /github connected/i }).click();
+  await mcpList.getByRole('button', { name: /github connected/i }).click();
 
   await expect
     .poll(() =>

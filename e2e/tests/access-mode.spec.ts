@@ -8,7 +8,7 @@ test('full access mode sends a bash request without showing a permission prompt'
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('In full access mode, get opencode version using bash by running opencode --version.');
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
 
   await expect(page.getByText('Permission Required')).toHaveCount(0);
   await expect(page.locator('.chat-turn-user').last()).toContainText('get opencode version');

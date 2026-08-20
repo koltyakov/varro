@@ -544,7 +544,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -1178,7 +1178,8 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
-    expect(button?.getAttribute('title')).toBe('Context usage unavailable');
+    expect(button?.getAttribute('aria-label')).toBe('Context usage unavailable');
+    expect(button?.getAttribute('title')).toBeNull();
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1211,7 +1212,7 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-context-usage')).toBeNull();
   });
 
-  it('removes the context button title while the popup is open', async () => {
+  it('keeps the context button accessible while the popup is open', async () => {
     setupModelState();
     setState('activeSessionId', 'session-1');
     setState('messages', [assistantMessageEntry({ input: 400, output: 100 })]);
@@ -1219,7 +1220,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const button = container?.querySelector<HTMLButtonElement>('.chat-context-usage');
-    expect(button?.getAttribute('title')).toBe('Context usage (50%)');
+    expect(button?.getAttribute('aria-label')).toBe('Context usage (50%)');
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1434,7 +1435,7 @@ describe('ChatInput', () => {
     ).toEqual(['Tool Calls50.0%', 'Other50.0%']);
   });
 
-  it('removes the provider limit title while the popup is open', async () => {
+  it('keeps the provider limit chip accessible while the popup is open', async () => {
     setupModelState();
     setState('providerLimits', {
       'openai:gpt-4o': availableProviderLimit({ planName: 'Pro' }),
@@ -1443,7 +1444,8 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const button = container?.querySelector<HTMLButtonElement>('.toolbar-limit-chip');
-    expect(button?.getAttribute('title')).toContain('5-Hour Limit: 39 / 100 left');
+    expect(button?.getAttribute('aria-label')).toContain('5-Hour Limit: 39 / 100 left');
+    expect(button?.getAttribute('title')).toBeNull();
 
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve();
@@ -1565,11 +1567,11 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.model-picker-btn')).not.toBeNull();
     expect(container?.querySelector('.permission-mode-button')).not.toBeNull();
-    expect(container?.querySelector('[title="Send (Enter)"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Send (Enter)"]')).not.toBeNull();
     expect(onBeforeSend).not.toHaveBeenCalled();
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -1606,7 +1608,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
     expect(inputText()).toBe('');
@@ -1632,7 +1634,7 @@ describe('ChatInput', () => {
     const editor = container?.querySelector<HTMLElement>('.rich-composer');
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -1656,7 +1658,7 @@ describe('ChatInput', () => {
 
     const send = () =>
       container
-        ?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]')
+        ?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]')
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     send();
     await flushAsyncWork();
@@ -2242,7 +2244,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     const queueButton = container?.querySelector<HTMLButtonElement>(
-      '[title="Add to queue (Enter)"]'
+      '[aria-label="Add to queue (Enter)"]'
     );
     queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
@@ -2276,6 +2278,43 @@ describe('ChatInput', () => {
       ],
       terminalSelection: { text: 'npm test', terminalName: 'zsh' },
     });
+  });
+
+  it('keeps the active file selection visible on a queued message', async () => {
+    setInputText('Test');
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: {
+        path: '/repo/src/menus.css',
+        relativePath: 'src/menus.css',
+        language: 'css',
+      },
+      selection: { startLine: 6, endLine: 26 },
+      diagnostics: [],
+    });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const queueButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Add to queue (Enter)"]'
+    );
+    expect(queueButton).not.toBeNull();
+    queueButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.queuedMessages[0]?.droppedFiles).toEqual([
+      {
+        path: '/repo/src/menus.css',
+        relativePath: 'src/menus.css',
+        type: 'file',
+        lineRanges: [{ startLine: 6, endLine: 26 }],
+      },
+    ]);
+    expect(container?.querySelector('.chat-queue-meta-item')?.getAttribute('aria-label')).toBe(
+      '1 attachment'
+    );
   });
 
   it('dispatches a queued message on authoritative idle without waiting for a timer', async () => {
@@ -2680,7 +2719,7 @@ describe('ChatInput', () => {
     setInputText('second edited');
     await flushAsyncWork();
     const queueButton = container?.querySelector<HTMLButtonElement>(
-      '[title="Add to queue (Enter)"]'
+      '[aria-label="Add to queue (Enter)"]'
     );
     expect(queueButton).not.toBeNull();
     expect(inputText()).toBe('second edited');
@@ -2715,7 +2754,7 @@ describe('ChatInput', () => {
     setIsLoading(false);
     await flushAsyncWork();
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton).not.toBeNull();
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
@@ -3271,7 +3310,9 @@ describe('ChatInput', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Original model');
-    expect(container?.querySelector('[title="Thinking level"]')?.textContent).toContain('High');
+    expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain(
+      'High'
+    );
     expect(state.selectedModel).toEqual({
       providerID: 'openai',
       modelID: 'current',
@@ -3283,7 +3324,7 @@ describe('ChatInput', () => {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(container?.querySelector('.model-picker-btn')?.textContent).toContain('Current model');
-    expect(container?.querySelector('[title="Thinking level"]')?.textContent).toContain('Max');
+    expect(container?.querySelector('[aria-label="Thinking level"]')?.textContent).toContain('Max');
     expect(state.selectedModel).toEqual({
       providerID: 'openai',
       modelID: 'current',
@@ -3442,10 +3483,10 @@ describe('ChatInput', () => {
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const queueButton = container?.querySelector<HTMLButtonElement>(
-      '[title="Add to queue (Enter)"]'
+      '[aria-label="Add to queue (Enter)"]'
     );
     expect(queueButton?.disabled).toBe(false);
-    expect(container?.querySelector('[title="More send options"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
 
     editor?.dispatchEvent(
       new KeyboardEvent('keydown', {
@@ -3508,10 +3549,10 @@ describe('ChatInput', () => {
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
     const queueButton = container?.querySelector<HTMLButtonElement>(
-      '[title="Add to queue (Enter)"]'
+      '[aria-label="Add to queue (Enter)"]'
     );
     expect(queueButton?.disabled).toBe(false);
-    expect(container?.querySelector('[title="More send options"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="More send options"]')).toBeNull();
 
     editor?.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
@@ -3549,7 +3590,7 @@ describe('ChatInput', () => {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     expect(sendButton?.disabled).toBe(true);
 
     editor?.dispatchEvent(
@@ -3693,11 +3734,11 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
     expect(container?.querySelector('.stop-button .toolbar-picker-label')).toBeNull();
     expect(container?.textContent).not.toContain('Stop');
-    expect(container?.querySelector('[title="Send (Enter)"]')).toBeNull();
-    expect(container?.querySelector('[title="Add to queue (Enter)"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Send (Enter)"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).toBeNull();
   });
 
   it('handles a rejected direct stop without an unhandled promise', async () => {
@@ -3707,7 +3748,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="Stop"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="Stop"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -3720,17 +3761,17 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
 
     setIsLoading(false);
     await Promise.resolve();
 
-    expect(container?.querySelector('[title="Stop"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).not.toBeNull();
 
     await vi.advanceTimersByTimeAsync(700);
     await Promise.resolve();
 
-    expect(container?.querySelector('[title="Stop"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
   });
 
   it('shows send controls instead of stop while loading with sendable content', () => {
@@ -3740,8 +3781,8 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    expect(container?.querySelector('[title="Stop"]')).toBeNull();
-    expect(container?.querySelector('[title="Add to queue (Enter)"]')).not.toBeNull();
+    expect(container?.querySelector('[aria-label="Stop"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Add to queue (Enter)"]')).not.toBeNull();
   });
 
   it('sends busy composer input as a steer on modifier enter', async () => {
@@ -3768,7 +3809,9 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const menuButton = container?.querySelector<HTMLButtonElement>('[title="More send options"]');
+    const menuButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="More send options"]'
+    );
     menuButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -3792,7 +3835,7 @@ describe('ChatInput', () => {
     cleanup = render(() => ChatInput(), container!);
 
     container
-      ?.querySelector<HTMLButtonElement>('[title="More send options"]')
+      ?.querySelector<HTMLButtonElement>('[aria-label="More send options"]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     const stopAndSendButton = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent?.includes('Stop and Send')
@@ -3838,7 +3881,7 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -4003,7 +4046,7 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -4019,7 +4062,7 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -4034,7 +4077,7 @@ describe('ChatInput', () => {
 
     cleanup = render(() => ChatInput(), container!);
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -5532,7 +5575,7 @@ describe('ChatInput', () => {
 
     expect(container?.textContent).toContain('Usage limit reached');
 
-    const sendButton = container?.querySelector<HTMLButtonElement>('[title="Send (Enter)"]');
+    const sendButton = container?.querySelector<HTMLButtonElement>('[aria-label="Send (Enter)"]');
     sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushAsyncWork();
 
@@ -5986,7 +6029,7 @@ describe('ChatInput composer history hotkeys', () => {
     ]);
     cleanup = render(() => ChatInput(), container!);
 
-    const agentButton = container?.querySelector<HTMLButtonElement>('[title="Select agent"]');
+    const agentButton = container?.querySelector<HTMLButtonElement>('[aria-label="Select agent"]');
     agentButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(container?.querySelector('.agent-popover')).toBeInstanceOf(HTMLDivElement);
 

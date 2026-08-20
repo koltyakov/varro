@@ -8,6 +8,7 @@ import type {
 import { getProviderIcon } from '../../lib/provider-icons';
 import { formatModelName } from '../../lib/format';
 import { FolderIcon } from '../FolderIcon';
+import { Tooltip } from '../Tooltip';
 import {
   alignPopupToBoundary,
   clampPopupToViewport,
@@ -58,17 +59,18 @@ export function WorkspacePicker(props: {
   const selected = () => props.folders.find((folder) => folder.path === props.selectedPath);
   return (
     <div style={{ position: 'relative' }}>
-      <button
-        ref={props.buttonRef}
-        class="toolbar-picker"
-        title={selected()?.path ?? 'Select workspace folder'}
-        aria-label="Select workspace folder"
-        onClick={props.onToggle}
-      >
-        <FolderIcon width={14} height={14} />
-        <span class="toolbar-picker-label">{selected()?.name ?? 'Workspace'}</span>
-        <PickerChevron />
-      </button>
+      <Tooltip content={selected()?.path ?? 'Select workspace folder'}>
+        <button
+          ref={props.buttonRef}
+          class="toolbar-picker"
+          aria-label="Select workspace folder"
+          onClick={props.onToggle}
+        >
+          <FolderIcon width={14} height={14} />
+          <span class="toolbar-picker-label">{selected()?.name ?? 'Workspace'}</span>
+          <PickerChevron />
+        </button>
+      </Tooltip>
       <Show when={props.showPicker}>
         <div ref={props.popoverRef} class="toolbar-popover" onClick={(e) => e.stopPropagation()}>
           <div class="toolbar-popover-header">Working directory</div>
@@ -131,6 +133,16 @@ export function PermissionModePicker(props: {
     }
     return 'Default permissions';
   };
+  const tooltipContent = () => {
+    const option = options.find((candidate) => candidate.mode === props.mode)!;
+    const configNote =
+      props.mode === 'default' ? ' Uses your OpenCode permission configuration.' : '';
+    const reviewer =
+      props.mode === 'auto' && props.judgeModel
+        ? ` Reviewer: ${props.judgeModel.providerName} / ${props.judgeModel.modelName}.`
+        : '';
+    return `${option.label}: ${option.detail}.${configNote}${reviewer}`;
+  };
   const buttonLabel = () => {
     if (props.mode === 'full') return 'Full access';
     if (props.mode === 'edits') return 'Auto-accept edits';
@@ -173,19 +185,20 @@ export function PermissionModePicker(props: {
 
   return (
     <div class="permission-mode-picker">
-      <button
-        ref={props.buttonRef}
-        class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
-        onClick={props.onToggle}
-        title={title()}
-        aria-label={title()}
-      >
-        <PermissionModeIcon mode={props.mode} />
-        <Show when={props.showLabel}>
-          <span class="toolbar-picker-label">{buttonLabel()}</span>
-          <PickerChevron />
-        </Show>
-      </button>
+      <Tooltip content={tooltipContent()} disabled={props.showPicker}>
+        <button
+          ref={props.buttonRef}
+          class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
+          onClick={props.onToggle}
+          aria-label={title()}
+        >
+          <PermissionModeIcon mode={props.mode} />
+          <Show when={props.showLabel}>
+            <span class="toolbar-picker-label">{buttonLabel()}</span>
+            <PickerChevron />
+          </Show>
+        </button>
+      </Tooltip>
       <Show when={props.showLabel && props.mode === 'auto' && props.activity?.length}>
         <span class="permission-activity" aria-label="Auto-approve activity">
           <span class="permission-activity-strip">
@@ -305,15 +318,17 @@ export function AgentPicker(props: {
 
   return (
     <div style={{ position: 'relative' }}>
-      <button
-        ref={props.buttonRef}
-        class="toolbar-picker"
-        onClick={props.onToggle}
-        title="Select agent"
-      >
-        <span class="toolbar-picker-label">{props.selectedLabel}</span>
-        <PickerChevron />
-      </button>
+      <Tooltip content="Select agent">
+        <button
+          ref={props.buttonRef}
+          class="toolbar-picker"
+          onClick={props.onToggle}
+          aria-label="Select agent"
+        >
+          <span class="toolbar-picker-label">{props.selectedLabel}</span>
+          <PickerChevron />
+        </button>
+      </Tooltip>
       <Show when={props.showPicker}>
         <div
           ref={setPopoverRef}
@@ -385,15 +400,17 @@ export function VariantPicker(props: {
 
   return (
     <div style={{ position: 'relative' }}>
-      <button
-        ref={props.buttonRef}
-        class="toolbar-picker"
-        onClick={props.onToggle}
-        title="Thinking level"
-      >
-        <span class="toolbar-picker-label">{props.selectedLabel}</span>
-        <PickerChevron />
-      </button>
+      <Tooltip content="Thinking level">
+        <button
+          ref={props.buttonRef}
+          class="toolbar-picker"
+          onClick={props.onToggle}
+          aria-label="Thinking level"
+        >
+          <span class="toolbar-picker-label">{props.selectedLabel}</span>
+          <PickerChevron />
+        </button>
+      </Tooltip>
       <Show when={props.showPicker}>
         <div
           ref={setPopoverRef}
@@ -432,41 +449,59 @@ export function ModelPickerButton(props: {
   canEllipsize: boolean;
   onToggle: () => void;
 }) {
+  const label = () =>
+    props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model';
+
   return (
-    <button
-      ref={props.buttonRef}
-      class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
-      onClick={props.onToggle}
-      title={props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model'}
-    >
-      <Show
-        when={props.modelName}
-        fallback={<span class="toolbar-picker-label model-name">Model</span>}
+    <Tooltip content={label()}>
+      <button
+        ref={props.buttonRef}
+        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
+        onClick={props.onToggle}
+        aria-label={label()}
       >
-        <span class="toolbar-picker-label model-name">
-          <Show when={getProviderIcon(props.providerID)}>
-            {(icon) => (
-              <span
-                class="provider-icon"
-                style={{ '--provider-icon-mask': `url("${icon()}")` }}
-                aria-hidden="true"
-              />
-            )}
-          </Show>
-          <span class="model-name-text">
-            <FormattedModelName name={props.modelName} />
+        <Show
+          when={props.modelName}
+          fallback={<span class="toolbar-picker-label model-name">Model</span>}
+        >
+          <span class="toolbar-picker-label model-name">
+            <Show when={getProviderIcon(props.providerID)}>
+              {(icon) => (
+                <span
+                  class="provider-icon"
+                  style={{ '--provider-icon-mask': `url("${icon()}")` }}
+                  aria-hidden="true"
+                />
+              )}
+            </Show>
+            <span class="model-name-text">
+              <FormattedModelName name={props.modelName} showFastTooltip={false} />
+            </span>
           </span>
-        </span>
-      </Show>
-      <PickerChevron />
-    </button>
+        </Show>
+        <PickerChevron />
+      </button>
+    </Tooltip>
   );
 }
 
-export function FormattedModelName(props: { name: string }) {
+export function FormattedModelName(props: { name: string; showFastTooltip?: boolean }) {
   return (
     <For each={formatModelName(props.name).split(/(⚡)/)}>
-      {(part) => (part === '⚡' ? <span title="Fast (more expensive)">{part}</span> : part)}
+      {(part) =>
+        part === '⚡' ? (
+          <Show
+            when={props.showFastTooltip !== false}
+            fallback={<span aria-label="Fast (more expensive)">{part}</span>}
+          >
+            <Tooltip content="Fast (more expensive)" delay={300}>
+              <span aria-label="Fast (more expensive)">{part}</span>
+            </Tooltip>
+          </Show>
+        ) : (
+          part
+        )
+      }
     </For>
   );
 }
@@ -480,35 +515,39 @@ export function ProviderLimitChip(props: {
 }) {
   return (
     <Show when={props.badges.length > 0}>
-      <button
-        ref={props.buttonRef}
-        type="button"
-        class="toolbar-limit-chip"
-        title={props.title ?? undefined}
-        aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
-        on:click={props.onClick}
+      <Tooltip
+        content={props.title ?? props.ariaLabel ?? 'Provider limits'}
+        disabled={!props.title}
       >
-        <span class="toolbar-limit-chip-label">
-          <span class="toolbar-meta-full-label">Limits:</span>
-          <span class="toolbar-meta-compact-label" aria-hidden="true">
-            L
+        <button
+          ref={props.buttonRef}
+          type="button"
+          class="toolbar-limit-chip"
+          aria-label={props.ariaLabel ?? props.title ?? 'Provider limits'}
+          on:click={props.onClick}
+        >
+          <span class="toolbar-limit-chip-label">
+            <span class="toolbar-meta-full-label">Limits:</span>
+            <span class="toolbar-meta-compact-label" aria-hidden="true">
+              L
+            </span>
           </span>
-        </span>
-        <For each={props.badges}>
-          {(badge, index) => (
-            <>
-              <Show when={index() > 0}>
-                <span class="toolbar-limit-chip-separator">&middot;</span>
-              </Show>
-              <span
-                class={`toolbar-limit-chip-badge ${badge.tone !== 'default' ? badge.tone : ''}`}
-              >
-                <span class="toolbar-limit-chip-badge-value">{badge.label}</span>
-              </span>
-            </>
-          )}
-        </For>
-      </button>
+          <For each={props.badges}>
+            {(badge, index) => (
+              <>
+                <Show when={index() > 0}>
+                  <span class="toolbar-limit-chip-separator">&middot;</span>
+                </Show>
+                <span
+                  class={`toolbar-limit-chip-badge ${badge.tone !== 'default' ? badge.tone : ''}`}
+                >
+                  <span class="toolbar-limit-chip-badge-value">{badge.label}</span>
+                </span>
+              </>
+            )}
+          </For>
+        </button>
+      </Tooltip>
     </Show>
   );
 }

@@ -13,6 +13,7 @@ import { modelSupportsVariants } from '../lib/model-capabilities';
 import { compareProviders, sortProviderModels } from '../lib/model-ordering';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import { FormattedModelName } from './chat-input/ToolbarPickers';
+import { Tooltip } from './Tooltip';
 
 interface ModelSelection {
   providerID?: string;
@@ -361,21 +362,22 @@ export function ModelPicker(props: {
             spellcheck={false}
           />
           <Show when={query().length > 0}>
-            <button
-              type="button"
-              class="dropdown-search-clear"
-              onClick={() => {
-                setQuery('');
-                searchInputRef?.focus();
-              }}
-              aria-label="Clear search"
-              title="Clear search"
-              tabIndex={-1}
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor">
-                <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
-              </svg>
-            </button>
+            <Tooltip content="Clear search">
+              <button
+                type="button"
+                class="dropdown-search-clear"
+                onClick={() => {
+                  setQuery('');
+                  searchInputRef?.focus();
+                }}
+                aria-label="Clear search"
+                tabIndex={-1}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3.22 3.22a.75.75 0 011.06 0L8 6.94l3.72-3.72a.75.75 0 111.06 1.06L9.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 01-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 010-1.06z" />
+                </svg>
+              </button>
+            </Tooltip>
           </Show>
         </div>
 
@@ -482,23 +484,24 @@ export function ModelPicker(props: {
                                   </span>
                                 </span>
                               </button>
-                              <button
-                                type="button"
-                                class="model-picker-pin"
-                                classList={{ active: pinned() }}
-                                onClick={() => setModelPinned(provider.id, model.id, !pinned())}
-                                aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${entry.item.name}`}
-                                title={`${pinned() ? 'Unpin' : 'Pin'} model`}
-                              >
-                                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                  <path
-                                    d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
-                                    stroke="currentColor"
-                                    stroke-width="1.1"
-                                    stroke-linejoin="round"
-                                  />
-                                </svg>
-                              </button>
+                              <Tooltip content={`${pinned() ? 'Unpin' : 'Pin'} model`}>
+                                <button
+                                  type="button"
+                                  class="model-picker-pin"
+                                  classList={{ active: pinned() }}
+                                  onClick={() => setModelPinned(provider.id, model.id, !pinned())}
+                                  aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${entry.item.name}`}
+                                >
+                                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M5.25 2.25h5.5l-.85 3.4 1.85 1.85v1H8.6v4.75L8 14l-.6-.75V8.5H4.25v-1L6.1 5.65l-.85-3.4Z"
+                                      stroke="currentColor"
+                                      stroke-width="1.1"
+                                      stroke-linejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </Tooltip>
                             </div>
                           );
                         }}

@@ -25,6 +25,7 @@ import {
 import type { SessionListFilter } from './SessionListView';
 import { showSessionActionFeedback } from './SessionActionFeedback';
 import { SharedSessionIcon } from './SharedSessionIcon';
+import { Tooltip } from '../Tooltip';
 
 function getActiveSession() {
   return state.sessions.find((session) => session.id === state.activeSessionId) ?? null;
@@ -73,15 +74,17 @@ export function SessionPickerHeader(props: {
     <>
       <div class="chat-header-left">
         <Show when={props.showBackButton}>
-          <button
-            class="chat-header-btn"
-            onClick={() => props.onBack?.()}
-            title={props.backTitle || 'Back to parent session'}
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor">
-              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-            </svg>
-          </button>
+          <Tooltip content={props.backTitle || 'Back to parent session'}>
+            <button
+              class="chat-header-btn"
+              onClick={() => props.onBack?.()}
+              aria-label={props.backTitle || 'Back to parent session'}
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+              </svg>
+            </button>
+          </Tooltip>
         </Show>
         <Show
           when={props.filterLabel}
@@ -94,19 +97,22 @@ export function SessionPickerHeader(props: {
           {(label) => (
             <>
               <span class="chat-header-filter-prefix">{props.filterPrefix}</span>
-              <span class="chat-header-filter-chip" title={props.filterTitle}>
-                <span class="chat-header-filter-chip-label">{label()}</span>
-                <button
-                  type="button"
-                  class="chat-header-filter-chip-remove"
-                  onClick={props.onClearFilter}
-                  title="Clear filter"
-                  aria-label={`Clear ${label()} filter`}
-                >
-                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
-                  </svg>
-                </button>
+              <span class="chat-header-filter-chip">
+                <Tooltip content={props.filterTitle ?? label()} disabled={!props.filterTitle}>
+                  <span class="chat-header-filter-chip-label">{label()}</span>
+                </Tooltip>
+                <Tooltip content="Clear filter">
+                  <button
+                    type="button"
+                    class="chat-header-filter-chip-remove"
+                    onClick={props.onClearFilter}
+                    aria-label={`Clear ${label()} filter`}
+                  >
+                    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
+                    </svg>
+                  </button>
+                </Tooltip>
               </span>
             </>
           )}
@@ -135,11 +141,13 @@ export function SessionPickerHeader(props: {
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
         </Show>
         <Show when={props.showNewChatButton}>
-          <button class="chat-header-btn" onClick={props.onCreateSession} title="New chat">
-            <svg viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-            </svg>
-          </button>
+          <Tooltip content="New chat">
+            <button class="chat-header-btn" onClick={props.onCreateSession} aria-label="New chat">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+              </svg>
+            </button>
+          </Tooltip>
         </Show>
       </div>
     </>
@@ -339,11 +347,13 @@ export function ActiveChatHeader(props: {
     <>
       <div class="chat-header-left">
         <Show when={props.showBackButton}>
-          <button class="chat-header-btn" onClick={props.onBack} title={props.backTitle}>
-            <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
-            </svg>
-          </button>
+          <Tooltip content={props.backTitle}>
+            <button class="chat-header-btn" onClick={props.onBack} aria-label={props.backTitle}>
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M5.928 7.976l4.357-4.357-.618-.62L4.69 7.976l4.977 4.977.618-.618z" />
+              </svg>
+            </button>
+          </Tooltip>
         </Show>
         <span
           ref={(element) => {
@@ -354,53 +364,50 @@ export function ActiveChatHeader(props: {
         >
           <span class="chat-header-title-text">{props.title}</span>
           <Show when={isActiveSessionPinned()}>
-            <span
-              class="session-item-pinned-marker"
-              title="Pinned session"
-              aria-label="Pinned session"
-            >
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M9.5 14.5 3 21"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="m5 9.485 9.193 9.193 1.697-1.697-.393-3.787 5.51-4.673-5.85-5.85-4.674 5.51-3.786-.393L5 9.485Z"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </span>
+            <Tooltip content="Pinned session">
+              <span class="session-item-pinned-marker" aria-label="Pinned session">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M9.5 14.5 3 21"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="m5 9.485 9.193 9.193 1.697-1.697-.393-3.787 5.51-4.673-5.85-5.85-4.674 5.51-3.786-.393L5 9.485Z"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+            </Tooltip>
           </Show>
           <Show when={getActiveSession()?.share?.url}>
-            <span
-              class="chat-header-shared-marker"
-              title="Session is shared"
-              aria-label="Session is shared"
-            >
-              <SharedSessionIcon />
-            </span>
+            <Tooltip content="Session is shared">
+              <span class="chat-header-shared-marker" aria-label="Session is shared">
+                <SharedSessionIcon />
+              </span>
+            </Tooltip>
           </Show>
         </span>
         <Show when={props.activeSubagentRootId}>
           {(rootSessionId) => (
-            <button
-              type="button"
-              class="session-item-subagents session-item-subagents-counter chat-header-subagents"
-              onClick={() => props.onOpenSubagents(rootSessionId())}
-              title={props.activeSubagentLabel}
-              aria-label={props.activeSubagentLabel}
-            >
-              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
-              </svg>
-              <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
-            </button>
+            <Tooltip content={props.activeSubagentLabel}>
+              <button
+                type="button"
+                class="session-item-subagents session-item-subagents-counter chat-header-subagents"
+                onClick={() => props.onOpenSubagents(rootSessionId())}
+                aria-label={props.activeSubagentLabel}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                  <path d="M5.5 2.5a2 2 0 110 4 2 2 0 010-4zm5 1a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM2 9.25c0-1.8 2.1-2.75 3.5-2.75S9 7.45 9 9.25V10H2v-.75zm7.5.75v-.5c0-.66-.2-1.23-.54-1.7.5-.19 1.04-.3 1.54-.3 1.22 0 3 .73 3 2.25V10h-4z" />
+                </svg>
+                <span class="session-item-subagents-count">{props.activeSubagentCount}</span>
+              </button>
+            </Tooltip>
           )}
         </Show>
         <Show when={workedDurationMs()}>
@@ -422,11 +429,13 @@ export function ActiveChatHeader(props: {
             onClick={props.onOpenCompletedSessions}
           />
           <RunningSessionsBadge count={props.runningCount} onClick={props.onOpenRunningSessions} />
-          <button class="chat-header-btn" onClick={props.onCreateSession} title="New chat">
-            <svg viewBox="0 0 16 16" fill="currentColor">
-              <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
-            </svg>
-          </button>
+          <Tooltip content="New chat">
+            <button class="chat-header-btn" onClick={props.onCreateSession} aria-label="New chat">
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
       </Show>
       <Show when={actionsSession()}>

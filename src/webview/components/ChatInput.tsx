@@ -129,6 +129,7 @@ import {
   formatContextLineRanges,
   getSelectionRangesFromEditorContext,
   hasExplicitContextForPath,
+  mergeContextFile,
 } from '../../shared/context-files';
 import { normalizeSessionTitle } from '../../shared/session-title';
 import { getQueuedAttachmentSnapshot } from '../hooks/session/session-send';
@@ -1800,13 +1801,34 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       const sessionId = composerSessionId()!;
       const queuedMessagePaused =
         queuedEdit && state.queuedMessages.find((item) => item.id === queuedEdit.id)?.paused;
+      const queuedDroppedFiles = [...(queuedAttachments.droppedFiles ?? [])];
+      const activeFile = composerActiveFile();
+      if (activeFile && activeContextEnabled(sessionId)) {
+        const activeFileContext = {
+          path: activeFile.path,
+          relativePath: activeFile.relativePath,
+          type: 'file' as const,
+          lineRanges: getSelectionRangesFromEditorContext(composerSelection()),
+        };
+        const existingIndex = queuedDroppedFiles.findIndex((file) =>
+          isSamePath(file.path, activeFile.path)
+        );
+        if (existingIndex === -1) {
+          queuedDroppedFiles.push(activeFileContext);
+        } else {
+          queuedDroppedFiles[existingIndex] = mergeContextFile(
+            queuedDroppedFiles[existingIndex],
+            activeFileContext
+          );
+        }
+      }
       const message = {
         id: createAttachmentID(),
         sessionId,
         text: sendableText,
         ...(state.selectedAgent ? { agent: state.selectedAgent } : {}),
         ...(queuedMessagePaused ? { paused: true } : {}),
-        droppedFiles: queuedAttachments.droppedFiles,
+        droppedFiles: queuedDroppedFiles,
         clipboardImages: queuedAttachments.clipboardImages,
         nativePdfs: queuedAttachments.nativePdfs,
         terminalSelection: queuedAttachments.terminalSelection,

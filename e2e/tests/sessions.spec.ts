@@ -53,7 +53,7 @@ test('restores a persisted active session', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=restored-session');
 
   await expect(
-    page.getByTitle('Back to sessions').locator('..').getByText('Restored Session')
+    page.getByLabel('Back to sessions').locator('..').getByText('Restored Session')
   ).toBeVisible();
   await expect(page.getByText('Review the refactor status', { exact: true })).toBeVisible();
   await expect(
@@ -68,9 +68,9 @@ test('filters sessions by running, failed, attention, and plan ready status', as
 
   await page.locator('.session-item').filter({ hasText: 'Completed sticky cleanup' }).click();
   await expect(
-    page.getByTitle('Back to sessions').locator('..').getByText('Completed sticky cleanup')
+    page.getByLabel('Back to sessions').locator('..').getByText('Completed sticky cleanup')
   ).toBeVisible();
-  await page.getByTitle('Back to sessions').click();
+  await page.getByLabel('Back to sessions').click();
   await expect(page.getByText('Sessions', { exact: false })).toBeVisible();
 
   const visibleSessionTitles = page.locator('.session-item:visible .session-item-title-text');

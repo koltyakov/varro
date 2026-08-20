@@ -159,7 +159,7 @@ test.describe('viewport content coverage', () => {
         return (
           (element.querySelector<HTMLElement>('.virtual-spacer-top')?.getBoundingClientRect().height ??
             0) +
-          rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
+            rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
           (element
             .querySelector<HTMLElement>('.virtual-spacer-bottom')
             ?.getBoundingClientRect().height ?? 0)
@@ -179,6 +179,8 @@ test.describe('viewport content coverage', () => {
     type HeightSample = {
       accountedHeight: number;
       terminalRows: number;
+      terminalFramesValid: boolean;
+      terminalPreviewsClipped: boolean;
       imageRows: number;
       renderedRows: number;
     };
@@ -195,14 +197,25 @@ test.describe('viewport content coverage', () => {
         const rows = [...element.querySelectorAll<HTMLElement>('[data-msg-id]')];
         const topSpacer = element.querySelector<HTMLElement>('.virtual-spacer-top');
         const bottomSpacer = element.querySelector<HTMLElement>('.virtual-spacer-bottom');
+        const terminalBlocks = rows
+          .map((row) => row.querySelector<HTMLElement>('.user-message-terminal-code-block'))
+          .filter((block): block is HTMLElement => block !== null);
         return {
           accountedHeight:
             (topSpacer?.getBoundingClientRect().height ?? 0) +
             rows.reduce((total, row) => total + row.getBoundingClientRect().height, 0) +
             (bottomSpacer?.getBoundingClientRect().height ?? 0),
-          terminalRows: rows.filter((row) =>
-            row.querySelector('.user-message-terminal-code-block')
-          ).length,
+          terminalRows: terminalBlocks.length,
+          terminalFramesValid: terminalBlocks.every((block) => {
+            const bounds = block.getBoundingClientRect();
+            return Math.abs(bounds.width / bounds.height - 16 / 9) < 0.01;
+          }),
+          terminalPreviewsClipped: terminalBlocks.every((block) => {
+            const pre = block.querySelector<HTMLElement>('pre.code-block');
+            if (!pre) return false;
+            const style = getComputedStyle(pre);
+            return style.overflow === 'hidden' && style.maskImage.includes('linear-gradient');
+          }),
           imageRows: rows.filter((row) => row.querySelector('.chat-image-preview-trigger')).length,
           renderedRows: rows.length,
         };
@@ -216,6 +229,10 @@ test.describe('viewport content coverage', () => {
 
     expect(hydrationSamples.some((sample) => sample.terminalRows > 0)).toBe(true);
     expect(hydrationSamples.some((sample) => sample.imageRows > 0)).toBe(true);
+    for (const sample of hydrationSamples.filter((value) => value.terminalRows > 0)) {
+      expect(sample.terminalFramesValid).toBe(true);
+      expect(sample.terminalPreviewsClipped).toBe(true);
+    }
 
     const expectedHeight = samples[0]!.accountedHeight;
     for (const sample of samples) {

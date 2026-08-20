@@ -19,7 +19,7 @@ test('host new-session command opens a draft chat and creates the session on fir
   await expect.poll(countSessionCreates).toBe(0);
 
   await composer.fill('Start the new session now.');
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
 
   await expect(page.locator('.chat-header-title-text').first()).toHaveText('Mock Session 2');
   await expect(page.locator('.chat-turn-user').last()).toContainText('Start the new session now.');

@@ -42,6 +42,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('ToolbarPickers', () => {
@@ -75,8 +76,8 @@ describe('ToolbarPickers', () => {
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
 
-    expect(toggleButton?.title).toBe('Default permissions');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Default permissions');
+    expect(toggleButton?.getAttribute('title')).toBeNull();
     expect(buttonRef).toBe(toggleButton);
     expect(popoverRef).toBe(container?.querySelector('.toolbar-popover'));
     expect(options).toHaveLength(4);
@@ -109,7 +110,7 @@ describe('ToolbarPickers', () => {
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.permission-mode-button');
     const options = container?.querySelectorAll<HTMLButtonElement>('.toolbar-popover-item') ?? [];
-    expect(toggleButton?.title).toBe('Auto-accept edits permissions');
+    expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-accept edits permissions');
     expect(toggleButton?.textContent).toContain('Auto-accept edits');
     expect(options[1]?.className).toContain('selected');
     expect(options[1]?.textContent).toContain('Auto-approve edits, ask before other actions');
@@ -130,7 +131,6 @@ describe('ToolbarPickers', () => {
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
-    expect(toggleButton?.title).toBe('Auto-approve permissions');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Auto-approve permissions');
   });
 
@@ -196,7 +196,7 @@ describe('ToolbarPickers', () => {
     const dots = activity?.querySelectorAll<HTMLElement>('.permission-activity-item') ?? [];
     expect(dots).toHaveLength(6);
     expect(toggleButton?.contains(activity ?? null)).toBe(false);
-    expect(activity?.previousElementSibling).toBe(toggleButton);
+    expect(activity?.previousElementSibling?.contains(toggleButton ?? null)).toBe(true);
     expect(dots[0]?.className).toContain('reviewing');
     expect(dots[1]?.className).toContain('auto-approved');
     expect(dots[2]?.className).toContain('approval-required');
@@ -207,7 +207,6 @@ describe('ToolbarPickers', () => {
     expect(dots[2]?.title).toBe(
       'Manual approval requested: external_directory /tmp/*. Outside the workspace.'
     );
-    expect(toggleButton?.title).toBe('Auto-approve permissions - OpenAI / GPT-5.6');
     expect(toggleButton?.getAttribute('aria-label')).toBe(
       'Auto-approve permissions - OpenAI / GPT-5.6'
     );
@@ -234,7 +233,8 @@ describe('ToolbarPickers', () => {
     expect(container?.querySelector('.permission-activity')).toBeNull();
   });
 
-  it('uses the full-access title when the permission picker is closed', () => {
+  it('explains full access when the permission picker is closed', async () => {
+    vi.useFakeTimers();
     cleanup = render(
       () => (
         <PermissionModePicker
@@ -249,9 +249,15 @@ describe('ToolbarPickers', () => {
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker.icon-only');
 
-    expect(toggleButton?.title).toBe('Full access permissions');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Full access permissions');
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
+
+    toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Full access: Allow commands and edits without prompts.'
+    );
   });
 
   it('renders a labeled permission button when requested', () => {
@@ -350,7 +356,7 @@ describe('ToolbarPickers', () => {
     const options =
       container?.querySelectorAll<HTMLButtonElement>('.agent-popover .toolbar-popover-item') ?? [];
 
-    expect(toggleButton?.title).toBe('Select agent');
+    expect(toggleButton?.getAttribute('aria-label')).toBe('Select agent');
     expect(toggleButton?.textContent).toContain('Reviewer');
     expect(options).toHaveLength(2);
     expect(options[0]?.className).toContain('keyboard-focus');
@@ -437,7 +443,7 @@ describe('ToolbarPickers', () => {
     );
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
-    expect(toggleButton?.title).toBe('Thinking level');
+    expect(toggleButton?.getAttribute('aria-label')).toBe('Thinking level');
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -478,8 +484,8 @@ describe('ToolbarPickers', () => {
       container!
     );
 
-    const button = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
-    const wrapper = button?.parentElement as HTMLDivElement | null;
+    const wrapper = container?.querySelector('.toolbar-picker')
+      ?.parentElement as HTMLDivElement | null;
 
     vi.spyOn(boundary, 'getBoundingClientRect').mockReturnValue({
       x: 0,
@@ -533,7 +539,8 @@ describe('ToolbarPickers', () => {
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
 
-    expect(button?.title).toBe('Choose model');
+    expect(button?.getAttribute('aria-label')).toBe('Choose model');
+    expect(button?.getAttribute('title')).toBeNull();
     expect(button?.className).not.toContain('model-ellipsis');
     expect(button?.textContent).toContain('Model');
     expect(container?.querySelector('.provider-icon')).toBeNull();
@@ -561,7 +568,7 @@ describe('ToolbarPickers', () => {
     const providerIcon = container?.querySelector<HTMLElement>('.provider-icon');
     const modelName = container?.querySelector('.model-name-text');
 
-    expect(button?.title).toBe('OpenAI / gpt-4.1');
+    expect(button?.getAttribute('aria-label')).toBe('OpenAI / gpt-4.1');
     expect(button?.className).toContain('model-ellipsis');
     expect(modelName?.textContent).toBe('gpt-4.1');
     expect(providerIcon).toBeInstanceOf(HTMLElement);
@@ -583,7 +590,7 @@ describe('ToolbarPickers', () => {
     );
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
-    expect(button?.title).toBe('OpenAI / GPT-5.6 Fast');
+    expect(button?.getAttribute('aria-label')).toBe('OpenAI / GPT-5.6 Fast');
     expect(container?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 ⚡');
   });
 

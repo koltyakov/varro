@@ -27,7 +27,7 @@ test('creates a session and sends a prompt through the mocked bridge', async ({ 
   await composer.fill('Add a smoke test for the sidebar');
   await expect(composer).toHaveText('Add a smoke test for the sidebar');
 
-  const sendButton = page.getByTitle('Send (Enter)');
+  const sendButton = page.getByLabel('Send (Enter)');
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
 
@@ -196,7 +196,7 @@ test('shows todos and queues follow-up messages while a session is busy', async 
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Queue the follow-up after the current response finishes');
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   const queueList = page.getByRole('list', { name: 'Queued messages' });
   await expect(queueList).toBeVisible();
@@ -261,7 +261,7 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
   const text = 'Keep this steer visible while history catches up';
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill(text);
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   await page.evaluate((promptText) => {
     const harness = window as Window & { optimisticMessageSamples?: boolean[] };
@@ -306,7 +306,7 @@ test('keeps pre-input panels visible for model picker and reserved for MCP picke
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Keep this queued while choosing a model');
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   const queue = page.locator('.chat-queue-container');
   const todo = page.locator('.todo-block:not(.changed-files-block)');
@@ -376,7 +376,7 @@ test('keeps pre-input panel space reserved while the @ selector is open', async 
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Keep this queued while choosing a file');
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   const queue = page.locator('.chat-queue-container');
   const todo = page.locator('.todo-block:not(.changed-files-block)');
@@ -428,7 +428,7 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   for (const text of ['First follow-up', 'Second follow-up', 'Third follow-up']) {
     await composer.fill(text);
-    await page.getByTitle('Add to queue (Enter)').click();
+    await page.getByLabel('Add to queue (Enter)').click();
   }
 
   const queueList = page.getByRole('list', { name: 'Queued messages' });
@@ -473,7 +473,7 @@ test('reorders and edits queued follow-up messages in place', async ({ page }) =
     editingRow.getByRole('button', { name: 'Reorder queued message: First follow-up' })
   ).toHaveCSS('visibility', 'visible');
   await composer.fill('First follow-up edited');
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   await expect(labels).toHaveText([
     'Second follow-up',
@@ -502,7 +502,7 @@ test('removes queued follow-up messages before sending them', async ({ page }) =
 
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
   await composer.fill('Queue this and then remove it');
-  await page.getByTitle('Add to queue (Enter)').click();
+  await page.getByLabel('Add to queue (Enter)').click();
 
   const queueList = page.getByRole('list', { name: 'Queued messages' });
   await expect(queueList.getByRole('listitem')).toContainText('Queue this and then remove it');
@@ -610,7 +610,7 @@ test('sending from mid transcript snaps back to bottom and keeps following new t
 
   const list = page.locator('.interactive-list');
   const composer = page.locator('[role="textbox"][aria-multiline="true"]').first();
-  const sendButton = page.getByTitle('Send (Enter)');
+  const sendButton = page.getByLabel('Send (Enter)');
 
   await expect(list).toBeVisible();
   await expect(composer).toBeVisible();
@@ -688,7 +688,7 @@ test('keeps existing transcript context visible while placing a new turn', async
     Object.assign(window, { newTurnTopSamples: samples });
     requestAnimationFrame(sample);
   });
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
 
   const newTurn = page.locator('.user-message-card').filter({ hasText: 'Test message' });
   await expect(newTurn).toBeVisible();
@@ -830,7 +830,7 @@ test('keeps the sent card and previous Worked summary stable through Thinking', 
     requestAnimationFrame(sample);
   }, text);
 
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
   await expect(page.getByText(text, { exact: true })).toBeVisible();
   await expect
     .poll(() =>
@@ -909,7 +909,7 @@ test('keeps first-turn Thinking directly after the prompt', async ({ page }) => 
     Object.assign(window, { firstTurnThinkingGapSamples: gapSamples });
     requestAnimationFrame(sample);
   });
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
 
   const newTurn = page.locator('.user-message-card').filter({ hasText: 'First turn positioning' });
   const loadingRow = page.locator('.interactive-loading-row');
@@ -964,7 +964,7 @@ test('yields send-triggered bottom follow to direct upward transcript input', as
 
   await composer.fill('Cancel placement with direct input');
   await delayPromptRequest(page, 1_000);
-  await page.getByTitle('Send (Enter)').click();
+  await page.getByLabel('Send (Enter)').click();
   const newTurn = page
     .locator('.user-message-card')
     .filter({ hasText: 'Cancel placement with direct input' });

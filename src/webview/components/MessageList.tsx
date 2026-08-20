@@ -94,6 +94,7 @@ import {
   StickyUserMessagePreviewCard,
   TurnNavigationRail,
 } from './message-list/MessageListChrome';
+import { Tooltip } from './Tooltip';
 import {
   getSubagentSessionIds,
   getStickyUserMessagePreview,
@@ -6887,23 +6888,24 @@ export function MessageList() {
       </Show>
       <ChatContentBottomFade />
       <Show when={showJumpToLatest() && !hasExpandedDiffOverlay()}>
-        <button
-          type="button"
-          class="jump-to-latest-button"
-          aria-label="Scroll to latest message"
-          title="Scroll to latest message"
-          onClick={() => requestMessageListScrollToBottom()}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
-            <path
-              d="M3.5 6.5 8 11l4.5-4.5"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
+        <Tooltip content="Scroll to latest message">
+          <button
+            type="button"
+            class="jump-to-latest-button"
+            aria-label="Scroll to latest message"
+            onClick={() => requestMessageListScrollToBottom()}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path
+                d="M3.5 6.5 8 11l4.5-4.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </Tooltip>
       </Show>
     </div>
   );

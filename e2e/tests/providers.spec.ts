@@ -15,7 +15,7 @@ test('shows usage-limit retry state and lets the user switch providers', async (
   await expect(page.getByText('Go Build', { exact: true })).toBeVisible();
   await page.getByText('Go Plan', { exact: true }).click();
 
-  await expect(page.getByTitle('OpenCode Go / Go Plan')).toBeVisible();
+  await expect(page.getByLabel('OpenCode Go / Go Plan')).toBeVisible();
 });
 
 test('stops retrying a usage-limited session', async ({ page }) => {
@@ -44,11 +44,11 @@ test('keeps the manually selected provider model as the default after reload', a
 
   await page.getByRole('button', { name: 'Switch provider' }).click();
   await page.getByText('Go Plan', { exact: true }).click();
-  await expect(page.getByTitle('OpenCode Go / Go Plan')).toBeVisible();
+  await expect(page.getByLabel('OpenCode Go / Go Plan')).toBeVisible();
 
   await page.reload();
 
-  await expect(page.getByTitle('OpenCode Go / Go Plan')).toBeVisible();
+  await expect(page.getByLabel('OpenCode Go / Go Plan')).toBeVisible();
 });
 
 test('supports escape in the provider switcher', async ({ page }) => {
@@ -64,7 +64,7 @@ test('supports escape in the provider switcher', async ({ page }) => {
 test('opens manage models from the picker and filters the settings catalog', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=blank');
 
-  await page.getByTitle('GitHub Copilot / GPT-5 mini').click();
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
   await expect(page.getByRole('button', { name: 'Manage models', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Manage models', exact: true }).click();
 

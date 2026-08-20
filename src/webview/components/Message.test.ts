@@ -1585,6 +1585,46 @@ describe('Message user editing', () => {
     });
   });
 
+  it('edits from a terminal header and opens terminal content from its body', () => {
+    const send = vi.fn();
+    (window as unknown as Record<string, unknown>).__sendToExtension = send;
+    setAppState('activeSessionId', 'session-1');
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-terminal-edit'),
+          parts: [
+            textPart(
+              'text-terminal-edit',
+              '[Selection from terminal zsh]\n```text\nnpm test\nfailed output\n```'
+            ),
+          ],
+        }),
+      container!
+    );
+
+    window.getSelection()?.removeAllRanges();
+    container?.querySelector<HTMLElement>('pre.code-block')?.click();
+    expect(send).toHaveBeenCalledWith({
+      type: 'vscode/open-text',
+      payload: {
+        content: 'npm test\nfailed output',
+        title: 'zsh terminal selection',
+        language: 'shellscript',
+      },
+    });
+    expect(editingMessage()).toBeNull();
+
+    container?.querySelector<HTMLElement>('.code-block-header')?.click();
+    expect(editingMessage()).toMatchObject({
+      messageId: 'message-terminal-edit',
+      sessionId: 'session-1',
+      context: {
+        terminalSelection: { terminalName: 'zsh', text: 'npm test\nfailed output' },
+      },
+    });
+  });
+
   it('does not offer editing when the message belongs to another session', () => {
     setAppState('activeSessionId', 'session-2');
     cleanup = render(

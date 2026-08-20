@@ -128,12 +128,12 @@ test('does not throw while opening a subagent session from the filtered subagent
     .first()
     .click();
 
-  await expect(page.getByTitle('Back to sub-agent sessions')).toBeVisible();
+  await expect(page.getByLabel('Back to sub-agent sessions')).toBeVisible();
   await expect(
     page.locator('.interactive-session > .chat-header .chat-header-title-text')
   ).toHaveText('Update tests');
 
-  await page.getByTitle('Back to sub-agent sessions').click();
+  await page.getByLabel('Back to sub-agent sessions').click();
   await expect(
     page.getByText('Sub-agents for Parent orchestration', { exact: true })
   ).toBeVisible();
