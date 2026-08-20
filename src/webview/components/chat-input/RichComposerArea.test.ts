@@ -503,6 +503,75 @@ describe('RichComposerArea', () => {
     });
   });
 
+  it('renders an atomic chip at the start of a line with a caret stop before it', () => {
+    const marker = '[Image 1]';
+    const value = `Tests\n${marker}`;
+    renderComposer({
+      value,
+      cursorOffset: 'Tests\n'.length,
+      chips: [
+        {
+          id: 'img:1',
+          type: 'image',
+          label: 'Image 1',
+          icon: 'image',
+          textMarker: marker,
+        },
+      ],
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const lineBreak = editor.querySelector('br');
+    const leadingSpacer = lineBreak?.nextSibling;
+
+    expect(editor.querySelectorAll('br')).toHaveLength(1);
+    expect(editor.querySelector('[data-caret-placeholder]')).toBeNull();
+    expect(leadingSpacer?.nodeType).toBe(Node.TEXT_NODE);
+    expect(leadingSpacer?.textContent).toBe('\u200B');
+    expect(leadingSpacer?.nextSibling).toBe(editor.querySelector('.inline-chip'));
+    expect(extractText(editor)).toBe(value);
+    expect(findNodeAtOffset(editor, 'Tests\n'.length)).toEqual({
+      node: leadingSpacer,
+      offset: 1,
+    });
+  });
+
+  it('removes the newline before a line-start atomic chip with Backspace', () => {
+    const marker = '[Image 1]';
+    const value = `Tests\n${marker}`;
+    const onInput = vi.fn();
+    renderComposer({
+      value,
+      cursorOffset: 'Tests\n'.length,
+      chips: [
+        {
+          id: 'img:1',
+          type: 'image',
+          label: 'Image 1',
+          icon: 'image',
+          textMarker: marker,
+        },
+      ],
+      onInput,
+    });
+
+    const editor = container?.querySelector<HTMLElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    const target = findNodeAtOffset(editor, 'Tests\n'.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+    const event = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onInput).toHaveBeenCalledWith(`Tests${marker}`, 'Tests'.length);
+  });
+
   it('replaces a selection spanning a session reference when pasting', () => {
     const onInput = vi.fn();
     const marker = 'session:ses_auth';

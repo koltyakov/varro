@@ -102,15 +102,20 @@ export function RichComposerArea(props: {
     const pattern = new RegExp(`(${sortedMarkers.map((m) => escapeRegex(m)).join('|')})`, 'g');
 
     const parts = text.split(pattern);
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
       const chip = chips.get(part);
       if (chip) {
+        const previousNode = frag.lastChild;
+        const isAtomicChip = chip.type !== 'external-link' && chip.type !== 'mention-session';
+        if (isAtomicChip && previousNode instanceof HTMLBRElement) {
+          frag.appendChild(document.createTextNode(CARET_SPACER));
+        }
         frag.appendChild(createChipElement(chip));
         if (chip.type !== 'external-link') {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
       } else {
-        appendTextWithLineBreaks(frag, part);
+        appendTextWithLineBreaks(frag, part, index === parts.length - 1);
       }
     }
     return frag;
@@ -199,6 +204,24 @@ export function RichComposerArea(props: {
 
     const selection = getSelectionOffsets();
     if (!selection || selection.start !== selection.end) return false;
+
+    if (
+      event.key === 'Backspace' &&
+      props.value[selection.start - 1] === '\n' &&
+      props.chips.some(
+        (chip) =>
+          chip.type !== 'external-link' &&
+          chip.type !== 'mention-session' &&
+          props.value.startsWith(chip.textMarker, selection.start)
+      )
+    ) {
+      event.preventDefault();
+      props.onInput(
+        `${props.value.slice(0, selection.start - 1)}${props.value.slice(selection.start)}`,
+        selection.start - 1
+      );
+      return true;
+    }
 
     if (removeSessionReferenceAtSelection()) {
       event.preventDefault();
@@ -737,13 +760,13 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function appendTextWithLineBreaks(parent: Node, text: string) {
+function appendTextWithLineBreaks(parent: Node, text: string, addTrailingPlaceholder = true) {
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (i > 0) parent.appendChild(document.createElement('br'));
     if (lines[i]) parent.appendChild(document.createTextNode(lines[i]!));
   }
-  if (text.endsWith('\n')) {
+  if (addTrailingPlaceholder && text.endsWith('\n')) {
     const placeholder = document.createElement('br');
     placeholder.dataset.caretPlaceholder = 'true';
     parent.appendChild(placeholder);
