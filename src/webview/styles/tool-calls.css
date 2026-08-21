@@ -18,6 +18,11 @@
   cursor: text;
 }
 
+.rich-composer br[data-caret-placeholder] {
+  font-size: 0;
+  line-height: 0;
+}
+
 .rich-composer[data-empty='true']::before {
   content: attr(data-placeholder);
   color: var(--color-vscode-muted);

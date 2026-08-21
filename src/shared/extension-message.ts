@@ -12,6 +12,7 @@ import {
   type WebviewThemeKind,
 } from './protocol';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from './native-pdf';
+import { isChatFontFamily, isResponseTimestampPlacement } from './provider-limit-config';
 import { asRecord, isBoolean, isNumber, isString } from './type-utils';
 import type { UnknownRecord } from './type-utils';
 
@@ -186,6 +187,19 @@ export function parseExtensionMessage<T>(value: T): ExtensionMessage | null {
         config.showInlineFileChanges = payload.showInlineFileChanges;
       }
       if (isBoolean(payload.showChangedFiles)) config.showChangedFiles = payload.showChangedFiles;
+      if (isNumber(payload.chatFontSize)) config.chatFontSize = payload.chatFontSize;
+      if (isChatFontFamily(payload.chatFontFamily)) {
+        config.chatFontFamily = payload.chatFontFamily;
+      }
+      if (isBoolean(payload.showRequestTimestamps)) {
+        config.showRequestTimestamps = payload.showRequestTimestamps;
+      }
+      if (isBoolean(payload.showResponseTimestamps)) {
+        config.showResponseTimestamps = payload.showResponseTimestamps;
+      }
+      if (isResponseTimestampPlacement(payload.responseTimestamp)) {
+        config.responseTimestamp = payload.responseTimestamp;
+      }
       return { type, payload: config };
     }
 

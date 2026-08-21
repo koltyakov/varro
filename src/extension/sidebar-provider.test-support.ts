@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
       showTextDocument: vi.fn(() => Promise.resolve()),
       showWarningMessage: vi.fn(() => Promise.resolve(undefined)),
       showErrorMessage: vi.fn(() => Promise.resolve(undefined)),
+      showInformationMessage: vi.fn(() => Promise.resolve(undefined)),
       createTerminal: vi.fn(() => ({ show: vi.fn(), sendText: vi.fn() })),
       onDidCloseTerminal: vi.fn(() => ({ dispose: vi.fn() })),
     },
@@ -297,6 +298,8 @@ beforeEach(() => {
   mocks.vscode.window.showWarningMessage.mockResolvedValue(undefined);
   mocks.vscode.window.showErrorMessage.mockReset();
   mocks.vscode.window.showErrorMessage.mockResolvedValue(undefined);
+  mocks.vscode.window.showInformationMessage.mockReset();
+  mocks.vscode.window.showInformationMessage.mockResolvedValue(undefined);
   mocks.vscode.window.showOpenDialog.mockReset();
   mocks.vscode.window.showOpenDialog.mockResolvedValue(undefined);
   mocks.vscode.commands.executeCommand.mockReset();

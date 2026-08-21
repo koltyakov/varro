@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createResource } from 'solid-js';
 import {
   friendlyErrorName,
   isAbortedAssistantError,
@@ -16,13 +16,25 @@ import { editingMessageId, startEditingMessage } from '../lib/message-edit-state
 import { collapseLeadingDuplicateFileEvents } from '../lib/message-event-collapse';
 import { getAssistantDiffRequest, isAssistantMessage } from '../lib/message-metrics';
 import { formatMessageSentTime } from '../lib/message-time';
-import { isWorkspaceDirectoryText, shouldShowAssistantPartInline } from '../lib/part-utils';
+import {
+  hasVisibleReasoningContent,
+  isWorkspaceDirectoryText,
+  shouldShowAssistantPartInline,
+} from '../lib/part-utils';
 import {
   markProviderAuthFailure,
   providerAuthRestoredForMessage,
   requestProviderConnection,
 } from '../lib/provider-connection-state';
-import { getActiveUsageLimitNotice, isActiveSessionWorking, state } from '../lib/state';
+import {
+  getActiveUsageLimitNotice,
+  isActiveSessionWorking,
+  responseTimestamp,
+  showRequestTimestamps,
+  showResponseTimestamps,
+  showThinking,
+  state,
+} from '../lib/state';
 import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import {
@@ -75,15 +87,6 @@ export type {
   UserMessageMarkupSuffix,
 } from './message/UserMessageContent';
 
-const FINAL_MARK_PULSE_MIN_DURATION_MS = 600;
-const FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS = 6;
-const FINAL_MARK_PULSE_DURATION_PROPERTY = '--assistant-final-mark-pulse-duration';
-const FINAL_MARK_RAIL_SELECTOR = [
-  '.assistant-turn-content-highlighted',
-  '.assistant-turn-content-planning',
-  '.assistant-message-flow-item-final',
-].join(', ');
-
 function isManagedSubagentSession() {
   return state.sessions.some(
     (session) => session.id === state.activeSessionId && Boolean(session.parentID)
@@ -99,8 +102,8 @@ export function Message(props: {
   info: MessageType;
   parts: Part[];
   promptNumber?: number;
-  showSentTimestamp?: boolean;
   isLastAssistant?: boolean;
+  isTurnEndAssistant?: boolean;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   highlightFinalAnswer?: boolean;
@@ -118,56 +121,29 @@ export function Message(props: {
   visibleActiveActivityPartKeys?: ReadonlySet<string>;
   groupedActiveActivityPartKeys?: ReadonlySet<string>;
 }) {
-  let turnRef: HTMLDivElement | undefined;
-  const [pulseFinalMark, setPulseFinalMark] = createSignal(false);
-  let wasCompleted = props.info.role === 'assistant' && props.info.time.completed !== undefined;
-  let finalMarkPulsePending = false;
-
-  createEffect(() => {
-    const completed = props.info.role === 'assistant' && props.info.time.completed !== undefined;
-    if (!completed) {
-      wasCompleted = false;
-      finalMarkPulsePending = false;
-      setPulseFinalMark(false);
-      return;
-    }
-
-    if (!wasCompleted) {
-      wasCompleted = true;
-      finalMarkPulsePending = true;
-    }
-
-    if (finalMarkPulsePending && props.highlightFinalAnswer) {
-      finalMarkPulsePending = false;
-      setPulseFinalMark(true);
-      return;
-    }
-
-    if (!props.highlightFinalAnswer) {
-      setPulseFinalMark(false);
-    }
-  });
-
-  createEffect(() => {
-    if (!pulseFinalMark()) {
-      turnRef?.style.removeProperty(FINAL_MARK_PULSE_DURATION_PROPERTY);
-      return;
-    }
-
-    queueMicrotask(() => {
-      if (!pulseFinalMark() || !turnRef) return;
-      const rail = turnRef.querySelector<HTMLElement>(FINAL_MARK_RAIL_SELECTOR);
-      if (!rail) return;
-      const duration = Math.max(
-        FINAL_MARK_PULSE_MIN_DURATION_MS,
-        Math.round(rail.getBoundingClientRect().height * FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS)
-      );
-      turnRef.style.setProperty(FINAL_MARK_PULSE_DURATION_PROPERTY, `${duration}ms`);
-    });
-  });
-
   const isUser = () => props.info.role === 'user';
-  const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
+  const sentTimestamp = createMemo(() => {
+    const info = props.info;
+    const value =
+      isAssistantMessage(info) && info.time.completed !== undefined
+        ? info.time.completed
+        : info.time.created;
+    return {
+      text: formatMessageSentTime(value),
+      iso: new Date(value).toISOString(),
+    };
+  });
+  const showSentTime = createMemo(() => {
+    if (isUser()) return showRequestTimestamps();
+    if (!showResponseTimestamps()) return false;
+    if (responseTimestamp() !== 'each-step' && !(props.isTurnEndAssistant ?? false)) {
+      return false;
+    }
+    const info = props.info;
+    return info.role === 'assistant'
+      ? info.time.completed !== undefined || info.error !== undefined
+      : true;
+  });
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   // While the composer's usage-limit banner is up for this session, the latest
   // assistant 429 error card would repeat the same message and actions; hide it
@@ -260,6 +236,11 @@ export function Message(props: {
             const effectiveText = getEffectivePartText(part) || '';
             return effectiveText.trim().length > 0 && !isWorkspaceDirectoryText(effectiveText);
           }
+          if (part.type === 'reasoning') {
+            // Live reasoning streams into streamedText before the part commits, so gate on
+            // the effective text the same way text parts do.
+            return showThinking() && hasVisibleReasoningContent(getEffectivePartText(part) || '');
+          }
           return shouldShowAssistantPartInline(part);
         })
       : normalizedParts()
@@ -277,6 +258,9 @@ export function Message(props: {
   });
   const hasVisibleAssistantOutput = () => {
     const visibleParts = visibleAssistantParts().filter((part) => {
+      // Reasoning renders standalone in its own flow instead of joining the
+      // compact activity group, so it always counts as visible output.
+      if (part.type === 'reasoning') return true;
       if (
         !props.visibleActiveActivityPartKeys ||
         !isAssistantActivityPart(part) ||
@@ -292,6 +276,9 @@ export function Message(props: {
     if (!props.compactActivityGroups) return visibleParts.length > 0;
     return visibleParts.some((part) => {
       if (!isAssistantActivityPart(part)) return true;
+      // Reasoning renders standalone in its own flow instead of joining the
+      // compact activity group, so it always counts as visible output.
+      if (part.type === 'reasoning') return true;
       const partKey = getAssistantActivityPartKey(part);
       if (
         props.visibleActiveActivityPartKeys?.has(partKey) ||
@@ -410,13 +397,7 @@ export function Message(props: {
         fallback={<CompactionDivider part={compactionDivider()!} />}
       >
         <div
-          ref={(element) => {
-            turnRef = element;
-          }}
-          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}${pulseFinalMark() ? ' assistant-final-mark-pulse' : ''}`}
-          onAnimationEnd={(event) => {
-            if (event.animationName === 'assistant-final-mark-pulse') setPulseFinalMark(false);
-          }}
+          class={`chat-turn ${isUser() ? 'chat-turn-user' : 'chat-turn-assistant'}${isWrapperlessAssistant() ? ' chat-turn-assistant-plain' : ''}`}
         >
           <div
             class={`value chat-turn-content ${
@@ -467,15 +448,12 @@ export function Message(props: {
               />
             </Show>
           </div>
-          <Show when={isUser()}>
-            <time
-              class={`message-sent-time${props.showSentTimestamp ? ' is-visible' : ''}`}
-              dateTime={new Date(props.info.time.created).toISOString()}
-              aria-hidden={!props.showSentTimestamp}
-            >
-              {sentTimestamp()}
-            </time>
-          </Show>
+          <time
+            class={`message-sent-time${showSentTime() ? ' is-visible' : ''}`}
+            dateTime={sentTimestamp().iso}
+          >
+            {sentTimestamp().text}
+          </time>
           <Show when={hasOmittedDiffs()}>
             <div class="change-set-omission" role="note">
               <span class="change-set-omission-title">Large change set condensed</span>

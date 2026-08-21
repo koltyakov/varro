@@ -556,6 +556,72 @@ describe('parseExtensionMessage', () => {
     ).toBeNull();
   });
 
+  it('parses optional chat presentation keys in config/update', () => {
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'full',
+          showRequestTimestamps: false,
+          showResponseTimestamps: false,
+          responseTimestamp: 'each-step',
+          chatFontFamily: 'serif',
+          chatFontSize: 16,
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        showRequestTimestamps: false,
+        showResponseTimestamps: false,
+        responseTimestamp: 'each-step',
+        chatFontFamily: 'serif',
+        chatFontSize: 16,
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'full',
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'full',
+          chatFontFamily: 'editor',
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'full',
+        chatFontFamily: 'editor',
+      },
+    });
+
+    expect(
+      parseExtensionMessage({
+        type: 'config/update',
+        payload: {
+          desktopSessionPaneSide: 'left',
+          defaultPermissionMode: 'full',
+          showRequestTimestamps: 'nope',
+          responseTimestamp: 'middle',
+          chatFontFamily: 'cursive',
+          chatFontSize: 'large',
+        },
+      })
+    ).toEqual({
+      type: 'config/update',
+      payload: {
+        desktopSessionPaneSide: 'left',
+        defaultPermissionMode: 'full',
+      },
+    });
+  });
+
   it('parses auto permission mode in config/update', () => {
     expect(
       parseExtensionMessage({

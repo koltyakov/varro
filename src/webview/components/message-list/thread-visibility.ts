@@ -1,6 +1,7 @@
 import { state } from '../../lib/state';
 import { collectSessionTreeIds } from '../../lib/session-tree-index';
 import { shouldShowAssistantPartInline } from '../../lib/part-utils';
+import { isAssistantMessage } from '../../lib/message-metrics';
 import type { MessageEntry, Part, Session } from '../../types';
 
 export function getRenderedMessages(
@@ -56,6 +57,25 @@ export function getVisibleThreadMessages(
   return messages.filter(
     (entry) => !shouldHideThreadMessage(entry, activeSessionId, activeTreeIds, sessions)
   );
+}
+
+export function computeTurnEndAssistantIds(
+  messages: readonly MessageEntry[]
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  let turnEnd: string | null = null;
+  for (const entry of messages) {
+    if (entry.info.role === 'user') {
+      if (turnEnd) ids.add(turnEnd);
+      turnEnd = null;
+      continue;
+    }
+    if (isAssistantMessage(entry.info)) {
+      turnEnd = entry.info.id;
+    }
+  }
+  if (turnEnd) ids.add(turnEnd);
+  return ids;
 }
 
 export function hasVisibleRunningToolPart(messages: Array<{ parts: Part[] }>) {

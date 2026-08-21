@@ -182,6 +182,139 @@ describe('MessagePart', () => {
     );
   });
 
+  it('settles an auto-opened streaming reasoning block when the row remounts completed', () => {
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    renderPart(part);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // Rows (and thus this block) are recreated when the completed part commits;
+    // the new instance must settle the unobserved auto-open.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nStep one', time: { start: 0, end: 1000 } });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    // The settled state survives later remounts.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nStep one', time: { start: 0, end: 1000 } });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+  });
+
+  it('keeps an auto-opened reasoning block expanded until the message settles when its part ends first', () => {
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    const runningInfo = assistantMessage('message-1', { time: { created: 0 } });
+    renderPart(part, { messageInfo: runningInfo });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // The part commits its end while the message is still running; the row
+    // remount must keep the auto-opened block visible.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, time: { start: 0, end: 1000 } }, { messageInfo: runningInfo });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+
+    // Once the message settles, the pending auto-open collapses the block.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart(
+      { ...part, time: { start: 0, end: 1000 } },
+      { messageInfo: assistantMessage('message-1', { time: { created: 0, completed: 5 } }) }
+    );
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+  });
+
+  it('collapses an auto-opened reasoning block when the message settles without a remount', async () => {
+    const [part, setPart] = createStore(
+      reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } })
+    );
+    const [info, setInfo] = createStore(
+      assistantMessage('message-1', { time: { created: 0 } })
+    );
+    cleanup = render(() => MessagePart({ part, messageInfo: info }), container!);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // The reasoning part finishes while the message keeps running; the block
+    // must stay expanded so the thinking stays visible.
+    setPart('time', 'end', 1000);
+    await nextFrame();
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+    expect(container?.querySelector('.thinking-content')?.textContent).toContain('Step one');
+
+    setInfo('time', 'completed', 5);
+    await nextFrame();
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+  });
+
+  it('keeps a user-collapsed streaming reasoning block closed across a completed remount', () => {
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    renderPart(part);
+
+    // Collapse the auto-opened block; the user choice must survive the remount.
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nStep one', time: { start: 0, end: 1000 } });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+  });
+
+  it('keeps a re-expanded streaming reasoning block open across a completed remount', () => {
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    renderPart(part);
+
+    // Collapse then re-expand: an explicit user expansion must survive the remount.
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    cleanup?.();
+    cleanup = undefined;
+    container!.innerHTML = '';
+    renderPart({ ...part, text: '**Planning**\n\nStep one', time: { start: 0, end: 1000 } });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+  });
+
   it('follows streaming reasoning at the bottom until the user scrolls away', async () => {
     const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
     const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
@@ -203,7 +336,10 @@ describe('MessagePart', () => {
       const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
       cleanup = render(() => MessagePart({ part }), container!);
 
-      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      // Streaming blocks auto-expand and start following from the bottom.
+      expect(
+        container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+      ).toBe('true');
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
       expect(content?.scrollTop).toBe(500);
 
@@ -222,6 +358,9 @@ describe('MessagePart', () => {
       setPart('time', 'end', 1000);
       await nextFrame();
       expect(content?.scrollTop).toBe(100);
+      expect(container?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+        'false'
+      );
     } finally {
       if (scrollHeight) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeight);
       else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
@@ -241,15 +380,16 @@ describe('MessagePart', () => {
       const [part, setPart] = createStore(reasoningPart('Step one', { time: { start: 0 } }));
       cleanup = render(() => MessagePart({ part }), container!);
 
-      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+      // Streaming blocks auto-expand and start following from the bottom.
       const content = container?.querySelector<HTMLDivElement>('.thinking-content');
       expect(content?.scrollTop).toBe(500);
 
       setPart('time', 'end', 1000);
       expect(content?.scrollTop).toBe(0);
+      // Auto-collapse on completion, but the user can reopen from the top.
+      expect(container?.querySelector('.thinking-content')).toBeNull();
 
       content!.scrollTop = 120;
-      container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
       expect(container?.querySelector<HTMLDivElement>('.thinking-content')?.scrollTop).toBe(0);
     } finally {

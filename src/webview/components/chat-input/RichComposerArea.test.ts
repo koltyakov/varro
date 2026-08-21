@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { batch, createSignal } from 'solid-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import {
@@ -462,6 +462,89 @@ describe('RichComposerArea', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
+  });
+
+  it('adds exactly one line per Shift+Enter through the value/caret round-trip', async () => {
+    const onInput = vi.fn();
+    const [value, setValue] = createSignal('something');
+    const [cursor, setCursor] = createSignal('something'.length);
+
+    // Production wires this component through the Solid compiler, which emits
+    // getter-based props (e.g. `get value() { return inputText() }`), so the
+    // resync effect re-runs when the parent signals change on the same
+    // instance. Mirror that here: one instantiation, live props via getters.
+    cleanup = render(
+      () =>
+        RichComposerArea({
+          editorRef: () => {},
+          placeholder: 'Compose',
+          get value() {
+            return value();
+          },
+          get cursorOffset() {
+            return cursor();
+          },
+          chips: [],
+          isFocused: true,
+          showCompletionMenu: false,
+          completionItems: [],
+          completionSelectedIndex: 0,
+          onInput: (text: string, offset: number) => {
+            onInput(text, offset);
+            batch(() => {
+              setValue(text);
+              setCursor(offset);
+            });
+          },
+          onKeyDown: () => {},
+          onPaste: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+          onClick: () => {},
+          onKeyUp: () => {},
+          onSelect: () => {},
+          onSelectCompletion: () => {},
+        }),
+      container!
+    );
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    await flushAsyncWork();
+
+    const pressShiftEnter = () => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const caretMatchesValue = (expectedValue: string) => {
+      const expected = findNodeAtOffset(editor, expectedValue.length);
+      const selection = window.getSelection();
+      return (
+        !!expected &&
+        selection?.anchorNode === expected.node &&
+        selection?.anchorOffset === expected.offset
+      );
+    };
+
+    expect(pressShiftEnter()).toBe(true);
+    expect(onInput).toHaveBeenLastCalledWith('something\n', 'something\n'.length);
+    await flushAsyncWork();
+    expect(extractText(editor)).toBe('something\n');
+    expect(caretMatchesValue('something\n')).toBe(true);
+
+    // The caret now sits on the trailing blank line; the next press must move
+    // exactly one line down, never through an extra blank line.
+    expect(pressShiftEnter()).toBe(true);
+    expect(onInput).toHaveBeenLastCalledWith('something\n\n', 'something\n\n'.length);
+    await flushAsyncWork();
+    expect(extractText(editor)).toBe('something\n\n');
+    expect(caretMatchesValue('something\n\n')).toBe(true);
   });
 
   it('continues a hyphen bullet on Shift+Enter', () => {

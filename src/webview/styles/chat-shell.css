@@ -686,6 +686,10 @@ input:focus-visible {
   z-index: var(--z-lifted);
 }
 
+.chat-turn-assistant > .message-sent-time {
+  margin-top: 2px;
+}
+
 .latest-user-message-sticky-time {
   position: absolute;
   top: calc(100% + 2px);

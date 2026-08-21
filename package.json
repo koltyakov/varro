@@ -277,6 +277,58 @@
           "default": false,
           "description": "Show the changed-files panel above the chat input."
         },
+        "varro.chat.showDesktopNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show desktop notification balloons when a session needs permission approval or input, when a plan is ready for review, or when a session hits an error. In-chat prompts and the status bar are always visible."
+        },
+        "varro.chat.fontSize": {
+          "type": "integer",
+          "enum": [0, 12, 13, 14, 15, 16, 18, 20, 24],
+          "enumItemLabels": [
+            "Default (follow editor)",
+            "12 px",
+            "13 px",
+            "14 px",
+            "15 px",
+            "16 px",
+            "18 px",
+            "20 px",
+            "24 px"
+          ],
+          "default": 0,
+          "description": "Font size for chat message text. Default follows the editor font."
+        },
+        "varro.chat.fontFamily": {
+          "type": "string",
+          "enum": ["default", "editor", "sans", "mono", "serif"],
+          "enumItemLabels": [
+            "Default (original font)",
+            "Editor font",
+            "Sans-serif",
+            "Monospace",
+            "Serif"
+          ],
+          "default": "default",
+          "description": "Font face for chat message text. Default keeps the original Varro font; the other choices replace it."
+        },
+        "varro.chat.showRequestTimestamps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the send time under user request messages."
+        },
+        "varro.chat.showResponseTimestamps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the time under assistant response messages."
+        },
+        "varro.chat.responseTimestamp": {
+          "type": "string",
+          "enum": ["turn-end", "each-step"],
+          "enumItemLabels": ["End of full response", "Each step"],
+          "default": "turn-end",
+          "description": "When to show the time for assistant responses: once when the full response is complete, or on every step."
+        },
         "varro.chat.desktopSessionPaneSide": {
           "type": "string",
           "enum": [

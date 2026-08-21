@@ -41,6 +41,7 @@ import type {
   WorkspaceStatusEventSummary,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import type { ResponseTimestampPlacement } from '../../shared/provider-limit-config';
 import { mergeContextFile } from '../../shared/context-files';
 import type {
   ProviderAuthMethodsByProvider,
@@ -193,6 +194,12 @@ export interface AppStateInstance {
   setShowInlineFileChanges: Setter<boolean>;
   showChangedFiles: Accessor<boolean>;
   setShowChangedFiles: Setter<boolean>;
+  showRequestTimestamps: Accessor<boolean>;
+  setShowRequestTimestamps: Setter<boolean>;
+  showResponseTimestamps: Accessor<boolean>;
+  setShowResponseTimestamps: Setter<boolean>;
+  responseTimestamp: Accessor<ResponseTimestampPlacement>;
+  setResponseTimestamp: Setter<ResponseTimestampPlacement>;
   desktopSessionPaneSide: Accessor<DesktopSessionPaneSide>;
   setDesktopSessionPaneSide: Setter<DesktopSessionPaneSide>;
   inputText: Accessor<string>;
@@ -373,6 +380,11 @@ export function createAppState(): AppStateInstance {
   const [showChangedFiles, setShowChangedFiles] = createSignal(
     initialWebviewState.showChangedFiles ?? false
   );
+  const [showRequestTimestamps, setShowRequestTimestamps] = createSignal(true);
+  const [showResponseTimestamps, setShowResponseTimestamps] = createSignal(true);
+  const [responseTimestamp, setResponseTimestamp] = createSignal<ResponseTimestampPlacement>(
+    'turn-end'
+  );
   const [desktopSessionPaneSide, setDesktopSessionPaneSide] = createSignal<DesktopSessionPaneSide>(
     readDesktopSessionPaneSide(initialWebviewState)
   );
@@ -451,6 +463,12 @@ export function createAppState(): AppStateInstance {
     setShowInlineFileChanges,
     showChangedFiles,
     setShowChangedFiles,
+    showRequestTimestamps,
+    setShowRequestTimestamps,
+    showResponseTimestamps,
+    setShowResponseTimestamps,
+    responseTimestamp,
+    setResponseTimestamp,
     desktopSessionPaneSide,
     setDesktopSessionPaneSide,
     inputText,
@@ -534,6 +552,12 @@ export const showInlineFileChanges = defaultAppState.showInlineFileChanges;
 export const setShowInlineFileChanges = defaultAppState.setShowInlineFileChanges;
 export const showChangedFiles = defaultAppState.showChangedFiles;
 export const setShowChangedFiles = defaultAppState.setShowChangedFiles;
+export const showRequestTimestamps = defaultAppState.showRequestTimestamps;
+export const setShowRequestTimestamps = defaultAppState.setShowRequestTimestamps;
+export const showResponseTimestamps = defaultAppState.showResponseTimestamps;
+export const setShowResponseTimestamps = defaultAppState.setShowResponseTimestamps;
+export const responseTimestamp = defaultAppState.responseTimestamp;
+export const setResponseTimestamp = defaultAppState.setResponseTimestamp;
 export const desktopSessionPaneSide = defaultAppState.desktopSessionPaneSide;
 export const setDesktopSessionPaneSide = defaultAppState.setDesktopSessionPaneSide;
 export const inputText = defaultAppState.inputText;
@@ -597,6 +621,9 @@ export function resetDefaultAppState() {
   setShowThinking(next.showThinking());
   setShowInlineFileChanges(next.showInlineFileChanges());
   setShowChangedFiles(next.showChangedFiles());
+  setShowRequestTimestamps(next.showRequestTimestamps());
+  setShowResponseTimestamps(next.showResponseTimestamps());
+  setResponseTimestamp(next.responseTimestamp());
   setDesktopSessionPaneSide(next.desktopSessionPaneSide());
   setInputText(next.inputText());
   setNextPastedImageIndex(next.nextPastedImageIndex());

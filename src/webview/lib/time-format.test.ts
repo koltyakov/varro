@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatDuration,
+  formatLoadingElapsed,
   formatRelativeAge,
   formatRelativeReset,
   formatTurnDuration,
@@ -29,6 +30,18 @@ describe('time format helpers', () => {
     expect(formatTurnDuration(999)).toBe('<1s');
     expect(formatTurnDuration(1_500)).toBe('2s');
     expect(formatTurnDuration(125_000)).toBe('2m 5s');
+  });
+
+  it('hides loading elapsed time under 10s and formats across thresholds', () => {
+    expect(formatLoadingElapsed(0)).toBeNull();
+    expect(formatLoadingElapsed(9.9)).toBeNull();
+    expect(formatLoadingElapsed(10)).toBe('10s');
+    expect(formatLoadingElapsed(59)).toBe('59s');
+    expect(formatLoadingElapsed(60)).toBe('1m 00s');
+    expect(formatLoadingElapsed(125)).toBe('2m 05s');
+    expect(formatLoadingElapsed(3_600)).toBe('1h');
+    expect(formatLoadingElapsed(3_960)).toBe('1h 6m');
+    expect(formatLoadingElapsed(-5)).toBeNull();
   });
 
   it('formats relative age across all thresholds', () => {

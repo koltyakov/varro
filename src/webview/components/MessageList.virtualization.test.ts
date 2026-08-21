@@ -437,6 +437,15 @@ describe('MessageList history pagination', () => {
       text: 'Current thought',
       time: { start: 3, end: 4 },
     };
+    const commandCurrent = toolPart('current-command', 'current-assistant', 'current-command-call');
+    commandCurrent.state = {
+      status: 'completed',
+      input: { command: 'npm run check' },
+      output: 'passed',
+      title: 'npm run check',
+      metadata: {},
+      time: { start: 2, end: 3 },
+    };
     const command = toolPart('older-command', 'older-assistant', 'older-command-call');
     command.state = {
       status: 'completed',
@@ -458,7 +467,7 @@ describe('MessageList history pagination', () => {
       [
         {
           info: assistantMessage('current-assistant', { parentID: 'shared-user' }),
-          parts: [thought],
+          parts: [commandCurrent, thought],
         },
       ],
       undefined,

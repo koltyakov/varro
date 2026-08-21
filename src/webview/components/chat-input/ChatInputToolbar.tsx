@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/protocol';
 import { Tooltip } from '../Tooltip';
 import { AttachButton } from './AttachButton';
+import { BusyIndicator } from './BusyIndicator';
 import { BusySendMenu } from './BusySendMenu';
 import { ContextPopup, ContextUsageButton, formatContextUsageTitle } from './ContextPopup';
 import { ProviderLimitPopup } from './ProviderLimitPopup';
@@ -76,6 +77,7 @@ type ToolbarSharedProps = {
   currentModel: CurrentModelInfo;
   modelCanEllipsize: boolean;
   onToggleModelPicker: () => void;
+  showBusyIndicator: boolean;
   providerLimitBadges: Array<{ label: string; tone: string }>;
   providerLimitTitle: string | null;
   providerLimit: ProviderLimitStatus | null;
@@ -253,6 +255,10 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
           expanded={props.showModelPicker}
           onToggle={props.onToggleModelPicker}
         />
+
+        <Show when={props.showBusyIndicator}>
+          <BusyIndicator />
+        </Show>
 
         <Show when={props.availableVariants.length > 0 && props.showReasoningControl}>
           <VariantPicker

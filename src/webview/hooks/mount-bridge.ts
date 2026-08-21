@@ -10,7 +10,24 @@ import { postMessage } from '../lib/bridge';
 import { getWorkspaceStatusEventSummary } from '../lib/client';
 import { isString } from '../lib/runtime-values';
 import { syncSessionMarkersForWorkspace } from '../lib/state';
+import type { ChatFontFamily } from '../../shared/provider-limit-config';
 import { normalizeProjectPath } from './session/session-lifecycle';
+
+const CHAT_FONT_FAMILY_STYLES = {
+  editor: "var(--vscode-editor-font-family, 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace)",
+  sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  mono: "'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace",
+  serif: "Georgia, 'Times New Roman', 'Noto Serif', serif",
+} satisfies Record<Exclude<ChatFontFamily, 'default'>, string>;
+
+function applyChatFontFamily(family: ChatFontFamily | undefined, root: HTMLElement) {
+  const style = family && family !== 'default' ? CHAT_FONT_FAMILY_STYLES[family] : undefined;
+  if (style) {
+    root.style.setProperty('--varro-chat-font-family', style);
+  } else {
+    root.style.removeProperty('--varro-chat-font-family');
+  }
+}
 
 export function createMountBridgeOperations(deps: {
   ensureConnectionInitialized(): void;
@@ -56,8 +73,25 @@ export function createMountBridgeOperations(deps: {
           if (payload.showChangedFiles !== undefined) {
             uiStore.setShowChangedFiles(payload.showChangedFiles);
           }
+          if (payload.showRequestTimestamps !== undefined) {
+            uiStore.setShowRequestTimestamps(payload.showRequestTimestamps);
+          }
+          if (payload.showResponseTimestamps !== undefined) {
+            uiStore.setShowResponseTimestamps(payload.showResponseTimestamps);
+          }
+          if (payload.responseTimestamp !== undefined) {
+            uiStore.setResponseTimestamp(payload.responseTimestamp);
+          }
           uiStore.setDesktopSessionPaneSide(payload.desktopSessionPaneSide);
           permissionsStore.setDefaultPermissionModePreference(payload.defaultPermissionMode);
+          const fontSize = payload.chatFontSize;
+          const root = document.documentElement;
+          if (fontSize !== undefined && Number.isFinite(fontSize) && fontSize > 0) {
+            root.style.setProperty('--varro-chat-font-size', `${Math.round(fontSize)}px`);
+          } else {
+            root.style.removeProperty('--varro-chat-font-size');
+          }
+          applyChatFontFamily(payload.chatFontFamily, root);
         },
         getPreviousActiveFilePath: () => appStore.state.editorContext.activeFile?.path ?? null,
         getCurrentWorkspacePath: deps.getCurrentWorkspacePath,

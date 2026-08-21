@@ -81,19 +81,14 @@ describe('MessageList prompt numbers', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
-    expect(container?.querySelectorAll('.message-sent-time')).toHaveLength(2);
+    expect(container?.querySelectorAll('.message-sent-time')).toHaveLength(3);
     expect(
       [...(container?.querySelectorAll('.message-sent-time') ?? [])].every(
-        (timestamp) => !timestamp.classList.contains('is-visible')
+        (timestamp) => timestamp.classList.contains('is-visible')
       )
     ).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' }));
-    expect(
-      [...(container?.querySelectorAll('.message-sent-time') ?? [])].every((timestamp) =>
-        timestamp.classList.contains('is-visible')
-      )
-    ).toBe(true);
     await vi.waitFor(() => {
       expect(
         [...(container?.querySelectorAll('.user-message-card .prompt-number-badge') ?? [])].map(
@@ -107,7 +102,7 @@ describe('MessageList prompt numbers', () => {
     expect(container?.querySelector('.prompt-number-badge')).toBeNull();
     expect(
       [...(container?.querySelectorAll('.message-sent-time') ?? [])].every(
-        (timestamp) => !timestamp.classList.contains('is-visible')
+        (timestamp) => timestamp.classList.contains('is-visible')
       )
     ).toBe(true);
   });

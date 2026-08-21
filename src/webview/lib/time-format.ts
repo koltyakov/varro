@@ -39,6 +39,21 @@ export function formatRelativeAge(timestamp: number, now: number): string {
   return `${totalMinutes}m`;
 }
 
+/** Live loading elapsed time; hidden under 10s so short turns do not flash digits. */
+export function formatLoadingElapsed(totalSeconds: number): string | null {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  if (seconds < 10) return null;
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds >= 60 * 60) {
+    const hours = Math.floor(seconds / (60 * 60));
+    const minutes = Math.floor((seconds % (60 * 60)) / 60);
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m ${remainder.toString().padStart(2, '0')}s`;
+}
+
 export function formatRelativeReset(resetAt: number, now: number): string {
   const remainingMs = Math.max(resetAt - now, 0);
   if (remainingMs < 1000) return '<1s';

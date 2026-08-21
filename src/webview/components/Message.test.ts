@@ -10,7 +10,14 @@ import {
   resolveProviderAuthFailure,
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
-import { setShowSettings, setState as setAppState, showSettings } from '../lib/state';
+import {
+  setShowRequestTimestamps,
+  setShowResponseTimestamps,
+  setShowSettings,
+  setResponseTimestamp,
+  setState as setAppState,
+  showSettings,
+} from '../lib/state';
 import {
   Message,
   getAssistantContainerVariant,
@@ -69,6 +76,9 @@ afterEach(() => {
   selectSessionMock.mockReset();
   resetProviderConnectionState();
   setShowSettings(false);
+  setShowRequestTimestamps(true);
+  setShowResponseTimestamps(true);
+  setResponseTimestamp('turn-end');
   setAppState('sessions', []);
   setAppState('allAgents', []);
   resetToolCallExpansionState();
@@ -1321,33 +1331,47 @@ describe('parseUserMessageContent', () => {
 });
 
 describe('Message user rendering', () => {
-  it('reveals a system-formatted time without mounting new layout content', () => {
+  it('renders a system-formatted time under the user message', () => {
     const now = new Date();
     const created = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45);
-    const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
     cleanup = render(
       () =>
         Message({
           info: { ...userMessage('message-timestamp-today'), time: { created: created.getTime() } },
           parts: [textPart('text-timestamp-today', 'Timestamped prompt')],
-          get showSentTimestamp() {
-            return showSentTimestamp();
-          },
         }),
       container!
     );
 
     const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
-    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+    expect(timestamp?.classList.contains('is-visible')).toBe(true);
     expect(timestamp?.textContent).toBe(
       new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(created)
     );
     expect(timestamp?.dateTime).toBe(created.toISOString());
+  });
 
-    setShowSentTimestamp(true);
+  it('renders the completion time under the assistant response', () => {
+    const created = new Date(2026, 0, 2, 10, 0).getTime();
+    const completed = created + 42 * 60 * 1000;
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('assistant-timestamp'), time: { created, completed } },
+          parts: [textPart('text-assistant-timestamp', 'A response')],
+          isTurnEndAssistant: true,
+        }),
+      container!
+    );
 
-    expect(container?.querySelector('.message-sent-time')).toBe(timestamp);
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
+    expect(timestamp?.textContent).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(
+        new Date(completed)
+      )
+    );
+    expect(timestamp?.dateTime).toBe(new Date(completed).toISOString());
   });
 
   it('includes the system-formatted date for messages sent before today', () => {
@@ -1358,7 +1382,6 @@ describe('Message user rendering', () => {
         Message({
           info: { ...userMessage('message-timestamp-older'), time: { created: created.getTime() } },
           parts: [textPart('text-timestamp-older', 'Older prompt')],
-          showSentTimestamp: true,
         }),
       container!
     );
@@ -1366,6 +1389,131 @@ describe('Message user rendering', () => {
     expect(container?.querySelector('.message-sent-time')?.textContent).toBe(
       new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(created)
     );
+  });
+
+  it('hides the request timestamp when request timestamps are disabled', () => {
+    setShowRequestTimestamps(false);
+    cleanup = render(
+      () =>
+        Message({
+          info: userMessage('message-timestamp-hidden-request'),
+          parts: [textPart('text-timestamp-hidden-request', 'Prompt')],
+        }),
+      container!
+    );
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+
+    setShowRequestTimestamps(true);
+    expect(timestamp?.classList.contains('is-visible')).toBe(true);
+  });
+
+  it('hides response timestamps when response timestamps are disabled', () => {
+    setShowResponseTimestamps(false);
+    cleanup = render(
+      () =>
+        Message({
+          info: { ...assistantMessage('assistant-timestamp-off'), time: { created: 0, completed: 1 } },
+          parts: [textPart('text-timestamp-off', 'A response')],
+          isTurnEndAssistant: true,
+        }),
+      container!
+    );
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+  });
+
+  it('hides the response timestamp on intermediate steps in turn-end mode', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('assistant-mid-step'),
+            time: { created: 0, completed: 1 },
+          },
+          parts: [textPart('text-mid-step', 'A step')],
+        }),
+      container!
+    );
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+
+    cleanup?.();
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('assistant-mid-step-again'),
+            time: { created: 0, completed: 1 },
+          },
+          parts: [textPart('text-mid-step-again', 'A step')],
+          isTurnEndAssistant: true,
+        }),
+      container!
+    );
+    expect(
+      container?.querySelector<HTMLTimeElement>('.message-sent-time')?.classList.contains(
+        'is-visible'
+      )
+    ).toBe(true);
+  });
+
+  it('hides the turn-end response timestamp while the final step is still streaming', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('assistant-streaming-final'),
+            time: { created: 0 },
+          },
+          parts: [textPart('text-streaming-final', 'In progress')],
+          isTurnEndAssistant: true,
+        }),
+      container!
+    );
+    const timestamp = container?.querySelector<HTMLTimeElement>('.message-sent-time');
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+  });
+
+  it('shows the turn-end response timestamp when the final step ends in an error', () => {
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('assistant-error-final'),
+            time: { created: 0 },
+            error: { name: 'UnknownError', data: { message: 'boom' } },
+          },
+          parts: [textPart('text-error-final', 'Failed step')],
+          isTurnEndAssistant: true,
+        }),
+      container!
+    );
+    expect(
+      container?.querySelector<HTMLTimeElement>('.message-sent-time')?.classList.contains(
+        'is-visible'
+      )
+    ).toBe(true);
+  });
+
+  it('shows response timestamps on every step in each-step mode', () => {
+    setResponseTimestamp('each-step');
+    cleanup = render(
+      () =>
+        Message({
+          info: {
+            ...assistantMessage('assistant-each-step'),
+            time: { created: 0, completed: 1 },
+          },
+          parts: [textPart('text-each-step', 'A step')],
+        }),
+      container!
+    );
+    expect(
+      container?.querySelector<HTMLTimeElement>('.message-sent-time')?.classList.contains(
+        'is-visible'
+      )
+    ).toBe(true);
   });
 
   it('does not render empty user message shells with no meaningful content', () => {
@@ -1828,7 +1976,10 @@ describe('Message streamed assistant text rendering', () => {
     );
 
     expect(container?.querySelector('.thinking-label-text')?.textContent).toContain('Plan');
-    container?.querySelector<HTMLButtonElement>('.thinking-header')?.click();
+    // Streaming thinking auto-expands so the streamed delta is visible.
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
     expect(container?.querySelector('.thinking-text')?.textContent).toContain('Inspect logs');
   });
 
@@ -1910,6 +2061,14 @@ describe('Message assistant final answer rendering', () => {
           info: assistantMessage('message-normal-observers'),
           parts: [
             reasoningPart('reason-1', 'Inspecting', true),
+            toolPart('tool-1', {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/workspace',
+              title: 'Inspect cwd',
+              time: { start: 1, end: 2 },
+              metadata: {},
+            }),
             textPart('text-1', 'Status update.'),
             textPart('text-2', 'Final answer.'),
           ],
@@ -2058,107 +2217,6 @@ describe('Message assistant final answer rendering', () => {
     expect(finalItem?.textContent).toContain('Final answer.');
   });
 
-  it('scales the final mark pulse duration with the rail height', async () => {
-    const [info, setInfo] = createSignal({
-      ...assistantMessage('message-final-pulse'),
-      time: { created: 0 },
-    });
-    const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
-
-    cleanup = render(
-      () =>
-        Message({
-          get info() {
-            return info();
-          },
-          parts: [textPart('text-final-pulse', 'Final answer.')],
-          get highlightFinalAnswer() {
-            return highlightFinalAnswer();
-          },
-        }),
-      container!
-    );
-
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
-
-    const getBoundingClientRect = vi
-      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function (this: HTMLElement) {
-        const height = this.classList.contains('assistant-message-flow-item-final') ? 400 : 0;
-        return DOMRect.fromRect({ height });
-      });
-    setInfo(assistantMessage('message-final-pulse'));
-    setHighlightFinalAnswer(true);
-    await Promise.resolve();
-    getBoundingClientRect.mockRestore();
-
-    const pulse = container?.querySelector<HTMLElement>('.assistant-final-mark-pulse');
-    expect(pulse).toBeInstanceOf(HTMLDivElement);
-    expect(pulse?.style.getPropertyValue('--assistant-final-mark-pulse-duration')).toBe('2400ms');
-    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
-      HTMLDivElement
-    );
-
-    const animationEnd = new Event('animationend', { bubbles: true });
-    Object.defineProperty(animationEnd, 'animationName', { value: 'assistant-final-mark-pulse' });
-    container?.querySelector('.assistant-message-flow-item-final')?.dispatchEvent(animationEnd);
-    await Promise.resolve();
-
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
-    expect(pulse?.style.getPropertyValue('--assistant-final-mark-pulse-duration')).toBe('');
-  });
-
-  it('does not pulse an existing final response when a follow-up changes its highlight', () => {
-    const [info, setInfo] = createSignal({
-      ...assistantMessage('message-final-follow-up'),
-      time: { created: 0 },
-    });
-    const [highlightFinalAnswer, setHighlightFinalAnswer] = createSignal(false);
-
-    cleanup = render(
-      () =>
-        Message({
-          get info() {
-            return info();
-          },
-          parts: [textPart('text-final-follow-up', 'Existing final answer.')],
-          get highlightFinalAnswer() {
-            return highlightFinalAnswer();
-          },
-        }),
-      container!
-    );
-
-    setInfo(assistantMessage('message-final-follow-up'));
-    setHighlightFinalAnswer(true);
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeInstanceOf(HTMLDivElement);
-
-    setHighlightFinalAnswer(false);
-    setHighlightFinalAnswer(true);
-
-    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
-      HTMLDivElement
-    );
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
-  });
-
-  it('does not replay the final mark pulse for an already completed response', () => {
-    cleanup = render(
-      () =>
-        Message({
-          info: assistantMessage('message-final-restored'),
-          parts: [textPart('text-final-restored', 'Restored final answer.')],
-          highlightFinalAnswer: true,
-        }),
-      container!
-    );
-
-    expect(container?.querySelector('.assistant-message-flow-item-final')).toBeInstanceOf(
-      HTMLDivElement
-    );
-    expect(container?.querySelector('.assistant-final-mark-pulse')).toBeNull();
-  });
-
   it('does not mark text as a dedicated final answer block when a visible tool call follows it', () => {
     cleanup = render(
       () =>
@@ -2244,11 +2302,11 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
-    const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
+    const thinkingItem = container?.querySelector('.chat-thinking-box');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final-planning');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
-    expect(container?.textContent).toContain('Thinking');
+    expect(container?.textContent).toContain('Inspecting');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Dummy Plan');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);
@@ -2274,11 +2332,11 @@ describe('Message assistant final answer rendering', () => {
     );
 
     const plainContainer = container?.querySelector('.assistant-turn-content-plain');
-    const thinkingItem = container?.querySelector('.assistant-active-activity-tray');
+    const thinkingItem = container?.querySelector('.chat-thinking-box');
     const finalItem = container?.querySelector('.assistant-message-flow-item-final');
 
     expect(plainContainer).toBeInstanceOf(HTMLDivElement);
-    expect(container?.textContent).toContain('Thinking');
+    expect(container?.textContent).toContain('Inspecting');
     expect(container?.textContent).not.toContain('[Working directory: /workspace]');
     expect(container?.textContent).toContain('Implemented the fix.');
     expect(finalItem).toBeInstanceOf(HTMLDivElement);

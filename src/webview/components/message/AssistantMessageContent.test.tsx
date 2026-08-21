@@ -262,14 +262,19 @@ describe('AssistantMessageContent', () => {
     const summary = () =>
       container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
     const initialSummary = summary();
-    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search');
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 search');
     expect(summary()?.getAttribute('aria-expanded')).toBe('false');
     expect(container?.querySelector('.assistant-activity-details')).toBeNull();
+
+    // The thinking block stays a standalone flow item, outside the activity group.
+    const thinkingItem = container?.querySelector('.message-part-mock[data-part-type="reasoning"]');
+    expect(thinkingItem).not.toBeNull();
+    expect(thinkingItem?.closest('.assistant-activity-group')).toBeNull();
 
     summary()?.click();
 
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(3);
 
     const runningCommand = toolPart('bash-1', 'bash', { command: 'npm test' });
     runningCommand.state = {
@@ -282,11 +287,11 @@ describe('AssistantMessageContent', () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expect(summary()).toBe(initialSummary);
-    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search');
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 search');
     expect(summary()?.textContent).not.toContain('command');
     expect(summary()?.getAttribute('aria-expanded')).toBe('true');
     expect(summary()?.classList).not.toContain('assistant-activity-summary-settling');
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(3);
     expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
     expect(
       container
@@ -303,8 +308,8 @@ describe('AssistantMessageContent', () => {
     ]);
     await Promise.resolve();
 
-    expect(summary()?.textContent).toContain('Explored: 2 files, 1 thought, 1 search, 1 command');
-    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(5);
+    expect(summary()?.textContent).toContain('Explored: 2 files, 1 search, 1 command');
+    expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(4);
   });
 
   it('replaces activity words with icons from right to left as space narrows', () => {
@@ -322,9 +327,9 @@ describe('AssistantMessageContent', () => {
     renderAssistantMessageContent({
       parts: [
         toolPart('read-1', 'read'),
-        reasoningPart('reasoning-1'),
         toolPart('grep-1', 'grep'),
         toolPart('bash-1', 'bash'),
+        reasoningPart('reasoning-1'),
       ],
     });
 
@@ -349,10 +354,12 @@ describe('AssistantMessageContent', () => {
     // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
     resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
 
+    const thinkingItem = container?.querySelector('.message-part-mock[data-part-type="reasoning"]');
+    expect(thinkingItem).not.toBeNull();
+    expect(thinkingItem?.closest('.assistant-activity-group')).toBeNull();
+
     const summary = container?.querySelector('.assistant-activity-summary-text');
-    expect(summary?.getAttribute('aria-label')).toBe(
-      'Explored: 1 file, 1 thought, 1 search, 1 command'
-    );
+    expect(summary?.getAttribute('aria-label')).toBe('Explored: 1 file, 1 search, 1 command');
     expect(
       [...(summary?.querySelectorAll('.assistant-activity-kind-icon') || [])].map((icon) =>
         icon.getAttribute('data-kind')
@@ -364,7 +371,7 @@ describe('AssistantMessageContent', () => {
     resize?.([fixture<ResizeObserverEntry>({ target: resizeTarget })], {} as ResizeObserver);
 
     expect(summary?.querySelector('.assistant-activity-kind-icon')).toBeNull();
-    expect(summary?.textContent).toBe('Explored: 1 file, 1 thought, 1 search, 1 command');
+    expect(summary?.textContent).toBe('Explored: 1 file, 1 search, 1 command');
   });
 
   it('keeps inline file edits outside the compact activity disclosure while streaming', () => {
