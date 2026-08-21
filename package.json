@@ -1,7 +1,7 @@
 {
   "name": "varro",
   "displayName": "Varro: OpenCode Workbench",
-  "version": "0.25.11",
+  "version": "0.25.12",
   "description": "OpenCode agent workbench with project-aware chat, parallel sessions, plan and change review, model and permission controls, commit messages, and usage insights.",
   "categories": [
     "AI",
@@ -51,6 +51,8 @@
     "test:e2e": "playwright test",
     "test:vscode-sandbox": "npm run build && node scripts/vscode-sandbox/run.mjs",
     "ai:vscode": "npm run build && node scripts/launch-ai-vscode.mjs",
+    "ai:preconditions": "node scripts/ai-fuzzy-preconditions.mjs",
+    "ai:live": "node scripts/ai-fuzzy-live.mjs",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "package:vsix": "node scripts/package-vsix.mjs",

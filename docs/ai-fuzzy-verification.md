@@ -348,9 +348,27 @@ decorative Markdown. The timed observation must include all of these if the mode
 - a failed or corrective intermediate check when it occurs naturally; do not manufacture failures
 - completion transitions from active tools into Explored/Worked plus final response text
 
-If the first prompt does not produce edits, a diff, and a verified nested scroller, send one bounded
-follow-up in the same run-created session. If those preconditions still cannot be reached, mark AI-07
-and AI-08 `BLOCKED`; do not replace the realistic task with injected DOM state or edits to Varro.
+Do not rely on one general prompt and then mark the scenario blocked. Use the bounded live controller
+after opening the run fork in the dedicated host:
+
+```sh
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-07
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-08
+```
+
+The controller allows three prompts by default and at most four when explicitly requested. The first
+prompt requests the complete realistic workflow. Later prompts name only the gates still missing, such
+as the file edit, expandable diff, retained disclosure, or parallel activity needed to overflow the
+active tray. It polls the real Varro DOM while the model is busy, begins native interaction as soon as
+the gate is simultaneously true, verifies the nested-to-outer wheel handoff, and executes AI-08's
+recorded 50-action plan. It waits for bounded stream settlement and records the resulting fixture status
+in the manifest so cleanup has exact changed-path evidence. Stop prompting as soon as the gate is reached.
+
+After the retry budget, report the per-attempt missing gates and the first unavailable native action.
+Do not use the generic explanation that actions "were not executed." `BLOCKED` is valid only when the
+recorded recovery attempts exhausted their budget, the tracked host or session disappeared, a required
+control truly was unavailable, or continuing would violate fixture safety. Never replace the realistic
+task with injected DOM state or edits to Varro.
 
 ### Long Session Preparation
 
@@ -363,6 +381,64 @@ a tall form.
 Preparation may be performed before the timed run. Record the session ID or exact title, turn count,
 model, and whether the history has ever been opened. Do not describe a 32-turn transcript as a
 pagination test.
+
+#### Reusable Golden History
+
+Use the precondition helper instead of regenerating long history for every run:
+
+```sh
+npm run ai:preconditions -- prepare-run --seed <seed>
+```
+
+The helper validates a workspace-scoped `VFZ GOLDEN` session, forks it without opening it in the
+webview, records the fork and a deterministic 50-action plan in an ignored manifest, and reports the
+static gate for every scenario. If no valid golden exists, it creates one once with
+`openai/gpt-5.6-luna` by default. Use `--golden <session-id>` to adopt and validate an older prepared
+history. The source golden is never a run-created session and must not be deleted during run cleanup.
+
+Static history can establish AI-01 through AI-06 cheaply. It cannot satisfy AI-07 or AI-08 by itself.
+The manifest keeps those gates pending until the live stream proves the required edit, disclosure,
+virtualized state, and nested-scroller geometry. Treat a failed static gate as setup work to repair or
+regenerate before launching the timed scenario, not as a late scenario surprise.
+
+After launching or restarting the dedicated host, verify that the fork survived into the exact server
+instance before opening it in Varro:
+
+```sh
+npm run ai:preconditions -- verify-run --manifest <manifest-path>
+```
+
+This check reads the fork through the workspace-scoped REST API, validates its title and complete
+history, checks the clean fixture commit, and leaves the webview cold for AI-05. A missing fork is a
+setup failure to repair before timed interaction, not a scenario that should consume model budget.
+
+After deleting any additional run-created sessions, clean the recorded fork with the exact manifest
+path printed during preparation:
+
+```sh
+npm run ai:preconditions -- cleanup --manifest <manifest-path>
+```
+
+Cleanup fetches each recorded session, verifies the exact run title prefix, deletes only those IDs,
+and verifies that they no longer appear in the scoped root-session list.
+
+#### Scenario Recovery Budget
+
+Preparation and execution are separate states. A scenario whose static gate passes is not allowed to
+remain incomplete merely because the next native action was not attempted.
+
+1. Re-establish cheap deterministic state, such as latest position, detached midpoint, sticky prompt,
+   or prompt-number visibility, with the recorded seed.
+2. Retry a failed native targeting action once after refreshing read-only geometry. Do not retry a
+   correctly targeted action that exposed a product invariant failure.
+3. If an active stream settles too early, start at most two fresh bounded streams with the same seed.
+   AI-07 and AI-08 use the targeted live controller above instead of repeating the full general prompt.
+4. End as `BLOCKED` only with a concrete terminal condition and the attempts made. Examples are a
+   missing control after reload, a model that settled after all prompt attempts without the required
+   content, or a nested tray that never gained real scroll range.
+
+This budget is intentionally small. It removes avoidable setup misses without turning fuzzy verification
+into an unbounded model loop or hiding genuine failures.
 
 ## Standard Scenarios
 

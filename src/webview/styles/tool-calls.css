@@ -2628,6 +2628,11 @@ kbd {
   overscroll-behavior-y: auto;
   margin-right: -14px;
   padding-right: 14px;
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent) transparent;
+}
+
+.user-message-card:hover .user-message-text-scroll {
+  scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
 }
 
 .user-message-text-scroll.has-more-below {

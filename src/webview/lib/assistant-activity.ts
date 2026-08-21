@@ -225,10 +225,12 @@ export function preserveAssistantActivityGroupKeys(
         previousGroup && !claimedPreviousKeys.has(previousGroup.key)
           ? previousGroup.key
           : group.key;
-      const previousOwnerStillPresent = previousGroup?.parts.some(
-        (part) =>
-          part.messageID === previousGroup.ownerMessageId && part.id === previousGroup.ownerPartId
-      );
+      const previousOwnerStillPresent =
+        !!previousGroup &&
+        group.parts.some(
+          (part) =>
+            part.messageID === previousGroup.ownerMessageId && part.id === previousGroup.ownerPartId
+        );
       const ownerChanged =
         !!previousGroup &&
         (previousGroup.ownerMessageId !== group.ownerMessageId ||

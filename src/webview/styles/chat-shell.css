@@ -376,25 +376,6 @@ input:focus-visible {
   scrollbar-color: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent) transparent;
 }
 
-.latest-user-message-sticky-text::-webkit-scrollbar {
-  width: 10px;
-}
-
-.latest-user-message-sticky-text::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.latest-user-message-sticky-text::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-vscode-fg) 20%, transparent);
-  border-radius: var(--radius-pill);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-.latest-user-message-sticky:hover .latest-user-message-sticky-text::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-vscode-fg) 32%, transparent);
-}
-
 .latest-user-message-sticky-meta {
   position: absolute;
   right: 10px;

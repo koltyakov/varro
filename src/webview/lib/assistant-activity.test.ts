@@ -332,6 +332,41 @@ describe('assistant activity summaries', () => {
     });
   });
 
+  it('releases a pinned summary owner after its part leaves the group', () => {
+    const remaining = completedTool('command-remaining', 'bash');
+    const removedOwner = {
+      ...completedTool('command-removed', 'bash'),
+      messageID: 'assistant-2',
+    };
+    const previousGroup = {
+      key: 'activity-pinned',
+      ownerMessageId: 'assistant-2',
+      ownerPartId: removedOwner.id,
+      ownerPinned: true,
+      parts: [remaining, removedOwner],
+    };
+    const currentGroup = {
+      key: 'activity-current',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: remaining.id,
+      parts: [remaining],
+    };
+
+    const preserved = preserveAssistantActivityGroupKeys(
+      new Map([['assistant-1', [currentGroup]]]),
+      new Map([
+        ['assistant-1', [previousGroup]],
+        ['assistant-2', [previousGroup]],
+      ])
+    );
+
+    expect(preserved.get('assistant-1')?.[0]).toMatchObject({
+      key: 'activity-pinned',
+      ownerMessageId: 'assistant-1',
+      ownerPartId: remaining.id,
+    });
+  });
+
   it('starts a new activity group after visible response text', () => {
     const command = completedTool('bash-1', 'bash');
     const thought = reasoning('reasoning-1', 2);
