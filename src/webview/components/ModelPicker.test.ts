@@ -112,9 +112,15 @@ describe('ModelPicker', () => {
     const fastLabel = Array.from(container?.querySelectorAll('.dropdown-name') ?? []).find(
       (item) => item.textContent === 'GPT-5.6 ⚡'
     );
-    const fastSymbol = fastLabel?.querySelector('[aria-label="Fast (more expensive)"]');
+    const fastSymbol = fastLabel?.querySelector(
+      '[aria-label="Fast mode may consume usage limits faster and cost more."]'
+    );
     expect(fastSymbol?.textContent).toBe('⚡');
-    expect(container?.querySelectorAll('[aria-label="Fast (more expensive)"]')).toHaveLength(1);
+    expect(
+      container?.querySelectorAll(
+        '[aria-label="Fast mode may consume usage limits faster and cost more."]'
+      )
+    ).toHaveLength(1);
   });
 
   it('shows model details only while hovering when there is room on the right', async () => {

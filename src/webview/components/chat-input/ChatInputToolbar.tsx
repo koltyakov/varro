@@ -136,11 +136,61 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   selectedWorkspacePath: string | null;
   showWorkspacePicker: boolean;
   showModelPicker: boolean;
+  selectionCostWarning: {
+    providerName: string;
+    modelName: string;
+    reasoningLabel: string;
+  } | null;
   workspaceButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   onToggleWorkspacePicker: () => void;
   onSelectWorkspace: (path: string) => void;
 };
+
+const SELECTION_COST_WARNING =
+  'Switching the model or reasoning level mid-session may make this request more expensive.';
+
+function SelectionCostWarning(props: {
+  providerName: string;
+  modelName: string;
+  reasoningLabel: string;
+}) {
+  const detail = `Current session: ${props.providerName} / ${props.modelName} · ${props.reasoningLabel}`;
+  return (
+    <Tooltip
+      content={
+        <span class="model-selection-cost-tooltip">
+          <span>{SELECTION_COST_WARNING}</span>
+          <span class="model-selection-cost-tooltip-detail">{detail}</span>
+        </span>
+      }
+    >
+      <span
+        class="model-selection-cost-warning"
+        role="img"
+        aria-label={`${SELECTION_COST_WARNING} ${detail}`}
+        tabIndex={0}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+          <path
+            d="M20.0429 21H3.95705C2.41902 21 1.45658 19.3364 2.22324 18.0031L10.2662 4.01533C11.0352 2.67792 12.9648 2.67791 13.7338 4.01532L21.7768 18.0031C22.5434 19.3364 21.581 21 20.0429 21Z"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+          <path d="M12 9V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <path
+            d="M12 17.01L12.01 16.9989"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
+    </Tooltip>
+  );
+}
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   showMcpControl: boolean;
@@ -216,6 +266,10 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             onToggle={props.onToggleVariantPicker}
             onSelect={props.onSelectVariant}
           />
+        </Show>
+
+        <Show when={props.selectionCostWarning}>
+          {(warning) => <SelectionCostWarning {...warning()} />}
         </Show>
       </div>
 

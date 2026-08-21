@@ -358,6 +358,7 @@ describe('ToolbarPickers', () => {
 
     expect(toggleButton?.getAttribute('aria-label')).toBe('Select agent');
     expect(toggleButton?.textContent).toContain('Reviewer');
+    expect(toggleButton?.classList.contains('plan-agent-selected')).toBe(false);
     expect(options).toHaveLength(2);
     expect(options[0]?.className).toContain('keyboard-focus');
     expect(options[1]?.className).toContain('selected');
@@ -371,6 +372,61 @@ describe('ToolbarPickers', () => {
     expect(onToggle).toHaveBeenCalledOnce();
     expect(onFocusIndex).toHaveBeenCalledWith(0);
     expect(onSelect).toHaveBeenCalledWith(agents[0]);
+  });
+
+  it('marks the agent picker trigger when Plan is selected', () => {
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'plan' })]}
+          selectedAgent="plan"
+          selectedLabel="Plan"
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+
+    expect(toggleButton?.classList.contains('plan-agent-selected')).toBe(true);
+  });
+
+  it('shows the selected agent description below its name in the tooltip', async () => {
+    vi.useFakeTimers();
+    cleanup = render(
+      () => (
+        <AgentPicker
+          agents={[createAgent({ name: 'reviewer', description: 'Reviews work' })]}
+          selectedAgent="reviewer"
+          selectedLabel="Reviewer"
+          focusIndex={0}
+          showPicker={false}
+          getLabel={(agent) => agent.name}
+          getDetail={(agent) => agent.description ?? 'No description'}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+          onFocusIndex={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+    toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1500);
+
+    const tooltip = document.querySelector('[role="tooltip"]');
+    expect(tooltip?.querySelector('.agent-picker-tooltip-title')?.textContent).toBe('Reviewer');
+    expect(tooltip?.querySelector('.agent-picker-tooltip-detail')?.textContent).toBe(
+      'Reviews work'
+    );
   });
 
   it('limits the agent popover to the input host', async () => {
@@ -444,6 +500,7 @@ describe('ToolbarPickers', () => {
 
     const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
     expect(toggleButton?.getAttribute('aria-label')).toBe('Thinking level');
+    expect(toggleButton?.classList.contains('maximum-reasoning-selected')).toBe(false);
     expect(container?.querySelector('.toolbar-popover')).toBeNull();
 
     toggleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -460,6 +517,35 @@ describe('ToolbarPickers', () => {
     options[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it.each(['max', 'Ultra'])('warns when %s reasoning is selected', async (variant) => {
+    vi.useFakeTimers();
+    cleanup = render(
+      () => (
+        <VariantPicker
+          variants={['low', variant]}
+          selectedVariant={variant}
+          selectedLabel={variant}
+          showPicker={false}
+          getLabel={(value) => value.toUpperCase()}
+          onToggle={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      ),
+      container!
+    );
+
+    const toggleButton = container?.querySelector<HTMLButtonElement>('.toolbar-picker');
+
+    expect(toggleButton?.classList.contains('maximum-reasoning-selected')).toBe(true);
+
+    toggleButton?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      'Maximum reasoning may be more expensive.'
+    );
   });
 
   it('right-aligns the variant picker popover when a boundary is provided', async () => {
@@ -571,12 +657,14 @@ describe('ToolbarPickers', () => {
 
     expect(button?.getAttribute('aria-label')).toBe('OpenAI / gpt-4.1');
     expect(button?.className).toContain('model-ellipsis');
+    expect(button?.className).not.toContain('fast-model-selected');
     expect(modelName?.textContent).toBe('gpt-4.1');
     expect(providerIcon).toBeInstanceOf(HTMLElement);
     expect(providerIcon?.style.getPropertyValue('--provider-icon-mask')).toContain('url(');
   });
 
-  it('renders GPT Fast models with a lightning symbol', () => {
+  it('renders GPT Fast models with a lightning symbol and cost warning', async () => {
+    vi.useFakeTimers();
     cleanup = render(
       () => (
         <ModelPickerButton
@@ -592,7 +680,19 @@ describe('ToolbarPickers', () => {
 
     const button = container?.querySelector<HTMLButtonElement>('.model-picker-btn');
     expect(button?.getAttribute('aria-label')).toBe('OpenAI / GPT-5.6 Fast');
+    expect(button?.className).toContain('fast-model-selected');
     expect(container?.querySelector('.model-name-text')?.textContent).toBe('GPT-5.6 ⚡');
+
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const tooltip = document.querySelector('[role="tooltip"]');
+    expect(tooltip?.querySelector('.model-picker-tooltip > span')?.textContent).toBe(
+      'OpenAI / GPT-5.6 Fast'
+    );
+    expect(tooltip?.querySelector('.model-picker-tooltip-detail')?.textContent).toBe(
+      'Fast mode may consume usage limits faster and cost more.'
+    );
   });
 
   it('omits the provider limit chip when no label is available', () => {

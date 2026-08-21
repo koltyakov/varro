@@ -18,6 +18,12 @@ import {
 import { PermissionModeIcon } from './PermissionModeIcon';
 import { isFunction } from '../../lib/runtime-values';
 
+const FAST_MODE_COST_WARNING = 'Fast mode may consume usage limits faster and cost more.';
+
+function isFastModelName(name: string) {
+  return formatModelName(name).includes('⚡');
+}
+
 function PickerChevron() {
   return (
     <svg
@@ -266,6 +272,17 @@ export function AgentPicker(props: {
   onFocusIndex: (index: number) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
+  const selectedAgent = () => props.agents.find((agent) => agent.name === props.selectedAgent);
+  const tooltipContent = () => {
+    const agent = selectedAgent();
+    if (!agent) return 'Select agent';
+    return (
+      <span class="agent-picker-tooltip">
+        <span class="agent-picker-tooltip-title">{props.selectedLabel}</span>
+        <span class="agent-picker-tooltip-detail">{props.getDetail(agent)}</span>
+      </span>
+    );
+  };
 
   createEffect(() => {
     if (!props.showPicker || !popupEl) return;
@@ -321,10 +338,10 @@ export function AgentPicker(props: {
 
   return (
     <div style={{ position: 'relative' }}>
-      <Tooltip content="Select agent">
+      <Tooltip content={tooltipContent()}>
         <button
           ref={props.buttonRef}
-          class="toolbar-picker"
+          class={`toolbar-picker ${props.selectedAgent === 'plan' ? 'plan-agent-selected' : ''}`}
           onClick={props.onToggle}
           aria-label="Select agent"
           aria-expanded={props.showPicker}
@@ -377,6 +394,10 @@ export function VariantPicker(props: {
   onSelect: (variant: string | null) => void;
 }) {
   let popupEl: HTMLDivElement | undefined;
+  const isMaximumReasoning = () => {
+    const variant = props.selectedVariant?.trim().toLowerCase();
+    return variant === 'max' || variant === 'ultra';
+  };
 
   createEffect(() => {
     if (!props.showPicker || !popupEl) return;
@@ -404,10 +425,14 @@ export function VariantPicker(props: {
 
   return (
     <div style={{ position: 'relative' }}>
-      <Tooltip content="Thinking level">
+      <Tooltip
+        content={
+          isMaximumReasoning() ? 'Maximum reasoning may be more expensive.' : 'Thinking level'
+        }
+      >
         <button
           ref={props.buttonRef}
-          class="toolbar-picker"
+          class={`toolbar-picker ${isMaximumReasoning() ? 'maximum-reasoning-selected' : ''}`}
           onClick={props.onToggle}
           aria-label="Thinking level"
           aria-expanded={props.showPicker}
@@ -457,12 +482,22 @@ export function ModelPickerButton(props: {
 }) {
   const label = () =>
     props.modelName ? `${props.providerName} / ${props.modelName}` : 'Choose model';
+  const isFastModel = () => isFastModelName(props.modelName);
+  const tooltipContent = () =>
+    isFastModel() ? (
+      <span class="model-picker-tooltip">
+        <span>{label()}</span>
+        <span class="model-picker-tooltip-detail">{FAST_MODE_COST_WARNING}</span>
+      </span>
+    ) : (
+      label()
+    );
 
   return (
-    <Tooltip content={label()}>
+    <Tooltip content={tooltipContent()}>
       <button
         ref={props.buttonRef}
-        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
+        class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''} ${isFastModel() ? 'fast-model-selected' : ''}`}
         onClick={props.onToggle}
         aria-label={label()}
         aria-expanded={props.expanded ?? false}
@@ -499,10 +534,10 @@ export function FormattedModelName(props: { name: string; showFastTooltip?: bool
         part === '⚡' ? (
           <Show
             when={props.showFastTooltip !== false}
-            fallback={<span aria-label="Fast (more expensive)">{part}</span>}
+            fallback={<span aria-label={FAST_MODE_COST_WARNING}>{part}</span>}
           >
-            <Tooltip content="Fast (more expensive)" delay={300}>
-              <span aria-label="Fast (more expensive)">{part}</span>
+            <Tooltip content={FAST_MODE_COST_WARNING} delay={300}>
+              <span aria-label={FAST_MODE_COST_WARNING}>{part}</span>
             </Tooltip>
           </Show>
         ) : (

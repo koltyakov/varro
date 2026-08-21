@@ -162,6 +162,7 @@ afterEach(() => {
   setShowChangedFiles(false);
   setShowModelPicker(false);
   setState('activeSessionId', null);
+  setState('messagesLoading', false);
   setState('messages', []);
   setState('sessions', []);
   setState('questions', []);
@@ -5836,6 +5837,88 @@ describe('ChatInput', () => {
       modelID: 'gpt-5.4',
       variant: 'medium',
     });
+  });
+
+  it('warns when the model or reasoning level changes after a session request', async () => {
+    vi.useFakeTimers();
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+          'gpt-5.5': {
+            id: 'gpt-5.5',
+            name: 'GPT-5.5',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-5.4' });
+    setState('activeSessionId', 'session-1');
+    setState('sessions', [session('session-1', 2_000)]);
+    setState('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
+    const previousResponse = assistantMessageEntry({ input: 400, output: 100 });
+    setState('messages', [
+      {
+        ...previousResponse,
+        info: {
+          ...previousResponse.info,
+          modelID: 'gpt-5.4',
+          variant: 'medium',
+        },
+      },
+    ]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+
+    setState('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'high',
+    });
+    const warning = container?.querySelector<HTMLElement>('.model-selection-cost-warning');
+    expect(warning).not.toBeNull();
+
+    warning?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(1_500);
+    const tooltip = document.querySelector('[role="tooltip"]');
+    expect(tooltip?.querySelector('.model-selection-cost-tooltip > span')?.textContent).toBe(
+      'Switching the model or reasoning level mid-session may make this request more expensive.'
+    );
+    expect(tooltip?.querySelector('.model-selection-cost-tooltip-detail')?.textContent).toBe(
+      'Current session: OpenAI / GPT-5.4 · Medium'
+    );
+
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
+    expect(container?.querySelector('.model-selection-cost-warning')).not.toBeNull();
+
+    setState('selectedModel', {
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'medium',
+    });
+    expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
+
+    setState('messagesLoading', true);
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.5', variant: 'low' });
+    expect(container?.querySelector('.model-selection-cost-warning')).toBeNull();
   });
 
   it('keeps the usage-limit banner visible when a retry notice predates active-session model hydration', () => {

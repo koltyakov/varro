@@ -89,6 +89,7 @@ import {
   reviewSession,
   updatePermissionModeForSession,
 } from '../hooks/useOpenCode';
+import { deriveSelectedModelFromMessages } from '../hooks/routing-state';
 import {
   editingMessage,
   getMessageEditDraftBackup,
@@ -3144,6 +3145,28 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     return null;
   });
 
+  const selectionCostWarning = createMemo(() => {
+    if (!composerSessionId() || state.messagesLoading || composerEditingMessage()) return null;
+    const previous = deriveSelectedModelFromMessages(state.messages);
+    const current = currentModel();
+    if (!previous || !current.providerID || !current.modelID) return null;
+    const changed =
+      previous.providerID !== current.providerID ||
+      previous.modelID !== current.modelID ||
+      (previous.variant ?? null) !== effectiveVariant();
+    if (!changed) return null;
+
+    const provider = state.providers.find((item) => item.id === previous.providerID);
+    const model = provider?.models[previous.modelID];
+    return {
+      providerName: provider?.name || previous.providerID,
+      modelName: model
+        ? getModelDisplayName(previous.providerID, previous.modelID, model.name)
+        : previous.modelID,
+      reasoningLabel: previous.variant ? formatVariantLabel(previous.variant) : 'Default',
+    };
+  });
+
   const toolbarFitDependencies = createMemo(() => ({
     agents: state.agents.length,
     selectedAgent: state.selectedAgent,
@@ -3154,6 +3177,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       .map((badge) => badge.label)
       .join('|'),
     variant: effectiveVariant(),
+    selectionCostWarning: selectionCostWarning(),
     hasContextUsage: !!contextUsage(),
     loading: isComposerBusy(),
     hasQuestion: composerHasActiveQuestion(),
@@ -3810,6 +3834,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             selectedVariantLabel={selectedVariantLabel() ?? ''}
             showVariantPicker={showVariantPicker()}
             showReasoningControl={isToolbarControlVisible('reasoning')}
+            selectionCostWarning={selectionCostWarning()}
             variantButtonRef={(el) => {
               variantPickerRef = el;
             }}

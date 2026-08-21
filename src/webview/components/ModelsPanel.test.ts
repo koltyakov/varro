@@ -246,7 +246,7 @@ describe('ModelsPanel', () => {
     await Promise.resolve();
 
     const fastSymbol = container?.querySelector(
-      '.settings-model-name [aria-label="Fast (more expensive)"]'
+      '.settings-model-name [aria-label="Fast mode may consume usage limits faster and cost more."]'
     );
     expect(fastSymbol?.textContent).toBe('⚡');
   });
