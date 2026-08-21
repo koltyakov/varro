@@ -358,6 +358,43 @@ describe('optimistic user message reconciliation', () => {
 
     expect(state.messages[0]!.parts).toEqual([textPart('part-server', 'msg-1', 'server text')]);
   });
+
+  it('does not append the same acknowledged prompt under a second server part id', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        textPart('msg-1-part-0', 'msg-1', 'Review these screenshots'),
+        imagePart('msg-1-part-1', 'msg-1', {
+          filename: 'first.png',
+          url: 'data:image/png;base64,FIRST',
+        }),
+        imagePart('msg-1-part-2', 'msg-1', {
+          filename: 'second.png',
+          url: 'data:image/png;base64,SECOND',
+        }),
+      ],
+    });
+    upsertMessageInfo(userMessage('msg-1'));
+
+    upsertPart(textPart('server-text-1', 'msg-1', 'Review these screenshots'));
+    upsertPart(
+      imagePart('server-image-1', 'msg-1', {
+        filename: 'first.png',
+        url: 'data:image/png;base64,FIRST',
+      })
+    );
+    upsertPart(
+      imagePart('server-image-2', 'msg-1', {
+        filename: 'second.png',
+        url: 'data:image/png;base64,SECOND',
+      })
+    );
+    upsertPart(textPart('server-text-2', 'msg-1', 'Review these screenshots'));
+
+    expect(
+      state.messages[0]!.parts.map((part) => (part.type === 'text' ? part.text : part.id))
+    ).toEqual(['Review these screenshots', 'server-image-1', 'server-image-2']);
+  });
 });
 
 describe('history prepend reconciliation', () => {

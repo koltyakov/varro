@@ -393,6 +393,7 @@ describe('empty session pruning', () => {
   it('auto-deletes only inactive empty sessions without meaningful status', () => {
     const now = Date.now();
     const empty = session('empty', now - EMPTY_SESSION_PRUNE_GRACE_MS - 100, {
+      title: 'New Chat',
       time: {
         created: now - EMPTY_SESSION_PRUNE_GRACE_MS - 100,
         updated: now - EMPTY_SESSION_PRUNE_GRACE_MS - 100,
@@ -470,7 +471,7 @@ describe('empty session pruning', () => {
     setState('sessions', [
       session('active', 200),
       session('empty', staleTime, {
-        title: 'Empty session',
+        title: 'New Chat',
         time: { created: staleTime, updated: staleTime },
       }),
     ]);
@@ -482,7 +483,10 @@ describe('empty session pruning', () => {
     vi.runOnlyPendingTimers();
     await Promise.resolve();
 
-    expect(container?.textContent).not.toContain('Empty session');
+    const titles = Array.from(container?.querySelectorAll('.session-item-title') ?? []).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(titles).not.toContain('New Chat');
     expect(deleteImmediatelySpy).toHaveBeenCalledWith('empty');
   });
 

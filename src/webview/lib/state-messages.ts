@@ -146,6 +146,17 @@ export function upsertPart(part: Part) {
             return;
           }
         }
+        if (isPendingOptimisticUserMessage(msgs[idx]!) && nextPart.type === 'text') {
+          const acknowledgedTextIndex = msgs[idx]!.parts.findIndex(
+            (currentPart) =>
+              currentPart.id !== nextPart.id && areMatchingOptimisticParts(currentPart, nextPart)
+          );
+          if (acknowledgedTextIndex !== -1) {
+            msgs[idx]!.parts[acknowledgedTextIndex] = nextPart;
+            messageIndex.invalidate();
+            return;
+          }
+        }
         const optimisticImageIndex = removeAcknowledgedOptimisticImageFilePart(
           msgs[idx]!,
           nextPart
