@@ -36,11 +36,13 @@ describe('renderWebviewHtml', () => {
       cssUri: 'webview://assets/webview.css',
     });
 
-    expect(html).toContain('<link rel="stylesheet" href="webview://assets/webview.css" />');
+    expect(html).toContain(
+      '<link rel="stylesheet" href="webview://assets/webview.css?v=Zml4ZWQtbm9uY2U" />'
+    );
     expect(html).toContain('role="status" aria-label="Loading workspace"');
     expect(html).toContain('Loading workspace...');
     expect(html).toContain(
-      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js"></script>'
+      '<script type="module" nonce="Zml4ZWQtbm9uY2U" src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"></script>'
     );
     expect(html).toContain('window.__initialTheme = window.__initialWebviewState.theme;');
     expect(html).toContain(
@@ -58,10 +60,10 @@ describe('renderWebviewHtml', () => {
     expect(html).toContain('window.__clearVarroBootstrapFailureHandlers = clearHandlers;');
     expect(html).toContain("typeof window.__cleanupVarroBridge === 'function'");
     expect(html.indexOf('window.__clearVarroBootstrapFailureHandlers')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js"')
+      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
     );
     expect(html.indexOf('Loading workspace...')).toBeLessThan(
-      html.indexOf('src="webview://assets/webview.js"')
+      html.indexOf('src="webview://assets/webview.js?v=Zml4ZWQtbm9uY2U"')
     );
   });
 
@@ -113,7 +115,7 @@ describe('renderWebviewHtml', () => {
       cssUri: 'webview.css?value="<unsafe>&',
     });
 
-    expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;"');
-    expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;"');
+    expect(html).toContain('src="webview.js?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtbm9uY2U"');
+    expect(html).toContain('href="webview.css?value=&quot;&lt;unsafe>&amp;&amp;v=Zml4ZWQtbm9uY2U"');
   });
 });

@@ -53,7 +53,9 @@ export function LspPicker(props: {
               <div class="dropdown-item lsp-picker-item">
                 <span class="dropdown-name-wrap">
                   <span class="dropdown-name">{item.name}</span>
-                  <span class="dropdown-hint">{item.root || 'workspace root'}</span>
+                  <span class="dropdown-hint" classList={{ 'lsp-workspace-root': !item.root }}>
+                    {item.root || 'workspace root'}
+                  </span>
                 </span>
                 <span class="dropdown-meta">
                   <span class={`model-capability-tag mcp-status-tag status-${item.status}`}>

@@ -81,6 +81,8 @@ export function renderWebviewHtml(
 ) {
   const nonce = randomNonce();
   const serializedInitialState = serializeForInlineScript(initialState);
+  const scriptUri = appendCacheKey(assets.scriptUri, nonce);
+  const cssUri = appendCacheKey(assets.cssUri, nonce);
 
   return /*html*/ `<!DOCTYPE html>
 <html lang="en">
@@ -91,7 +93,7 @@ export function renderWebviewHtml(
     content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' ${cspSource}; style-src 'unsafe-inline' ${cspSource}; font-src data:;" />
   <title>Varro</title>
   <style>${LOADING_STYLES}</style>
-  <link rel="stylesheet" href="${escapeHtmlAttribute(assets.cssUri)}" />
+  <link rel="stylesheet" href="${escapeHtmlAttribute(cssUri)}" />
 </head>
 <body>
   <div id="root">${LOADING_MARKUP}</div>
@@ -148,7 +150,7 @@ export function renderWebviewHtml(
       setState: function(state) { vscode.setState(state); },
     };
   </script>
-  <script type="module" nonce="${nonce}" src="${escapeHtmlAttribute(assets.scriptUri)}"></script>
+  <script type="module" nonce="${nonce}" src="${escapeHtmlAttribute(scriptUri)}"></script>
 </body>
 </html>`;
 }
@@ -156,6 +158,11 @@ export function renderWebviewHtml(
 function randomNonce(): string {
   const bytes = randomBytes(24);
   return bytes.toString('base64url');
+}
+
+function appendCacheKey(uri: string, cacheKey: string): string {
+  const separator = uri.includes('?') ? '&' : '?';
+  return `${uri}${separator}v=${encodeURIComponent(cacheKey)}`;
 }
 
 function serializeForInlineScript(value: unknown): string {

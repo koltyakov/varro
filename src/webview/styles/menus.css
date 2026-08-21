@@ -231,6 +231,10 @@
   color: var(--color-vscode-muted);
 }
 
+.lsp-workspace-root {
+  font-family: inherit;
+}
+
 .model-release-date {
   display: none;
   flex-shrink: 0;
