@@ -6727,6 +6727,11 @@ export function MessageList() {
       if (!canAlignHistoryAnchor() || !historyStructureChanged()) return;
       measureVisibleItems();
       restorePendingHistoryAnchorIfMounted();
+      // The first mounted row can restore while Solid is still flushing the prepended range.
+      // Recheck after that update turn so the complete reconciled geometry is aligned pre-paint.
+      queueMicrotask(() => {
+        if (canAlignHistoryAnchor()) restorePendingHistoryAnchorIfMounted();
+      });
     });
     if (trackRef) historyMutationObserver.observe(trackRef, { childList: true, subtree: true });
     const keepHistoryAnchorAlignedBeforePaint = () => {

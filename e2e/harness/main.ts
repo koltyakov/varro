@@ -1719,7 +1719,7 @@ function createScenarioState(name: ScenarioName): ScenarioState {
           `message-sticky-variant-${variant.id}-assistant`,
           user.info.id,
           Array.from(
-            { length: 14 },
+            { length: variant.id === 'agent' ? 20 : 14 },
             (_, paragraph) =>
               `${variant.id} response ${paragraph + 1}: preserve the sticky prompt without blinking or collision.`
           ).join('\n\n'),
