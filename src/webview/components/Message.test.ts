@@ -395,6 +395,45 @@ describe('Message user prompt rendering', () => {
     expect(scrollContainer?.querySelectorAll('.user-message-text')).toHaveLength(2);
   });
 
+  it('shows the plan agent above planning prompts only', () => {
+    cleanup = render(
+      () => [
+        Message({
+          info: { ...userMessage('message-plan'), agent: 'plan' },
+          parts: [
+            textPart('text-plan', 'Draft an implementation plan'),
+            filePart('file-1', 'one.pdf'),
+            filePart('file-2', 'two.pdf'),
+            filePart('file-3', 'three.pdf'),
+            filePart('file-4', 'four.pdf'),
+          ],
+        }),
+        Message({
+          info: userMessage('message-chat'),
+          parts: [textPart('text-chat', 'Implement the change')],
+        }),
+      ],
+      container!
+    );
+
+    const cards = container?.querySelectorAll('.user-message-card');
+    const planRail = cards?.[0]?.querySelector(
+      '.message-file-attachments.message-attachments-leading'
+    );
+    const planChip = planRail?.querySelector('.message-attachment-chip');
+    expect(planChip?.textContent).toContain('Plan');
+    expect(planChip?.getAttribute('title')).toBe('Agent: Plan');
+    expect(planChip?.classList).toContain('chat-attachment-chip');
+    expect(planRail).toBe(cards?.[0]?.querySelector('.rendered-markdown')?.firstElementChild);
+    expect(
+      Array.from(planRail?.querySelectorAll('.message-attachment-visible > *') ?? []).map((item) =>
+        item.textContent?.trim()
+      )
+    ).toEqual(['Plan', 'one.pdf', 'two.pdf']);
+    expect(planRail?.querySelector('.message-attachment-overflow-trigger')?.textContent).toBe('+2');
+    expect(cards?.[1]?.querySelector('.message-attachment-chip')).toBeNull();
+  });
+
   it('fades overflowing user prompt text until it is scrolled to the end', () => {
     cleanup = render(
       () =>

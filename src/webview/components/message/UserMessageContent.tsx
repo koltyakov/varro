@@ -79,7 +79,8 @@ type IndexedMessageAttachment = {
 
 type DisplayMessageAttachment =
   | { type: 'message'; attachment: MessageAttachment }
-  | { type: 'file-part'; part: FilePart };
+  | { type: 'file-part'; part: FilePart }
+  | { type: 'agent'; part: AgentPart };
 
 type InlineRenderableAttachment =
   | { type: 'message-attachment'; attachment: MessageAttachment }
@@ -522,9 +523,19 @@ export function getUserMessagePreviewText(parts: Part[]): string {
   return '(no content)';
 }
 
-export function UserMessageContent(props: { parts: Part[] }) {
+export function UserMessageContent(props: { parts: Part[]; leadingAgent?: string }) {
   const parsed = createMemo(() => parseUserMessageContent(props.parts));
   const agentParts = createMemo(() => getDisplayAgentParts(parsed()));
+  const leadingAgentPart = createMemo<AgentPart | null>(() => {
+    if (!props.leadingAgent) return null;
+    return {
+      id: `display-leading-agent-${props.leadingAgent}`,
+      sessionID: '',
+      messageID: '',
+      type: 'agent',
+      name: props.leadingAgent,
+    };
+  });
   const indexedAttachments = createMemo<IndexedMessageAttachment[]>(() =>
     parsed().attachments.map((attachment, index) => ({
       id: `attachment-${index}`,
@@ -555,12 +566,20 @@ export function UserMessageContent(props: { parts: Part[] }) {
         !inlineAttachmentIds().has(id) && attachment !== expandedTerminalAttachment()
     )
   );
-  const visibleAgentParts = createMemo(() =>
-    agentParts().filter((part) => {
+  const visibleAgentParts = createMemo(() => {
+    const leading = leadingAgentPart();
+    return agentParts().filter((part) => {
+      if (leading && part.name.toLowerCase() === leading.name.toLowerCase()) return false;
       const marker = part.source?.value || `@${part.name}`;
       return !parsed().messageTexts.some((text) => text.includes(marker));
-    })
-  );
+    });
+  });
+  const inlineAgentParts = createMemo(() => {
+    const leadingName = leadingAgentPart()?.name.toLowerCase();
+    return leadingName
+      ? agentParts().filter((part) => part.name.toLowerCase() !== leadingName)
+      : agentParts();
+  });
 
   const imageParts = createMemo(() =>
     parsed().fileParts.filter((part) => part.mime.startsWith('image/'))
@@ -568,14 +587,15 @@ export function UserMessageContent(props: { parts: Part[] }) {
   const otherFileParts = createMemo(() =>
     parsed().fileParts.filter((part) => !part.mime.startsWith('image/'))
   );
-  const attachmentCount = createMemo(() => visibleAttachments().length + otherFileParts().length);
   const displayAttachments = createMemo<DisplayMessageAttachment[]>(() => [
+    ...(leadingAgentPart() ? [{ type: 'agent' as const, part: leadingAgentPart()! }] : []),
     ...visibleAttachments().map(({ attachment }) => ({
       type: 'message' as const,
       attachment,
     })),
     ...otherFileParts().map((part) => ({ type: 'file-part' as const, part })),
   ]);
+  const attachmentCount = createMemo(() => displayAttachments().length);
   const [activeImageIndex, setActiveImageIndex] = createSignal(0);
   const [previewIndex, setPreviewIndex] = createSignal<number | null>(null);
 
@@ -678,7 +698,7 @@ export function UserMessageContent(props: { parts: Part[] }) {
       class={`rendered-markdown${imageParts().length > 0 ? ' user-message-content-has-image' : ''}`}
       onCopy={handleCopy}
     >
-      <Show when={visibleAttachments().length > 0 || otherFileParts().length > 0}>
+      <Show when={displayAttachments().length > 0}>
         <MessageAttachmentRail
           attachments={displayAttachments()}
           leading={hasTrailingAttachmentContent()}
@@ -704,7 +724,7 @@ export function UserMessageContent(props: { parts: Part[] }) {
                 text={text}
                 attachments={indexedAttachments()}
                 imageParts={imageParts()}
-                agentParts={agentParts()}
+                agentParts={inlineAgentParts()}
                 onOpenImagePreview={openImagePreview}
               />
             )}
@@ -1654,7 +1674,12 @@ function MessageAttachmentRail(props: {
         <For each={props.attachments}>
           {(attachment) => (
             <span class="message-attachment-measure-item">
-              <FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />
+              <Show
+                when={attachment.type === 'agent'}
+                fallback={<FileTypeIcon path={getDisplayMessageAttachmentPath(attachment)} />}
+              >
+                <MaterialChipIcon kind="agent" class="chip-icon" />
+              </Show>
               <span>{getDisplayMessageAttachmentLabel(attachment)}</span>
               <Show when={getDisplayMessageAttachmentDetail(attachment)}>
                 {(detail) => <span class="chip-detail">{detail()}</span>}
@@ -1668,15 +1693,18 @@ function MessageAttachmentRail(props: {
 }
 
 function DisplayMessageAttachmentItem(props: { attachment: DisplayMessageAttachment }) {
-  return props.attachment.type === 'message' ? (
-    <MessageAttachmentChip attachment={props.attachment.attachment} />
-  ) : (
-    <MessageFileAttachment part={props.attachment.part} />
-  );
+  if (props.attachment.type === 'message') {
+    return <MessageAttachmentChip attachment={props.attachment.attachment} />;
+  }
+  if (props.attachment.type === 'agent') {
+    return <AgentChip part={props.attachment.part} />;
+  }
+  return <MessageFileAttachment part={props.attachment.part} />;
 }
 
 function getDisplayMessageAttachmentLabel(attachment: DisplayMessageAttachment): string {
   if (attachment.type === 'message') return getAttachmentLabel(attachment.attachment);
+  if (attachment.type === 'agent') return formatAgentLabel(attachment.part.name);
   return getMessageFileAttachmentLabel(attachment.part);
 }
 
@@ -1693,6 +1721,7 @@ function getDisplayMessageAttachmentDetail(attachment: DisplayMessageAttachment)
 
 function getDisplayMessageAttachmentPath(attachment: DisplayMessageAttachment): string | undefined {
   if (attachment.type === 'message') return getMessageAttachmentPath(attachment.attachment);
+  if (attachment.type === 'agent') return undefined;
   return attachment.part.source?.path || attachment.part.filename;
 }
 

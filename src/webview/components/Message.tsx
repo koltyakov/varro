@@ -434,7 +434,12 @@ export function Message(props: {
               )}
             </Show>
             <Show when={isUser() && hasUserContent()}>
-              <UserMessageContent parts={normalizedParts()} />
+              <UserMessageContent
+                parts={normalizedParts()}
+                leadingAgent={
+                  props.info.role === 'user' && props.info.agent === 'plan' ? 'plan' : undefined
+                }
+              />
             </Show>
             <Show when={!isUser() && assistant()}>
               <AssistantMessageContent
