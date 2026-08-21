@@ -268,78 +268,15 @@
   box-shadow: var(--chat-shadow-card);
 }
 
-/* Final answers are distinguished by a flat left rail drawn in the existing
-   horizontal gutter, not a filled rounded card. The rail is absolutely
-   positioned so it never reflows content when a streaming turn resolves to
-   "final" (during streaming the turn is plain/flush; finalizing only paints
-   the rail into the gutter). Planning vs ordinary differ only by rail color,
-   with equal visual weight. */
+/* Final answers render flat (no filled rounded card), so nothing shifts when
+   a streaming turn finalizes. */
 .assistant-turn-content.assistant-turn-content-highlighted,
 .assistant-turn-content.assistant-turn-content-planning {
-  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.assistant-turn-content.assistant-turn-content-planning {
-  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
-}
-
-.assistant-turn-content.assistant-turn-content-highlighted::before,
-.assistant-turn-content.assistant-turn-content-planning::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(-1 * var(--chat-horizontal-padding));
-  width: 1px;
-  background: var(--assistant-rail-color);
-  pointer-events: none;
-}
-
-.assistant-final-mark-pulse .assistant-turn-content.assistant-turn-content-highlighted::after,
-.assistant-final-mark-pulse .assistant-turn-content.assistant-turn-content-planning::after,
-.assistant-final-mark-pulse
-  .assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-final::after {
-  content: '';
-  position: absolute;
-  top: -12px;
-  left: calc(-1 * var(--chat-horizontal-padding) - 1px);
-  width: 3px;
-  height: 24px;
-  border-radius: 999px;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    color-mix(in srgb, var(--assistant-rail-color) 58%, var(--color-vscode-fg)),
-    transparent
-  );
-  filter: drop-shadow(0 0 3px var(--assistant-rail-color));
-  pointer-events: none;
-  animation: assistant-final-mark-pulse var(--assistant-final-mark-pulse-duration, 1.1s) ease-in-out
-    both;
-}
-
-@keyframes assistant-final-mark-pulse {
-  0%,
-  100% {
-    top: -12px;
-    opacity: 0;
-  }
-
-  8%,
-  92% {
-    opacity: 1;
-  }
-
-  50% {
-    top: calc(100% - 12px);
-    opacity: 1;
-  }
 }
 
 .assistant-turn-content.assistant-turn-content-bare {
@@ -734,32 +671,15 @@
   }
 }
 
-/* Final answer items keep the same left-anchored rail in plain turns, so they
-   never need a filled rounded wrapper when a streaming turn finalizes. */
+/* Final answer items in plain turns render flat (no filled rounded wrapper)
+   so nothing shifts when a streaming turn finalizes. */
 .assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final {
-  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-accent) 70%, transparent);
   position: relative;
   padding: 0;
   border: none;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.assistant-turn-content.assistant-turn-content-plain
-  .assistant-message-flow-item-final.assistant-message-flow-item-final-planning {
-  --assistant-rail-color: color-mix(in srgb, var(--color-vscode-warning) 75%, transparent);
-}
-
-.assistant-turn-content.assistant-turn-content-plain .assistant-message-flow-item-final::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(-1 * var(--chat-horizontal-padding));
-  width: 1px;
-  background: var(--assistant-rail-color);
-  pointer-events: none;
 }
 
 .assistant-message-flow-item-final > .rendered-markdown > :first-child {

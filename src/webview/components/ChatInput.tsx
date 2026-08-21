@@ -3827,6 +3827,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             showSendControl={showSendControl()}
             showBusySendControls={showBusySendControls()}
             showBusySendOptions={showBusySendOptions()}
+            showBusyIndicator={isComposerDisplayBusy()}
             canSend={canSend()}
             busyToggleRef={(el) => {
               busyToggleRef = el;
@@ -3856,6 +3857,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         <ChatInputMetaToolbar
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
+          showBusyIndicator={isComposerDisplayBusy()}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
           connectedMcpCount={connectedMcpCount()}
           mcpButtonRef={(el) => {

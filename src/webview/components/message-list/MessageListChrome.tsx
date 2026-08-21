@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { formatMessageSentTime } from '../../lib/message-time';
+import { formatLoadingElapsed } from '../../lib/time-format';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
 import {
   loadingLastActivityAt,
@@ -20,37 +21,6 @@ import type { StickyUserMessagePreview } from './sticky-preview';
 
 const STALE_LOADING_TOTAL_MS = 90_000;
 const STALE_LOADING_INACTIVITY_MS = 60_000;
-const LOADING_VERBS = [
-  'Thinking',
-  'Analyzing',
-  'Considering',
-  'Pondering',
-  'Musing',
-  'Reasoning',
-  'Evaluating',
-  'Deliberating',
-  'Reflecting',
-  'Processing',
-  'Synthesizing',
-  'Formulating',
-  'Examining',
-  'Interpreting',
-  'Inferring',
-  'Deducing',
-  'Contemplating',
-  'Investigating',
-  'Deciphering',
-  'Integrating',
-  'Discerning',
-  'Ideating',
-  'Refining',
-  'Cogitating',
-  'Computing',
-  'Brainstorming',
-  'Percolating',
-  'Unraveling',
-  'Calculating',
-];
 
 function bindStickyTextOverflowFade(
   text: HTMLElement,
@@ -318,71 +288,57 @@ export function LoadingRow(props: { compacting: boolean; visible: boolean }) {
     return startedAt === null ? 0 : Math.max(0, now() - startedAt);
   };
   const elapsedSeconds = () => Math.floor(totalElapsedMs() / 1000);
-  const verb = () => LOADING_VERBS[Math.floor(elapsedSeconds() / 6) % LOADING_VERBS.length];
-  const formatElapsed = () => {
-    const seconds = elapsedSeconds();
-    if (seconds < 10) return null;
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds >= 60 * 60) {
-      const hours = Math.floor(seconds / (60 * 60));
-      const minutes = Math.floor((seconds % (60 * 60)) / 60);
-      return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    const minutes = Math.floor(seconds / 60);
-    const remainder = seconds % 60;
-    return `${minutes}m ${remainder.toString().padStart(2, '0')}s`;
-  };
+  const formatElapsed = () => formatLoadingElapsed(elapsedSeconds());
+
+  // The row only occupies space while it says something meaningful (stale
+  // warning, or an in-flight compact). Plain "busy" no longer burns a row:
+  // the composer shows the live busy indicator instead.
+  const showContent = () => isStale() || props.compacting;
 
   return (
-    <div
-      class={`interactive-item-container interactive-response interactive-loading-row${
-        props.visible ? '' : ' is-reserved'
-      }`}
-      aria-hidden={props.visible ? undefined : true}
-    >
+    <Show when={!props.visible || showContent()}>
       <div
-        class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
+        class={`interactive-item-container interactive-response interactive-loading-row${
+          props.visible ? '' : ' is-reserved'
+        }`}
+        aria-hidden={props.visible ? undefined : true}
       >
-        <Show
-          when={!props.compacting && isStale()}
-          fallback={
-            <Show
-              when={props.compacting}
-              fallback={
-                <span class="shimmer-progress loading-verb">
-                  {verb()}
-                  <span class="chat-animated-ellipsis" />
-                </span>
-              }
-            >
-              <span class="loading-verb">Compacting conversation context…</span>
-            </Show>
-          }
+        <div
+          class={`loading-indicator ${isStale() ? 'stale' : ''} ${props.compacting ? 'is-compacting' : ''}`}
         >
-          <span>Session may be stale</span>
-        </Show>
-        <Show when={formatElapsed()}>
-          <span class="loading-elapsed">{formatElapsed()}</span>
-        </Show>
-        <Show when={isStale()}>
-          <button
-            class="loading-action"
-            onClick={() => {
-              if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
-            }}
-            title="Check if session is still running"
+          <Show
+            when={!props.compacting && isStale()}
+            fallback={
+              <Show when={props.compacting}>
+                <span class="loading-verb">Compacting conversation context…</span>
+              </Show>
+            }
           >
-            Recheck
-          </button>
-          <button
-            class="loading-action"
-            onClick={() => stopLoading()}
-            title="Dismiss loading indicator"
-          >
-            Dismiss
-          </button>
-        </Show>
+            <span>Session may be stale</span>
+          </Show>
+          <Show when={formatElapsed()}>
+            <span class="loading-elapsed">{formatElapsed()}</span>
+          </Show>
+          <Show when={isStale()}>
+            <button
+              class="loading-action"
+              onClick={() => {
+                if (state.activeSessionId) recheckSessionStatus(state.activeSessionId);
+              }}
+              title="Check if session is still running"
+            >
+              Recheck
+            </button>
+            <button
+              class="loading-action"
+              onClick={() => stopLoading()}
+              title="Dismiss loading indicator"
+            >
+              Dismiss
+            </button>
+          </Show>
+        </div>
       </div>
-    </div>
+    </Show>
   );
 }

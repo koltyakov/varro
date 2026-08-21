@@ -614,6 +614,62 @@
   max-width: 100%;
 }
 
+/* Live "not idle" indicator: three bouncing dots plus a running elapsed time,
+   shown whenever the active session is working. Kept small and quiet so it
+   reads as status, not decoration. */
+.chat-busy-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-left: 2px;
+  color: var(--color-vscode-fg-soft);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chat-busy-dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.chat-busy-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chat-busy-bounce 1.2s ease-in-out infinite;
+}
+
+.chat-busy-dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.chat-busy-dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.chat-busy-elapsed {
+  color: color-mix(in srgb, var(--color-vscode-fg-soft) 76%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes chat-busy-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
 .toolbar-limit-chip {
   display: inline-flex;
   align-items: center;

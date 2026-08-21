@@ -2706,7 +2706,7 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
     expect(container?.textContent).not.toContain('Session may be stale');
 
     vi.advanceTimersByTime(91_000);
@@ -2716,22 +2716,24 @@ describe('MessageList loading row', () => {
     expect(container?.querySelector('.loading-action')).toBeInstanceOf(HTMLButtonElement);
   });
 
-  it('shows the loading row while visible reasoning is streaming', async () => {
+  it('does not render a loading row while visible reasoning is streaming', async () => {
+    vi.setSystemTime(0);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       { info: assistantMessage('message-1'), parts: [reasoningPart('reason-1', 'Analyzing')] },
     ]);
     setState('streamingPartId', 'reason-1');
     setState('streamingText', 'Analyzing');
-    startLoading(1);
+    startLoading(0);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
-  it('shows the loading row while hidden reasoning is streaming', async () => {
+  it('does not render a loading row while hidden reasoning is streaming', async () => {
+    vi.setSystemTime(0);
     setState('activeSessionId', 'session-1');
     setShowThinkingPreference(false);
     replaceMessages([
@@ -2739,27 +2741,25 @@ describe('MessageList loading row', () => {
     ]);
     setState('streamingPartId', 'reason-1');
     setState('streamingText', 'Analyzing');
-    startLoading(1);
+    startLoading(0);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    expect(container?.querySelector('.interactive-loading-row')).toBeInstanceOf(HTMLDivElement);
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
-  it('shows the loading row while the active session status is busy', async () => {
+  it('does not render a loading row while the active session status is busy', async () => {
     setState('activeSessionId', 'session-1');
     setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    const row = container?.querySelector('.interactive-loading-row');
-    expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList.contains('is-reserved')).toBe(false);
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
-  it('shows the loading row while automatic permission review is in progress', async () => {
+  it('does not render a loading row while automatic permission review is in progress', async () => {
     setSessions([session('session-1'), session('child-1', { parentID: 'session-1' })]);
     setState('activeSessionId', 'session-1');
     setState('sessionAutoPermissionCounts', 'child-1', {
@@ -2771,13 +2771,10 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    const row = container?.querySelector('.interactive-loading-row');
-    expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList.contains('is-reserved')).toBe(false);
-    expect(row?.textContent).toContain('Thinking');
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
-  it('keeps the loading row while the visible assistant reply is incomplete', async () => {
+  it('does not keep a loading row while the visible assistant reply is incomplete', async () => {
     setState('activeSessionId', 'session-1');
     replaceMessages([{ info: assistantMessage('message-1', { time: { created: 1 } }), parts: [] }]);
     startLoading(1);
@@ -2790,9 +2787,7 @@ describe('MessageList loading row', () => {
     vi.advanceTimersByTime(600);
     await Promise.resolve();
 
-    const row = container?.querySelector('.interactive-loading-row');
-    expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList.contains('is-reserved')).toBe(false);
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
   it('does not keep the loading label for older incomplete assistant replies', async () => {
@@ -2958,7 +2953,8 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('shows the loading row while a visible tool is still running', async () => {
+  it('does not render a loading row while a visible tool is still running', async () => {
+    vi.setSystemTime(0);
     setState('activeSessionId', 'session-1');
     replaceMessages([
       {
@@ -2971,10 +2967,7 @@ describe('MessageList loading row', () => {
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
 
-    const row = container?.querySelector('.interactive-loading-row');
-    expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList.contains('is-reserved')).toBe(false);
-    expect(row?.getAttribute('aria-hidden')).toBeNull();
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
   it('hides the loading label while an active edit tool is shown inline', async () => {
@@ -3011,7 +3004,8 @@ describe('MessageList loading row', () => {
     expect(row?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('keeps the loading label visible with a namespaced running task tool card', async () => {
+  it('does not render a loading row with a namespaced running task tool card', async () => {
+    vi.setSystemTime(0);
     const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
     tool.tool = 'opencode.task';
     tool.state = {
@@ -3033,20 +3027,16 @@ describe('MessageList loading row', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
-    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
-      'is-reserved'
-    );
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(500);
 
     expect(container?.querySelector('.tool-invocation-task')).not.toBeNull();
-    const row = container?.querySelector('.interactive-loading-row');
-    expect(row).toBeInstanceOf(HTMLDivElement);
-    expect(row?.classList).not.toContain('is-reserved');
-    expect(row?.getAttribute('aria-hidden')).toBeNull();
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
   });
 
   it('hides the loading label once a compact active tool row is visible', async () => {
+    vi.setSystemTime(0);
     const tool = toolPart('tool-active', 'assistant-1', 'call-tool-active');
     tool.state = {
       status: 'running',
@@ -3066,9 +3056,7 @@ describe('MessageList loading row', () => {
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
-    expect(container?.querySelector('.interactive-loading-row')?.classList).not.toContain(
-      'is-reserved'
-    );
+    expect(container?.querySelector('.interactive-loading-row')).toBeNull();
 
     await vi.advanceTimersByTimeAsync(500);
 

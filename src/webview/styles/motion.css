@@ -25,6 +25,11 @@
     color: var(--color-vscode-muted);
   }
 
+  .chat-busy-dots i {
+    animation: none;
+    opacity: 0.7;
+  }
+
   .ralph-iter-verdicts-track {
     animation: none;
   }
