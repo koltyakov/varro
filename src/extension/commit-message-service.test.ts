@@ -109,6 +109,7 @@ function createRepository(root = '/repo', patch = 'diff --git a/src/a.ts b/src/a
     state: {
       indexChanges: [{ uri: uri(`${root}/src/a.ts`) }],
       mergeChanges: [] as Array<{ uri: vscode.Uri }>,
+      workingTreeChanges: [] as Array<{ uri: vscode.Uri }>,
     },
     status: vi.fn(() => Promise.resolve()),
     diff: vi.fn((_cached?: boolean) => Promise.resolve(patch)),
@@ -418,7 +419,7 @@ describe('CommitMessageService', () => {
       ?.split('\n----- END UNTRUSTED STAGED DIFF -----')[0];
     expect(sentDiff).toHaveLength(60_000);
     expect(sentDiff).toContain('retryFailedCharge');
-    expect(sentDiff).toContain('omitted staged diff content');
+    expect(sentDiff).toContain('omitted diff content');
     expect(prompt).toContain('sampled across files');
   });
 
@@ -638,7 +639,33 @@ describe('CommitMessageService', () => {
     expect(repository.inputBox.value).toBe('Handle failed charges');
   });
 
-  it('warns without calling OpenCode when there are no staged changes', async () => {
+  it('uses all unstaged changes when there are no staged changes', async () => {
+    const repository = createRepository('/repo');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push(
+      { uri: uri('/repo/src/first.ts') },
+      { uri: uri('/repo/src/second.ts') }
+    );
+    repository.diff.mockImplementation((cached?: boolean) =>
+      Promise.resolve(cached ? '' : 'diff --git a/src/first.ts b/src/first.ts\n+unstaged change')
+    );
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(repository.diff.mock.calls).toEqual([[true], [false], [false]]);
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('Create a commit message for these unstaged changes.');
+    expect(prompt).toContain('src/first.ts');
+    expect(prompt).toContain('src/second.ts');
+    expect(prompt).toContain('unstaged change');
+    expect(repository.inputBox.value).toContain('feat: generated message');
+  });
+
+  it('warns without calling OpenCode when there are no changes', async () => {
     const repository = createRepository('/repo', ' \r\n ');
     setGitRepositories([repository]);
     const { service, request, ensureServerStarted } = createService();
@@ -646,9 +673,9 @@ describe('CommitMessageService', () => {
     await service.generate();
 
     expect(repository.status).toHaveBeenCalledOnce();
-    expect(repository.diff).toHaveBeenCalledWith(true);
+    expect(repository.diff.mock.calls).toEqual([[true], [false]]);
     expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('no staged changes')
+      expect.stringContaining('no changes')
     );
     expect(ensureServerStarted).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
