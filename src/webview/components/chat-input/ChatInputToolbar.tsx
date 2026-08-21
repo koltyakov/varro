@@ -143,8 +143,12 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   showMcpControl: boolean;
-  connectedMcpCount: number;
+  enabledMcpCount: number;
+  availableMcpCount: number;
   activeLspNames: string[];
+  showLspPicker: boolean;
+  lspButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
+  onToggleLsps: () => void;
   mcpButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   onToggleMcps: () => void;
 };
@@ -280,35 +284,17 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
         </div>
 
         <div class="toolbar-meta-right">
-          <Show when={props.showMcpControl}>
-            <Tooltip
-              content={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
-            >
-              <button
-                ref={props.mcpButtonRef}
-                type="button"
-                class="toolbar-mcp-count"
-                aria-label={`${props.connectedMcpCount} connected MCP${props.connectedMcpCount === 1 ? '' : 's'}`}
-                onClick={props.onToggleMcps}
-              >
-                <span class="toolbar-mcp-count-label">
-                  <span class="toolbar-meta-full-label">MCPs:</span>
-                  <span class="toolbar-meta-compact-label" aria-hidden="true">
-                    M
-                  </span>
-                </span>
-                <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
-              </button>
-            </Tooltip>
-          </Show>
-
           <Show when={props.activeLspNames.length > 0}>
             <Tooltip
               content={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}
             >
-              <span
+              <button
+                ref={props.lspButtonRef}
+                type="button"
                 class="toolbar-lsp-count"
                 aria-label={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}
+                aria-expanded={props.showLspPicker}
+                onClick={props.onToggleLsps}
               >
                 <span class="toolbar-lsp-count-label">
                   <span class="toolbar-meta-full-label">LSPs:</span>
@@ -317,7 +303,35 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                   </span>
                 </span>
                 <span class="toolbar-lsp-count-value">{props.activeLspNames.length}</span>
-              </span>
+              </button>
+            </Tooltip>
+          </Show>
+
+          <Show when={props.showMcpControl}>
+            <Tooltip
+              content={`${props.enabledMcpCount} of ${props.availableMcpCount} MCP${props.availableMcpCount === 1 ? '' : 's'} enabled`}
+            >
+              <button
+                ref={props.mcpButtonRef}
+                type="button"
+                class="toolbar-mcp-count"
+                aria-label={`${props.enabledMcpCount} of ${props.availableMcpCount} MCP${props.availableMcpCount === 1 ? '' : 's'} enabled`}
+                onClick={props.onToggleMcps}
+              >
+                <span class="toolbar-mcp-count-label">
+                  <span class="toolbar-meta-full-label">MCPs:</span>
+                  <span class="toolbar-meta-compact-label" aria-hidden="true">
+                    M
+                  </span>
+                </span>
+                <span class="toolbar-mcp-count-value">
+                  {props.enabledMcpCount}
+                  <Show when={props.enabledMcpCount !== props.availableMcpCount}>
+                    <span class="toolbar-mcp-count-separator">/</span>
+                    {props.availableMcpCount}
+                  </Show>
+                </span>
+              </button>
             </Tooltip>
           </Show>
 

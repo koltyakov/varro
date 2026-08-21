@@ -817,7 +817,9 @@ describe('ChatInput', () => {
 
     const mcpCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
     expect(mcpCount?.textContent).toContain('MCPs:');
-    expect(mcpCount?.textContent).toContain('2');
+    expect(mcpCount?.textContent).toContain('2/4');
+    expect(mcpCount?.getAttribute('aria-label')).toBe('2 of 4 MCPs enabled');
+    expect(mcpCount?.querySelector('.toolbar-mcp-count-separator')?.textContent).toBe('/');
 
     mcpCount?.click();
     await waitForDropdown();
@@ -840,7 +842,7 @@ describe('ChatInput', () => {
       gamma: { status: 'failed' },
       delta: { status: 'disabled' },
     });
-    expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('0');
+    expect(container?.querySelector('.toolbar-mcp-count')?.textContent).toContain('0/4');
 
     setState('mcpStatus', {
       alpha: { status: 'disabled' },
@@ -849,7 +851,7 @@ describe('ChatInput', () => {
       delta: { status: 'disabled' },
     });
     const disconnectedCount = container?.querySelector<HTMLButtonElement>('.toolbar-mcp-count');
-    expect(disconnectedCount?.textContent).toContain('0');
+    expect(disconnectedCount?.textContent).toContain('0/4');
   });
 
   it('hides the MCP control while editing a message', async () => {
@@ -867,7 +869,20 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
   });
 
-  it('shows active LSPs in the status row', () => {
+  it('shows one MCP count when every available MCP is enabled', () => {
+    setState('mcpStatus', { alpha: { status: 'connected' } });
+    const availableNames = Object.keys(state.mcpStatus);
+    setState('draftSelectedMcps', availableNames);
+    cleanup = render(() => ChatInput(), container!);
+
+    const mcpValue = container?.querySelector('.toolbar-mcp-count-value');
+    expect(mcpValue?.textContent).toBe(String(availableNames.length));
+    expect(mcpValue?.textContent).not.toContain('/');
+    expect(mcpValue?.querySelector('.toolbar-mcp-count-separator')).toBeNull();
+  });
+
+  it('shows active LSPs before MCPs and opens a read-only list', async () => {
+    setState('mcpStatus', { docs: { status: 'connected' } });
     cleanup = render(() => ChatInput(), container!);
 
     expect(container?.querySelector('.toolbar-lsp-count')).toBeNull();
@@ -877,10 +892,25 @@ describe('ChatInput', () => {
       { id: 'oxlint', name: 'Oxlint', root: '/repo', status: 'connected' },
     ]);
 
-    const lspCount = container?.querySelector('.toolbar-lsp-count');
+    const lspCount = container?.querySelector<HTMLButtonElement>('.toolbar-lsp-count');
     expect(lspCount?.textContent).toContain('LSPs:');
     expect(lspCount?.textContent).toContain('2');
     expect(lspCount?.getAttribute('aria-label')).toContain('Oxlint, TypeScript');
+    expect(
+      Array.from(container?.querySelectorAll('.toolbar-lsp-count, .toolbar-mcp-count') ?? []).map(
+        (element) => element.className
+      )
+    ).toEqual(['toolbar-lsp-count', 'toolbar-mcp-count']);
+
+    lspCount?.click();
+    await waitForDropdown();
+
+    const dropdown = container?.querySelector('.dropdown-menu');
+    expect(dropdown?.textContent).toContain('LSPs');
+    expect(dropdown?.textContent).toContain('Oxlint');
+    expect(dropdown?.textContent).toContain('TypeScript');
+    expect(dropdown?.querySelectorAll('.lsp-picker-item')).toHaveLength(2);
+    expect(dropdown?.querySelector('button')).toBeNull();
   });
 
   it('shows all available provider-limit windows under the fixed threshold', () => {

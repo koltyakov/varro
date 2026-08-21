@@ -126,6 +126,14 @@
   color: var(--color-vscode-fg);
 }
 
+.lsp-picker-item {
+  cursor: default;
+}
+
+.lsp-picker-item:hover {
+  background: none;
+}
+
 .dropdown-check {
   display: flex;
   align-items: center;
@@ -201,6 +209,7 @@
 }
 
 .mcp-status-tag.status-failed,
+.mcp-status-tag.status-error,
 .mcp-status-tag.status-needs_auth,
 .mcp-status-tag.status-needs_client_registration {
   color: color-mix(in srgb, var(--color-vscode-muted) 76%, var(--color-vscode-warning));

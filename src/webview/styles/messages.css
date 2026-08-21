@@ -2147,6 +2147,7 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-right {
   flex: 0 0 auto;
+  gap: 4px;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {

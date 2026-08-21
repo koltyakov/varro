@@ -52,6 +52,7 @@ import {
   getCurrentDocumentEnabled,
   getProviderLimit,
   getModelDisplayName,
+  getSelectedMcpsForSession,
   toggleCurrentDocumentEnabled,
   getActiveUsageLimitNotice,
   isActiveSessionWorking,
@@ -244,6 +245,9 @@ const LazyModelPicker = lazy(() =>
 );
 const LazyMcpPicker = lazy(() =>
   import('./McpPicker').then((module) => ({ default: module.McpPicker }))
+);
+const LazyLspPicker = lazy(() =>
+  import('./LspPicker').then((module) => ({ default: module.LspPicker }))
 );
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
@@ -579,6 +583,8 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   let modelPopoverRef: HTMLDivElement | undefined;
   let mcpPickerRef: HTMLButtonElement | undefined;
   let mcpPopoverRef: HTMLDivElement | undefined;
+  let lspPickerRef: HTMLButtonElement | undefined;
+  let lspPopoverRef: HTMLDivElement | undefined;
   let toolbarRef: HTMLDivElement | undefined;
   let toolbarLeftRef: HTMLDivElement | undefined;
   let toolbarRightRef: HTMLDivElement | undefined;
@@ -606,6 +612,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   } | null>(null);
   const [showProviderLimitPopup, setShowProviderLimitPopup] = createSignal(false);
   const [showMcpPicker, setShowMcpPicker] = createSignal(false);
+  const [showLspPicker, setShowLspPicker] = createSignal(false);
   const [editSelectedModel, setEditSelectedModel] = createSignal<RalphSelectedModel | null>(null);
   const composerSessionId = () => (props.newSession ? null : state.activeSessionId);
   const composerEditingMessage = () => (props.newSession ? null : editingMessage());
@@ -676,6 +683,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     | 'context'
     | 'providerLimit'
     | 'busy'
+    | 'lsp'
     | 'mcp';
   const closePopups = (except?: PopupKind) => {
     if (except !== 'workspace') setShowWorkspacePicker(false);
@@ -683,6 +691,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (except !== 'variant') setShowVariantPicker(false);
     if (except !== 'model') setShowModelPicker(false);
     if (except !== 'mcp') setShowMcpPicker(false);
+    if (except !== 'lsp') setShowLspPicker(false);
     if (except !== 'permission') setShowPermissionModePicker(false);
     if (except !== 'context') setShowContextPopup(false);
     if (except !== 'providerLimit') setShowProviderLimitPopup(false);
@@ -694,6 +703,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     showVariantPicker() ||
     showModelPicker() ||
     showMcpPicker() ||
+    showLspPicker() ||
     showPermissionModePicker() ||
     showContextPopup() ||
     showProviderLimitPopup() ||
@@ -1394,6 +1404,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     () =>
       showModelPicker() ||
       showMcpPicker() ||
+      showLspPicker() ||
       showAgentPicker() ||
       showVariantPicker() ||
       showPermissionModePicker() ||
@@ -2628,6 +2639,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         setShowAgentPicker(false);
         setShowModelPicker(false);
         setShowMcpPicker(false);
+        setShowLspPicker(false);
         setShowVariantPicker(false);
         setShowPermissionModePicker(false);
         setShowBusyMenu(false);
@@ -2657,6 +2669,9 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       if (showMcpPicker() && clickedOutside(target, mcpPickerRef, mcpPopoverRef)) {
         setShowMcpPicker(false);
+      }
+      if (showLspPicker() && clickedOutside(target, lspPickerRef, lspPopoverRef)) {
+        setShowLspPicker(false);
       }
       if (showVariantPicker() && clickedOutside(target, variantPickerRef, variantPopoverRef)) {
         setShowVariantPicker(false);
@@ -2732,6 +2747,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         showVariantPicker() ||
         showModelPicker() ||
         showMcpPicker() ||
+        showLspPicker() ||
         showPermissionModePicker()
       )
         return;
@@ -3063,14 +3079,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
   const currentProviderLimitBadges = createMemo(() =>
     showCurrentProviderLimit() ? getProviderLimitCompactBadges(currentCompactProviderLimit()) : []
   );
-  const mcpStatuses = createMemo(() => Object.values(state.mcpStatus));
-  const connectedMcpCount = createMemo(
-    () => mcpStatuses().filter((status) => status.status === 'connected').length
-  );
-  const showMcpControl = createMemo(() => {
-    const statuses = mcpStatuses();
-    return statuses.length > 0;
+  const availableMcpNames = createMemo(() => Object.keys(state.mcpStatus));
+  const enabledMcpCount = createMemo(() => {
+    const available = new Set(availableMcpNames());
+    return (getSelectedMcpsForSession(composerSessionId()) ?? []).filter((name) =>
+      available.has(name)
+    ).length;
   });
+  const showMcpControl = createMemo(() => availableMcpNames().length > 0);
   const activeLspNames = createMemo(() =>
     state.lspStatus
       .map((status) => status.name)
@@ -3147,6 +3163,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     showVariantPicker: showVariantPicker(),
     showModelPicker: showModelPicker(),
     showMcpPicker: showMcpPicker(),
+    showLspPicker: showLspPicker(),
     showPermissionModePicker: showPermissionModePicker(),
     showBusyMenu: showBusyMenu(),
     showContextPopup: showContextPopup(),
@@ -3360,6 +3377,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       deps.showVariantPicker ||
       deps.showModelPicker ||
       deps.showMcpPicker ||
+      deps.showLspPicker ||
       deps.showPermissionModePicker
     )
       return;
@@ -3370,7 +3388,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
 
   return (
     <div
-      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
+      class={`interactive-input-part ${composerEditingMessage() ? ' editing-message' : ''} ${showModelPicker() ? 'model-picker-open' : ''} ${showMcpPicker() || showLspPicker() ? 'mcp-picker-open' : ''} ${showMentionCompletionMenu() ? 'mention-completion-open' : ''}`}
     >
       <Show when={isDraggingOver()}>
         <DropOverlay />
@@ -3508,11 +3526,21 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           </Suspense>
         </Show>
 
+        <Show when={showLspPicker()}>
+          <Suspense>
+            <LazyLspPicker
+              items={state.lspStatus}
+              onClose={() => setShowLspPicker(false)}
+              popoverRef={(el) => (lspPopoverRef = el)}
+            />
+          </Suspense>
+        </Show>
+
         <div
           ref={(el) => {
             inputFrameRef = el;
           }}
-          class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
+          class={`chat-input-container ${isFocused() ? 'focused' : ''} ${showModelPicker() || showMcpPicker() || showLspPicker() ? 'showing-model-picker' : ''} ${showAgentPicker() || showVariantPicker() || showMcpPicker() || showLspPicker() || showBusyMenu() || (isFocused() && showCompletionMenu()) ? 'showing-context-popup' : ''}`}
           style={{
             'min-height': sendComposerMinHeight() ? `${sendComposerMinHeight()}px` : undefined,
           }}
@@ -3615,6 +3643,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
               setShowAgentPicker(false);
               setShowModelPicker(false);
               setShowMcpPicker(false);
+              setShowLspPicker(false);
               setShowVariantPicker(false);
               setShowPermissionModePicker(false);
               setShowBusyMenu(false);
@@ -3862,8 +3891,18 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
-          connectedMcpCount={connectedMcpCount()}
+          enabledMcpCount={enabledMcpCount()}
+          availableMcpCount={availableMcpNames().length}
           activeLspNames={composerEditingMessage() ? [] : activeLspNames()}
+          showLspPicker={showLspPicker()}
+          lspButtonRef={(el) => {
+            lspPickerRef = el;
+          }}
+          onToggleLsps={() => {
+            const next = !showLspPicker();
+            closePopups(next ? 'lsp' : undefined);
+            setShowLspPicker(next);
+          }}
           mcpButtonRef={(el) => {
             mcpPickerRef = el;
           }}
