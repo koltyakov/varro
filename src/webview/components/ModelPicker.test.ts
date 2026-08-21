@@ -179,7 +179,7 @@ describe('ModelPicker', () => {
     await flushMicrotasks();
 
     expect(container?.querySelector('.model-picker-details')).toBeNull();
-    vi.advanceTimersByTime(2_999);
+    vi.advanceTimersByTime(1_999);
     expect(container?.querySelector('.model-picker-details')).toBeNull();
     vi.advanceTimersByTime(1);
     await flushMicrotasks();

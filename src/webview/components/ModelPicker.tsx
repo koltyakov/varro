@@ -23,7 +23,7 @@ interface ModelSelection {
 
 const DEBUG_ANIMATE_MANAGE_MODELS = false; // set to true to always animate the "Manage models" button when opening the model picker
 const STACKED_DETAILS_MAX_WIDTH = 700;
-const STACKED_DETAILS_HOVER_DELAY_MS = 3_000;
+const STACKED_DETAILS_HOVER_DELAY_MS = 2_000;
 
 export function ModelPicker(props: {
   onSelect: (sel: ModelSelection) => void;
