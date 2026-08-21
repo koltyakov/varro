@@ -126,10 +126,19 @@ function ReasoningBlock(props: {
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
-  // A previous instance of this block auto-expanded a streaming run that has
-  // not settled yet. Rows are recreated on every part commit, so the in-life
-  // collapse may never observe the stream end; settle the auto-open on mount.
-  const settledPendingAutoCollapse = takeReasoningAutoOpened(currentExpansionKey);
+  // A message settles when it completes or errors. The final reasoning part of
+  // a still-running step ends before the message settles, so its end must not
+  // collapse a block that later rows of the same run keep visible.
+  const isMessageSettled = () => {
+    const info = props.messageInfo;
+    if (!info) return props.part.time.end !== undefined;
+    return info.time.completed !== undefined || info.error !== undefined;
+  };
+  // A previous instance of this block auto-expanded a streaming run and the
+  // message has settled. Rows are recreated on every part commit, so the
+  // pending auto-open may never observe the settle; settle it on mount.
+  const settledPendingAutoCollapse =
+    isMessageSettled() && takeReasoningAutoOpened(currentExpansionKey);
   if (settledPendingAutoCollapse) {
     setMessageBlockExpanded(currentExpansionKey, false);
   }
@@ -156,7 +165,8 @@ function ReasoningBlock(props: {
   createEffect(() => {
     const nextExpansionKey = expansionKey();
     if (nextExpansionKey === currentExpansionKey) return;
-    const nextSettledPendingAutoCollapse = takeReasoningAutoOpened(nextExpansionKey);
+    const nextSettledPendingAutoCollapse =
+      isMessageSettled() && takeReasoningAutoOpened(nextExpansionKey);
     if (nextSettledPendingAutoCollapse) {
       setMessageBlockExpanded(nextExpansionKey, false);
     }
@@ -222,7 +232,7 @@ function ReasoningBlock(props: {
       }
       autoOpened = true;
       markReasoningAutoOpened(expansionKey());
-    } else if (!streaming && autoManaged && autoOpened) {
+    } else if (isMessageSettled() && autoManaged && autoOpened) {
       setExpanded(false);
       setMessageBlockExpanded(expansionKey(), false);
       clearReasoningAutoOpened(expansionKey());
