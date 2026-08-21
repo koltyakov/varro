@@ -965,9 +965,15 @@ describe('MarkdownRenderer', () => {
     expect(sanitizeSpy.mock.calls.length - initialSanitizeCalls).toBe(1);
   });
 
-  it('skips file-path linkification in the streaming tail', async () => {
+  it('linkifies complete file references in the streaming tail', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
     cleanup = render(
-      () => MarkdownRenderer({ content: 'Stable paragraph\n\n./src/webview/App.tsx' }),
+      () => MarkdownRenderer({ content: 'Stable paragraph\n\n`./src/webview/App.tsx`' }),
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -980,8 +986,223 @@ describe('MarkdownRenderer', () => {
     );
 
     expect(stableLinks).toHaveLength(0);
-    expect(tailLinks).toHaveLength(0);
-    expect(container?.textContent).toContain('./src/webview/App.tsx');
+    expect(tailLinks).toHaveLength(1);
+    expect(tailLinks?.[0]?.textContent).toBe('App.tsx');
+    expect(tailLinks?.[0]?.getAttribute('title')).toBe('/repo/src/webview/App.tsx');
+  });
+
+  it('holds an unclosed inline-code suffix until its delimiter arrives', async () => {
+    const [content, setContent] = createSignal(
+      'The related tests are in `src/webview/components/Markdown'
+    );
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const paragraph = container?.querySelector('[data-markdown-segment="tail"] p');
+    expect(paragraph?.textContent).toBe('The related tests are in ');
+    expect(container?.textContent).not.toContain('src/webview/components/Markdown');
+
+    setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.querySelector('[data-markdown-segment="tail"] p')).toBe(paragraph);
+    expect(container?.textContent).not.toContain('MarkdownRenderer.test.ts');
+
+    setContent('The related tests are in `src/webview/components/MarkdownRenderer.test.ts`');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+    expect(link?.textContent).toBe('MarkdownRenderer.test.ts');
+    expect(link?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
+    expect(container?.textContent).not.toContain('src/webview/components/');
+  });
+
+  it('holds an unfinished Markdown link until its destination closes', async () => {
+    const [content, setContent] = createSignal(
+      'Explicit local links use standard Markdown syntax. Open [the renderer implementation'
+    );
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+
+    cleanup = render(
+      () =>
+        createComponent(MarkdownRenderer, {
+          get content() {
+            return content();
+          },
+        }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.textContent?.trimEnd()).toBe(
+      'Explicit local links use standard Markdown syntax. Open'
+    );
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
+
+    setContent(
+      'Explicit local links use standard Markdown syntax. Open [the renderer implementation]'
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent?.trimEnd()).toBe(
+      'Explicit local links use standard Markdown syntax. Open'
+    );
+
+    setContent(
+      'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/'
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent?.trimEnd()).toBe(
+      'Explicit local links use standard Markdown syntax. Open'
+    );
+
+    setContent(
+      'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test'
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(container?.textContent?.trimEnd()).toBe(
+      'Explicit local links use standard Markdown syntax. Open the renderer implementation or'
+    );
+    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(1);
+
+    setContent(
+      'Explicit local links use standard Markdown syntax. Open [the renderer implementation](src/webview/components/MarkdownRenderer.tsx) or [its test suite](src/webview/components/MarkdownRenderer.test.ts)'
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+    expect(links).toHaveLength(2);
+    expect(links?.[1]?.textContent).toBe('its test suite');
+    expect(links?.[1]?.title).toBe('/repo/src/webview/components/MarkdownRenderer.test.ts');
+  });
+
+  it('holds and linkifies trailing bare paths across path styles', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const cases = [
+      {
+        partial: 'packages/client/components/FileTypeIcon',
+        complete: 'packages/client/components/FileTypeIcon.tsx',
+        title: '/repo/packages/client/components/FileTypeIcon.tsx',
+      },
+      {
+        partial: '../shared/components/FileTypeIcon',
+        complete: '../shared/components/FileTypeIcon.tsx',
+        title: '/repo/../shared/components/FileTypeIcon.tsx',
+      },
+      {
+        partial: '/opt/project/components/FileTypeIcon',
+        complete: '/opt/project/components/FileTypeIcon.tsx',
+        title: '/opt/project/components/FileTypeIcon.tsx',
+      },
+      {
+        partial: String.raw`packages\client\components\FileTypeIcon`,
+        complete: String.raw`packages\client\components\FileTypeIcon.tsx`,
+        title: '/repo/packages/client/components/FileTypeIcon.tsx',
+      },
+      {
+        partial: String.raw`C:\work\project\components\FileTypeIcon`,
+        complete: String.raw`C:\work\project\components\FileTypeIcon.tsx`,
+        title: 'C:/work/project/components/FileTypeIcon.tsx',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const [content, setContent] = createSignal(`Bare path: ${testCase.partial}`);
+      cleanup = render(
+        () =>
+          createComponent(MarkdownRenderer, {
+            get content() {
+              return content();
+            },
+          }),
+        container!
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      expect(container?.textContent?.trimEnd()).toBe('Bare path:');
+
+      setContent(`Bare path: ${testCase.complete}`);
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+      const link = container?.querySelector<HTMLAnchorElement>('a.file-path-link');
+      expect(link?.textContent).toBe('FileTypeIcon.tsx');
+      expect(link?.title).toBe(testCase.title);
+
+      cleanup();
+      cleanup = undefined;
+      container!.innerHTML = '';
+    }
+  });
+
+  it('links Windows paths in inline code without withholding URLs', async () => {
+    setState('editorContext', {
+      workspacePath: '/repo',
+      activeFile: null,
+      selection: null,
+      diagnostics: [],
+    });
+    const content =
+      'Windows: `C:\\work\\project\\App.tsx` and [open it](C:\\work\\project\\App.tsx)\n\nURL: https://example.test/folder/App';
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    const links = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+    expect(links).toHaveLength(2);
+    expect(links?.[0]?.textContent).toBe('App.tsx');
+    expect(links?.[0]?.title).toBe('C:/work/project/App.tsx');
+    expect(links?.[1]?.textContent).toBe('open it');
+    expect(links?.[1]?.title).toBe('C:/work/project/App.tsx');
+    expect(container?.textContent).toContain('https://example.test/folder/App');
+  });
+
+  it('does not hold escaped backticks or content inside a streaming fence', async () => {
+    const content = [
+      'An escaped \\`backtick remains visible.',
+      '',
+      '```ts',
+      'const path = `src/webview/components/Markdown',
+    ].join('\n');
+
+    cleanup = render(() => MarkdownRenderer({ content }), container!);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.textContent).toContain('An escaped `backtick remains visible.');
+    expect(container?.textContent).toContain('src/webview/components/Markdown');
+    expect(container?.querySelector('.interactive-result-code-block')).not.toBeNull();
+  });
+
+  it('shows unmatched inline code when the response is already complete', async () => {
+    cleanup = render(
+      () => MarkdownRenderer({ content: 'Malformed `inline content', cacheByContent: true }),
+      container!
+    );
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
+    expect(container?.textContent).toContain('Malformed `inline content');
   });
 
   it('linkifies mixed-text file references when streaming completes', async () => {
@@ -1006,7 +1227,10 @@ describe('MarkdownRenderer', () => {
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.querySelectorAll('a.file-path-link')).toHaveLength(0);
+    const streamingLinks = container?.querySelectorAll<HTMLAnchorElement>('a.file-path-link');
+    expect(streamingLinks).toHaveLength(2);
+    expect(streamingLinks?.[0]?.textContent).toBe('protocol.ts');
+    expect(streamingLinks?.[1]?.textContent).toBe('onboarding-verification.md');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
@@ -1018,6 +1242,8 @@ describe('MarkdownRenderer', () => {
     expect(links?.[1]?.textContent).toBe('onboarding-verification.md');
     expect(links?.[1]?.title).toBe('/repo/docs/onboarding-verification.md');
     expect(container?.querySelectorAll('.file-path-icon')).toHaveLength(2);
+    expect(links?.[0]).toBe(streamingLinks?.[0]);
+    expect(links?.[1]).toBe(streamingLinks?.[1]);
   });
 
   it('preserves stable markdown DOM when streaming completes', async () => {
@@ -1044,15 +1270,16 @@ describe('MarkdownRenderer', () => {
 
     const stableSegment = container?.querySelector<HTMLElement>('[data-markdown-segment="stable"]');
     const stableParagraph = stableSegment?.firstElementChild;
+    const streamingLink = container?.querySelector('a.file-path-link');
     expect(stableParagraph?.textContent).toBe('Stable paragraph.');
-    expect(container?.querySelector('a.file-path-link')).toBeNull();
+    expect(streamingLink?.textContent).toBe('protocol.ts');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
 
     expect(stableSegment?.firstElementChild).toBe(stableParagraph);
     expect(stableSegment?.style.display).toBe('contents');
-    expect(container?.querySelector('a.file-path-link')?.textContent).toBe('protocol.ts');
+    expect(container?.querySelector('a.file-path-link')).toBe(streamingLink);
   });
 
   it('does not revert final rendering when completion briefly regresses', async () => {
@@ -1076,12 +1303,13 @@ describe('MarkdownRenderer', () => {
       container!
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-    expect(container?.querySelector('a.file-path-link')).toBeNull();
+    const streamingLink = container?.querySelector('a.file-path-link');
+    expect(streamingLink?.textContent).toBe('protocol.ts');
 
     setCompleted(true);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
     const finalLink = container?.querySelector('a.file-path-link');
-    expect(finalLink?.textContent).toBe('protocol.ts');
+    expect(finalLink).toBe(streamingLink);
 
     setCompleted(false);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));

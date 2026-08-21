@@ -532,11 +532,21 @@ marked.setOptions({
   breaks: false,
 });
 
-const FILE_PATH_RE =
-  /(?:^|[\s(])(`?)(\.?\/?(?:[\w.-]+\/)*[\w.-]+\.[\w]+(?::\d+(?:-\d+)?|\s+\(line \d+(?:-\d+)?\))?)(`?)(?=[\s),.]|$)/gi;
-const FILE_PATH_REFERENCE_RE =
-  /^\.?\/?(?:[\w.-]+\/)*(?:[\w.-]+\.[\w]+|dockerfile|license|makefile|\.(?:gitignore|npmrc|nvmrc))(?::\d+(?:-\d+)?|\s+\(line \d+(?:-\d+)?\))?$/i;
+const PATH_SEPARATOR_SOURCE = String.raw`[\\/]`;
+const PATH_SEGMENT_CHARS_SOURCE = String.raw`[\w.@+-]`;
+const PATH_SEGMENT_SOURCE = String.raw`${PATH_SEGMENT_CHARS_SOURCE}+`;
+const PATH_ROOT_SOURCE = String.raw`(?:[A-Za-z]:[\\/]|\/|\.\.?[\\/])`;
+const FILE_NAME_SOURCE = String.raw`(?:[\w.@+-]+\.[\w]+|dockerfile|license|makefile|\.(?:gitignore|npmrc|nvmrc))`;
+const FILE_LINE_SUFFIX_SOURCE = String.raw`(?::\d+(?:-\d+)?|\s+\(line \d+(?:-\d+)?\))?`;
+const FILE_PATH_REFERENCE_SOURCE = String.raw`(?:${PATH_ROOT_SOURCE})?(?:${PATH_SEGMENT_SOURCE}${PATH_SEPARATOR_SOURCE})*${FILE_NAME_SOURCE}${FILE_LINE_SUFFIX_SOURCE}`;
+const FILE_PATH_RE = new RegExp(
+  '(?:^|[\\s(])(`?)(' + FILE_PATH_REFERENCE_SOURCE + ')(`?)(?=[\\s),.<]|$)',
+  'gi'
+);
+const FILE_PATH_REFERENCE_RE = new RegExp(`^${FILE_PATH_REFERENCE_SOURCE}$`, 'i');
 const FILE_PATH_CANDIDATE_RE = /\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/;
+const TRAILING_PATH_SOURCE = String.raw`(?:${PATH_ROOT_SOURCE}(?:${PATH_SEGMENT_SOURCE}${PATH_SEPARATOR_SOURCE})*${PATH_SEGMENT_CHARS_SOURCE}*|(?:${PATH_SEGMENT_SOURCE}${PATH_SEPARATOR_SOURCE})+${PATH_SEGMENT_CHARS_SOURCE}*)(?::\d*)?`;
+const TRAILING_BARE_PATH_CANDIDATE_RE = new RegExp(`(?:^|[\\s(])(${TRAILING_PATH_SOURCE})$`);
 const SPECIAL_FILE_NAMES = new Set([
   '.gitignore',
   '.npmrc',
@@ -544,6 +554,14 @@ const SPECIAL_FILE_NAMES = new Set([
   'dockerfile',
   'license',
   'makefile',
+]);
+const CANONICAL_SPECIAL_FILE_NAMES = new Set([
+  '.gitignore',
+  '.npmrc',
+  '.nvmrc',
+  'Dockerfile',
+  'LICENSE',
+  'Makefile',
 ]);
 const PRESERVED_HTML_PLACEHOLDER_RE = /@@VARRO_PRESERVE_(\d+)@@/g;
 const MARKDOWN_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
@@ -579,26 +597,30 @@ function cancelIdleWork(handle: IdleWorkHandle | null) {
 function isLocalFileHref(href: string | null): boolean {
   if (!href) return false;
   if (href.startsWith('#')) return false;
+  if (/^[A-Za-z]:[/\\]/.test(href)) return true;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
   if (href.startsWith('//')) return false;
   return (
     href.startsWith('/') ||
     href.startsWith('./') ||
     href.startsWith('../') ||
-    /^[A-Za-z]:[/\\]/.test(href) ||
     FILE_PATH_REFERENCE_RE.test(href)
   );
 }
 
-function isLikelyFilePathReference(raw: string): boolean {
+function isLikelyFilePathReference(raw: string, requireCanonicalSpecialName = false): boolean {
   const parsed = splitPathReference(raw);
   if (!parsed || !FILE_PATH_REFERENCE_RE.test(raw.trim())) return false;
 
   const path = normalizePath(parsed.path);
   if (path.includes('/') || isAbsolutePath(path)) return true;
 
-  const filename = getLeafPathName(path).toLowerCase();
-  return SPECIAL_FILE_NAMES.has(filename) || hasRecognizedFileType(filename);
+  const filename = getLeafPathName(path);
+  const normalizedFilename = filename.toLowerCase();
+  if (SPECIAL_FILE_NAMES.has(normalizedFilename)) {
+    return !requireCanonicalSpecialName || CANONICAL_SPECIAL_FILE_NAMES.has(filename);
+  }
+  return hasRecognizedFileType(normalizedFilename);
 }
 
 function sanitizeAnchorHref(anchor: HTMLAnchorElement) {
@@ -926,6 +948,114 @@ function getMarkdownRenderSegments(
   return getStreamingMarkdownSegments(content, previousScanState);
 }
 
+function isEscapedMarkdownDelimiter(content: string, index: number, lineStart: number) {
+  let backslashCount = 0;
+  for (
+    let previous = index - 1;
+    previous >= lineStart && content[previous] === '\\';
+    previous -= 1
+  ) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function hideUnclosedStreamingMarkdown(content: string) {
+  let index = 0;
+  let openFence: MarkdownFenceState | null = null;
+  let inlineStart: number | null = null;
+  let inlineDelimiterLength = 0;
+  const linkLabelStarts: number[] = [];
+  let linkDestinationStart: number | null = null;
+  let linkParenthesisDepth = 0;
+
+  while (index < content.length) {
+    const nextBreak = content.indexOf('\n', index);
+    const lineEnd = nextBreak === -1 ? content.length : nextBreak;
+    const rawLine = content.slice(index, lineEnd);
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const fenceMatch =
+      inlineStart === null && linkDestinationStart === null ? line.match(MARKDOWN_FENCE_RE) : null;
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1]!;
+      if (!openFence) {
+        openFence = { char: marker[0]!, length: marker.length };
+      } else if (marker[0] === openFence.char && marker.length >= openFence.length) {
+        openFence = null;
+      }
+    } else if (!openFence) {
+      let cursor = index;
+      while (cursor < lineEnd) {
+        const character = content[cursor]!;
+        if (linkDestinationStart !== null) {
+          if (isEscapedMarkdownDelimiter(content, cursor, index)) {
+            cursor += 2;
+            continue;
+          }
+          if (character === '(') {
+            linkParenthesisDepth += 1;
+          } else if (character === ')') {
+            linkParenthesisDepth -= 1;
+            if (linkParenthesisDepth === 0) linkDestinationStart = null;
+          }
+          cursor += 1;
+          continue;
+        }
+
+        if (character === '`') {
+          let runEnd = cursor + 1;
+          while (runEnd < lineEnd && content[runEnd] === '`') runEnd += 1;
+          const delimiterLength = runEnd - cursor;
+          if (!isEscapedMarkdownDelimiter(content, cursor, index)) {
+            if (inlineStart === null) {
+              inlineStart = cursor;
+              inlineDelimiterLength = delimiterLength;
+            } else if (delimiterLength === inlineDelimiterLength) {
+              inlineStart = null;
+              inlineDelimiterLength = 0;
+            }
+          }
+          cursor = runEnd;
+          continue;
+        }
+
+        if (inlineStart === null && !isEscapedMarkdownDelimiter(content, cursor, index)) {
+          if (character === '[') {
+            linkLabelStarts.push(cursor);
+          } else if (character === ']') {
+            const labelStart = linkLabelStarts.pop();
+            if (labelStart !== undefined && content[cursor + 1] === '(') {
+              linkDestinationStart = labelStart;
+              linkParenthesisDepth = 1;
+              cursor += 2;
+              continue;
+            }
+            if (labelStart !== undefined && cursor === content.length - 1) {
+              linkLabelStarts.push(labelStart);
+            }
+          }
+        }
+
+        cursor += 1;
+      }
+    }
+
+    index = nextBreak === -1 ? content.length : nextBreak + 1;
+  }
+
+  const hiddenStarts = [inlineStart, linkDestinationStart, ...linkLabelStarts].filter(
+    (start): start is number => start !== null
+  );
+  const visibleContent =
+    hiddenStarts.length === 0 ? content : content.slice(0, Math.min(...hiddenStarts));
+  const trailingPath = visibleContent.match(TRAILING_BARE_PATH_CANDIDATE_RE);
+  if (!trailingPath || isLikelyFilePathReference(trailingPath[1]!)) return visibleContent;
+
+  const candidateStart = trailingPath.index! + trailingPath[0].length - trailingPath[1]!.length;
+  return visibleContent.slice(0, candidateStart);
+}
+
 function isAppendOnlySafeMarkdown(content: string) {
   for (const line of content.split(/\r?\n/)) {
     if (!line) continue;
@@ -1026,7 +1156,7 @@ function linkifyPaths(html: string): string {
   html = html.replace(
     FILE_PATH_RE,
     (full, openingTick: string, path: string, closingTick: string) => {
-      if (!isLikelyFilePathReference(path)) return full;
+      if (!isLikelyFilePathReference(path, true)) return full;
       const link = buildFileLink(path);
       if (!link) return full;
       return full.replace(
@@ -1421,9 +1551,12 @@ export function MarkdownRenderer(props: MarkdownProps) {
         allowMermaidHydration: lw(),
       })
     : '';
-  let lastAppliedTailHtml = parseMarkdown(initialSegments.tailContent, {
+  const initialTailRenderContent = props.cacheByContent
+    ? initialSegments.tailContent
+    : hideUnclosedStreamingMarkdown(initialSegments.tailContent);
+  let lastAppliedTailHtml = parseMarkdown(initialTailRenderContent, {
     cacheByContent: initialSegments.stableContent.length === 0 && !!props.cacheByContent,
-    disablePathLinkify: !props.cacheByContent || lw(),
+    disablePathLinkify: lw(),
     disableCodeHighlighting: initialSegments.hasUnclosedFence || lw(),
     allowMermaidHydration: lw() && !initialSegments.hasUnclosedFence,
   });
@@ -1450,9 +1583,9 @@ export function MarkdownRenderer(props: MarkdownProps) {
       if (sessionContextKey !== lastAppliedSessionContextKey) return;
       if (content !== lastAppliedTailContent) return;
 
-      const highlightedTailHtml = parseMarkdown(content, {
+      const highlightedTailHtml = parseMarkdown(hideUnclosedStreamingMarkdown(content), {
         cacheByContent: false,
-        disablePathLinkify: !props.cacheByContent,
+        disablePathLinkify: false,
       });
       if (highlightedTailHtml === lastAppliedTailHtml) return;
 
@@ -1535,13 +1668,18 @@ export function MarkdownRenderer(props: MarkdownProps) {
         !segments.hasUnclosedFence &&
         hasCompletedHighlightableFence(segments.tailContent);
       const nextTailHtml = tailContentChanged
-        ? parseMarkdown(segments.tailContent, {
-            cacheByContent: segments.stableContent.length === 0 && cacheByContent,
-            disablePathLinkify: !cacheByContent || isLightweight,
-            disableCodeHighlighting:
-              segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
-            allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
-          })
+        ? parseMarkdown(
+            cacheByContent
+              ? segments.tailContent
+              : hideUnclosedStreamingMarkdown(segments.tailContent),
+            {
+              cacheByContent: segments.stableContent.length === 0 && cacheByContent,
+              disablePathLinkify: isLightweight,
+              disableCodeHighlighting:
+                segments.hasUnclosedFence || shouldDeferTailHighlight || isLightweight,
+              allowMermaidHydration: isLightweight && !segments.hasUnclosedFence,
+            }
+          )
         : lastAppliedTailHtml;
 
       const stableChanged = nextStableHtml !== lastAppliedStableHtml;

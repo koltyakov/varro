@@ -2640,6 +2640,10 @@ kbd {
   padding-bottom: 0px;
 }
 
+.chat-turn-user .user-message-card:has(.message-image-carousel) {
+  width: min(78%, 720px);
+}
+
 .user-message-content-has-image > .chat-image-figure:not(.message-image-carousel-figure) {
   padding: 0;
   overflow: hidden;

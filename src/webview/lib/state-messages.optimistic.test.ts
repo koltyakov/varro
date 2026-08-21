@@ -442,6 +442,40 @@ describe('optimistic image part de-duplication', () => {
     expect(partIds()).toEqual([['server-image']]);
   });
 
+  it('preserves multi-image order while canonical parts arrive', () => {
+    upsertMessage({
+      info: userMessage('msg-1'),
+      parts: [
+        imagePart('msg-1-optimistic-file-0', 'msg-1', {
+          filename: 'first.png',
+          url: 'data:image/png;base64,FIRST',
+        }),
+        imagePart('msg-1-optimistic-file-1', 'msg-1', {
+          filename: 'second.png',
+          url: 'data:image/png;base64,SECOND',
+        }),
+      ],
+    });
+
+    upsertPart(
+      imagePart('server-image-1', 'msg-1', {
+        filename: 'first.png',
+        url: 'data:image/png;base64,FIRST',
+      })
+    );
+
+    expect(partIds()).toEqual([['server-image-1', 'msg-1-optimistic-file-1']]);
+
+    upsertPart(
+      imagePart('server-image-2', 'msg-1', {
+        filename: 'second.png',
+        url: 'data:image/png;base64,SECOND',
+      })
+    );
+
+    expect(partIds()).toEqual([['server-image-1', 'server-image-2']]);
+  });
+
   it('replaces the optimistic image when the server rewrites its url', () => {
     seedServerMessageWithOptimisticImage();
     upsertPart(imagePart('server-image', 'msg-1', { url: 'https://cdn/img.png' }));

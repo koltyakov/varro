@@ -1444,6 +1444,59 @@ test('image previews reserve stable 16:9 frames before loading', async ({ page }
   expect(resizedFrame.width / resizedFrame.height).toBeCloseTo(16 / 9, 2);
 });
 
+test('multi-image messages use one normalized responsive width', async ({ page }) => {
+  await page.setViewportSize({ width: 552, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await expect(page.locator('.interactive-session')).toBeVisible();
+
+  await page.locator('.interactive-session').evaluate((root) => {
+    for (const text of ['Short', 'A longer message with image attachment chips']) {
+      const turn = document.createElement('div');
+      turn.className = 'chat-turn chat-turn-user';
+      const card = document.createElement('div');
+      card.className = 'value chat-turn-content chat-turn-card user-message-card';
+      const content = document.createElement('div');
+      content.className = 'rendered-markdown user-message-content-has-image';
+      const message = document.createElement('p');
+      message.className = 'user-message-text';
+      message.textContent = text;
+      const carousel = document.createElement('div');
+      carousel.className = 'message-image-carousel';
+      carousel.innerHTML = `
+        <div class="message-image-carousel-frame">
+          <div class="message-image-carousel-slide">
+            <figure class="chat-image-figure message-image-carousel-figure">
+              <button class="chat-image-preview-trigger message-image-carousel-preview-trigger">
+                <img class="chat-image-img" />
+              </button>
+              <figcaption class="chat-image-caption message-image-carousel-caption-row">
+                1 / 2 · Image 1 · image/png
+              </figcaption>
+            </figure>
+          </div>
+        </div>`;
+      content.append(message, carousel);
+      card.append(content);
+      turn.append(card);
+      root.append(turn);
+    }
+  });
+
+  const cards = page.locator('.user-message-card:has(.message-image-carousel)');
+  const frames = cards.locator('.message-image-carousel-preview-trigger');
+  const cardWidths = await cards.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().width)
+  );
+  const frameWidths = await frames.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().width)
+  );
+
+  expect(cardWidths).toHaveLength(2);
+  expect(frameWidths).toHaveLength(2);
+  expect(cardWidths[0]).toBeCloseTo(cardWidths[1]!, 1);
+  expect(frameWidths[0]).toBeCloseTo(frameWidths[1]!, 1);
+});
+
 test('the first image message does not overlap the sticky prompt', async ({ page }) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto('/e2e/harness/index.html?scenario=sticky-preview');

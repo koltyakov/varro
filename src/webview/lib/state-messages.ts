@@ -146,7 +146,10 @@ export function upsertPart(part: Part) {
             return;
           }
         }
-        removeAcknowledgedOptimisticImageFilePart(msgs[idx]!, nextPart);
+        const optimisticImageIndex = removeAcknowledgedOptimisticImageFilePart(
+          msgs[idx]!,
+          nextPart
+        );
         const location = messageIndex.findPartLocation(msgs, nextPart.id);
         if (location && location.msgIdx === idx) {
           const currentPart = msgs[idx]!.parts[location.partIdx];
@@ -159,6 +162,11 @@ export function upsertPart(part: Part) {
           ) {
             messageIndex.notifyPartContentChange();
           }
+          return;
+        }
+        if (optimisticImageIndex !== -1) {
+          msgs[idx]!.parts.splice(optimisticImageIndex, 0, nextPart);
+          messageIndex.invalidate();
           return;
         }
         msgs[idx]!.parts.push(nextPart);
@@ -768,7 +776,7 @@ function removeAcknowledgedOptimisticImageFilePart(entry: MessageEntry, incoming
     !isImageFilePart(incoming) ||
     isOptimisticImageFilePart(incoming)
   ) {
-    return;
+    return -1;
   }
   const matchingIndex = entry.parts.findIndex(
     (part) => isOptimisticImageFilePart(part) && areMatchingImageFileParts(part, incoming)
@@ -777,9 +785,10 @@ function removeAcknowledgedOptimisticImageFilePart(entry: MessageEntry, incoming
     matchingIndex !== -1
       ? matchingIndex
       : entry.parts.findIndex((part) => isOptimisticImageFilePart(part));
-  if (index === -1) return;
+  if (index === -1) return -1;
   entry.parts.splice(index, 1);
   messageIndex.invalidate();
+  return index;
 }
 
 function isImageFilePart(part: Part): part is Extract<Part, { type: 'file' }> {
