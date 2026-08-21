@@ -65,6 +65,7 @@ export function WorkspacePicker(props: {
           ref={props.buttonRef}
           class="toolbar-picker"
           aria-label="Select workspace folder"
+          aria-expanded={props.showPicker}
           onClick={props.onToggle}
         >
           <FolderIcon width={14} height={14} />
@@ -192,6 +193,7 @@ export function PermissionModePicker(props: {
           class={`toolbar-picker permission-mode-button ${props.showLabel ? '' : 'icon-only'}`}
           onClick={props.onToggle}
           aria-label={title()}
+          aria-expanded={props.showPicker}
         >
           <PermissionModeIcon mode={props.mode} />
           <Show when={props.showLabel}>
@@ -325,6 +327,7 @@ export function AgentPicker(props: {
           class="toolbar-picker"
           onClick={props.onToggle}
           aria-label="Select agent"
+          aria-expanded={props.showPicker}
         >
           <span class="toolbar-picker-label">{props.selectedLabel}</span>
           <PickerChevron />
@@ -407,6 +410,7 @@ export function VariantPicker(props: {
           class="toolbar-picker"
           onClick={props.onToggle}
           aria-label="Thinking level"
+          aria-expanded={props.showPicker}
         >
           <span class="toolbar-picker-label">{props.selectedLabel}</span>
           <PickerChevron />
@@ -448,6 +452,7 @@ export function ModelPickerButton(props: {
   providerName: string;
   modelName: string;
   canEllipsize: boolean;
+  expanded?: boolean;
   onToggle: () => void;
 }) {
   const label = () =>
@@ -460,6 +465,7 @@ export function ModelPickerButton(props: {
         class={`toolbar-picker model-picker-btn ${props.canEllipsize ? 'model-ellipsis' : ''}`}
         onClick={props.onToggle}
         aria-label={label()}
+        aria-expanded={props.expanded ?? false}
       >
         <Show
           when={props.modelName}

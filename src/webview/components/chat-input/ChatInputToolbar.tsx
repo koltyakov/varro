@@ -135,6 +135,7 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
   workspaceFolders: WorkspaceFolderContext[];
   selectedWorkspacePath: string | null;
   showWorkspacePicker: boolean;
+  showModelPicker: boolean;
   workspaceButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   workspacePopoverRef?: HTMLDivElement | ((el: HTMLDivElement) => void);
   onToggleWorkspacePicker: () => void;
@@ -143,6 +144,7 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   showMcpControl: boolean;
+  showMcpPicker: boolean;
   enabledMcpCount: number;
   availableMcpCount: number;
   activeLspNames: string[];
@@ -198,6 +200,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
           providerName={props.currentModel.providerName}
           modelName={props.currentModel.modelName}
           canEllipsize={props.modelCanEllipsize}
+          expanded={props.showModelPicker}
           onToggle={props.onToggleModelPicker}
         />
 
@@ -230,6 +233,7 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
             <SendControls
               showBusyControls={props.showBusySendControls}
               showBusyOptions={props.showBusySendOptions}
+              busyMenuOpen={props.showBusyMenu}
               canSend={props.canSend}
               busyToggleRef={props.busyToggleRef}
               onSend={props.onSend}
@@ -316,6 +320,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 type="button"
                 class="toolbar-mcp-count"
                 aria-label={`${props.enabledMcpCount} of ${props.availableMcpCount} MCP${props.availableMcpCount === 1 ? '' : 's'} enabled`}
+                aria-expanded={props.showMcpPicker}
                 onClick={props.onToggleMcps}
               >
                 <span class="toolbar-mcp-count-label">

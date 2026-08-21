@@ -15,6 +15,7 @@ function SendIcon(props: { size: number }) {
 export function SendControls(props: {
   showBusyControls: boolean;
   showBusyOptions: boolean;
+  busyMenuOpen: boolean;
   canSend: boolean;
   busyToggleRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   onSend: () => void;
@@ -66,6 +67,7 @@ export function SendControls(props: {
               class="send-mode-options"
               onClick={props.onToggleBusyMenu}
               aria-label="More send options"
+              aria-expanded={props.busyMenuOpen}
             >
               <svg
                 width="12"

@@ -81,7 +81,7 @@ export function Tooltip(props: {
   };
 
   const show = () => {
-    if (props.disabled) return;
+    if (props.disabled || trigger?.getAttribute('aria-expanded') === 'true') return;
     if (showTimer) clearTimeout(showTimer);
     showTimer = setTimeout(() => {
       showTimer = undefined;
@@ -129,12 +129,22 @@ export function Tooltip(props: {
     triggerElement.addEventListener('focusin', show);
     triggerElement.addEventListener('focusout', handleFocusOut);
     triggerElement.addEventListener('keydown', handleKeyDown);
+    triggerElement.addEventListener('click', hide);
+    const expandedObserver = new MutationObserver(() => {
+      if (triggerElement.getAttribute('aria-expanded') === 'true') hide();
+    });
+    expandedObserver.observe(triggerElement, {
+      attributes: true,
+      attributeFilter: ['aria-expanded'],
+    });
     onCleanup(() => {
       triggerElement.removeEventListener('mouseenter', show);
       triggerElement.removeEventListener('mouseleave', hide);
       triggerElement.removeEventListener('focusin', show);
       triggerElement.removeEventListener('focusout', handleFocusOut);
       triggerElement.removeEventListener('keydown', handleKeyDown);
+      triggerElement.removeEventListener('click', hide);
+      expandedObserver.disconnect();
       if (previousDescription) {
         triggerElement.setAttribute('aria-describedby', previousDescription);
       } else {

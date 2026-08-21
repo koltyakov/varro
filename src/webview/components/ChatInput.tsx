@@ -3782,6 +3782,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
             }}
             currentModel={currentModel()}
             modelCanEllipsize={modelCanEllipsize()}
+            showModelPicker={showModelPicker()}
             onToggleModelPicker={() => {
               const next = !showModelPicker();
               closePopups(next ? 'model' : undefined);
@@ -3891,6 +3892,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           compactTight={toolbarCompactMode() === 'tight'}
           inputFrameRef={inputFrameRef}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
+          showMcpPicker={showMcpPicker()}
           enabledMcpCount={enabledMcpCount()}
           availableMcpCount={availableMcpNames().length}
           activeLspNames={composerEditingMessage() ? [] : activeLspNames()}

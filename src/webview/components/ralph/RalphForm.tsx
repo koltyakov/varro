@@ -395,6 +395,7 @@ export function RalphForm() {
                     providerName={currentModelInfo().providerName}
                     modelName={currentModelInfo().modelName}
                     canEllipsize={true}
+                    expanded={showModelPicker()}
                     onToggle={() => {
                       setShowVariantPicker(false);
                       setShowModelPicker(!showModelPicker());

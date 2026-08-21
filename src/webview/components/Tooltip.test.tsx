@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_TOOLTIP_DELAY, Tooltip } from './Tooltip';
@@ -77,6 +78,30 @@ describe('Tooltip', () => {
     container.querySelector('button')?.dispatchEvent(new MouseEvent('mouseenter'));
     await vi.runAllTimersAsync();
 
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it('hides and stays hidden while a dropdown is expanded', async () => {
+    const [expanded, setExpanded] = createSignal(false);
+    cleanup = render(
+      () => (
+        <Tooltip content="Choose an option" delay={0}>
+          <button aria-expanded={expanded()}>Choose</button>
+        </Tooltip>
+      ),
+      container
+    );
+
+    const button = container.querySelector('button');
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.runAllTimersAsync();
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+
+    setExpanded(true);
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull());
+
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.runAllTimersAsync();
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 });
