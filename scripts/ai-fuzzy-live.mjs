@@ -80,6 +80,82 @@ export function buildLivePrompt({ seed, attempt, missing = [] }) {
   return `${marker} The live UI gate is still missing: ${missing.join(', ')}. ${requests.join('; ')}. Do not repeat completed work, commit, change branches, install dependencies, or touch files outside this repository. Continue until the requested tool activity is underway, then finish with VFZ-TOOLS-END.`;
 }
 
+export function buildDuplicateDeliveryPrompt(seed, tokens) {
+  return `[VFZ:${seed}:DUP] Respond with only these tokens, one per line, exactly once each, in this order:\n${tokens.join('\n')}\nDo not repeat, quote, explain, or use tools.`;
+}
+
+export function duplicateDeliveryFailures(observation, sawBusy) {
+  const failures = [];
+  if (!sawBusy) failures.push('active model stream was not observed');
+  if (!observation?.userSeen) failures.push('sent user prompt was not observed');
+  if (!observation?.assistantSeen) failures.push('assistant stream was not observed');
+  if (!observation?.tokenSeen?.every(Boolean)) failures.push('not every required stream token was observed');
+  if ((observation?.maxUserRows ?? 0) > 1) failures.push('sent user prompt rendered more than once');
+  if ((observation?.maxAssistantRows ?? 0) > 1) failures.push('assistant response rendered in multiple rows');
+  if (observation?.maxTokenCounts?.some((count) => count > 1)) {
+    failures.push('a streamed token rendered more than once');
+  }
+  return failures;
+}
+
+export function buildDuplicateDeliveryObserverExpression(marker, tokens) {
+  return `(() => {
+    globalThis.__varroDuplicateDeliveryObserver?.stop();
+    const marker = ${JSON.stringify(marker)};
+    const tokens = ${JSON.stringify(tokens)};
+    const observation = {
+      frames: 0,
+      userSeen: false,
+      assistantSeen: false,
+      maxUserRows: 0,
+      maxAssistantRows: 0,
+      maxTokenCounts: tokens.map(() => 0),
+      tokenSeen: tokens.map(() => false),
+      firstViolation: null,
+    };
+    let active = true;
+    const sample = () => {
+      if (!active) return;
+      observation.frames += 1;
+      const userRows = [...document.querySelectorAll('.chat-turn-user')].filter((row) =>
+        row.textContent?.includes(marker)
+      );
+      const assistantRows = [...document.querySelectorAll('.chat-turn-assistant')].filter((row) =>
+        tokens.some((token) => row.textContent?.includes(token))
+      );
+      const assistantText = assistantRows.map((row) => row.textContent ?? '').join('\\n');
+      const tokenCounts = tokens.map((token) => assistantText.split(token).length - 1);
+      observation.userSeen ||= userRows.length > 0;
+      observation.assistantSeen ||= assistantRows.length > 0;
+      observation.maxUserRows = Math.max(observation.maxUserRows, userRows.length);
+      observation.maxAssistantRows = Math.max(observation.maxAssistantRows, assistantRows.length);
+      tokenCounts.forEach((count, index) => {
+        observation.maxTokenCounts[index] = Math.max(observation.maxTokenCounts[index], count);
+        observation.tokenSeen[index] ||= count > 0;
+      });
+      if (!observation.firstViolation && (
+        userRows.length > 1 ||
+        assistantRows.length > 1 ||
+        tokenCounts.some((count) => count > 1)
+      )) {
+        observation.firstViolation = {
+          frame: observation.frames,
+          userRows: userRows.length,
+          assistantRows: assistantRows.length,
+          tokenCounts,
+        };
+      }
+      requestAnimationFrame(sample);
+    };
+    globalThis.__varroDuplicateDeliveryObserver = {
+      observation,
+      stop() { active = false; },
+    };
+    requestAnimationFrame(sample);
+    return true;
+  })()`;
+}
+
 class OpenCodeClient {
   constructor(server, workspace) {
     this.server = server.replace(/\/$/, '');
@@ -319,6 +395,32 @@ class CdpController {
     return true;
   }
 
+  async sendComposerPrompt(prompt) {
+    if (!(await this.click('[aria-label="Message composer"]'))) return false;
+    await this.call('Input.insertText', { text: prompt });
+    for (const type of ['keyDown', 'keyUp']) {
+      await this.call('Input.dispatchKeyEvent', {
+        type,
+        key: 'Enter',
+        code: 'Enter',
+      });
+    }
+    return true;
+  }
+
+  startDuplicateDeliveryObservation(marker, tokens) {
+    return this.evaluate(buildDuplicateDeliveryObserverExpression(marker, tokens));
+  }
+
+  finishDuplicateDeliveryObservation() {
+    return this.evaluate(`(() => {
+      const observer = globalThis.__varroDuplicateDeliveryObserver;
+      if (!observer) return null;
+      observer.stop();
+      return observer.observation;
+    })()`);
+  }
+
   close() {
     this.socket.close();
   }
@@ -375,6 +477,15 @@ async function waitForIdle(client, sessionId, timeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return true;
+}
+
+async function waitForBusy(client, sessionId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await client.isBusy(sessionId)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
 }
 
 async function nestedHandoff(cdp) {
@@ -477,7 +588,9 @@ async function runLive(options) {
   const manifestPath = path.resolve(required(options, 'manifest'));
   const launchPath = path.resolve(required(options, 'launch'));
   const scenario = options.scenario ?? 'AI-07';
-  if (!['AI-07', 'AI-08'].includes(scenario)) throw new Error('--scenario must be AI-07 or AI-08');
+  if (!['AI-07', 'AI-08', 'AI-17'].includes(scenario)) {
+    throw new Error('--scenario must be AI-07, AI-08, or AI-17');
+  }
   const maxPrompts = Number(options['max-prompts'] ?? DEFAULT_MAX_PROMPTS);
   const timeoutMs = Number(options['gate-timeout-ms'] ?? DEFAULT_GATE_TIMEOUT_MS);
   if (!Number.isInteger(maxPrompts) || maxPrompts < 1 || maxPrompts > 4) {
@@ -510,6 +623,53 @@ async function runLive(options) {
     await openRunSession(cdp, tracked.title);
     await cdp.click('[aria-label="Scroll to latest message"]');
     await cdp.key('.interactive-list', 'End');
+    if (scenario === 'AI-17') {
+      const tokens = [
+        ...Array.from({ length: 20 }, (_, index) =>
+          `VFZ-DUP-${String(index + 1).padStart(2, '0')}`
+        ),
+        'VFZ-DUP-END',
+      ];
+      const marker = `[VFZ:${manifest.seed}:DUP]`;
+      const prompt = buildDuplicateDeliveryPrompt(manifest.seed, tokens);
+      await cdp.startDuplicateDeliveryObservation(marker, tokens);
+      const sent = await cdp.sendComposerPrompt(prompt);
+      const sawBusy = sent && (await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)));
+      const settled = sawBusy ? await waitForIdle(client, tracked.id, timeoutMs) : false;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const observation = await cdp.finishDuplicateDeliveryObservation();
+      const failures = sent
+        ? duplicateDeliveryFailures(observation, sawBusy)
+        : ['native composer input was unavailable'];
+      if (!settled) failures.push('model stream did not settle');
+      const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
+      if (
+        fixtureAfterPreparation.status !== fixture.status ||
+        fixtureAfterPreparation.commit !== fixture.commit
+      ) {
+        failures.push('controlled stream changed the repository fixture');
+      }
+      const result = {
+        scenario,
+        prepared: failures.length === 0,
+        prompt,
+        model: options.model ?? DEFAULT_MODEL,
+        sent,
+        sawBusy,
+        settled,
+        observation,
+        failures,
+        fixtureAfterPreparation,
+      };
+      manifest.livePreparation ??= {};
+      manifest.livePreparation[scenario] = { ...result, recordedAt: new Date().toISOString() };
+      await writeJsonAtomic(manifestPath, manifest);
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      if (failures.length > 0) {
+        throw new Error(`AI-17 failed: ${failures.join('; ')}`);
+      }
+      return;
+    }
     for (let attempt = 1; attempt <= maxPrompts; attempt += 1) {
       const idleDeadline = Date.now() + timeoutMs;
       while (await client.isBusy(tracked.id)) {
@@ -587,7 +747,9 @@ async function runLive(options) {
 async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (command === 'run') return runLive(options);
-  throw new Error('Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08');
+  throw new Error(
+    'Usage: ai-fuzzy-live.mjs run --manifest <path> --launch <path> --scenario AI-07|AI-08|AI-17'
+  );
 }
 
 if (path.resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {

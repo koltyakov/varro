@@ -983,6 +983,115 @@
   margin-left: 4px;
 }
 
+.settings-provider-models-button {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  color: var(--color-vscode-fg);
+  font-size: 10px;
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--color-vscode-border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.settings-provider-models-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.settings-model-catalog-dialog {
+  height: min(560px, calc(100vh - 32px));
+}
+
+.settings-model-catalog-search {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-vscode-border);
+}
+
+.settings-model-catalog-body {
+  padding: 0;
+}
+
+.settings-model-catalog-empty {
+  padding: 24px 14px;
+  text-align: center;
+}
+
+.settings-model-catalog-loading {
+  padding: 28px 14px;
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.settings-model-catalog-error {
+  margin: 12px 14px 8px;
+}
+
+.settings-model-catalog-list {
+  padding: 4px 0;
+}
+
+.settings-model-catalog-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 9px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.settings-model-catalog-row:hover {
+  background: var(--color-vscode-hover);
+}
+
+.settings-model-catalog-name,
+.settings-model-catalog-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-model-catalog-name {
+  font-size: 12px;
+}
+
+.settings-model-catalog-id {
+  grid-column: 2;
+  color: var(--color-vscode-muted);
+  font-size: 10px;
+}
+
+.settings-model-catalog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-vscode-border);
+}
+
+.settings-model-catalog-status {
+  color: var(--color-vscode-muted);
+  font-size: 11px;
+}
+
+.settings-model-catalog-actions {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
+@media (max-width: 480px) {
+  .settings-model-catalog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-model-catalog-actions {
+    width: 100%;
+  }
+}
+
 @media (min-width: 960px) {
   :root {
     --color-vscode-chat-scrollbar-thumb: var(--color-vscode-chat-scrollbar-thumb-desktop);

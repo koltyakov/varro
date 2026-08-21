@@ -672,10 +672,32 @@ Run these when the changed area, observed behavior, or user request calls for th
 | `AI-14` | Theme, font, high contrast, and DPI reflow | Typography, CSS, icons, scrollbar geometry, or VS Code theme integration changed |
 | `AI-15` | Abort, reconnect, and reload during streaming | Transport, abort, persistence, server lifecycle, or busy state changed |
 | `AI-16` | Huge code, table, terminal, and nested scrollers | Markdown, tool cards, terminal attachments, or wheel ownership changed |
+| `AI-17` | Duplicate delivery during send and streaming | Webview bridge startup, listener lifecycle, optimistic messages, or event delivery changed |
 
 For each extended scenario, combine the named mutation with `AI-02` reflow, `AI-06` detached
 streaming, the realistic `tmp/opencode` workflow when tools or edits are relevant, and the ownership
 invariants relevant to the changed component.
+
+### AI-17 Duplicate Delivery During Send And Streaming
+
+Precondition: a dedicated Extension Development Host with a prepared run session open at the latest
+message and Luna or Terra selected.
+
+Run the frame-level duplicate oracle through the live controller:
+
+```sh
+npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-17
+```
+
+The controller sends one marked prompt through native composer input, requests 21 unique tokens, and
+samples the real Varro DOM on every animation frame until the stream settles.
+
+Pass invariants:
+
+- The marked user prompt appears in exactly one user row in every sampled frame after it first appears.
+- The response occupies exactly one assistant row in every sampled frame.
+- Every required token appears, and no token appears more than once in any sampled frame.
+- The stream enters busy state, settles, and does not modify the repository fixture.
 
 ## Failure Oracle
 

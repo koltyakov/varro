@@ -1,3 +1,4 @@
+/* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- SAFETY: Assertions access test-only fields installed by the controlled E2E harness. */
 import { expect, test } from '@playwright/test';
 import {
   getScrollMetrics,
@@ -98,6 +99,69 @@ test.describe('scroll stability regressions', () => {
 });
 
 test.describe('rapid streaming bottom follow', () => {
+  test('renders each streamed chunk and assistant row at most once in every frame', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
+    await expect(page.locator('.interactive-list')).toBeVisible();
+
+    const markers = Array.from(
+      { length: 8 },
+      (_, index) => `VFZ-DUP-${String(index + 1).padStart(2, '0')}`
+    );
+    await page.evaluate((streamMarkers) => {
+      const harness = window as Window & {
+        streamingDuplicateSamples?: Array<{ rowCount: number; tokenCounts: number[] }>;
+      };
+      harness.streamingDuplicateSamples = [];
+      const sample = () => {
+        const row = document.querySelector<HTMLElement>(
+          '[data-msg-id="message-rapid-assistant-streaming"]'
+        );
+        const text = row?.textContent ?? '';
+        harness.streamingDuplicateSamples?.push({
+          rowCount: document.querySelectorAll('[data-msg-id="message-rapid-assistant-streaming"]')
+            .length,
+          tokenCounts: streamMarkers.map((marker) => text.split(marker).length - 1),
+        });
+        if ((harness.streamingDuplicateSamples?.length ?? 0) < 80) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, markers);
+
+    for (const marker of markers) {
+      await appendDeltaToRapidStreaming(page, `\n${marker}`);
+      await waitForAnimationFrames(page, 3);
+    }
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { streamingDuplicateSamples?: unknown[] }).streamingDuplicateSamples
+              ?.length ?? 0
+        )
+      )
+      .toBe(80);
+
+    const samples = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            streamingDuplicateSamples?: Array<{ rowCount: number; tokenCounts: number[] }>;
+          }
+        ).streamingDuplicateSamples ?? []
+    );
+    expect(
+      samples.every(
+        (sample) => sample.rowCount === 1 && sample.tokenCounts.every((count) => count <= 1)
+      ),
+      JSON.stringify(samples)
+    ).toBe(true);
+    await expect(page.locator('[data-msg-id="message-rapid-assistant-streaming"]')).toContainText(
+      markers.at(-1)!
+    );
+  });
+
   test('keeps bottom follow engaged across varying streaming delta sizes', async ({ page }) => {
     await page.goto('/e2e/harness/index.html?scenario=rapid-streaming-jitter');
     const list = page.locator('.interactive-list');

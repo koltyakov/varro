@@ -4,12 +4,17 @@ import { asRecord } from '../../shared/type-utils';
 import {
   isModelPinned,
   isModelVisible,
+  getListedProviderModels,
   getModelDisplayName,
+  isLargeModelCatalog,
+  setModelsAdded,
   setModelDisplayName,
   setModelPinned,
   setModelVisible,
+  setModelsVisible,
   setProviderVisible,
   setShowSettings,
+  setState,
   state,
 } from '../lib/state';
 import { formatContextLimit, formatModelReleaseDate } from '../lib/format';
@@ -61,6 +66,7 @@ type ModelRouteTag = {
 
 const MIN_RELOAD_INDICATOR_MS = 500;
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
+const MODEL_CATALOG_RESULT_LIMIT = 50;
 
 function routableAgents() {
   return state.allAgents.filter((agent) => agent.mode === 'subagent');
@@ -76,6 +82,9 @@ export function ModelsPanel() {
   const [previousRouting, setPreviousRouting] = createSignal<OpenCodeModelRouting | null>(null);
   const [contextMenu, setContextMenu] = createSignal<ModelContextMenuState | null>(null);
   const [renameDialog, setRenameDialog] = createSignal<ModelRenameState | null>(null);
+  const [modelCatalogProvider, setModelCatalogProvider] = createSignal<SettingsProvider | null>(
+    null
+  );
   const [isSaving, setIsSaving] = createSignal(false);
   const [isReloading, setIsReloading] = createSignal(false);
   const [providerConnectionData, setProviderConnectionData] = createSignal<{
@@ -120,7 +129,7 @@ export function ModelsPanel() {
 
     return state.providers
       .map((provider) => {
-        const models = sortProviderModels(Object.values(provider.models));
+        const models = sortProviderModels(getListedProviderModels(provider));
 
         if (!search) return { provider, models };
 
@@ -139,7 +148,7 @@ export function ModelsPanel() {
               ),
         };
       })
-      .filter((entry) => entry.models.length > 0)
+      .filter((entry) => entry.models.length > 0 || isLargeModelCatalog(entry.provider))
       .toSorted((a, b) => compareProviders(a.provider, b.provider));
   });
   const maxCapabilityCount = createMemo(() =>
@@ -489,6 +498,7 @@ export function ModelsPanel() {
                     routing={routing()}
                     previousRouting={state.providerRefreshPending ? previousRouting() : null}
                     onOpenContextMenu={(next) => setContextMenu(next)}
+                    onOpenModelCatalog={() => setModelCatalogProvider(provider)}
                   />
                 )}
               </For>
@@ -725,6 +735,11 @@ export function ModelsPanel() {
           />
         )}
       </Show>
+      <Show when={modelCatalogProvider()} keyed>
+        {(provider) => (
+          <ModelCatalogDialog provider={provider} onClose={() => setModelCatalogProvider(null)} />
+        )}
+      </Show>
       <Show when={providerDisconnectionData()}>
         {(data) => (
           <ProviderDisconnectionDialog
@@ -740,6 +755,225 @@ export function ModelsPanel() {
   );
 }
 
+function ModelCatalogDialog(props: { provider: SettingsProvider; onClose: () => void }) {
+  const [query, setQuery] = createSignal('');
+  const [catalogProvider, setCatalogProvider] = createSignal<SettingsProvider>(props.provider);
+  const [isLoading, setIsLoading] = createSignal(true);
+  const [loadError, setLoadError] = createSignal('');
+  const allModels = createMemo(() => sortProviderModels(Object.values(catalogProvider().models)));
+  const modelKeyPrefix = `${props.provider.id}:`;
+  const initialModelIDs = new Set(
+    state.addedModels
+      .filter((key) => key.startsWith(modelKeyPrefix))
+      .map((key) => key.slice(modelKeyPrefix.length))
+  );
+  const [selectedModelIDs, setSelectedModelIDs] = createSignal(new Set(initialModelIDs));
+  const normalizedQuery = createMemo(() => query().trim().toLocaleLowerCase());
+  const hasChanges = createMemo(() => {
+    const selected = selectedModelIDs();
+    return (
+      selected.size !== initialModelIDs.size ||
+      [...selected].some((modelID) => !initialModelIDs.has(modelID))
+    );
+  });
+  const changeCount = createMemo(() => {
+    const selected = selectedModelIDs();
+    let count = 0;
+    for (const modelID of selected) {
+      if (!initialModelIDs.has(modelID)) count += 1;
+    }
+    for (const modelID of initialModelIDs) {
+      if (!selected.has(modelID)) count += 1;
+    }
+    return count;
+  });
+  const matchingModels = createMemo(() => {
+    const search = normalizedQuery();
+    if (!search) {
+      return allModels().filter(
+        (model) => initialModelIDs.has(model.id) || selectedModelIDs().has(model.id)
+      );
+    }
+    return allModels().filter((model) =>
+      [model.name, model.id].some((value) => value.toLocaleLowerCase().includes(search))
+    );
+  });
+  const visibleModels = createMemo(() => matchingModels().slice(0, MODEL_CATALOG_RESULT_LIMIT));
+  let searchInputRef: HTMLInputElement | undefined;
+
+  onMount(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const result = await client.config.providers();
+        if (!active) return;
+        const refreshedProvider = result.providers.find(
+          (provider) => provider.id === props.provider.id
+        );
+        if (!refreshedProvider) {
+          throw new Error(`${props.provider.name} is no longer available`);
+        }
+        setCatalogProvider(refreshedProvider);
+        setState(
+          'providers',
+          state.providers.map((provider) =>
+            provider.id === refreshedProvider.id ? refreshedProvider : provider
+          )
+        );
+        setState('providerDefaults', { ...state.providerDefaults, ...result.default });
+      } catch (error) {
+        if (!active) return;
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
+      if (!active) return;
+      setIsLoading(false);
+      queueMicrotask(() => searchInputRef?.focus());
+    })();
+    onCleanup(() => {
+      active = false;
+    });
+  });
+
+  function toggleModel(modelID: string, selected: boolean) {
+    setSelectedModelIDs((current) => {
+      const next = new Set(current);
+      if (selected) next.add(modelID);
+      else next.delete(modelID);
+      return next;
+    });
+  }
+
+  function saveChanges() {
+    if (!hasChanges()) return;
+    setModelsAdded(props.provider.id, [...selectedModelIDs()]);
+    props.onClose();
+  }
+
+  return (
+    <Portal>
+      <div
+        class="provider-connect-overlay"
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          props.onClose();
+        }}
+      >
+        <div
+          class="provider-connect-dialog settings-model-catalog-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-model-catalog-title"
+        >
+          <div class="provider-connect-header">
+            <div>
+              <div id="settings-model-catalog-title" class="provider-connect-title">
+                Manage {props.provider.name} models
+              </div>
+              <div class="provider-connect-subtitle">
+                {isLoading()
+                  ? 'Refreshing available models...'
+                  : `Search ${allModels().length} available models. Added models appear in model pickers.`}
+              </div>
+            </div>
+            <button
+              type="button"
+              class="provider-connect-close"
+              onClick={props.onClose}
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M6.758 17.243L12 12m5.243-5.243L12 12m0 0L6.758 6.757M12 12l5.243 5.243" />
+              </svg>
+            </button>
+          </div>
+          <div class="settings-model-catalog-search">
+            <input
+              ref={(element) => (searchInputRef = element)}
+              type="text"
+              class="settings-search-input"
+              value={query()}
+              onInput={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Search models by name or ID"
+              aria-label={`Search ${props.provider.name} models`}
+              autocomplete="off"
+              spellcheck={false}
+              disabled={isLoading()}
+            />
+          </div>
+          <div class="provider-connect-body settings-model-catalog-body">
+            <Show
+              when={!isLoading()}
+              fallback={
+                <div class="settings-model-catalog-loading" role="status">
+                  Refreshing model catalog...
+                </div>
+              }
+            >
+              <Show when={loadError()}>
+                {(message) => (
+                  <div class="provider-connect-error settings-model-catalog-error" role="alert">
+                    Could not refresh the catalog: {message()}. Showing cached models.
+                  </div>
+                )}
+              </Show>
+              <Show
+                when={visibleModels().length > 0}
+                fallback={
+                  <div class="provider-connect-empty settings-model-catalog-empty">
+                    {normalizedQuery() ? 'No matching models' : 'Search the catalog to add models.'}
+                  </div>
+                }
+              >
+                <div class="settings-model-catalog-list">
+                  <For each={visibleModels()}>
+                    {(model) => (
+                      <label class="settings-model-catalog-row">
+                        <input
+                          type="checkbox"
+                          class="settings-checkbox"
+                          checked={selectedModelIDs().has(model.id)}
+                          onChange={(event) => toggleModel(model.id, event.currentTarget.checked)}
+                        />
+                        <span class="settings-model-catalog-name">
+                          <FormattedModelName name={model.name} />
+                        </span>
+                        <span class="settings-model-catalog-id">{model.id}</span>
+                      </label>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+          </div>
+          <div class="settings-model-catalog-footer">
+            <span class="settings-model-catalog-status">
+              {hasChanges()
+                ? `${changeCount()} unsaved ${changeCount() === 1 ? 'change' : 'changes'}`
+                : matchingModels().length > MODEL_CATALOG_RESULT_LIMIT
+                  ? `Showing ${MODEL_CATALOG_RESULT_LIMIT} of ${matchingModels().length} matches`
+                  : `${selectedModelIDs().size} ${selectedModelIDs().size === 1 ? 'model' : 'models'} selected`}
+            </span>
+            <div class="provider-connect-actions settings-model-catalog-actions">
+              <button type="button" class="provider-connect-secondary" onClick={props.onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="provider-connect-primary"
+                disabled={isLoading() || !hasChanges()}
+                onClick={saveChanges}
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
 function ProviderSection(props: {
   provider: SettingsProvider;
   models: SettingsModel[];
@@ -749,9 +983,8 @@ function ProviderSection(props: {
   routing: OpenCodeModelRouting;
   previousRouting: OpenCodeModelRouting | null;
   onOpenContextMenu: (menu: ModelContextMenuState) => void;
+  onOpenModelCatalog: () => void;
 }) {
-  const allModels = () => Object.values(props.provider.models);
-
   const enabledCount = () =>
     props.models.filter((m) => isModelVisible(props.provider.id, m.id)).length;
 
@@ -759,7 +992,7 @@ function ProviderSection(props: {
 
   const allEnabled = () => props.models.length > 0 && enabledCount() === props.models.length;
   const someEnabled = () => enabledCount() > 0 && !allEnabled();
-  const isFullProviderView = () => props.models.length === allModels().length;
+  const isFullProviderView = () => !isLargeModelCatalog(props.provider);
   const isExpanded = () => props.forceExpanded || props.reconnectRequired || expanded();
   function toggleProvider() {
     const visible = !allEnabled();
@@ -767,10 +1000,11 @@ function ProviderSection(props: {
     if (isFullProviderView()) {
       setProviderVisible(props.provider.id, visible);
     }
-
-    for (const model of props.models) {
-      setModelVisible(props.provider.id, model.id, visible);
-    }
+    setModelsVisible(
+      props.provider.id,
+      props.models.map((model) => model.id),
+      visible
+    );
   }
 
   return (
@@ -793,15 +1027,30 @@ function ProviderSection(props: {
           </svg>
           <span class="settings-provider-name">{props.provider.name}</span>
           <span class="settings-provider-count">
-            {props.reconnectRequired ? 'Reconnect' : `${enabledCount()}/${props.models.length}`}
+            {props.reconnectRequired
+              ? 'Reconnect'
+              : isLargeModelCatalog(props.provider)
+                ? `${props.models.length} added`
+                : `${enabledCount()}/${props.models.length}`}
           </span>
         </button>
         <Show when={!props.reconnectRequired}>
-          <ProviderCheckbox
-            checked={allEnabled()}
-            indeterminate={someEnabled()}
-            onChange={toggleProvider}
-          />
+          <Show when={isLargeModelCatalog(props.provider)}>
+            <button
+              type="button"
+              class="settings-provider-models-button"
+              onClick={props.onOpenModelCatalog}
+            >
+              Add models
+            </button>
+          </Show>
+          <Show when={props.models.length > 0}>
+            <ProviderCheckbox
+              checked={allEnabled()}
+              indeterminate={someEnabled()}
+              onChange={toggleProvider}
+            />
+          </Show>
         </Show>
       </div>
 

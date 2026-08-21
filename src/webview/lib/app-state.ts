@@ -153,6 +153,7 @@ export interface AppState {
   draftSelectedMcps: string[] | null;
   hiddenProviders: string[];
   hiddenModels: string[];
+  addedModels: string[];
   pinnedModels: string[];
   modelDisplayNames: Record<string, string>;
   lastSeenSessions: Record<string, number>;
@@ -346,6 +347,7 @@ export function createAppState(): AppStateInstance {
     draftSelectedMcps: null,
     hiddenProviders: readStoredStringArray(STORAGE_KEYS.hiddenProviders),
     hiddenModels: readStoredStringArray(STORAGE_KEYS.hiddenModels),
+    addedModels: readStoredStringArray(STORAGE_KEYS.addedModels),
     pinnedModels: readStoredStringArray(STORAGE_KEYS.pinnedModels),
     modelDisplayNames: readStoredStringRecord(STORAGE_KEYS.modelDisplayNames),
     lastSeenSessions: initialLastSeenSessions,

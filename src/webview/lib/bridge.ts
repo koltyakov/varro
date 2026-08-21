@@ -29,6 +29,8 @@ type BridgeWindow = Window & {
 // SAFETY: Browser globals may carry the two optional bridge callbacks declared above.
 const bridgeWindow = window as BridgeWindow;
 
+bridgeWindow[BRIDGE_CLEANUP_KEY]?.();
+
 const messageListener = (event: MessageEvent) => {
   const msg = parseExtensionMessage(event.data);
   if (!msg) return;

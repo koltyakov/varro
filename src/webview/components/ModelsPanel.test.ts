@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
-import type { Session } from '../types';
+import type { Provider, Session } from '../types';
 import {
   markProviderAuthFailure,
   resetProviderConnectionState,
 } from '../lib/provider-connection-state';
-import { setState } from '../lib/state';
+import { setState, state } from '../lib/state';
 import { STORAGE_KEYS } from '../lib/state-storage';
 import { ModelsPanel } from './ModelsPanel';
 
@@ -36,6 +36,7 @@ declare global {
 const clientMocks = vi.hoisted(() => ({
   openCodeConfig: vi.fn(),
   saveModelRouting: vi.fn(),
+  providers: vi.fn(),
   providerAuth: vi.fn(),
   providerCatalog: vi.fn(),
   authorizeProvider: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock('../lib/client', () => ({
       saveModelRouting: clientMocks.saveModelRouting,
     },
     config: {
+      providers: clientMocks.providers,
       providerAuth: clientMocks.providerAuth,
       providerCatalog: clientMocks.providerCatalog,
       authorizeProvider: clientMocks.authorizeProvider,
@@ -95,6 +97,23 @@ function session(id: string, parentID?: string): Session {
   return value;
 }
 
+function createModels(count: number) {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => {
+      const id = `model-${index}`;
+      return [
+        id,
+        {
+          id,
+          name: `Model ${index}`,
+          capabilities: { toolcall: true },
+          cost: { input: 1, output: 1 },
+        },
+      ];
+    })
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   container = document.createElement('div');
@@ -120,6 +139,14 @@ beforeEach(() => {
   clientMocks.providerAuth.mockResolvedValue({
     openai: [{ type: 'api', label: 'API key' }],
   });
+  clientMocks.providers.mockImplementation(async () => ({
+    providers: state.providers.map((provider): Provider => ({
+      ...provider,
+      models: { ...provider.models },
+    })),
+    default: { ...state.providerDefaults },
+    defaultModel: null,
+  }));
   clientMocks.providerCatalog.mockResolvedValue({
     all: [
       {
@@ -200,9 +227,11 @@ beforeEach(() => {
   ]);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('addedModels', []);
   setState('pinnedModels', []);
   setState('modelDisplayNames', {});
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.addedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
@@ -227,9 +256,11 @@ afterEach(() => {
   setState('workspaceStatuses', []);
   setState('hiddenProviders', []);
   setState('hiddenModels', []);
+  setState('addedModels', []);
   setState('pinnedModels', []);
   setState('modelDisplayNames', {});
   window.localStorage.removeItem(STORAGE_KEYS.pinnedModels);
+  window.localStorage.removeItem(STORAGE_KEYS.addedModels);
   window.localStorage.removeItem(STORAGE_KEYS.modelDisplayNames);
   setState('providerAuthMethods', reconcile({}));
   resetProviderConnectionState();
@@ -240,6 +271,134 @@ afterEach(() => {
 });
 
 describe('ModelsPanel', () => {
+  it('keeps large catalogs out of the model list until models are added', async () => {
+    const template = {
+      capabilities: { toolcall: true },
+      cost: { input: 1, output: 1 },
+    };
+    setState('providers', [
+      {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        source: 'api',
+        models: Object.fromEntries(
+          Array.from({ length: 101 }, (_, index) => {
+            const id = `model-${index}`;
+            return [id, { ...template, id, name: `Model ${index}` }];
+          })
+        ),
+      },
+    ]);
+    setState('providerDefaults', {});
+    cleanup = render(() => ModelsPanel(), container!);
+    await Promise.resolve();
+
+    expect(container?.querySelectorAll('.settings-model-row')).toHaveLength(0);
+    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+
+    findButton(container, 'Add models')?.click();
+    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    expect(dialog?.textContent).toContain('Refreshing model catalog...');
+    expect(
+      dialog?.querySelector<HTMLInputElement>('[aria-label="Search OpenRouter models"]')?.disabled
+    ).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dialog?.querySelectorAll('.settings-model-catalog-row')).toHaveLength(0);
+    expect(dialog?.textContent).toContain('Search 101 available models');
+    expect(clientMocks.providers).toHaveBeenCalledOnce();
+
+    const search = dialog?.querySelector<HTMLInputElement>(
+      '[aria-label="Search OpenRouter models"]'
+    );
+    if (search) {
+      search.value = 'model-100';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+    const result = dialog?.querySelector<HTMLElement>('.settings-model-catalog-row');
+    expect(result?.textContent).toContain('Model 100');
+    result?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+    expect(window.localStorage.getItem(STORAGE_KEYS.addedModels)).toBeNull();
+    expect(dialog?.textContent).toContain('1 unsaved change');
+    findButton(dialog, 'Save changes')?.click();
+    await Promise.resolve();
+
+    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('1 added');
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEYS.addedModels)!)).toEqual([
+      'openrouter:model-100',
+    ]);
+
+    await Promise.resolve();
+    expect(container?.querySelectorAll('.settings-model-row')).toHaveLength(1);
+    expect(container?.querySelector('.settings-model-row')?.textContent).toContain('Model 100');
+  });
+
+  it('discards pending model catalog changes when cancelled', async () => {
+    const template = {
+      capabilities: { toolcall: true },
+      cost: { input: 1, output: 1 },
+    };
+    setState('providers', [
+      {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        source: 'api',
+        models: Object.fromEntries(
+          Array.from({ length: 51 }, (_, index) => {
+            const id = `model-${index}`;
+            return [id, { ...template, id, name: `Model ${index}` }];
+          })
+        ),
+      },
+    ]);
+    cleanup = render(() => ModelsPanel(), container!);
+
+    findButton(container, 'Add models')?.click();
+    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    await Promise.resolve();
+    await Promise.resolve();
+    const search = dialog?.querySelector<HTMLInputElement>(
+      '[aria-label="Search OpenRouter models"]'
+    );
+    if (search) {
+      search.value = 'model-50';
+      search.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    }
+    dialog?.querySelector<HTMLInputElement>('.settings-checkbox')?.click();
+    findButton(dialog, 'Cancel')?.click();
+
+    expect(document.body.querySelector('.settings-model-catalog-dialog')).toBeNull();
+    expect(container?.querySelector('.settings-provider-count')?.textContent).toBe('0 added');
+    expect(window.localStorage.getItem(STORAGE_KEYS.addedModels)).toBeNull();
+  });
+
+  it('replaces a cached large catalog with the freshly loaded models', async () => {
+    setState('providers', [
+      { id: 'openrouter', name: 'OpenRouter', source: 'api', models: createModels(360) },
+    ]);
+    clientMocks.providers.mockResolvedValue({
+      providers: [
+        { id: 'openrouter', name: 'OpenRouter', source: 'api', models: createModels(541) },
+      ],
+      default: {},
+      defaultModel: null,
+    });
+    cleanup = render(() => ModelsPanel(), container!);
+
+    findButton(container, 'Add models')?.click();
+    const dialog = document.body.querySelector<HTMLElement>('.settings-model-catalog-dialog');
+    expect(dialog?.textContent).toContain('Refreshing available models...');
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(dialog?.textContent).toContain('Search 541 available models');
+    expect(Object.keys(state.providers[0]?.models ?? {})).toHaveLength(541);
+  });
+
   it('labels the GPT Fast lightning symbol on hover', async () => {
     setState('providers', 0, 'models', 'gpt-5', 'name', 'GPT-5 Fast');
     cleanup = render(() => ModelsPanel(), container!);

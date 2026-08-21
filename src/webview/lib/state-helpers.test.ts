@@ -1237,6 +1237,39 @@ describe('state helpers', () => {
     expect(stateModule.isModelVisible('anthropic', 'claude')).toBe(true);
   });
 
+  it('lists only explicitly added models from large provider catalogs', async () => {
+    const stateModule = await loadState();
+    const openRouter = provider(
+      'openrouter',
+      Array.from({ length: 101 }, (_, index) => `model-${index}`)
+    );
+    stateModule.setState('providers', [openRouter]);
+
+    expect(stateModule.isLargeModelCatalog(openRouter)).toBe(true);
+    expect(stateModule.getVisibleProviders([openRouter])).toEqual([]);
+
+    stateModule.setModelAdded('openrouter', 'model-42', true);
+
+    expect(Object.keys(stateModule.getVisibleProviders([openRouter])[0]?.models ?? {})).toEqual([
+      'model-42',
+    ]);
+    expect(JSON.parse(window.localStorage.getItem('varro.addedModels')!)).toEqual([
+      'openrouter:model-42',
+    ]);
+
+    const refreshed = provider(
+      'openrouter',
+      Array.from({ length: 102 }, (_, index) => `model-${index}`)
+    );
+    stateModule.setState('providers', [refreshed]);
+    expect(Object.keys(stateModule.getVisibleProviders([refreshed])[0]?.models ?? {})).toEqual([
+      'model-42',
+    ]);
+
+    stateModule.setModelAdded('openrouter', 'model-42', false);
+    expect(stateModule.getVisibleProviders([refreshed])).toEqual([]);
+  });
+
   it('tracks provider limits independently per provider and model', async () => {
     const stateModule = await loadState();
 

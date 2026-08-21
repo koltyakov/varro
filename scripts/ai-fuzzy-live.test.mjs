@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 
-import { buildLivePrompt, missingLiveGates } from './ai-fuzzy-live.mjs';
+import {
+  buildDuplicateDeliveryObserverExpression,
+  buildDuplicateDeliveryPrompt,
+  buildLivePrompt,
+  duplicateDeliveryFailures,
+  missingLiveGates,
+} from './ai-fuzzy-live.mjs';
 
 const ready = {
   virtualized: true,
@@ -41,4 +48,46 @@ test('the initial task requests the content forms needed by the live gate', () =
   assert.match(prompt, /eight independent read or search tool calls/);
   assert.match(prompt, /exactly two existing source or test files/);
   assert.match(prompt, /another parallel group/);
+});
+
+test('builds the controlled duplicate-delivery stream prompt', () => {
+  const prompt = buildDuplicateDeliveryPrompt('abc', ['VFZ-DUP-01', 'VFZ-DUP-END']);
+
+  assert.match(prompt, /^\[VFZ:abc:DUP\]/);
+  assert.match(prompt, /VFZ-DUP-01\nVFZ-DUP-END/);
+  assert.match(prompt, /exactly once each/);
+});
+
+test('builds valid JavaScript for the duplicate-delivery frame observer', () => {
+  const expression = buildDuplicateDeliveryObserverExpression('[VFZ:abc:DUP]', [
+    'VFZ-DUP-01',
+    'VFZ-DUP-END',
+  ]);
+
+  assert.doesNotThrow(() => new vm.Script(expression));
+  assert.match(expression, /join\('\\n'\)/);
+});
+
+test('rejects transient duplicate user rows, assistant rows, and stream tokens', () => {
+  const complete = {
+    userSeen: true,
+    assistantSeen: true,
+    maxUserRows: 1,
+    maxAssistantRows: 1,
+    maxTokenCounts: [1, 1],
+    tokenSeen: [true, true],
+  };
+
+  assert.deepEqual(duplicateDeliveryFailures(complete, true), []);
+  assert.deepEqual(
+    duplicateDeliveryFailures(
+      { ...complete, maxUserRows: 2, maxAssistantRows: 2, maxTokenCounts: [1, 2] },
+      true
+    ),
+    [
+      'sent user prompt rendered more than once',
+      'assistant response rendered in multiple rows',
+      'a streamed token rendered more than once',
+    ]
+  );
 });

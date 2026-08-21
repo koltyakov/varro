@@ -113,8 +113,7 @@ test('undoes deleted decorated composer text without duplication', async ({ page
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 
   const composer = page.locator('.rich-composer').first();
-  const original =
-    'session:session-search-beta session:session-search-beta\nhttps://iconoir.com';
+  const original = 'session:session-search-beta session:session-search-beta\nhttps://iconoir.com';
   await composer.fill(original);
   await expect(composer.locator('.composer-session-reference')).toHaveCount(2);
   await expect(composer.locator('.composer-external-link')).toHaveCount(1);
@@ -266,13 +265,13 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
   await page.getByLabel('Add to queue (Enter)').click();
 
   await page.evaluate((promptText) => {
-    const harness = window as Window & { optimisticMessageSamples?: boolean[] };
+    const harness = window as Window & { optimisticMessageSamples?: number[] };
     harness.optimisticMessageSamples = [];
     const sample = () => {
-      const visible = [...document.querySelectorAll<HTMLElement>('.chat-turn-user')].some((row) =>
-        row.textContent?.includes(promptText)
-      );
-      harness.optimisticMessageSamples?.push(visible);
+      const visibleCount = [...document.querySelectorAll<HTMLElement>('.chat-turn-user')].filter(
+        (row) => row.textContent?.includes(promptText)
+      ).length;
+      harness.optimisticMessageSamples?.push(visibleCount);
       if ((harness.optimisticMessageSamples?.length ?? 0) < 50) requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
@@ -285,7 +284,7 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
     .poll(() =>
       page.evaluate(
         () =>
-          (window as Window & { optimisticMessageSamples?: boolean[] }).optimisticMessageSamples
+          (window as Window & { optimisticMessageSamples?: number[] }).optimisticMessageSamples
             ?.length ?? 0
       )
     )
@@ -293,11 +292,14 @@ test('keeps an optimistic steer visible through canonical parts and stale histor
 
   const samples = await page.evaluate(
     () =>
-      (window as Window & { optimisticMessageSamples?: boolean[] }).optimisticMessageSamples ?? []
+      (window as Window & { optimisticMessageSamples?: number[] }).optimisticMessageSamples ?? []
   );
-  const firstVisible = samples.indexOf(true);
+  const firstVisible = samples.findIndex((count) => count > 0);
   expect(firstVisible).toBeGreaterThanOrEqual(0);
-  expect(samples.slice(firstVisible).every(Boolean)).toBe(true);
+  expect(
+    samples.slice(firstVisible).every((count) => count === 1),
+    JSON.stringify(samples)
+  ).toBe(true);
   await expect(page.getByText(text, { exact: true })).toHaveCount(1);
 });
 

@@ -7,6 +7,8 @@ import { setState, state } from './app-state';
 import { providerRequiresReconnection } from './provider-connection-state';
 import { STORAGE_KEYS, writeStored } from './state-storage';
 
+export const LARGE_MODEL_CATALOG_THRESHOLD = 50;
+
 export function getSelectedModelForSession(
   sessionId: string | null | undefined
 ): SelectedModel | null {
@@ -202,9 +204,23 @@ export function isProviderVisible(providerID: string) {
   return !state.hiddenProviders.includes(providerID);
 }
 
+export function isLargeModelCatalog(provider: Provider) {
+  return Object.keys(provider.models).length >= LARGE_MODEL_CATALOG_THRESHOLD;
+}
+
+export function isModelAdded(providerID: string, modelID: string) {
+  return state.addedModels.includes(modelVisibilityKey(providerID, modelID));
+}
+
+export function isModelListed(providerID: string, modelID: string) {
+  const provider = state.providers.find((item) => item.id === providerID);
+  return !provider || !isLargeModelCatalog(provider) || isModelAdded(providerID, modelID);
+}
+
 export function isModelVisible(providerID: string, modelID: string) {
   return (
     isProviderVisible(providerID) &&
+    isModelListed(providerID, modelID) &&
     !state.hiddenModels.includes(modelVisibilityKey(providerID, modelID))
   );
 }
@@ -223,6 +239,51 @@ export function setModelPinned(providerID: string, modelID: string, pinned: bool
   writeStored(STORAGE_KEYS.pinnedModels, next);
 }
 
+export function setModelAdded(providerID: string, modelID: string, added: boolean) {
+  const prefix = `${providerID}:`;
+  const currentModelIDs = state.addedModels
+    .filter((item) => item.startsWith(prefix))
+    .map((item) => item.slice(prefix.length));
+  setModelsAdded(
+    providerID,
+    added
+      ? [...currentModelIDs.filter((item) => item !== modelID), modelID]
+      : currentModelIDs.filter((item) => item !== modelID)
+  );
+}
+
+export function setModelsAdded(providerID: string, modelIDs: readonly string[]) {
+  const prefix = `${providerID}:`;
+  const previousModelIDs = new Set(
+    state.addedModels
+      .filter((item) => item.startsWith(prefix))
+      .map((item) => item.slice(prefix.length))
+  );
+  const nextModelIDs = [...new Set(modelIDs)];
+  const next = [
+    ...state.addedModels.filter((item) => !item.startsWith(prefix)),
+    ...nextModelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)),
+  ];
+
+  setState('addedModels', next);
+  writeStored(STORAGE_KEYS.addedModels, next);
+
+  const newlyAddedModelIDs = nextModelIDs.filter((modelID) => !previousModelIDs.has(modelID));
+  setModelsVisible(providerID, newlyAddedModelIDs, true);
+
+  if (
+    state.selectedModel?.providerID === providerID &&
+    !nextModelIDs.includes(state.selectedModel.modelID)
+  ) {
+    setSelectedModel(null);
+  }
+}
+
+export function getListedProviderModels(provider: Provider) {
+  if (!isLargeModelCatalog(provider)) return Object.values(provider.models);
+  return Object.values(provider.models).filter((model) => isModelAdded(provider.id, model.id));
+}
+
 export function getVisibleProviders(providers: Provider[]) {
   return providers
     .filter(
@@ -231,7 +292,9 @@ export function getVisibleProviders(providers: Provider[]) {
     .map((provider) => ({
       ...provider,
       models: Object.fromEntries(
-        Object.entries(provider.models).filter(([modelID]) => isModelVisible(provider.id, modelID))
+        getListedProviderModels(provider)
+          .filter((model) => isModelVisible(provider.id, model.id))
+          .map((model) => [model.id, model])
       ),
     }))
     .filter((provider) => Object.keys(provider.models).length > 0);
@@ -289,10 +352,20 @@ export function setProviderVisible(providerID: string, visible: boolean) {
 }
 
 export function setModelVisible(providerID: string, modelID: string, visible: boolean) {
-  const key = modelVisibilityKey(providerID, modelID);
+  setModelsVisible(providerID, [modelID], visible);
+}
+
+export function setModelsVisible(
+  providerID: string,
+  modelIDs: readonly string[],
+  visible: boolean
+) {
+  const keys = new Set(modelIDs.map((modelID) => modelVisibilityKey(providerID, modelID)));
+  if (keys.size === 0) return;
+
   const next = visible
-    ? state.hiddenModels.filter((item) => item !== key)
-    : [...state.hiddenModels.filter((item) => item !== key), key];
+    ? state.hiddenModels.filter((item) => !keys.has(item))
+    : [...state.hiddenModels.filter((item) => !keys.has(item)), ...keys];
 
   setState('hiddenModels', next);
   writeStored(STORAGE_KEYS.hiddenModels, next);
@@ -304,8 +377,9 @@ export function setModelVisible(providerID: string, modelID: string, visible: bo
 
     const provider = state.providers.find((p) => p.id === providerID);
     if (provider) {
-      const otherKeys = Object.keys(provider.models)
-        .filter((id) => id !== modelID)
+      const otherKeys = getListedProviderModels(provider)
+        .map((model) => model.id)
+        .filter((id) => !modelIDs.includes(id))
         .map((id) => modelVisibilityKey(providerID, id));
       const nextHidden = [...next, ...otherKeys.filter((k) => !next.includes(k))];
       setState('hiddenModels', nextHidden);
@@ -316,7 +390,7 @@ export function setModelVisible(providerID: string, modelID: string, visible: bo
   if (
     !visible &&
     state.selectedModel?.providerID === providerID &&
-    state.selectedModel.modelID === modelID
+    modelIDs.includes(state.selectedModel.modelID)
   ) {
     setSelectedModel(null);
   }

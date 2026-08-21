@@ -66,6 +66,21 @@ describe('bridge', () => {
     expect(bridgeWindow[BRIDGE_CLEANUP_KEY]).toBeUndefined();
   });
 
+  it('disposes the previous bridge when the bundle is evaluated again', async () => {
+    const firstBridge = await loadBridge();
+    const firstHandler = vi.fn();
+    firstBridge.onMessage(firstHandler);
+
+    vi.resetModules();
+    const secondBridge = await loadBridge();
+    const secondHandler = vi.fn();
+    secondBridge.onMessage(secondHandler);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'command/focus-input' } }));
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledOnce();
+  });
+
   it('subscribes and unsubscribes message handlers', async () => {
     const bridge = await loadBridge();
     const handler = vi.fn();

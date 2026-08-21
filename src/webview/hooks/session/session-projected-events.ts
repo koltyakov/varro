@@ -18,7 +18,6 @@ type ProjectedSessionEventContext = {
   isSessionInActiveTree(sessionId: string | null | undefined): boolean;
   getMessages(): MessageEntry[];
   findAssistantMessage(sessionId: string, assistantMessageID?: string): MessageEntry | null;
-  shouldApplyTextDelta(messageID: string, partID: string, delta: string): boolean;
   scheduleActiveMessageSync(sessionId: string): void;
   syncTodosFromMessages(): void;
 };
@@ -84,9 +83,7 @@ export function createProjectedSessionEventHandler(ctx: ProjectedSessionEventCon
     if (!messageID) return false;
     if (eventName === 'session.next.text.delta') {
       const delta = getEventString(props, 'delta') || text;
-      if (delta && ctx.shouldApplyTextDelta(messageID, textID, delta)) {
-        sessionStore.applyMessagePartDelta(messageID, textID, delta, sessionId, 'text');
-      }
+      if (delta) sessionStore.applyMessagePartDelta(messageID, textID, delta, sessionId, 'text');
     }
     return true;
   };
