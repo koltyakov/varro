@@ -1,3 +1,4 @@
+import { isPlaceholderSessionTitle } from '../../shared/session-title';
 import type { Session } from '../types';
 
 export const EMPTY_SESSION_PRUNE_GRACE_MS = 5_000;
@@ -25,12 +26,12 @@ export function shouldHideEmptySessionFromList(
   session: Session,
   options: EmptySessionStateOptions
 ) {
-  if (!isEmptySession(session)) return false;
+  if (!isEmptySession(session) || !isPlaceholderSessionTitle(session.title)) return false;
   return !hasEmptySessionKeepReason(session, options);
 }
 
 export function shouldPruneEmptySession(session: Session, options: EmptySessionPruneOptions) {
-  if (!isEmptySession(session)) return false;
+  if (!isEmptySession(session) || !isPlaceholderSessionTitle(session.title)) return false;
   if (Date.now() - session.time.updated < EMPTY_SESSION_PRUNE_GRACE_MS) return false;
   return !hasEmptySessionKeepReason(session, options);
 }

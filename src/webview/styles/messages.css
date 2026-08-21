@@ -130,6 +130,12 @@
   contain: layout style;
 }
 
+/* Nested scrolling and sticky diff columns need normal paint invalidation when
+   an activity block above them collapses and moves the preview within its row. */
+.interactive-list-track.virtualized .interactive-item-container:has(.diff-view-lines) {
+  contain: layout style;
+}
+
 .interactive-item-container:has(.file-edit-more-menu) {
   position: relative;
   z-index: var(--z-chrome-cover);

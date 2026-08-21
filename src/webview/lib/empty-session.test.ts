@@ -12,7 +12,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     id: 'sess-1',
     projectID: 'proj-1',
     directory: '/tmp',
-    title: 'Test',
+    title: 'New Chat',
     version: '1',
     time: { created: 1000, updated: 1000 },
     ...overrides,
@@ -55,6 +55,11 @@ describe('shouldHideEmptySessionFromList', () => {
     expect(shouldHideEmptySessionFromList(session, makeOptions())).toBe(false);
   });
 
+  it('does not hide a named fork whose cloned history preserves equal timestamps', () => {
+    const session = makeSession({ title: 'VFZ test golden-fork' });
+    expect(shouldHideEmptySessionFromList(session, makeOptions())).toBe(false);
+  });
+
   it('returns false when preserve is true', () => {
     const session = makeSession({ time: { created: 1000, updated: 1000 } });
     expect(shouldHideEmptySessionFromList(session, makeOptions({ preserve: true }))).toBe(false);
@@ -64,6 +69,14 @@ describe('shouldHideEmptySessionFromList', () => {
 describe('shouldPruneEmptySession', () => {
   it('returns false for non-empty sessions', () => {
     const session = makeSession({ time: { created: 1000, updated: 2000 } });
+    expect(shouldPruneEmptySession(session, makeOptions())).toBe(false);
+  });
+
+  it('does not prune a named fork whose cloned history preserves equal timestamps', () => {
+    const session = makeSession({
+      title: 'VFZ test golden-fork',
+      time: { created: 0, updated: 0 },
+    });
     expect(shouldPruneEmptySession(session, makeOptions())).toBe(false);
   });
 

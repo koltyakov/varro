@@ -106,6 +106,11 @@ test.describe('diff preview anchoring', () => {
     const anchorMessageId = 'message-diff-preview-active-step-5';
     await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
     await expect(page.locator(`[data-msg-id="${editMessageId}"] .diff-view-file`)).toBeVisible();
+    expect(
+      await page.locator(`[data-msg-id="${editMessageId}"]`).evaluate((row) => {
+        return getComputedStyle(row).contain;
+      })
+    ).toBe('layout style');
 
     const anchorRow = page.locator(`[data-msg-id="${anchorMessageId}"]`);
     await anchorRow.scrollIntoViewIfNeeded();
