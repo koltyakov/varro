@@ -12,7 +12,13 @@ import { formatDisplayPath } from '../lib/path-display';
 import { modelSupportsReasoning } from '../lib/model-capabilities';
 import { parseUsageLimitNotice, shouldDisplayUsageLimitNotice } from '../lib/usage-limit';
 import { hasVisibleReasoningContent } from '../lib/part-utils';
-import { getMessageBlockExpanded, setMessageBlockExpanded } from '../lib/tool-call-expansion-state';
+import {
+  clearReasoningAutoOpened,
+  getMessageBlockExpanded,
+  markReasoningAutoOpened,
+  setMessageBlockExpanded,
+  takeReasoningAutoOpened,
+} from '../lib/tool-call-expansion-state';
 import { AgentChip } from './message/AgentChip';
 import { InlineMessageImage } from './InlineMessageImage';
 import { FileTypeIcon } from './FileTypeIcon';
@@ -120,13 +126,22 @@ function ReasoningBlock(props: {
   const expansionKey = () =>
     `reasoning\u0000${props.part.sessionID}\u0000${props.part.messageID}\u0000${props.part.id}`;
   let currentExpansionKey = expansionKey();
+  // A previous instance of this block auto-expanded a streaming run that has
+  // not settled yet. Rows are recreated on every part commit, so the in-life
+  // collapse may never observe the stream end; settle the auto-open on mount.
+  const settledPendingAutoCollapse = takeReasoningAutoOpened(currentExpansionKey);
+  if (settledPendingAutoCollapse) {
+    setMessageBlockExpanded(currentExpansionKey, false);
+  }
   let contentElement: HTMLDivElement | undefined;
   let autoFollow = true;
   let wasExpanded = false;
   let wasStreaming = props.part.time.end === undefined;
   let followFrameRequest = 0;
+  let autoManaged = true;
+  let autoOpened = false;
   const [expanded, setExpanded] = createSignal(
-    getMessageBlockExpanded(currentExpansionKey) ?? false
+    settledPendingAutoCollapse ? false : getMessageBlockExpanded(currentExpansionKey) ?? false
   );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
@@ -141,10 +156,20 @@ function ReasoningBlock(props: {
   createEffect(() => {
     const nextExpansionKey = expansionKey();
     if (nextExpansionKey === currentExpansionKey) return;
+    const nextSettledPendingAutoCollapse = takeReasoningAutoOpened(nextExpansionKey);
+    if (nextSettledPendingAutoCollapse) {
+      setMessageBlockExpanded(nextExpansionKey, false);
+    }
     currentExpansionKey = nextExpansionKey;
     wasExpanded = false;
     autoFollow = true;
-    setExpanded(getMessageBlockExpanded(nextExpansionKey) ?? false);
+    autoManaged = true;
+    autoOpened = false;
+    setExpanded(
+      nextSettledPendingAutoCollapse
+        ? false
+        : getMessageBlockExpanded(nextExpansionKey) ?? false
+    );
   });
 
   const followStreamingBottom = () => {
@@ -188,6 +213,23 @@ function ReasoningBlock(props: {
     wasStreaming = nextStreaming;
   });
 
+  createEffect(() => {
+    const streaming = isStreaming();
+    if (autoManaged && streaming) {
+      if (!expanded()) {
+        setExpanded(true);
+        setMessageBlockExpanded(expansionKey(), true);
+      }
+      autoOpened = true;
+      markReasoningAutoOpened(expansionKey());
+    } else if (!streaming && autoManaged && autoOpened) {
+      setExpanded(false);
+      setMessageBlockExpanded(expansionKey(), false);
+      clearReasoningAutoOpened(expansionKey());
+      autoOpened = false;
+    }
+  });
+
   const handleContentScroll = () => {
     if (!contentElement || !isStreaming()) return;
     const distanceFromBottom =
@@ -196,6 +238,8 @@ function ReasoningBlock(props: {
   };
 
   const toggleExpanded = () => {
+    autoManaged = false;
+    clearReasoningAutoOpened(expansionKey());
     const nextExpanded = !expanded();
     setMessageBlockExpanded(expansionKey(), nextExpanded);
     setExpanded(nextExpanded);

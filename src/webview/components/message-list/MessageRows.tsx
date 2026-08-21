@@ -26,8 +26,8 @@ export type MessageRowSharedProps = {
   modelChangeMap: Map<string, string>;
   promptNumberMap: ReadonlyMap<string, number>;
   showPromptNumbers: boolean;
-  showSentTimestamps: boolean;
   lastAssistantID: string | null;
+  turnEndAssistantIDs: ReadonlySet<string>;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
   previousTrailingFileEventSignatureMap: Map<string, string | null>;
@@ -178,11 +178,11 @@ export function MessageRow(
             info={props.msg.info}
             parts={props.msg.parts}
             promptNumber={
-              props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
-            }
-            showSentTimestamp={props.showSentTimestamps}
-            isLastAssistant={props.msg.info.id === props.lastAssistantID}
-            nearViewport={props.nearViewport}
+               props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
+             }
+              isLastAssistant={props.msg.info.id === props.lastAssistantID}
+              isTurnEndAssistant={props.turnEndAssistantIDs.has(props.msg.info.id)}
+             nearViewport={props.nearViewport}
             outerListVirtualized={props.outerListVirtualized}
             highlightFinalAnswer={highlightFinalAnswer()}
             highlightPlanningAnswer={highlightPlanningAnswer()}

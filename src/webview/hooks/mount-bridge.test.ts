@@ -17,6 +17,9 @@ const {
   syncSessionMarkersForWorkspace,
   setShowInlineFileChanges,
   setShowChangedFiles,
+  setShowRequestTimestamps,
+  setShowResponseTimestamps,
+  setResponseTimestamp,
   setDesktopSessionPaneSide,
   setDefaultPermissionModePreference,
   setWorkspaceStatusSummary,
@@ -33,9 +36,12 @@ const {
   rememberCurrentDocumentNavigation: vi.fn(),
   syncDraftPermissionForWorkspace: vi.fn(),
   syncSessionMarkersForWorkspace: vi.fn(),
-  setShowInlineFileChanges: vi.fn(),
-  setShowChangedFiles: vi.fn(),
-  setDesktopSessionPaneSide: vi.fn(),
+    setShowInlineFileChanges: vi.fn(),
+    setShowChangedFiles: vi.fn(),
+    setShowRequestTimestamps: vi.fn(),
+    setShowResponseTimestamps: vi.fn(),
+    setResponseTimestamp: vi.fn(),
+    setDesktopSessionPaneSide: vi.fn(),
   setDefaultPermissionModePreference: vi.fn(),
   setWorkspaceStatusSummary: vi.fn(),
   setWorkspaceStatuses: vi.fn(),
@@ -64,6 +70,9 @@ vi.mock('../lib/state', async () => {
     syncSessionMarkersForWorkspace,
     setShowInlineFileChanges,
     setShowChangedFiles,
+    setShowRequestTimestamps,
+    setShowResponseTimestamps,
+    setResponseTimestamp,
     setDesktopSessionPaneSide,
     setDefaultPermissionModePreference,
   };
@@ -509,6 +518,10 @@ describe('mount bridge helpers', () => {
       payload: {
         showInlineFileChanges: true,
         showChangedFiles: true,
+        showRequestTimestamps: false,
+        showResponseTimestamps: false,
+        responseTimestamp: 'each-step',
+        chatFontFamily: 'mono',
         desktopSessionPaneSide: 'right',
         defaultPermissionMode: 'full',
       },
@@ -525,6 +538,35 @@ describe('mount bridge helpers', () => {
     expect(setDefaultPermissionModePreference).toHaveBeenCalledWith('full');
     expect(setShowInlineFileChanges).toHaveBeenCalledWith(true);
     expect(setShowChangedFiles).toHaveBeenCalledWith(true);
+    expect(setShowRequestTimestamps).toHaveBeenCalledWith(false);
+    expect(setShowResponseTimestamps).toHaveBeenCalledWith(false);
+    expect(setResponseTimestamp).toHaveBeenCalledWith('each-step');
+    expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toContain(
+      'mono'
+    );
+
+    operations.handleExtensionMessage({
+      type: 'config/update',
+      payload: {
+        desktopSessionPaneSide: 'right',
+        defaultPermissionMode: 'full',
+        chatFontFamily: 'editor',
+      },
+    });
+    expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toContain(
+      'vscode-editor-font-family'
+    );
+
+    operations.handleExtensionMessage({
+      type: 'config/update',
+      payload: {
+        desktopSessionPaneSide: 'right',
+        defaultPermissionMode: 'full',
+        chatFontFamily: 'default',
+      },
+    });
+    expect(setShowRequestTimestamps).not.toHaveBeenCalledWith(undefined);
+    expect(document.documentElement.style.getPropertyValue('--varro-chat-font-family')).toBe('');
   });
 
   it('routes workspace status events into shared workspace state', () => {

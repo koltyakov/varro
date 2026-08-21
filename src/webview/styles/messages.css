@@ -1305,9 +1305,12 @@ body.vscode-light
 .rendered-markdown {
   line-height: 1.65;
   /* Track the user's editor font-size setting (accessibility); the +0.5px
-     keeps the prose slightly larger than UI chrome, as before. */
-  font-size: calc(var(--vscode-font-size, 13px) + 0.5px);
-  font-family: var(--font-sans);
+     keeps the prose slightly larger than UI chrome, as before. An explicit
+     varro.chat.fontSize override (set on :root) wins when present. */
+   font-size: var(--varro-chat-font-size, calc(var(--vscode-font-size, 13px) + 0.5px));
+  /* varro.chat.fontFamily (set on :root) wins when present; otherwise the
+     default sans stack applies. */
+  font-family: var(--varro-chat-font-family, var(--font-sans));
   color: var(--color-vscode-fg);
 }
 

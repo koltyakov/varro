@@ -150,7 +150,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         onStatusChange: () => this.updateStatusBarItem(),
       },
       {
-        shouldShow: () => !this.bridge.getView()?.visible,
+        shouldShow: () =>
+          vscode.workspace
+            .getConfiguration('varro')
+            .get<boolean>('chat.showDesktopNotifications', true) &&
+          !this.bridge.getView()?.visible,
       }
     );
     this.contextFilesState = new SidebarProviderContextFiles(this.droppedFilesService);
@@ -322,7 +326,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         event.affectsConfiguration('varro.chat.showInlineFileChanges') ||
         event.affectsConfiguration('varro.chat.showChangedFiles') ||
         event.affectsConfiguration('varro.chat.desktopSessionPaneSide') ||
-        event.affectsConfiguration('varro.chat.defaultPermissionMode')
+        event.affectsConfiguration('varro.chat.defaultPermissionMode') ||
+        event.affectsConfiguration('varro.chat.fontSize') ||
+        event.affectsConfiguration('varro.chat.fontFamily') ||
+        event.affectsConfiguration('varro.chat.showRequestTimestamps') ||
+        event.affectsConfiguration('varro.chat.showResponseTimestamps') ||
+        event.affectsConfiguration('varro.chat.responseTimestamp')
       ) {
         this.postConfigState();
       }

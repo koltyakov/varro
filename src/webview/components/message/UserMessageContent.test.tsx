@@ -729,6 +729,59 @@ describe('UserMessageContent', () => {
   });
 });
 
+describe('UserMessageContent inline markdown', () => {
+  it('renders inline code, bold, and italic markers as styled text', () => {
+    renderUserContent([textPart('text-1', 'Fix `my_func` **bold** and __bold2__ *ital* _under_')]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.querySelector('code')?.textContent).toBe('my_func');
+    expect(messageText?.querySelectorAll('strong')).toHaveLength(2);
+    expect(messageText?.querySelector('strong')?.textContent).toBe('bold');
+    expect(messageText?.querySelectorAll('em')).toHaveLength(2);
+    expect(messageText?.querySelector('em')?.textContent).toBe('ital');
+    expect(messageText?.textContent).toBe('Fix my_func bold and bold2 ital under');
+  });
+
+  it('keeps snake_case identifiers literal', () => {
+    renderUserContent([textPart('text-2', 'snake_case and foo_bar_baz stay literal')]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.querySelector('em')).toBeNull();
+    expect(messageText?.querySelector('strong')).toBeNull();
+    expect(messageText?.textContent).toBe('snake_case and foo_bar_baz stay literal');
+  });
+
+  it('leaves unclosed markers as plain text', () => {
+    renderUserContent([textPart('text-3', 'trailing **bold and *ital')]);
+
+    const messageText = container?.querySelector('.user-message-text');
+    expect(messageText?.querySelector('strong')).toBeNull();
+    expect(messageText?.querySelector('em')).toBeNull();
+    expect(messageText?.textContent).toBe('trailing **bold and *ital');
+  });
+
+  it('copies plain text without markdown markers from emphasized content', () => {
+    renderUserContent([textPart('text-4', 'Make **this** part bold')]);
+
+    const messageCard = container?.querySelector<HTMLElement>('.rendered-markdown');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(messageCard!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const setData = vi.fn();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { setData },
+    });
+
+    messageCard?.dispatchEvent(event);
+
+    expect(setData).toHaveBeenCalledWith('text/plain', 'Make this part bold');
+  });
+});
+
 describe('UserMessagePreviewContent', () => {
   it('renders the first meaningful text with inline chips', () => {
     cleanup = render(

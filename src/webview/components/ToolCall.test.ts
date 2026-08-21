@@ -241,6 +241,86 @@ describe('ToolCall', () => {
     ).toEqual(['M13 17H20', 'M5 7L10 12L5 17']);
   });
 
+  it('auto-expands a running search and collapses it when the call finishes', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'grep',
+      state: {
+        status: 'running',
+        input: { pattern: 'activity' },
+        title: 'Searching',
+        time: { start: 1 },
+      },
+    };
+    const key = getToolCallExpansionKey(part);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    expect(getToolCallExpanded(key)).toBe(true);
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+
+    cleanup?.();
+    cleanup = render(
+      () =>
+        ToolCall({
+          part: {
+            ...part,
+            state: completedState({ pattern: 'activity' }, 'Searching', 'Found matches'),
+          },
+        }),
+      container!
+    );
+
+    expect(getToolCallExpanded(key)).toBe(false);
+    expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
+  });
+
+  it('keeps a user-expanded search open when the call finishes', () => {
+    const part: ToolPart = {
+      id: 'tool-1',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'grep',
+      state: {
+        status: 'running',
+        input: { pattern: 'activity' },
+        title: 'Searching',
+        time: { start: 1 },
+      },
+    };
+    const key = getToolCallExpansionKey(part);
+
+    cleanup = render(() => ToolCall({ part }), container!);
+
+    const header = container?.querySelector<HTMLButtonElement>('.tool-invocation-header');
+    expect(header).not.toBeNull();
+    header?.click();
+    expect(container?.querySelector('.tool-invocation-detail')).toBeNull();
+    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+
+    cleanup?.();
+    cleanup = render(
+      () =>
+        ToolCall({
+          part: {
+            ...part,
+            state: completedState({ pattern: 'activity' }, 'Searching', 'Found matches'),
+          },
+        }),
+      container!
+    );
+
+    expect(getToolCallExpanded(key)).toBe(true);
+    expect(container?.querySelector('.tool-invocation-detail')).not.toBeNull();
+  });
+
   it('does not repeat long commands in the collapsed preview', () => {
     const command = `npm run test -- ${'src/webview/components/MessageList.test.ts '.repeat(3)}`;
     const part: ToolPart = {
@@ -1012,7 +1092,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    // Running invocations auto-expand, so the details are already visible.
 
     const rows = Array.from(container?.querySelectorAll('.structured-tool-row') || []);
     expect(
@@ -1190,8 +1270,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
-
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    // Running invocations auto-expand, so the details are already visible.
 
     expect(container?.querySelectorAll('.tool-call-icon')).toHaveLength(1);
     expect(container?.querySelector('.tool-call-icon-task')).toBeInstanceOf(HTMLSpanElement);
@@ -1282,7 +1361,7 @@ describe('ToolCall', () => {
     };
 
     cleanup = render(() => ToolCall({ part }), container!);
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
+    // Running invocations auto-expand, so the status card is already visible.
 
     const runningStatus = container?.querySelector<HTMLButtonElement>(
       '.tool-invocation-subagent-running'
@@ -1328,8 +1407,8 @@ describe('ToolCall', () => {
 
     const retryLabel = container?.querySelector('.tool-invocation-retry-label');
     expect(retryLabel?.textContent).toContain('retrying #2');
+    // Running invocations auto-expand, so the running detail is already visible.
 
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     const runningDiv = container?.querySelector('.tool-invocation-running');
     expect(runningDiv?.textContent).toContain('Subagent is retrying');
     expect(runningDiv?.textContent).toContain('Attempt 2');
@@ -1358,8 +1437,8 @@ describe('ToolCall', () => {
     cleanup = render(() => ToolCall({ part }), container!);
 
     expect(container?.querySelector('.tool-invocation-retry-label')).toBeNull();
+    // Running invocations auto-expand, so the running detail is already visible.
 
-    container?.querySelector<HTMLButtonElement>('.tool-invocation-header')?.click();
     expect(container?.querySelector('.tool-invocation-running')?.textContent).toContain(
       'Subagent is working'
     );

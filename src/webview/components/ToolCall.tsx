@@ -31,7 +31,13 @@ import { formatCommandDisplay } from '../lib/command-display';
 import { formatDuration, formatNumber } from '../lib/message-metrics';
 import { getToolFileChanges, getToolReadPath, isToolFileRead } from '../lib/tool-file-change';
 import type { FileChange } from '../lib/tool-file-change';
-import { getToolCallExpanded, setToolCallExpanded } from '../lib/tool-call-expansion-state';
+import {
+  getToolCallExpanded,
+  setToolCallExpanded,
+  clearToolCallAutoOpened,
+  markToolCallAutoOpened,
+  takeToolCallAutoOpened,
+} from '../lib/tool-call-expansion-state';
 import type { ToolCallPermissionMatch } from '../lib/tool-call-matching';
 import { resolveTaskSessionId } from '../lib/task-session';
 import {
@@ -459,6 +465,10 @@ function openGenericToolFile(path: string) {
   postMessage({ type: 'vscode/open', payload: { path, kind: 'file' } });
 }
 
+function isSettledToolStatus(status: ToolPart['state']['status']) {
+  return status === 'completed' || status === 'error';
+}
+
 export function ToolCall(props: {
   part: ToolPart;
   questionRequest?: QuestionRequest | null;
@@ -468,7 +478,25 @@ export function ToolCall(props: {
 }) {
   const tool = () => props.part;
   const expansionKey = () => getToolCallExpansionKey(tool());
-  const [expanded, setExpanded] = createSignal(getToolCallExpanded(expansionKey()));
+  // A previous instance of this call auto-expanded a running invocation that
+  // has not settled yet. Instances are recreated on every part commit, so the
+  // in-flight auto-open may never observe the finish; settle it on mount.
+  const settledPendingAutoCollapse = isSettledToolStatus(tool().state.status)
+    ? takeToolCallAutoOpened(expansionKey())
+    : false;
+  if (settledPendingAutoCollapse) setToolCallExpanded(expansionKey(), false);
+  let autoManaged = true;
+  let autoOpened = false;
+  let initialExpanded = settledPendingAutoCollapse
+    ? false
+    : getToolCallExpanded(expansionKey());
+  if (!settledPendingAutoCollapse && !initialExpanded && !isSettledToolStatus(tool().state.status)) {
+    setToolCallExpanded(expansionKey(), true);
+    autoOpened = true;
+    markToolCallAutoOpened(expansionKey());
+    initialExpanded = true;
+  }
+  const [expanded, setExpanded] = createSignal(initialExpanded);
   const state = () => tool().state;
   const toolSessionRootId = createMemo(
     () => getSessionTreeRootId(tool().sessionID) || tool().sessionID
@@ -582,7 +610,26 @@ export function ToolCall(props: {
     setExpanded(getToolCallExpanded(expansionKey()));
   });
 
+  createEffect(() => {
+    const settled = isSettledToolStatus(tool().state.status);
+    if (autoManaged && !settled) {
+      if (!expanded()) {
+        setExpanded(true);
+        setToolCallExpanded(expansionKey(), true);
+      }
+      autoOpened = true;
+      markToolCallAutoOpened(expansionKey());
+    } else if (autoManaged && settled && autoOpened) {
+      setExpanded(false);
+      setToolCallExpanded(expansionKey(), false);
+      clearToolCallAutoOpened(expansionKey());
+      autoOpened = false;
+    }
+  });
+
   const toggleExpand = () => {
+    autoManaged = false;
+    clearToolCallAutoOpened(expansionKey());
     const next = !expanded();
     setToolCallExpanded(expansionKey(), next);
     setExpanded(next);

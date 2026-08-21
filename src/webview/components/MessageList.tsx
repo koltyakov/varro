@@ -85,6 +85,10 @@ import {
 } from '../lib/tool-call-matching';
 import {
   getMessageBlockExpanded,
+  setMessageBlockExpanded,
+  isActivityGroupUserManaged,
+  markActivityGroupAutoExpanded,
+  takeActivityGroupAutoExpanded,
   trackMessageBlockExpansionState,
 } from '../lib/tool-call-expansion-state';
 import {
@@ -138,6 +142,7 @@ import {
   type PendingPermissionSequence,
 } from './message-list/pending-prompts';
 import {
+  computeTurnEndAssistantIds,
   getRenderedMessages,
   getVisibleThreadMessages,
   hasVisibleRunningToolPart,
@@ -429,6 +434,13 @@ export function MessageList() {
     }
     return null;
   });
+  const turnEndAssistantIDs = createMemo(
+    () =>
+      computeTurnEndAssistantIds(
+        getVisibleThreadMessages(state.messages, state.activeSessionId, state.sessions)
+      ),
+    () => messageStructureVersion()
+  );
   let expectedScrollTop = -1;
   let ignoreScrollUntil = 0;
   let lastObservedScrollTop = 0;
@@ -5977,6 +5989,31 @@ export function MessageList() {
     },
     new Map()
   );
+  createComputed(() => {
+    // Only parts actively shown in the tray keep the group expanded. Settled
+    // parts move to the tray (retained/exiting) and stop holding it open, and
+    // the rendered set ignores parts hidden behind streamed response text.
+    const visible = renderedVisibleActiveActivityPartKeys();
+    const isActivePartKey = (part: AssistantActivityPart) =>
+      visible.has(getAssistantActivityPartKey(part));
+    const seenGroupKeys = new Set<string>();
+    for (const groups of assistantActivityGroupMap().values()) {
+      for (const group of groups) {
+        if (seenGroupKeys.has(group.key)) continue;
+        seenGroupKeys.add(group.key);
+        if (isActivityGroupUserManaged(group.key)) continue;
+        if (!group.parts.some((part) => part.type !== 'reasoning')) continue;
+        const hasActivePart = group.parts.some(isActivePartKey);
+        const expanded = getMessageBlockExpanded(group.key) ?? false;
+        if (hasActivePart && !expanded) {
+          markActivityGroupAutoExpanded(group.key);
+          setMessageBlockExpanded(group.key, true);
+        } else if (!hasActivePart && expanded && takeActivityGroupAutoExpanded(group.key)) {
+          setMessageBlockExpanded(group.key, false);
+        }
+      }
+    }
+  });
   const compactActivityDisclosureLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(
@@ -6709,7 +6746,6 @@ export function MessageList() {
                 preview={preview()}
                 parts={messages()[messageIndexById().get(preview().id) ?? -1]?.parts}
                 sentAt={messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created}
-                showSentTimestamp={showPromptNumbers()}
                 promptNumber={
                   promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
                 }
@@ -6795,8 +6831,8 @@ export function MessageList() {
               modelChangeMap={modelChangeMap()}
               promptNumberMap={promptNumberMap()}
               showPromptNumbers={promptNumbersVisible()}
-              showSentTimestamps={showPromptNumbers()}
               lastAssistantID={lastAssistantID()}
+              turnEndAssistantIDs={turnEndAssistantIDs()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
               assistantDialogSummaryMap={rowAssistantDialogSummaryMap()}

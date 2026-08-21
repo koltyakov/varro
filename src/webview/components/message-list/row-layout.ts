@@ -11,6 +11,7 @@ import {
   shouldShowAssistantPartInline,
 } from '../../lib/part-utils';
 import { getToolInlineFileChangesLayoutSignature } from '../../lib/tool-file-change';
+import { showThinking } from '../../lib/state';
 import type { MessageEntry, Part } from '../../types';
 
 export function getInlinePreviewLayoutSignatures(
@@ -129,8 +130,16 @@ export function getRenderEmptyAssistantMessageIds(
       const visible =
         part.type === 'text'
           ? hasVisibleProjectedText(part, streaming)
-          : shouldShowAssistantPartInline(part);
+          : part.type === 'reasoning'
+            ? hasVisibleProjectedReasoning(part, streaming)
+            : shouldShowAssistantPartInline(part);
       if (!visible) continue;
+      // Reasoning renders standalone in its own flow instead of joining the
+      // compact activity group, so it always counts as visible row content.
+      if (part.type === 'reasoning') {
+        hasVisibleRowContent = true;
+        break;
+      }
       if (!isAssistantActivityPart(part)) {
         hasVisibleRowContent = true;
         break;
@@ -166,6 +175,15 @@ export function hasVisibleProjectedText(
 ) {
   const text = part.id === streaming?.partId ? streaming.text || part.text : part.text;
   return text.trim().length > 0 && !isWorkspaceDirectoryText(text);
+}
+
+export function hasVisibleProjectedReasoning(
+  part: { id: string; text: string },
+  streaming?: { partId: string | null; text: string }
+) {
+  if (!showThinking()) return false;
+  const text = part.id === streaming?.partId ? streaming.text || part.text : part.text;
+  return hasVisibleReasoningContent(text);
 }
 
 export function getChangedInlinePreviewMessageIds(

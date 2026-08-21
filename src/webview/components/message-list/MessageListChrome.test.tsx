@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Permission, QuestionRequest } from '../../types';
 
@@ -195,10 +194,9 @@ describe('MessageListChrome', () => {
     expect(onSelect).toHaveBeenCalledWith(turns[0]);
   });
 
-  it('reveals the reserved sticky timestamp without mounting new content', () => {
+  it('renders the sticky timestamp under the preview', () => {
     const now = new Date();
     const sentAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45).getTime();
-    const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
     cleanup = render(
       () => (
         <StickyUserMessagePreviewCard
@@ -210,22 +208,16 @@ describe('MessageListChrome', () => {
             imageCount: 0,
           }}
           sentAt={sentAt}
-          showSentTimestamp={showSentTimestamp()}
         />
       ),
       container!
     );
 
     const timestamp = container?.querySelector<HTMLTimeElement>('.latest-user-message-sticky-time');
-    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+    expect(timestamp?.classList.contains('is-visible')).toBe(true);
     expect(timestamp?.textContent).toBe(
       new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(sentAt)
     );
-
-    setShowSentTimestamp(true);
-
-    expect(container?.querySelector('.latest-user-message-sticky-time')).toBe(timestamp);
-    expect(timestamp?.classList.contains('is-visible')).toBe(true);
   });
 
   it('toggles the overflow fade as the preview scrolls', async () => {

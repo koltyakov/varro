@@ -713,6 +713,175 @@ describe('MessageList compact activity', () => {
     );
   });
 
+  it('shows the expanded thinking box while reasoning streams and collapses it after commit', async () => {
+    const thought: Part = {
+      id: 'thought-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'reasoning',
+      text: '',
+      time: { start: 1 },
+    };
+    setState('activeSessionId', 'session-1');
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Analyze the code')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [thought],
+      },
+    ]);
+    batch(() => {
+      setState('streamingPartId', thought.id);
+      setState('streamingText', 'Analyzing the problem statement');
+    });
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const row = container?.querySelector('[data-msg-id="assistant-1"]');
+    expect(row?.classList).not.toContain('interactive-item-render-empty');
+    const streamingBox = row?.querySelector('.chat-thinking-box');
+    expect(streamingBox).not.toBeNull();
+    expect(streamingBox?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'true'
+    );
+    expect(streamingBox?.querySelector('.thinking-content')?.textContent).toContain(
+      'Analyzing the problem statement'
+    );
+    expect(container?.textContent).toContain('Analyzing the problem statement');
+
+    batch(() => {
+      upsertPart({
+        ...thought,
+        text: 'Analyzing the problem statement',
+        time: { start: 1, end: 2 },
+      });
+      setState('streamingPartId', null);
+      setState('streamingText', '');
+    });
+    await Promise.resolve();
+
+    const committedBox = container?.querySelector(
+      '[data-msg-id="assistant-1"] .chat-thinking-box'
+    );
+    expect(committedBox).not.toBeNull();
+    expect(committedBox?.querySelector('.thinking-header')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+    // Collapsed boxes unmount their content, so the streamed text is hidden.
+    expect(committedBox?.querySelector('.thinking-content')).toBeNull();
+  });
+
+  it('auto-expands the activity group while a tool runs and collapses it once it settles', async () => {
+    const done = toolPart('command-done', 'assistant-1', 'call-command-done');
+    done.state = {
+      status: 'completed',
+      input: { command: 'npm run lint' },
+      output: 'passed',
+      title: 'npm run lint',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const running = toolPart('command-running', 'assistant-1', 'call-command-running');
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [done, running],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summary = () =>
+      container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
+
+    batch(() => {
+      upsertPart({
+        ...running,
+        state: {
+          status: 'completed',
+          input: { command: 'pwd' },
+          output: 'done',
+          title: 'pwd',
+          metadata: {},
+          time: { start: 1, end: 3 },
+        },
+      });
+    });
+    await Promise.resolve();
+
+    // The group collapses as soon as the running tool settles; the tray keeps
+    // showing the finished command while it transitions out.
+    expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      container?.querySelector('[data-activity-part-id="command-running"].is-completed')
+    ).not.toBeNull();
+  });
+
+  it('keeps a manually collapsed activity group collapsed while tools keep running', async () => {
+    const done = toolPart('command-done', 'assistant-1', 'call-command-done');
+    done.state = {
+      status: 'completed',
+      input: { command: 'npm run lint' },
+      output: 'passed',
+      title: 'npm run lint',
+      metadata: {},
+      time: { start: 1, end: 2 },
+    };
+    const running = toolPart('command-running', 'assistant-1', 'call-command-running');
+    const runningSecond = toolPart('command-running-2', 'assistant-1', 'call-command-running-2');
+    runningSecond.state = {
+      status: 'running',
+      input: { command: 'npm run build' },
+      title: 'npm run build',
+      time: { start: 4 },
+    };
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', reconcile({ 'session-1': { type: 'busy' } }));
+    replaceMessages([
+      { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
+      {
+        info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+        parts: [done, running],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const summary = () =>
+      container?.querySelector<HTMLButtonElement>('.assistant-activity-summary');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+
+    summary()?.click();
+    expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+
+    batch(() => {
+      replaceMessages([
+        { info: userMessage('user-1'), parts: [textPart('prompt-1', 'Run the checks')] },
+        {
+          info: assistantMessage('assistant-1', { parentID: 'user-1' }),
+          parts: [done, running, runningSecond],
+        },
+      ]);
+    });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(container?.querySelector('.assistant-active-activity-tray')).not.toBeNull();
+    expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('uses one disclosure for activity across primary assistant messages', async () => {
     const command = toolPart('command-1', 'assistant-1', 'call-command-1');
     command.state = {
@@ -752,16 +921,18 @@ describe('MessageList compact activity', () => {
 
     const summaries = container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary');
     expect(summaries).toHaveLength(1);
-    expect(summaries?.[0]?.textContent).toContain('Explored: 1 thought, 1 command');
+    expect(summaries?.[0]?.textContent).toContain('Explored: 1 command');
     expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(0);
-    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).toContain(
+    // Reasoning renders standalone in its own message instead of joining the group.
+    expect(container?.querySelector('[data-msg-id="assistant-2"] .chat-thinking-box')).not.toBeNull();
+    expect(container?.querySelector('[data-msg-id="assistant-2"]')?.classList).not.toContain(
       'interactive-item-render-empty'
     );
 
     summaries?.[0]?.click();
 
     expect(summaries?.[0]?.getAttribute('aria-expanded')).toBe('true');
-    expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(2);
+    expect(container?.querySelectorAll('.assistant-activity-details')).toHaveLength(1);
     expect(container?.textContent).toContain('All checks passed.');
   });
 
@@ -1555,17 +1726,17 @@ describe('MessageList compact activity', () => {
     const summaries = [
       ...(container?.querySelectorAll<HTMLButtonElement>('.assistant-activity-summary') || []),
     ];
-    expect(summaries).toHaveLength(2);
+    expect(summaries).toHaveLength(1);
     expect(summaries[0]?.textContent).toContain('Explored: 1 command');
-    expect(summaries[1]?.textContent).toContain('Explored: 1 thought');
 
     const renderKeys = [
       ...(container?.querySelectorAll<HTMLElement>('[data-assistant-render-key]') || []),
     ].map((element) => element.dataset.assistantRenderKey);
+    // Reasoning now renders as a standalone part instead of its own disclosure.
     expect(renderKeys).toEqual([
       'activity-group:command-before',
       'part:response-mid',
-      'activity-group:thought-after',
+      'part:thought-after',
     ]);
   });
 
@@ -1902,34 +2073,57 @@ describe('MessageList compact activity', () => {
       metadata: {},
       time: { start: 1, end: 2 },
     };
+    const commandSecond = toolPart('command-2', 'assistant-2', 'call-command-2');
+    commandSecond.state = {
+      status: 'completed',
+      input: { command: 'npx tsc' },
+      output: 'ok',
+      title: 'npx tsc',
+      metadata: {},
+      time: { start: 2, end: 3 },
+    };
     const thought: Part = {
       id: 'reasoning-1',
       sessionID: 'session-1',
       messageID: 'assistant-2',
       type: 'reasoning',
       text: 'Verifying results',
-      time: { start: 3, end: 4 },
+      time: { start: 4, end: 5 },
     };
     setState('activeSessionId', 'session-1');
     replaceMessages([
-      { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [commandSecond, thought],
+      },
     ]);
 
     cleanup = render(() => MessageList(), container!);
     await Promise.resolve();
+    expect(container?.querySelector('.assistant-activity-summary')?.textContent).toContain(
+      'Explored: 1 command'
+    );
     container?.querySelector<HTMLButtonElement>('.assistant-activity-summary')?.click();
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(1);
 
     replaceMessages([
       { info: assistantMessage('assistant-1', { parentID: 'user-1' }), parts: [command] },
-      { info: assistantMessage('assistant-2', { parentID: 'user-1' }), parts: [thought] },
+      {
+        info: assistantMessage('assistant-2', { parentID: 'user-1' }),
+        parts: [commandSecond, thought],
+      },
     ]);
     await Promise.resolve();
 
     expect(
+      container?.querySelector('.assistant-activity-summary')?.textContent
+    ).toContain('Explored: 2 commands');
+    expect(
       container?.querySelector('.assistant-activity-summary')?.getAttribute('aria-expanded')
     ).toBe('true');
+    // Reasoning stays out of the group; the disclosure lists both tool calls.
     expect(container?.querySelectorAll('.assistant-activity-detail')).toHaveLength(2);
+    expect(container?.querySelector('.assistant-activity-details .chat-thinking-box')).toBeNull();
   });
 });
 

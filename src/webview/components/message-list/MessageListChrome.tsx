@@ -2,7 +2,13 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'so
 import { recheckSessionStatus } from '../../hooks/useOpenCode';
 import { formatMessageSentTime } from '../../lib/message-time';
 import { observeSettledResize } from '../../lib/settled-resize-observer';
-import { loadingLastActivityAt, loadingStartedAt, state, stopLoading } from '../../lib/state';
+import {
+  loadingLastActivityAt,
+  loadingStartedAt,
+  showRequestTimestamps,
+  state,
+  stopLoading,
+} from '../../lib/state';
 import type { Part, Permission, QuestionRequest } from '../../types';
 import { PermissionPrompt } from '../PermissionPrompt';
 import { QuestionPrompt } from '../QuestionPrompt';
@@ -77,7 +83,6 @@ export function StickyUserMessagePreviewCard(props: {
   parts?: Part[];
   promptNumber?: number;
   sentAt?: number;
-  showSentTimestamp?: boolean;
   onClick?: (preview: StickyUserMessagePreview) => void;
   loading?: boolean;
   onGeometryChange?: () => void;
@@ -196,15 +201,13 @@ export function StickyUserMessagePreviewCard(props: {
               </div>
             </Show>
           </div>
-          <Show when={sentTimestamp()}>
-            {(timestamp) => (
-              <time
-                class={`message-sent-time latest-user-message-sticky-time${props.showSentTimestamp ? ' is-visible' : ''}`}
-                dateTime={new Date(props.sentAt!).toISOString()}
-              >
-                {timestamp()}
-              </time>
-            )}
+          <Show when={sentTimestamp() && showRequestTimestamps()}>
+            <time
+              class="message-sent-time latest-user-message-sticky-time is-visible"
+              dateTime={new Date(props.sentAt!).toISOString()}
+            >
+              {sentTimestamp()}
+            </time>
           </Show>
         </div>
         <div class="latest-user-message-sticky-bottom-solid" />

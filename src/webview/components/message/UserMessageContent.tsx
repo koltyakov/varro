@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import type { JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import {
   formatDisplayPath,
@@ -837,6 +838,58 @@ function UserMessageTextContent(props: {
   );
 }
 
+type InlineMarkdownNode = string | JSX.Element;
+
+// Inline-only markdown for user prompts: `code`, **bold**, __bold__, *italic*, _italic_.
+// Underscore italics are flanking-guarded so snake_case identifiers stay literal.
+const INLINE_USER_MARKDOWN_RE = new RegExp(
+  [
+    '(`[^`\\n]+`)',
+    '(\\*\\*[^*\\n]+\\*\\*)',
+    '(__[^_\\n]+__)',
+    '(\\*[^*\\s](?:[^*\\n]*?[^*\\s])?\\*)',
+    '((?:(?<=^)|(?<=[\\s(\\[{"\'>]))_[^_\\s](?:[^_\\n]*?[^_\\s])?_(?![\\w-]))',
+  ].join('|'),
+  'g'
+);
+
+function buildInlineUserMarkdownNodes(content: string): InlineMarkdownNode[] {
+  if (!content.includes('*') && !content.includes('_') && !content.includes('`')) {
+    return [content];
+  }
+
+  const nodes: InlineMarkdownNode[] = [];
+  let lastIndex = 0;
+  for (const match of content.matchAll(INLINE_USER_MARKDOWN_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(content.slice(lastIndex, index));
+    const code = match[1];
+    const boldAsterisk = match[2];
+    const boldUnderscore = match[3];
+    const italicAsterisk = match[4];
+    const italicUnderscore = match[5];
+    if (code !== undefined) {
+      nodes.push(<code>{code.slice(1, -1)}</code>);
+    } else if (boldAsterisk !== undefined) {
+      nodes.push(<strong>{boldAsterisk.slice(2, -2)}</strong>);
+    } else if (boldUnderscore !== undefined) {
+      nodes.push(<strong>{boldUnderscore.slice(2, -2)}</strong>);
+    } else if (italicAsterisk !== undefined) {
+      nodes.push(<em>{italicAsterisk.slice(1, -1)}</em>);
+    } else if (italicUnderscore !== undefined) {
+      nodes.push(<em>{italicUnderscore.slice(1, -1)}</em>);
+    }
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < content.length) nodes.push(content.slice(lastIndex));
+  return nodes;
+}
+
+function InlineUserMarkdownText(props: { content: string }) {
+  const nodes = createMemo(() => buildInlineUserMarkdownNodes(props.content));
+  return <For each={nodes()}>{(node) => node}</For>;
+}
+
 function UserMessageMarkupChip(props: { content: string; format: UserMessageMarkupFormat }) {
   const label = () => props.format.kind.toUpperCase();
   const size = () => formatUserMessageMarkupSize(props.format.byteSize);
@@ -932,7 +985,9 @@ function InlineAttachmentText(props: {
   return (
     <For each={segments()}>
       {(segment) => {
-        if (segment.type === 'text') return segment.content;
+        if (segment.type === 'text') {
+          return <InlineUserMarkdownText content={segment.content} />;
+        }
         if (segment.type === 'session') {
           return <SessionReferenceLink reference={segment.reference} />;
         }

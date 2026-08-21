@@ -1120,9 +1120,10 @@ describe('MessageList auto-scroll', () => {
     await Promise.resolve();
 
     expect(container?.querySelector('[data-msg-id="assistant-40"]')).toBeNull();
-    // Compact activity already gives the follower rows zero height, so hiding thinking removes only
-    // the disclosure owner's provisional height.
-    expect(bottomSpacer() - bottomPadBefore).toBe(-100);
+    // Reasoning now renders standalone in its own row (auto-expanded while
+    // streaming), so hiding thinking removes every reasoning row's provisional
+    // height, not just the disclosure owner's.
+    expect(bottomSpacer() - bottomPadBefore).toBe(-1000);
     animationFrames.restore();
   });
 

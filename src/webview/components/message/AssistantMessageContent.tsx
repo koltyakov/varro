@@ -27,6 +27,7 @@ import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import {
   getMessageBlockExpanded,
   setMessageBlockExpanded,
+  markActivityGroupUserManaged,
   trackMessageBlockExpansionState,
 } from '../../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, QuestionRequest, TextPart, ToolPart } from '../../types';
@@ -421,6 +422,7 @@ export function AssistantMessageContent(props: {
     return null;
   });
   const isLocallyCompactActivityCandidate = (part: Part): part is AssistantActivityPart =>
+    part.type !== 'reasoning' &&
     isAssistantActivityPart(part) &&
     shouldCompactAssistantActivityPart(part, {
       keepEditInline: props.info.time.completed === undefined && !props.info.error,
@@ -468,18 +470,31 @@ export function AssistantMessageContent(props: {
       return groups.length > 0 ? groups : null;
     }
   );
-  const compactActivityGroupByPartKey = createMemo(
-    () =>
-      new Map<string, AssistantActivityGroupInfo>(
-        effectiveCompactActivityGroups()?.flatMap((group) =>
-          group.parts.flatMap((part) =>
-            isLocallyCompactActivityCandidate(part)
-              ? [[getAssistantActivityPartKey(part), group] as const]
-              : []
-          )
-        ) || []
+  const compactActivityGroupByPartKey = createMemo(() => {
+    const filteredGroups = (effectiveCompactActivityGroups() ?? []).flatMap((group) => {
+      const parts = group.parts.filter((part) => part.type !== 'reasoning');
+      if (parts.length === 0) return [];
+      const keptOwnerPart = parts.find((part) => part.id === group.ownerPartId);
+      const fallbackOwnerPart = parts[0]!;
+      return [
+        {
+          key: group.key,
+          ownerMessageId: keptOwnerPart ? group.ownerMessageId : fallbackOwnerPart.messageID,
+          ownerPartId: keptOwnerPart ? group.ownerPartId : fallbackOwnerPart.id,
+          parts,
+        } satisfies AssistantActivityGroupInfo,
+      ];
+    });
+    return new Map<string, AssistantActivityGroupInfo>(
+      filteredGroups.flatMap((group) =>
+        group.parts.flatMap((part) =>
+          isLocallyCompactActivityCandidate(part)
+            ? [[getAssistantActivityPartKey(part), group] as const]
+            : []
+        )
       )
-  );
+    );
+  });
   const getCompactActivitySummaryPartId = (group: AssistantActivityGroupInfo) => {
     if (group.ownerMessageId !== props.info.id) return null;
     return orderedDisplayParts().some((part) => part.id === group.ownerPartId)
@@ -1029,6 +1044,7 @@ function AssistantActivityGroup(props: {
   });
 
   const toggleExpanded = () => {
+    markActivityGroupUserManaged(props.expansionKey);
     const nextExpanded = !expanded();
     setMessageBlockExpanded(props.expansionKey, nextExpanded);
   };
