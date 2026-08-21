@@ -263,6 +263,35 @@ describe('optimistic user message reconciliation', () => {
     expect(partIds()).toEqual([['server-part-0', 'server-part-1']]);
   });
 
+  it('does not preserve an optimistic prompt beside its trimmed canonical part', () => {
+    const info = userMessage('msg-1');
+    upsertMessage({
+      info,
+      parts: [
+        textPart('msg-1-part-0', 'msg-1', 'Update changelog\n'),
+        textPart('msg-1-part-1', 'msg-1', '[Working directory: /repo]'),
+      ],
+    });
+
+    setMessagesIncremental(
+      [
+        {
+          info,
+          parts: [
+            textPart('server-part-0', 'msg-1', 'Update changelog'),
+            textPart('server-part-1', 'msg-1', '[Working directory: /repo]'),
+          ],
+        },
+      ],
+      { preserveExtraParts: true }
+    );
+
+    expect(state.messages[0]!.parts).toEqual([
+      textPart('server-part-0', 'msg-1', 'Update changelog'),
+      textPart('server-part-1', 'msg-1', '[Working directory: /repo]'),
+    ]);
+  });
+
   it('preserves an acknowledged optimistic row across a stale incremental refresh', () => {
     const previous = {
       info: userMessage('msg-previous'),

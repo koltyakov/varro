@@ -1663,6 +1663,64 @@ describe('registerSessionEventHandlers', () => {
     );
   });
 
+  it.each([
+    ['canonical only', ['canonical']],
+    ['projected only', ['projected']],
+    ['canonical before its projected twin', ['canonical', 'projected']],
+    ['projected before its canonical twin', ['projected', 'canonical']],
+  ] as const)('applies streamed text once with %s', (_label, sources) => {
+    const handlers = installHandlers();
+    const assistant = createAssistantEntry();
+    assistant.parts.push({
+      id: 'text-1',
+      sessionID: 'session-1',
+      messageID: 'assistant-1',
+      type: 'text',
+      text: '',
+    });
+    registerSessionEventHandlers(
+      createDefaultDeps({
+        getActiveSessionId: () => 'session-1',
+        getMessages: () => [assistant],
+      })
+    );
+    applyMessagePartDelta.mockClear();
+
+    const canonical = () =>
+      emitServerEvent(handlers, 'message.part.delta', {
+        properties: {
+          sessionID: 'session-1',
+          messageID: 'assistant-1',
+          partID: 'text-1',
+          delta: 'streamed text',
+          field: 'text',
+        },
+      });
+    const projected = () =>
+      emitServerEvent(handlers, 'session.next.text.delta', {
+        properties: {
+          sessionID: 'session-1',
+          assistantMessageID: 'assistant-1',
+          textID: 'text-1',
+          delta: 'streamed text',
+        },
+      });
+
+    for (const source of sources) {
+      if (source === 'canonical') canonical();
+      else projected();
+    }
+
+    expect(applyMessagePartDelta).toHaveBeenCalledOnce();
+    expect(applyMessagePartDelta).toHaveBeenCalledWith(
+      'assistant-1',
+      'text-1',
+      'streamed text',
+      'session-1',
+      'text'
+    );
+  });
+
   it('treats synchronized message parts as canonical when a delta targets a missing part', async () => {
     const handlers = installHandlers();
     const syncSessionMessages = vi.fn().mockResolvedValue(undefined);

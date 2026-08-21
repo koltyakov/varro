@@ -287,6 +287,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   // Per-session debounce timers for the optimistic streamed-completion settle.
   const streamedCompletionTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingTerminalStepSettles = new Map<string, number>();
+  const pendingTextDeltaTwins = new Map<string, { canonical: string[]; projected: string[] }>();
   // Per-session durable sequence cursor, advanced by synchronized events (ephemeral
   // delta fragments carry no `seq`). Lets us resync only when a durable event was
   // actually missed, instead of defensively on every progress event.
@@ -301,6 +302,39 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
   let disposed = false;
   let pendingPermissionSync = false;
   let serverReconciliation: Promise<void | boolean | object> | null = null;
+  const shouldApplyTextDelta = (
+    source: 'canonical' | 'projected',
+    messageId: string,
+    partId: string,
+    delta: string
+  ) => {
+    const key = getPartDeltaQueueKey(messageId, partId);
+    let pending = pendingTextDeltaTwins.get(key);
+    if (!pending) {
+      pending = { canonical: [], projected: [] };
+      pendingTextDeltaTwins.set(key, pending);
+      while (pendingTextDeltaTwins.size > 256) {
+        const oldestKey = pendingTextDeltaTwins.keys().next().value;
+        if (oldestKey === undefined) break;
+        pendingTextDeltaTwins.delete(oldestKey);
+      }
+    }
+
+    const opposite = source === 'canonical' ? pending.projected : pending.canonical;
+    const twinIndex = opposite.indexOf(delta);
+    if (twinIndex !== -1) {
+      opposite.splice(twinIndex, 1);
+      if (pending.canonical.length === 0 && pending.projected.length === 0) {
+        pendingTextDeltaTwins.delete(key);
+      }
+      return false;
+    }
+
+    const own = pending[source];
+    own.push(delta);
+    if (own.length > 256) own.shift();
+    return true;
+  };
   // Returns 'unknown' when the event carries no seq (e.g. an ephemeral delta - caller
   // keeps its default behavior), 'ok' when the event is in order or a duplicate, or 'gap'
   // when at least one durable event was skipped (a targeted resync is warranted).
@@ -922,6 +956,8 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
     isSessionInActiveTree,
     getMessages: () => deps.getMessages(),
     findAssistantMessage,
+    shouldApplyTextDelta: (messageId, partId, delta) =>
+      shouldApplyTextDelta('projected', messageId, partId, delta),
     scheduleActiveMessageSync: scheduleMessageSync,
     syncTodosFromMessages: () => deps.syncTodosFromMessages(),
   });
@@ -1019,6 +1055,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       if (pending.retryTimer !== undefined) clearTimeout(pending.retryTimer);
     }
     pendingMissingPartDeltas.clear();
+    pendingTextDeltaTwins.clear();
     lastSeqBySession.clear();
     evictedSequenceSessions.clear();
     for (const dirty of dirtyGaps.values()) {
@@ -1294,6 +1331,7 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
       const applyPart = () => {
         if (!isSessionInActiveTree(rawPart.sessionID)) return;
         const part = applyToolExecutionTime(rawPart);
+        pendingTextDeltaTwins.delete(getPartDeltaQueueKey(part.messageID, part.id));
         const staleCompletedMessage = ignoreStaleProgressForCompletedMessage(
           part.sessionID,
           part.messageID
@@ -1349,7 +1387,9 @@ export function registerSessionEventHandlers(deps: EventHandlerDependencies) {
         queueMissingPartDelta(sessionID, messageID, partID);
         return;
       }
-      sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
+      if (field !== 'text' || shouldApplyTextDelta('canonical', messageID, partID, delta)) {
+        sessionStore.applyMessagePartDelta(messageID, partID, delta, sessionID, field);
+      }
     })
   );
 

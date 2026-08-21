@@ -62,6 +62,7 @@ function createHarness(options: { inActiveTree?: boolean; messages?: MessageEntr
           message.info.sessionID === sessionId &&
           (!assistantMessageID || message.info.id === assistantMessageID)
       ) ?? null,
+    shouldApplyTextDelta: () => true,
     scheduleActiveMessageSync,
     syncTodosFromMessages,
   });

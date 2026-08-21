@@ -196,7 +196,11 @@ function findMatchingOptimisticPartIndex(entry: MessageEntry, incoming: Part) {
 }
 
 function areMatchingOptimisticParts(left: Part, right: Part) {
-  if (left.type === 'text' && right.type === 'text') return left.text === right.text;
+  if (left.type === 'text' && right.type === 'text') {
+    return (
+      left.text.replace(/\r\n?/g, '\n').trimEnd() === right.text.replace(/\r\n?/g, '\n').trimEnd()
+    );
+  }
   if (left.type !== 'file' || right.type !== 'file') return false;
   return left.url === right.url && left.mime === right.mime && left.filename === right.filename;
 }
