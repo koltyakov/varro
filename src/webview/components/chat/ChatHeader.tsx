@@ -1,20 +1,14 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js';
-import { Portal } from 'solid-js/web';
 import type { SessionDiffSummary } from '../../../shared/protocol';
-import { normalizeSessionTitle } from '../../../shared/session-title';
-import { deleteSession, renameSession } from '../../hooks/useOpenCode';
+import { deleteSession } from '../../hooks/useOpenCode';
 import { client } from '../../lib/client';
 import { formatDuration } from '../../lib/message-metrics';
-import { clampPopupToViewport } from '../../lib/popup-position';
-import { shareSession, unshareSession } from '../../lib/session-sharing';
 import {
   setError,
   setPersistentShowSessionPicker as setShowSessionPicker,
   setState,
   state,
 } from '../../lib/state';
-import { writeClipboard } from '../../lib/write-clipboard';
-import { postMessage } from '../../lib/bridge';
 import {
   AttentionSessionsBadge,
   CompletedSessionsBadge,
@@ -23,7 +17,7 @@ import {
   RunningSessionsBadge,
 } from './HeaderBadges';
 import type { SessionListFilter } from './SessionListView';
-import { showSessionActionFeedback } from './SessionActionFeedback';
+import { SessionActionsMenu, createSessionActionsState } from './SessionActionsMenu';
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { Tooltip } from '../Tooltip';
 
@@ -41,6 +35,21 @@ function isActiveSessionRunning() {
   if (!sessionId) return false;
   const type = state.sessionStatus[sessionId]?.type;
   return type === 'busy' || type === 'retry';
+}
+
+async function toggleSessionPinned(sessionId: string) {
+  const pinned = !state.pinnedSessionIds.includes(sessionId);
+  try {
+    const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned);
+    setState('pinnedSessionIds', pinnedSessionIds);
+  } catch (error) {
+    setError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function deleteSessionFromHeader(sessionId: string) {
+  await deleteSession(sessionId);
+  setShowSessionPicker(true);
 }
 
 export function SessionPickerHeader(props: {
@@ -224,114 +233,29 @@ export function ActiveChatHeader(props: {
 
   let titleRef: HTMLSpanElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
-  let renameInputRef: HTMLInputElement | undefined;
-  const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
-  const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
-  const [renaming, setRenaming] = createSignal(false);
-  const [renameValue, setRenameValue] = createSignal('');
-  const [renamePending, setRenamePending] = createSignal(false);
+  const sessionActions = createSessionActionsState();
   const actionsSession = () => {
-    const sessionId = actionsSessionId();
+    const sessionId = sessionActions.sessionId();
     return sessionId ? (state.sessions.find((session) => session.id === sessionId) ?? null) : null;
   };
   const isActionsSessionPinned = () => {
-    const sessionId = actionsSessionId();
+    const sessionId = sessionActions.sessionId();
     return !!sessionId && state.pinnedSessionIds.includes(sessionId);
-  };
-  const closeActions = () => {
-    setActionsSessionId(null);
-    setRenaming(false);
-    setRenamePending(false);
   };
   const openActions = (event: MouseEvent) => {
     const session = getActiveSession();
     if (!session) return;
-    event.preventDefault();
-    setActionsPosition({ x: event.clientX, y: event.clientY });
-    setRenaming(false);
-    setActionsSessionId(session.id);
+    sessionActions.open(session.id, event);
     queueMicrotask(() =>
       actionsMenuRef?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     );
   };
-  const beginRename = () => {
-    const session = actionsSession();
-    if (!session) return;
-    setRenameValue(normalizeSessionTitle(session.title) || '');
-    setRenaming(true);
-    queueMicrotask(() => {
-      renameInputRef?.focus();
-      renameInputRef?.select();
-    });
-  };
-  const submitRename = async () => {
-    if (renamePending()) return;
-    const sessionId = actionsSessionId();
-    const title = renameValue().trim();
-    if (!sessionId || !title) return;
-    setRenamePending(true);
-    const renamed = await renameSession(sessionId, title);
-    if (actionsSessionId() !== sessionId) return;
-    setRenamePending(false);
-    if (renamed) closeActions();
-  };
-  const togglePinned = async () => {
-    const sessionId = actionsSessionId();
-    if (!sessionId) return;
-    const pinned = !state.pinnedSessionIds.includes(sessionId);
-    closeActions();
-    try {
-      const pinnedSessionIds = await client.varro.session.setPinned(sessionId, pinned);
-      setState('pinnedSessionIds', pinnedSessionIds);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    }
-  };
-  const copySessionId = async () => {
-    const sessionId = actionsSessionId();
-    closeActions();
-    if (!sessionId) return;
-    if (!(await writeClipboard(sessionId))) {
-      setError('Failed to copy session ID');
-      return;
-    }
-    showSessionActionFeedback('Session ID copied');
-  };
-  const shareActionsSession = async () => {
-    const session = actionsSession();
-    closeActions();
-    if (!session || !(await shareSession(session))) return;
-    showSessionActionFeedback('Share link copied');
-  };
-  const unshareActionsSession = async () => {
-    const session = actionsSession();
-    closeActions();
-    if (!session || !(await unshareSession(session))) return;
-    showSessionActionFeedback('Session unshared');
-  };
-  const deleteActionsSession = async () => {
-    const sessionId = actionsSessionId();
-    closeActions();
-    if (!sessionId) return;
-    await deleteSession(sessionId);
-    setShowSessionPicker(true);
-  };
-
   createEffect(() => {
-    if (!actionsSessionId()) return;
-    actionsPosition();
-    renaming();
-    queueMicrotask(() => {
-      if (actionsMenuRef) clampPopupToViewport(actionsMenuRef);
-    });
-  });
-
-  createEffect(() => {
-    if (!actionsSessionId()) return;
+    if (!sessionActions.sessionId()) return;
     const closeIfOutside = (event: Event) => {
       const target = event.target;
       if (target instanceof Node && actionsMenuRef?.contains(target)) return;
-      closeActions();
+      sessionActions.close();
     };
     window.addEventListener('contextmenu', closeIfOutside, true);
     window.addEventListener('pointerdown', closeIfOutside, true);
@@ -440,116 +364,18 @@ export function ActiveChatHeader(props: {
       </Show>
       <Show when={actionsSession()}>
         {(session) => (
-          <Portal>
-            <div
-              ref={(element) => {
-                actionsMenuRef = element;
-              }}
-              class="session-item-actions-menu"
-              role="menu"
-              aria-label="Session actions"
-              style={{
-                left: `${actionsPosition().x}px`,
-                top: `${actionsPosition().y}px`,
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') return;
-                event.preventDefault();
-                closeActions();
-                titleRef?.focus();
-              }}
-            >
-              <Show
-                when={renaming()}
-                fallback={
-                  <>
-                    <Show when={!session().parentID}>
-                      <button type="button" role="menuitem" onClick={beginRename}>
-                        Rename
-                      </button>
-                    </Show>
-                    <Show when={!session().parentID}>
-                      <button type="button" role="menuitem" onClick={() => void togglePinned()}>
-                        {isActionsSessionPinned() ? 'Unpin' : 'Pin'}
-                      </button>
-                    </Show>
-                    <button type="button" role="menuitem" onClick={() => void copySessionId()}>
-                      Copy session ID
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        const sessionId = actionsSessionId();
-                        closeActions();
-                        if (sessionId) {
-                          postMessage({
-                            type: 'session/open-in-opencode',
-                            payload: { sessionId },
-                          });
-                        }
-                      }}
-                    >
-                      Open in OpenCode
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => void shareActionsSession()}
-                    >
-                      {session().share?.url ? 'Copy share link' : 'Share session'}
-                    </button>
-                    <Show when={session().share?.url}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => void unshareActionsSession()}
-                      >
-                        Unshare session
-                      </button>
-                    </Show>
-                    <Show when={!session().parentID}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        class="is-destructive"
-                        onClick={() => void deleteActionsSession()}
-                      >
-                        Move to Recycle Bin
-                      </button>
-                    </Show>
-                  </>
-                }
-              >
-                <form
-                  class="session-item-rename-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void submitRename();
-                  }}
-                >
-                  <label for={`header-session-rename-${session().id}`}>Session name</label>
-                  <input
-                    ref={(element) => {
-                      renameInputRef = element;
-                    }}
-                    id={`header-session-rename-${session().id}`}
-                    value={renameValue()}
-                    onInput={(event) => setRenameValue(event.currentTarget.value)}
-                    disabled={renamePending()}
-                  />
-                  <div class="session-item-rename-actions">
-                    <button type="button" onClick={closeActions}>
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={!renameValue().trim() || renamePending()}>
-                      Save
-                    </button>
-                  </div>
-                </form>
-              </Show>
-            </div>
-          </Portal>
+          <SessionActionsMenu
+            session={session()}
+            state={sessionActions}
+            isPinned={isActionsSessionPinned()}
+            inputIdPrefix="header-session-rename"
+            onMenuRef={(element) => {
+              actionsMenuRef = element;
+            }}
+            onEscape={() => titleRef?.focus()}
+            onTogglePinned={toggleSessionPinned}
+            onDelete={deleteSessionFromHeader}
+          />
         )}
       </Show>
     </>

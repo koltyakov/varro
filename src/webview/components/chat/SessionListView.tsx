@@ -26,7 +26,6 @@ import {
   on,
   untrack,
 } from 'solid-js';
-import { Portal } from 'solid-js/web';
 import {
   selectSession,
   deleteSession,
@@ -35,7 +34,6 @@ import {
   emptyRecycleBin,
   loadMoreSessions,
   reloadSessions,
-  renameSession,
 } from '../../hooks/useOpenCode';
 import { normalizeSessionTitle } from '../../../shared/session-title';
 import type { RecycleBinEntry, SessionDiffSummary } from '../../../shared/protocol';
@@ -46,13 +44,13 @@ import { ralphStore } from '../../lib/stores/ralph-store';
 import { isEmptySession, shouldHideEmptySessionFromList } from '../../lib/empty-session';
 import { formatEditCount, formatModelName, formatVariantLabel } from '../../lib/format';
 import { formatDuration, formatRelativeAge } from '../../lib/message-metrics';
-import { clampPopupToViewport } from '../../lib/popup-position';
 import { getProviderIcon } from '../../lib/provider-icons';
 import { compareSessionsByActivity } from '../../lib/session-order';
-import { shareSession, unshareSession } from '../../lib/session-sharing';
-import { writeClipboard } from '../../lib/write-clipboard';
-import { postMessage } from '../../lib/bridge';
-import { showSessionActionFeedback } from './SessionActionFeedback';
+import {
+  SessionActionsMenu,
+  createSessionActionsState,
+  type SessionActionsState,
+} from './SessionActionsMenu';
 import { SharedSessionIcon } from './SharedSessionIcon';
 import { isNumber, isString, type UnknownRecord, isObject } from '../../lib/runtime-values';
 
@@ -202,22 +200,6 @@ type SessionDiffSummaryCacheEntry = {
 type SessionDiffSummaryRequest = {
   sessionId: string;
   updated: number;
-};
-
-type SessionActionsState = {
-  sessionId: () => string | null;
-  position: () => { x: number; y: number };
-  renaming: () => boolean;
-  renameValue: () => string;
-  renameSelection: () => { start: number; end: number } | null;
-  renamePending: () => boolean;
-  open: (sessionId: string, event: MouseEvent) => void;
-  close: () => void;
-  beginRename: (title: string) => void;
-  setRenaming: (renaming: boolean) => void;
-  setRenameValue: (value: string) => void;
-  setRenameSelection: (selection: { start: number; end: number }) => void;
-  setRenamePending: (pending: boolean) => void;
 };
 
 export type SessionStatusIndicatorKind =
@@ -906,16 +888,7 @@ export function SessionListView(props: {
   const [nativeSearchResults, setNativeSearchResults] = createSignal<Session[] | null>(null);
   const [isSearchingAllSessions, setIsSearchingAllSessions] = createSignal(false);
   const [showAllModelDetails, setShowAllModelDetails] = createSignal(false);
-  const [actionsSessionId, setActionsSessionId] = createSignal<string | null>(null);
-  const [actionsPosition, setActionsPosition] = createSignal({ x: 0, y: 0 });
   const [frozenSessionOrder, setFrozenSessionOrder] = createSignal<string[] | null>(null);
-  const [renaming, setRenaming] = createSignal(false);
-  const [renameValue, setRenameValue] = createSignal('');
-  const [renameSelection, setRenameSelection] = createSignal<{
-    start: number;
-    end: number;
-  } | null>(null);
-  const [renamePending, setRenamePending] = createSignal(false);
   let containerRef: HTMLDivElement | undefined;
   let searchInputRef: HTMLInputElement | undefined;
   let hasPointerInteraction = false;
@@ -936,38 +909,15 @@ export function SessionListView(props: {
     window.removeEventListener('blur', hideAllModelDetails);
   });
 
-  const closeActions = () => {
-    setActionsSessionId(null);
-    setFrozenSessionOrder(null);
-    setRenaming(false);
-    setRenamePending(false);
-  };
-  const sessionActions: SessionActionsState = {
-    sessionId: actionsSessionId,
-    position: actionsPosition,
-    renaming,
-    renameValue,
-    renameSelection,
-    renamePending,
-    open: (sessionId, event) => {
-      event.preventDefault();
+  const sessionActions = createSessionActionsState({
+    onOpen: () => {
       setFocusedIndex(-1);
-      setActionsPosition({ x: event.clientX, y: event.clientY });
       setFrozenSessionOrder(visibleSessions().map((session) => session.id));
-      setRenaming(false);
-      setActionsSessionId(sessionId);
     },
-    close: closeActions,
-    beginRename: (title) => {
-      setRenameValue(normalizeSessionTitle(title) || '');
-      setRenameSelection(null);
-      setRenaming(true);
+    onClose: () => {
+      setFrozenSessionOrder(null);
     },
-    setRenaming,
-    setRenameValue,
-    setRenameSelection,
-    setRenamePending,
-  };
+  });
 
   const trimmedSearchQuery = createMemo(() => searchQuery().trim());
   const shouldShowSearch = createMemo(() => !props.subagentParentId && !props.sessionFilter);
@@ -1208,8 +1158,10 @@ export function SessionListView(props: {
   });
 
   createEffect(() => {
-    const sessionId = actionsSessionId();
-    if (sessionId && !state.sessions.some((session) => session.id === sessionId)) closeActions();
+    const sessionId = sessionActions.sessionId();
+    if (sessionId && !state.sessions.some((session) => session.id === sessionId)) {
+      sessionActions.close();
+    }
   });
 
   createEffect(() => {
@@ -1692,7 +1644,6 @@ function SessionListItem(props: {
   let rowRef: HTMLDivElement | undefined;
   let sessionButtonRef: HTMLButtonElement | undefined;
   let actionsMenuRef: HTMLDivElement | undefined;
-  let renameInputRef: HTMLInputElement | undefined;
   let openedPointerId: number | null = null;
   let pointerClickTimer: ReturnType<typeof setTimeout> | undefined;
   const [shouldLoadSummary, setShouldLoadSummary] = createSignal(false);
@@ -1770,45 +1721,6 @@ function SessionListItem(props: {
     }
     return getSessionStatusIndicatorTitle(kind, { retrying: status()?.type === 'retry' });
   };
-  const beginRename = () => {
-    props.actions.beginRename(props.session.title);
-    queueMicrotask(() => {
-      renameInputRef?.focus();
-      renameInputRef?.select();
-    });
-  };
-  const submitRename = async () => {
-    if (props.actions.renamePending()) return;
-    const title = props.actions.renameValue().trim();
-    if (!title) return;
-    const sessionId = props.session.id;
-    props.actions.setRenamePending(true);
-    const renamed = await renameSession(sessionId, title);
-    if (props.actions.sessionId() !== sessionId) return;
-    props.actions.setRenamePending(false);
-    if (renamed) props.actions.close();
-  };
-  const copySessionId = async () => {
-    props.actions.close();
-    if (!(await writeClipboard(props.session.id))) {
-      setError('Failed to copy session ID');
-      return;
-    }
-    showSessionActionFeedback('Session ID copied');
-  };
-  const copyShareLink = async () => {
-    const session = props.session;
-    props.actions.close();
-    if (!(await shareSession(session))) return;
-    showSessionActionFeedback('Share link copied');
-  };
-  const unshare = async () => {
-    const session = props.session;
-    props.actions.close();
-    if (!(await unshareSession(session))) return;
-    showSessionActionFeedback('Session unshared');
-  };
-
   const openActions = (event: MouseEvent) => {
     props.actions.open(props.session.id, event);
     queueMicrotask(() =>
@@ -1893,15 +1805,6 @@ function SessionListItem(props: {
 
   onCleanup(() => {
     if (pointerClickTimer !== undefined) clearTimeout(pointerClickTimer);
-  });
-
-  createEffect(() => {
-    if (!showActions()) return;
-    props.actions.position();
-    props.actions.renaming();
-    queueMicrotask(() => {
-      if (actionsMenuRef) clampPopupToViewport(actionsMenuRef);
-    });
   });
 
   createEffect(() => {
@@ -2149,148 +2052,18 @@ function SessionListItem(props: {
         </span>
       </div>
       <Show when={showActions()}>
-        <Portal>
-          <div
-            ref={(element) => {
-              actionsMenuRef = element;
-            }}
-            class="session-item-actions-menu"
-            role="menu"
-            aria-label="Session actions"
-            style={{
-              left: `${props.actions.position().x}px`,
-              top: `${props.actions.position().y}px`,
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return;
-              event.preventDefault();
-              props.actions.close();
-              sessionButtonRef?.focus();
-            }}
-          >
-            <Show
-              when={props.actions.renaming()}
-              fallback={
-                <>
-                  <Show when={!props.session.parentID}>
-                    <button type="button" role="menuitem" onClick={beginRename}>
-                      Rename
-                    </button>
-                  </Show>
-                  <Show when={!props.session.parentID}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        props.actions.close();
-                        void props.onTogglePinned();
-                      }}
-                    >
-                      {props.isPinned ? 'Unpin' : 'Pin'}
-                    </button>
-                  </Show>
-                  <button type="button" role="menuitem" onClick={() => void copySessionId()}>
-                    Copy session ID
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      props.actions.close();
-                      postMessage({
-                        type: 'session/open-in-opencode',
-                        payload: { sessionId: props.session.id },
-                      });
-                    }}
-                  >
-                    Open in OpenCode
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
-                    {props.session.share?.url ? 'Copy share link' : 'Share session'}
-                  </button>
-                  <Show when={props.session.share?.url}>
-                    <button type="button" role="menuitem" onClick={() => void unshare()}>
-                      Unshare session
-                    </button>
-                  </Show>
-                  <Show when={!props.session.parentID}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class="is-destructive"
-                      onClick={() => {
-                        props.actions.close();
-                        void deleteSession(props.session.id);
-                      }}
-                    >
-                      Move to Recycle Bin
-                    </button>
-                  </Show>
-                </>
-              }
-            >
-              <form
-                class="session-item-rename-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitRename();
-                }}
-              >
-                <label for={`session-rename-${props.session.id}`}>Session name</label>
-                <input
-                  ref={(element) => {
-                    renameInputRef = element;
-                    const selection = untrack(props.actions.renameSelection);
-                    if (!selection) return;
-                    queueMicrotask(() => {
-                      element.focus();
-                      element.setSelectionRange(selection.start, selection.end);
-                    });
-                  }}
-                  id={`session-rename-${props.session.id}`}
-                  value={props.actions.renameValue()}
-                  onInput={(event) => {
-                    props.actions.setRenameValue(event.currentTarget.value);
-                    props.actions.setRenameSelection({
-                      start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
-                      end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
-                    });
-                  }}
-                  onSelect={(event) =>
-                    props.actions.setRenameSelection({
-                      start: event.currentTarget.selectionStart ?? 0,
-                      end: event.currentTarget.selectionEnd ?? 0,
-                    })
-                  }
-                  onMouseUp={(event) =>
-                    props.actions.setRenameSelection({
-                      start: event.currentTarget.selectionStart ?? 0,
-                      end: event.currentTarget.selectionEnd ?? 0,
-                    })
-                  }
-                  onKeyUp={(event) =>
-                    props.actions.setRenameSelection({
-                      start: event.currentTarget.selectionStart ?? 0,
-                      end: event.currentTarget.selectionEnd ?? 0,
-                    })
-                  }
-                  disabled={props.actions.renamePending()}
-                />
-                <div class="session-item-rename-actions">
-                  <button type="button" onClick={props.actions.close}>
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!props.actions.renameValue().trim() || props.actions.renamePending()}
-                  >
-                    Save
-                  </button>
-                </div>
-              </form>
-            </Show>
-          </div>
-        </Portal>
+        <SessionActionsMenu
+          session={props.session}
+          state={props.actions}
+          isPinned={props.isPinned}
+          inputIdPrefix="session-rename"
+          onMenuRef={(element) => {
+            actionsMenuRef = element;
+          }}
+          onEscape={() => sessionButtonRef?.focus()}
+          onTogglePinned={() => props.onTogglePinned()}
+          onDelete={(sessionId) => deleteSession(sessionId)}
+        />
       </Show>
     </div>
   );
