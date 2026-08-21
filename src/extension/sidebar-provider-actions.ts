@@ -26,6 +26,7 @@ export interface SidebarProviderActionDeps {
   webviewSession: {
     setFocus(focused: boolean): void;
     updateCommandState(canAbort: boolean, canSwitchSessions: boolean): void;
+    reload(): Promise<void>;
   };
   setProviderWatchActive(active: boolean): void;
   setActiveChatModel(model: ChatModelSelection | null): void;
@@ -119,6 +120,7 @@ export function createSidebarProviderActions(
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
     exportSession: (sessionId) => deps.sessionExportService.exportSession(sessionId),
     generateUsageReport: (includeAllTime) => deps.usageReportService.openReport(includeAllTime),
+    reloadWebview: () => deps.webviewSession.reload(),
     openFolder: async () => {
       await vscode.commands.executeCommand('workbench.action.files.openFolder');
     },

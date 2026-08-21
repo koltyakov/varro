@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
   document.body.appendChild(entryRoot);
   return {
     cleanupBridge: vi.fn(),
+    postMessage: vi.fn(() => true),
     clearStartupHandlers: vi.fn(),
     disposeSolid: vi.fn(),
     entryRoot,
@@ -16,7 +17,10 @@ const mocks = vi.hoisted(() => {
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise the webview entry module's integration boundaries. */
 vi.mock('solid-js/web', () => ({ render: mocks.render }));
 vi.mock('./App', () => ({ AppRoot: () => null }));
-vi.mock('./lib/bridge', () => ({ cleanupBridge: mocks.cleanupBridge }));
+vi.mock('./lib/bridge', () => ({
+  cleanupBridge: mocks.cleanupBridge,
+  postMessage: mocks.postMessage,
+}));
 
 import { bootstrap, bootstrapWebview } from './index';
 import { fixture } from './test-fixtures';
@@ -34,6 +38,7 @@ const bootstrapWindow = fixture<UnknownRecord>(window);
 describe('webview bootstrap', () => {
   beforeEach(() => {
     mocks.cleanupBridge.mockReset();
+    mocks.postMessage.mockReset().mockReturnValue(true);
     mocks.clearStartupHandlers.mockReset();
     mocks.disposeSolid.mockReset();
     mocks.render.mockReset();
@@ -65,6 +70,9 @@ describe('webview bootstrap', () => {
     expect(mocks.clearStartupHandlers).toHaveBeenCalledOnce();
     expect(mocks.cleanupBridge).toHaveBeenCalledOnce();
     expect(consoleError).toHaveBeenCalledWith('Varro webview bootstrap failed', error);
+
+    root.querySelector<HTMLButtonElement>('button')?.click();
+    expect(mocks.postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
   });
 
   it('logs and cleans up safely when the root element is missing', () => {

@@ -689,8 +689,9 @@ Run the frame-level duplicate oracle through the live controller:
 npm run ai:live -- run --manifest <manifest-path> --launch <launch.json> --scenario AI-17
 ```
 
-The controller sends one marked prompt through native composer input, requests 21 unique tokens, and
-samples the real Varro DOM on every animation frame until the stream settles.
+The controller reloads the Extension Development Host through the native command palette, reconnects
+to the recreated Varro iframe, sends one marked prompt through native composer input, requests 21
+unique tokens, and samples the real Varro DOM on every animation frame until the stream settles.
 
 Pass invariants:
 

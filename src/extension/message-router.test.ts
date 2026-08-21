@@ -29,6 +29,7 @@ function createCallbacks(): MessageRouterCallbacks {
     openSessionInOpenCode: vi.fn(),
     exportSession: vi.fn(() => Promise.resolve()),
     generateUsageReport: vi.fn(() => Promise.resolve()),
+    reloadWebview: vi.fn(() => Promise.resolve()),
     openFolder: vi.fn(() => Promise.resolve()),
     openSettings: vi.fn(() => Promise.resolve()),
     showOutput: vi.fn(),
@@ -219,6 +220,15 @@ describe('MessageRouter', () => {
     await router.handleMessage({ type: 'vscode/open-folder' });
 
     expect(cb.openFolder).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches webview/reload', async () => {
+    const cb = createCallbacks();
+    const router = new MessageRouter(cb);
+
+    await router.handleMessage({ type: 'webview/reload' });
+
+    expect(cb.reloadWebview).toHaveBeenCalledOnce();
   });
 
   it('dispatches session/open-in-opencode', async () => {

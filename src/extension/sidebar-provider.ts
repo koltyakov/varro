@@ -277,6 +277,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           setFocus: (focused) => this.webviewSession.setFocus(focused),
           updateCommandState: (canAbort, canSwitchSessions) =>
             this.webviewSession.updateCommandState(canAbort, canSwitchSessions),
+          reload: () => this.webviewSession.reload(),
         },
         setProviderWatchActive: (active) => this.setProviderWatchActive(active),
         setActiveChatModel: (model) => {

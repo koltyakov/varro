@@ -75,6 +75,7 @@ function createActionFixture() {
   const webviewSession = {
     setFocus: vi.fn(),
     updateCommandState: vi.fn(),
+    reload: vi.fn(() => Promise.resolve()),
   };
   const contextFilesState = {
     notifyContextFilesChanged: vi.fn(),
@@ -232,6 +233,7 @@ describe('createSidebarProviderActions', () => {
     actions.runInTerminal('npm test', 'Tests');
     await actions.exportSession('session-1');
     await actions.generateUsageReport(false);
+    await actions.reloadWebview();
     await actions.handleDroppedPaths(['/repo/a.ts']);
     await actions.handleDroppedContent([{ name: 'a.ts', content: 'QQ==', size: 1 }]);
     actions.removeContextFile('/repo/a.ts');
@@ -258,6 +260,7 @@ describe('createSidebarProviderActions', () => {
     expect(deps.runInTerminal).toHaveBeenCalledWith('npm test', 'Tests');
     expect(sessionExportService.exportSession).toHaveBeenCalledWith('session-1');
     expect(usageReportService.openReport).toHaveBeenCalledWith(false);
+    expect(webviewSession.reload).toHaveBeenCalledOnce();
     expect(deps.handleDroppedPaths).toHaveBeenCalledWith(['/repo/a.ts']);
     expect(deps.handleDroppedContent).toHaveBeenCalledWith([
       { name: 'a.ts', content: 'QQ==', size: 1 },

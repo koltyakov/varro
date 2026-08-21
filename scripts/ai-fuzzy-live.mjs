@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { resizeVscodeSidebar } from './vscode-launch-process.mjs';
+import { reloadVscodeWindow, resizeVscodeSidebar } from './vscode-launch-process.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_MODEL = 'openai/gpt-5.6-luna';
@@ -37,6 +37,20 @@ function parseModel(value) {
     throw new Error('--model must use provider/model format');
   }
   return { providerID: value.slice(0, separator), modelID: value.slice(separator + 1) };
+}
+
+export function modelDisplayName(value) {
+  const { modelID } = parseModel(value);
+  const parts = modelID.split('-');
+  if (parts[0] === 'gpt' && /^\d+(?:\.\d+)*$/.test(parts[1] ?? '')) {
+    return `GPT-${parts[1]} ${parts
+      .slice(2)
+      .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+      .join(' ')}`.trim();
+  }
+  return parts
+    .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+    .join(' ');
 }
 
 export function missingLiveGates(snapshot, scenario) {
@@ -151,7 +165,7 @@ export function buildDuplicateDeliveryObserverExpression(marker, tokens) {
       observation,
       stop() { active = false; },
     };
-    requestAnimationFrame(sample);
+    sample();
     return true;
   })()`;
 }
@@ -193,37 +207,55 @@ class OpenCodeClient {
 }
 
 class CdpController {
-  constructor(port, socket, contextId) {
+  constructor(port, socket, contextId, frameId = null) {
     this.port = port;
     this.socket = socket;
     this.contextId = contextId;
+    this.frameId = frameId;
     this.requestId = 0;
   }
 
-  static async connect(port) {
-    const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
-      response.json()
+  static async connect(port, timeoutMs = 20_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = null;
+    while (Date.now() < deadline) {
+      let socket = null;
+      try {
+        const targets = await fetch(`http://127.0.0.1:${String(port)}/json/list`).then((response) =>
+          response.json()
+        );
+        const target = targets.find(
+          (item) => item.type === 'iframe' && item.url.includes('extensionId=koltyakov.varro')
+        );
+        if (!target?.webSocketDebuggerUrl) {
+          throw new Error('The tracked host has no Varro iframe target');
+        }
+        socket = new WebSocket(target.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+          socket.addEventListener('open', resolve, { once: true });
+          socket.addEventListener('error', reject, { once: true });
+        });
+        const temporary = new CdpController(port, socket, null);
+        const tree = await temporary.call('Page.getFrameTree');
+        const frameId = tree.frameTree.childFrames?.[0]?.frame.id;
+        if (!frameId) throw new Error('The Varro content frame is unavailable');
+        const world = await temporary.call('Page.createIsolatedWorld', {
+          frameId,
+          worldName: `varro-ai-fuzzy-${String(Date.now())}`,
+          grantUniveralAccess: true,
+        });
+        temporary.contextId = world.executionContextId;
+        temporary.frameId = frameId;
+        return temporary;
+      } catch (error) {
+        socket?.close();
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    throw new Error(
+      `Could not connect to the recreated Varro content frame: ${lastError instanceof Error ? lastError.message : String(lastError)}`
     );
-    const target = targets.find(
-      (item) => item.type === 'iframe' && item.url.includes('extensionId=koltyakov.varro')
-    );
-    if (!target?.webSocketDebuggerUrl) throw new Error('The tracked host has no Varro iframe target');
-    const socket = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      socket.addEventListener('open', resolve, { once: true });
-      socket.addEventListener('error', reject, { once: true });
-    });
-    const temporary = new CdpController(port, socket, null);
-    const tree = await temporary.call('Page.getFrameTree');
-    const frameId = tree.frameTree.childFrames?.[0]?.frame.id;
-    if (!frameId) throw new Error('The Varro content frame is unavailable');
-    const world = await temporary.call('Page.createIsolatedWorld', {
-      frameId,
-      worldName: `varro-ai-fuzzy-${String(Date.now())}`,
-      grantUniveralAccess: true,
-    });
-    temporary.contextId = world.executionContextId;
-    return temporary;
   }
 
   call(method, params = {}) {
@@ -242,15 +274,39 @@ class CdpController {
   }
 
   async evaluate(expression) {
-    const result = await this.call('Runtime.evaluate', {
-      contextId: this.contextId,
-      expression,
-      returnByValue: true,
-    });
+    let result;
+    try {
+      result = await this.evaluateInCurrentContext(expression);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('Cannot find context')) throw error;
+      await this.refreshContext();
+      result = await this.evaluateInCurrentContext(expression);
+    }
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
     }
     return result.result.value;
+  }
+
+  evaluateInCurrentContext(expression) {
+    return this.call('Runtime.evaluate', {
+      contextId: this.contextId,
+      expression,
+      returnByValue: true,
+    });
+  }
+
+  async refreshContext() {
+    const tree = await this.call('Page.getFrameTree');
+    const frameId = tree.frameTree.childFrames?.[0]?.frame.id;
+    if (!frameId) throw new Error('The recreated Varro content frame is unavailable');
+    const world = await this.call('Page.createIsolatedWorld', {
+      frameId,
+      worldName: `varro-ai-fuzzy-${String(Date.now())}`,
+      grantUniveralAccess: true,
+    });
+    this.frameId = frameId;
+    this.contextId = world.executionContextId;
   }
 
   snapshot() {
@@ -344,9 +400,11 @@ class CdpController {
       ? `&& !candidate.innerText.includes(${JSON.stringify(excludeText)})`
       : '';
     const point = await this.evaluate(`(() => {
-      const element = [...document.querySelectorAll('button, [role="button"]')].find((candidate) =>
-        candidate.innerText.includes(${JSON.stringify(text)}) ${exclusion}
-      );
+      const element = [...document.querySelectorAll('button, [role="button"]')].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return candidate.innerText.includes(${JSON.stringify(text)}) ${exclusion} &&
+          rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight;
+      });
       if (!element) return null;
       const rect = element.getBoundingClientRect();
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -408,6 +466,30 @@ class CdpController {
     return true;
   }
 
+  async selectModel(name) {
+    const current = await this.evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) =>
+        candidate.innerText.trim().startsWith('GPT-5.6 ')
+      );
+      return button?.innerText.trim() ?? null;
+    })()`);
+    if (current === name) return current;
+    if (!current || !(await this.clickText(current))) {
+      throw new Error('The current composer model control is unavailable');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (!(await this.clickText(name))) throw new Error(`Model ${name} is not visible in the picker`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const selected = await this.evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) =>
+        candidate.innerText.trim().startsWith('GPT-5.6 ')
+      );
+      return button?.innerText.trim() ?? null;
+    })()`);
+    if (selected !== name) throw new Error(`Model selection remained ${String(selected)}`);
+    return selected;
+  }
+
   startDuplicateDeliveryObservation(marker, tokens) {
     return this.evaluate(buildDuplicateDeliveryObserverExpression(marker, tokens));
   }
@@ -443,14 +525,23 @@ async function writeJsonAtomic(filePath, value) {
 async function openRunSession(cdp, title) {
   let snapshot = await cdp.snapshot();
   if (snapshot.title === title) return;
-  await cdp.click('[aria-label="Back to sessions"]');
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  if (!(await cdp.clickText(title))) {
+  const deadline = Date.now() + 5_000;
+  let opened = false;
+  while (Date.now() < deadline && !opened) {
+    await cdp.click('[aria-label="Back to sessions"]');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    opened = await cdp.clickText(title);
+  }
+  if (!opened) {
     throw new Error(`Run session ${title} is not visible in the dedicated host session list`);
   }
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  snapshot = await cdp.snapshot();
-  if (snapshot.title !== title) throw new Error(`Could not open run session ${title}`);
+  const openDeadline = Date.now() + 5_000;
+  while (Date.now() < openDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    snapshot = await cdp.snapshot();
+    if (snapshot?.title === title) return;
+  }
+  throw new Error(`Could not open run session ${title}`);
 }
 
 async function waitForLiveGate({ client, cdp, sessionId, scenario, timeoutMs }) {
@@ -616,6 +707,9 @@ async function runLive(options) {
   const tracked = manifest.runSessions.find((session) => !session.deleted);
   if (!tracked) throw new Error('The manifest has no active run session');
   const client = new OpenCodeClient(manifest.server, manifest.workspace);
+  if (scenario === 'AI-17') {
+    await reloadVscodeWindow(launch.remoteDebuggingPort);
+  }
   const cdp = await CdpController.connect(launch.remoteDebuggingPort);
   const attempts = [];
   let best = null;
@@ -624,6 +718,8 @@ async function runLive(options) {
     await cdp.click('[aria-label="Scroll to latest message"]');
     await cdp.key('.interactive-list', 'End');
     if (scenario === 'AI-17') {
+      const requestedModel = options.model ?? DEFAULT_MODEL;
+      const selectedModel = await cdp.selectModel(modelDisplayName(requestedModel));
       const tokens = [
         ...Array.from({ length: 20 }, (_, index) =>
           `VFZ-DUP-${String(index + 1).padStart(2, '0')}`
@@ -653,7 +749,8 @@ async function runLive(options) {
         scenario,
         prepared: failures.length === 0,
         prompt,
-        model: options.model ?? DEFAULT_MODEL,
+        model: requestedModel,
+        selectedModel,
         sent,
         sawBusy,
         settled,

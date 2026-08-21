@@ -63,6 +63,9 @@ delete environment.ELECTRON_RUN_AS_NODE;
 const vscodeArgs = [
   '--no-sandbox',
   '--disable-gpu-sandbox',
+  '--disable-background-timer-throttling',
+  '--disable-renderer-backgrounding',
+  '--disable-backgrounding-occluded-windows',
   '--password-store=basic',
   '--use-mock-keychain',
   '--disable-updates',

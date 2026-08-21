@@ -284,6 +284,22 @@ describe('WebviewSession', () => {
     expect(view.webview.html).toBe('<html>fresh</html>');
   });
 
+  it('reloads the current view through a fresh resolve', async () => {
+    const { session, bridge } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    await flushMicrotasks();
+    bridge.renderHtml.mockReturnValueOnce(Promise.resolve('<html>reloaded</html>'));
+
+    await session.reload();
+    expect(view.webview.html).toContain('Loading workspace...');
+    await flushMicrotasks();
+
+    expect(bridge.renderHtml).toHaveBeenCalledTimes(2);
+    expect(view.webview.html).toBe('<html>reloaded</html>');
+  });
+
   it('shares an overlapping recovery load and lets only the current generation commit it', async () => {
     const recovery = createDeferred<RecoverySnapshot>();
     const { session, bridge, sessionState, deps } = createSession();

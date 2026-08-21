@@ -43,6 +43,27 @@ export function reserveLoopbackPort() {
   });
 }
 
+async function bringTargetToFront(webSocketDebuggerUrl) {
+  const socket = new WebSocket(webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  const result = await new Promise((resolve, reject) => {
+    const handleMessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id !== 1) return;
+      socket.removeEventListener('message', handleMessage);
+      if (message.error) reject(new Error(message.error.message));
+      else resolve(message.result);
+    };
+    socket.addEventListener('message', handleMessage);
+    socket.send(JSON.stringify({ id: 1, method: 'Page.bringToFront', params: {} }));
+  });
+  socket.close();
+  return result;
+}
+
 export async function waitForVscodeProcess(executable, userDataDir, timeoutMs = 15_000) {
   const expectedArgument = `--user-data-dir=${userDataDir}`;
   const deadline = Date.now() + timeoutMs;
@@ -172,6 +193,82 @@ export async function resizeVscodeSidebar(remoteDebuggingPort, targetWidth, time
   throw new Error(
     `Could not resize the Varro sidebar to ${String(targetWidth)}px${lastWidth === null ? '' : ` (last measured ${String(lastWidth)}px)`}`
   );
+}
+
+export async function reloadVscodeWindow(remoteDebuggingPort, timeoutMs = 20_000) {
+  const targets = await fetch(`http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`).then(
+    (response) => response.json()
+  );
+  const workbench = targets.find(
+    (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
+  );
+  if (!workbench?.webSocketDebuggerUrl) throw new Error('VS Code workbench target is not ready');
+  const originalVarroTargetId = targets.find(
+    (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
+  )?.id;
+
+  const socket = new WebSocket(workbench.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  let requestId = 0;
+  const call = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const id = ++requestId;
+      const handleMessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.id !== id) return;
+        socket.removeEventListener('message', handleMessage);
+        if (message.error) reject(new Error(message.error.message));
+        else resolve(message.result);
+      };
+      socket.addEventListener('message', handleMessage);
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+
+  for (const type of ['keyDown', 'keyUp']) {
+    await call('Input.dispatchKeyEvent', {
+      type,
+      key: 'P',
+      code: 'KeyP',
+      modifiers: process.platform === 'darwin' ? 12 : 10,
+    });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await call('Input.insertText', { text: 'Developer: Reload Window' });
+  for (const type of ['keyDown', 'keyUp']) {
+    await call('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter' });
+  }
+  socket.close();
+
+  const deadline = Date.now() + timeoutMs;
+  let sawUnavailable = false;
+  while (Date.now() < deadline) {
+    try {
+      const currentTargets = await fetch(
+        `http://127.0.0.1:${String(remoteDebuggingPort)}/json/list`
+      ).then((response) => response.json());
+      const currentWorkbench = currentTargets.find(
+        (target) => target.type === 'page' && target.title.includes('[Extension Development Host]')
+      );
+      const varroTarget = currentTargets.find(
+        (target) => target.type === 'iframe' && target.url.includes('extensionId=koltyakov.varro')
+      );
+      const hasRecreatedVarro =
+        !!varroTarget && (!originalVarroTargetId || varroTarget.id !== originalVarroTargetId);
+      if (sawUnavailable && currentWorkbench?.webSocketDebuggerUrl && hasRecreatedVarro) {
+        await bringTargetToFront(currentWorkbench.webSocketDebuggerUrl);
+        return;
+      }
+      const hasVarro = !!varroTarget;
+      if (!currentWorkbench || !hasVarro) sawUnavailable = true;
+    } catch {
+      sawUnavailable = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error('VS Code did not finish reloading the Varro webview');
 }
 
 async function readProcessBirthIdentity(pid) {

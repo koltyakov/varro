@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web';
 import { AppRoot } from './App';
-import { cleanupBridge } from './lib/bridge';
+import { cleanupBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
 import { isFunction } from './lib/runtime-values';
@@ -44,7 +44,7 @@ export function showBootstrapFailure(root: HTMLElement) {
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = 'Reload sidebar';
-  button.addEventListener('click', () => window.location.reload());
+  button.addEventListener('click', () => postMessage({ type: 'webview/reload' }));
   fallback.append(title, message, button);
   root.replaceChildren(fallback);
 }

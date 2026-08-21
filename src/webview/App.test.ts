@@ -166,6 +166,12 @@ describe('AppRoot', () => {
     expect(container?.textContent).toContain('Something went wrong');
     expect(container?.textContent).toContain('initialization failed');
     expect(container?.textContent).not.toContain('Error: initialization failed');
+
+    const reloadButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Reload sidebar'
+    );
+    reloadButton?.click();
+    expect(appMocks.postMessage).toHaveBeenCalledWith({ type: 'webview/reload' });
   });
 
   it('keeps RalphForm failures inside the root boundary', async () => {

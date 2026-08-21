@@ -240,10 +240,8 @@ import {
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
 import { isString } from '../lib/runtime-values';
+import { ModelPicker } from './ModelPicker';
 
-const LazyModelPicker = lazy(() =>
-  import('./ModelPicker').then((module) => ({ default: module.ModelPicker }))
-);
 const LazyMcpPicker = lazy(() =>
   import('./McpPicker').then((module) => ({ default: module.McpPicker }))
 );
@@ -3521,7 +3519,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       >
         <Show when={showModelPicker()}>
           <Suspense>
-            <LazyModelPicker
+            <ModelPicker
               onSelect={(sel) => {
                 if (sel.providerID && sel.modelID) {
                   const rememberedVariant = getStoredVariantForModel(sel.providerID, sel.modelID);

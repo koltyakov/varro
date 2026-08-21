@@ -146,6 +146,12 @@ export class WebviewSession {
     this.flushPendingCommands();
   }
 
+  async reload() {
+    const view = this.bridge.getView();
+    if (!view) return;
+    await this.resolve(view);
+  }
+
   async resolve(webviewView: vscode.WebviewView) {
     this.bridge.setView(webviewView);
     this.webviewReady = false;

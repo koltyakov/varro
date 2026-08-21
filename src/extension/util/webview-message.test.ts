@@ -924,6 +924,9 @@ describe('webview message validation', () => {
     expect(parseWebviewMessage({ type: 'vscode/open-folder' })).toEqual({
       type: 'vscode/open-folder',
     });
+    expect(parseWebviewMessage({ type: 'webview/reload' })).toEqual({
+      type: 'webview/reload',
+    });
     expect(
       parseWebviewMessage({ type: 'workspace/select', payload: { path: '/repo/packages/app' } })
     ).toEqual({ type: 'workspace/select', payload: { path: '/repo/packages/app' } });
