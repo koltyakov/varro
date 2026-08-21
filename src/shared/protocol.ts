@@ -186,6 +186,13 @@ export type McpStatus = {
   error?: string;
 };
 
+export type LspStatus = {
+  id: string;
+  name: string;
+  root: string;
+  status: 'connected' | 'error';
+};
+
 /**
  * Why a startup failure happened, in a form the webview can branch on.
  *

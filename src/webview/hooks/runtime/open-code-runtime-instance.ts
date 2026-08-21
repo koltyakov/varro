@@ -851,6 +851,7 @@ export function resetWorkspaceDerivedState() {
     appStore.setState('providers', []);
     appStore.setState('providerLimits', reconcile({}));
     appStore.setState('mcpStatus', reconcile({}));
+    appStore.setState('lspStatus', []);
     appStore.setState('providerDefaults', reconcile({}));
     appStore.setState('sessionAutoPermissionCounts', reconcile({}));
     appStore.setState('sessionAutoPermissionActivity', reconcile({}));
@@ -1096,6 +1097,9 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         },
         refreshMcps: () => {
           void loadMcps();
+        },
+        refreshLsps: () => {
+          void loadLsps();
         },
         refreshProviders: () => {
           void refreshRoutingState();
@@ -1663,6 +1667,16 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   } = dataLoaders;
   const hydrateSessionStatuses = hydratePolledSessionStatuses;
 
+  async function loadLsps() {
+    const generation = workspaceGeneration;
+    try {
+      const status = await client.lsp.status();
+      if (generation === workspaceGeneration) appStore.setState('lspStatus', status);
+    } catch (err) {
+      if (generation === workspaceGeneration) logError('loadLsps', err);
+    }
+  }
+
   async function refreshRoutingState() {
     await Promise.all([dataLoaders.refreshRoutingState(), loadCompatibilityState()]);
   }
@@ -1676,6 +1690,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       loadQuestions(),
       syncPendingPermissions(),
       loadMcps(),
+      loadLsps(),
       loadCommands(),
       refreshRoutingState(),
       ...(activeSessionId ? [syncSession(activeSessionId)] : []),
@@ -1778,6 +1793,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
         loadProviders(),
         loadCompatibilityState(),
         loadMcps(),
+        loadLsps(),
         loadQuestions(),
         loadRecycleBin(),
         syncPendingPermissions().catch((err) => logError('permission.list', err)),

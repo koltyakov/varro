@@ -867,6 +867,22 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.toolbar-mcp-count')).toBeNull();
   });
 
+  it('shows active LSPs in the status row', () => {
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(container?.querySelector('.toolbar-lsp-count')).toBeNull();
+
+    setState('lspStatus', [
+      { id: 'typescript', name: 'TypeScript', root: '/repo', status: 'connected' },
+      { id: 'oxlint', name: 'Oxlint', root: '/repo', status: 'connected' },
+    ]);
+
+    const lspCount = container?.querySelector('.toolbar-lsp-count');
+    expect(lspCount?.textContent).toContain('LSPs:');
+    expect(lspCount?.textContent).toContain('2');
+    expect(lspCount?.getAttribute('aria-label')).toContain('Oxlint, TypeScript');
+  });
+
   it('shows all available provider-limit windows under the fixed threshold', () => {
     setState('providers', [
       {

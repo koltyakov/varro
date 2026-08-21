@@ -144,6 +144,7 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 type ChatInputMetaToolbarProps = ToolbarSharedProps & {
   showMcpControl: boolean;
   connectedMcpCount: number;
+  activeLspNames: string[];
   mcpButtonRef?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
   onToggleMcps: () => void;
 };
@@ -253,6 +254,7 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
   const showMetaRow = () =>
     props.showPermissionControl ||
     props.showMcpControl ||
+    props.activeLspNames.length > 0 ||
     hasContextControl() ||
     props.providerLimitBadges.length > 0;
 
@@ -297,6 +299,25 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
                 </span>
                 <span class="toolbar-mcp-count-value">{props.connectedMcpCount}</span>
               </button>
+            </Tooltip>
+          </Show>
+
+          <Show when={props.activeLspNames.length > 0}>
+            <Tooltip
+              content={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}
+            >
+              <span
+                class="toolbar-lsp-count"
+                aria-label={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}
+              >
+                <span class="toolbar-lsp-count-label">
+                  <span class="toolbar-meta-full-label">LSPs:</span>
+                  <span class="toolbar-meta-compact-label" aria-hidden="true">
+                    L
+                  </span>
+                </span>
+                <span class="toolbar-lsp-count-value">{props.activeLspNames.length}</span>
+              </span>
             </Tooltip>
           </Show>
 

@@ -3071,6 +3071,11 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     const statuses = mcpStatuses();
     return statuses.length > 0;
   });
+  const activeLspNames = createMemo(() =>
+    state.lspStatus
+      .map((status) => status.name)
+      .toSorted((left, right) => left.localeCompare(right))
+  );
   createEffect(() => {
     if (!showCurrentProviderLimit() && showProviderLimitPopup()) {
       setShowProviderLimitPopup(false);
@@ -3858,6 +3863,7 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           inputFrameRef={inputFrameRef}
           showMcpControl={!composerEditingMessage() && showMcpControl()}
           connectedMcpCount={connectedMcpCount()}
+          activeLspNames={composerEditingMessage() ? [] : activeLspNames()}
           mcpButtonRef={(el) => {
             mcpPickerRef = el;
           }}

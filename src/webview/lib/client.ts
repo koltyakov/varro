@@ -19,6 +19,7 @@ import type {
   AutoApproveJudgeRequest,
   AutoApproveJudgeResponse,
   ChatModelSelection,
+  LspStatus,
   McpStatus,
   ProviderLimitStatus,
   RecycleBinEntry,
@@ -450,6 +451,12 @@ export const client = {
     },
     async removeAuth(name: string): Promise<{ success: true }> {
       return apiCall('DELETE', `/mcp/${encodeURIComponent(name)}/auth`);
+    },
+  },
+
+  lsp: {
+    async status(): Promise<LspStatus[]> {
+      return requireArray<LspStatus>(await apiCall('GET', '/lsp'), '/lsp');
     },
   },
 

@@ -372,6 +372,7 @@ describe('mount bridge helpers', () => {
     const searchSessions = vi.fn();
     const abortSession = vi.fn();
     const refreshMcps = vi.fn();
+    const refreshLsps = vi.fn();
     const refreshProviders = vi.fn();
     const setProviderRefreshPending = vi.fn();
     const revalidateProviderAuth = vi.fn();
@@ -405,6 +406,7 @@ describe('mount bridge helpers', () => {
       requestSessionSearchFocus: searchSessions,
       abortSession,
       refreshMcps,
+      refreshLsps,
       refreshProviders,
       setProviderRefreshPending,
       revalidateProviderAuth,
@@ -433,6 +435,10 @@ describe('mount bridge helpers', () => {
     handleExtensionMessageWithDependencies(deps, {
       type: 'server/event',
       payload: { type: 'mcp.tools.changed', properties: {} },
+    });
+    handleExtensionMessageWithDependencies(deps, {
+      type: 'server/event',
+      payload: { type: 'lsp.updated', properties: {} },
     });
     handleExtensionMessageWithDependencies(deps, {
       type: 'server/event',
@@ -471,6 +477,7 @@ describe('mount bridge helpers', () => {
     expect(addDroppedContextFiles).toHaveBeenCalledTimes(1);
     expect(removeDroppedContextFile).toHaveBeenCalledWith('/repo/file.ts');
     expect(refreshMcps).toHaveBeenCalledTimes(2);
+    expect(refreshLsps).toHaveBeenCalledOnce();
     expect(refreshProviders).toHaveBeenCalledTimes(6);
     expect(setProviderRefreshPending).toHaveBeenCalledWith(true);
     expect(revalidateProviderAuth).toHaveBeenCalledTimes(3);

@@ -131,6 +131,7 @@ describe('webview message validation', () => {
     expect(isAllowedApiRequest('DELETE', '/varro/session-trash')).toBe(true);
     expect(isAllowedApiRequest('POST', '/varro/plan/open')).toBe(true);
     expect(isAllowedApiRequest('GET', '/mcp')).toBe(true);
+    expect(isAllowedApiRequest('GET', '/lsp')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/connect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/disconnect')).toBe(true);
     expect(isAllowedApiRequest('POST', '/mcp/browser-bridge/auth/authenticate')).toBe(true);

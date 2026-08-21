@@ -30,6 +30,7 @@ import type {
   DesktopSessionPaneSide,
   EditorContext,
   DroppedFile,
+  LspStatus,
   McpStatus,
   PermissionMode,
   ProviderLimitStatus,
@@ -134,6 +135,7 @@ export interface AppState {
   providers: Provider[];
   providerLimits: Record<string, ProviderLimitStatus | null>;
   mcpStatus: Record<string, McpStatus>;
+  lspStatus: LspStatus[];
   providerDefaults: Record<string, string>;
   sessionPermissionModes: Record<string, PermissionMode>;
   sessionAutoPermissionCounts: Record<
@@ -329,6 +331,7 @@ export function createAppState(): AppStateInstance {
     providers: [],
     providerLimits: {},
     mcpStatus: {},
+    lspStatus: [],
     providerDefaults: {},
     sessionPermissionModes: readStoredPermissionModes(STORAGE_KEYS.sessionPermissionModes),
     sessionAutoPermissionCounts: {},

@@ -24,6 +24,7 @@ export function createMountBridgeOperations(deps: {
   createSession(prefill?: string): void;
   abortSession(): void;
   refreshMcps(): void;
+  refreshLsps?(): void;
   refreshProviders(): void;
   revalidateProviderAuth?(): void;
   applyTheme(theme: WebviewThemeKind): void;
@@ -80,6 +81,7 @@ export function createMountBridgeOperations(deps: {
         requestSessionSearchFocus: uiStore.requestSessionSearchFocus,
         abortSession: deps.abortSession,
         refreshMcps: deps.refreshMcps,
+        refreshLsps: deps.refreshLsps,
         refreshProviders: deps.refreshProviders,
         setProviderRefreshPending: (pending) =>
           appStore.setState('providerRefreshPending', pending),
@@ -131,6 +133,7 @@ export function handleExtensionMessageWithDependencies(
     requestSessionSearchFocus?(): void;
     abortSession(): void;
     refreshMcps(): void;
+    refreshLsps?(): void;
     refreshProviders(): void;
     setProviderRefreshPending?(pending: boolean): void;
     revalidateProviderAuth?(): void;
@@ -233,6 +236,9 @@ export function handleExtensionMessageWithDependencies(
         msg.payload.type === 'mcp.browser.open.failed'
       ) {
         deps.refreshMcps();
+      }
+      if (msg.payload.type === 'lsp.updated') {
+        deps.refreshLsps?.();
       }
       if (msg.payload.type === 'mcp.browser.open.failed' && isString(msg.payload.properties?.url)) {
         deps.openExternal?.(msg.payload.properties.url);

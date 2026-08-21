@@ -1270,6 +1270,7 @@ const API_ROUTES: ApiRoute[] = [
   route('/auth/:id', methodsNoQuery('PUT', 'DELETE')),
   route('/command', methodsNoQuery('GET')),
   route('/mcp', methodsNoQuery('GET')),
+  route('/lsp', methodsNoQuery('GET')),
   route('/vcs/status', methodsNoQuery('GET')),
   route('/agent', methodsNoQuery('GET')),
   route('/question', methodsNoQuery('GET')),

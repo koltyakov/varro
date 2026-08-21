@@ -308,6 +308,7 @@ describe('client', () => {
       { path: '/agent', load: () => client.agent.list() },
       { path: '/command', load: () => client.command.list() },
       { path: '/mcp', load: () => client.mcp.status() },
+      { path: '/lsp', load: () => client.lsp.status() },
       { path: '/question', load: () => client.question.list() },
       { path: '/permission', load: () => client.permission.list() },
       { path: '/vcs/status', load: () => client.file.status() },
