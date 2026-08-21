@@ -464,6 +464,71 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
   });
 
+  it('renders one trailing line break when Shift+Enter follows an image chip', async () => {
+    const marker = '[Image]';
+    const chip: RichComposerChip = {
+      id: 'img:1',
+      type: 'image',
+      label: 'Image',
+      icon: 'image',
+      textMarker: marker,
+    };
+
+    cleanup = render(() => {
+      const [value, setValue] = createSignal(marker);
+      const [cursorOffset, setCursorOffset] = createSignal(marker.length);
+
+      return RichComposerArea({
+        editorRef: () => {},
+        placeholder: 'Compose',
+        get value() {
+          return value();
+        },
+        get cursorOffset() {
+          return cursorOffset();
+        },
+        chips: [chip],
+        isFocused: true,
+        showCompletionMenu: false,
+        completionItems: [],
+        completionSelectedIndex: 0,
+        onInput: (text, nextOffset) => {
+          setValue(text);
+          setCursorOffset(nextOffset);
+        },
+        onKeyDown: () => {},
+        onPaste: () => {},
+        onFocus: () => {},
+        onBlur: () => {},
+        onClick: () => {},
+        onKeyUp: () => {},
+        onSelect: () => {},
+        onSelectCompletion: () => {},
+      });
+    }, container!);
+
+    const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+    if (!editor) throw new Error('Expected composer editor');
+    await flushAsyncWork();
+    const target = findNodeAtOffset(editor, marker.length);
+    if (!target) throw new Error('Expected cursor target');
+    setCollapsedSelection(target.node, target.offset);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.dispatchEvent(event);
+    await flushAsyncWork();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(extractText(editor)).toBe(`${marker}\n`);
+    expect(editor.querySelectorAll('br')).toHaveLength(1);
+    expect(editor.querySelector('[data-caret-placeholder]')).toBeNull();
+  });
+
   it('continues a hyphen bullet on Shift+Enter', () => {
     const onInput = vi.fn();
     const value = '- Bullet item 1';

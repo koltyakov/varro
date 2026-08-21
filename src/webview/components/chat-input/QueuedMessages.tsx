@@ -138,6 +138,7 @@ export function QueuedMessages(props: {
             };
             return (
               <div
+                data-queued-message-id={item.id}
                 class={`chat-queue-item${item.paused ? ' is-paused' : ''}${draggedItemId() === item.id ? ' is-dragging' : ''}${dragOverItemId() === item.id ? ' is-drag-over' : ''}${isEditing() ? ' is-editing' : ''}`}
                 role="listitem"
                 title={item.text || label}

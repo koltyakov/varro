@@ -187,7 +187,8 @@ test('ellipsizes the composer placeholder at narrow widths', async ({ page }) =>
 });
 
 test('shows todos and queues follow-up messages while a session is busy', async ({ page }) => {
-  await page.goto('/e2e/harness/index.html?scenario=todo-queue');
+  await page.setViewportSize({ width: 500, height: 493 });
+  await page.goto('/e2e/harness/index.html?scenario=todo-queue&queuedSteerHandoff=1');
 
   await expect(page.getByRole('button', { name: /Todos/i })).toBeVisible();
   await expect(page.locator('.todo-block-item-text')).toContainText([
@@ -247,12 +248,40 @@ test('shows todos and queues follow-up messages while a session is busy', async 
   const steerButton = page.getByRole('button', { name: 'Send as Steer' });
   await expect(steerButton).toHaveText('');
   await expect(steerButton).toBeVisible();
+  await page.evaluate((promptText) => {
+    const harness = window as Window & { queuedSteerTopSamples?: number[] };
+    harness.queuedSteerTopSamples = [];
+    const sample = () => {
+      const card = [...document.querySelectorAll<HTMLElement>('.chat-turn-user')].find((row) =>
+        row.textContent?.includes(promptText)
+      );
+      if (card) harness.queuedSteerTopSamples?.push(card.getBoundingClientRect().top);
+      if ((harness.queuedSteerTopSamples?.length ?? 0) < 20) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, 'Queue the follow-up after the current response finishes');
   await steerButton.focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('list', { name: 'Queued messages' })).toHaveCount(0);
   await expect(page.locator('.chat-turn-user').last()).toContainText(
     'Queue the follow-up after the current response finishes'
   );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { queuedSteerTopSamples?: number[] }).queuedSteerTopSamples?.length ??
+          0
+      )
+    )
+    .toBe(20);
+  const topSamples = await page.evaluate(
+    () => (window as Window & { queuedSteerTopSamples?: number[] }).queuedSteerTopSamples ?? []
+  );
+  expect(
+    topSamples.every((top, index) => index === 0 || top <= topSamples[index - 1]! + 0.5),
+    JSON.stringify(topSamples)
+  ).toBe(true);
 });
 
 test('keeps an optimistic steer visible through canonical parts and stale history handoff', async ({

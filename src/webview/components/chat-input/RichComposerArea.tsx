@@ -115,7 +115,15 @@ export function RichComposerArea(props: {
           frag.appendChild(document.createTextNode(CARET_SPACER));
         }
       } else {
-        appendTextWithLineBreaks(frag, part, index === parts.length - 1);
+        const previousNode = frag.lastChild;
+        const followsAtomicChip =
+          previousNode?.nodeType === Node.TEXT_NODE &&
+          previousNode.textContent === CARET_SPACER &&
+          previousNode.previousSibling instanceof HTMLElement &&
+          previousNode.previousSibling.matches('.inline-chip[data-chip-id]');
+        const needsTrailingPlaceholder =
+          index === parts.length - 1 && !(followsAtomicChip && /^\n+$/.test(part));
+        appendTextWithLineBreaks(frag, part, needsTrailingPlaceholder);
       }
     }
     return frag;

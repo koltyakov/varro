@@ -50,6 +50,7 @@ import {
   type AssistantActivityPart,
 } from '../lib/assistant-activity';
 import { isAssistantMessage, isContinuationAssistantFinish } from '../lib/message-metrics';
+import { registerQueuedMessageRemovalHandler } from '../lib/message-list-layout';
 import {
   getFinalAssistantTextPartId,
   isWorkspaceDirectoryText,
@@ -4808,22 +4809,15 @@ export function MessageList() {
     });
   }
 
-  function handleExternalLayoutClickCapture(event: MouseEvent) {
-    if (!containerRef || !autoScroll() || !pinnedToBottom || stickyNavigationOwnsScroll()) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const todoToggle = target.closest<HTMLElement>('.todo-block-header[aria-expanded="true"]');
-    const todoList = todoToggle
-      ?.closest('.todo-block')
-      ?.querySelector<HTMLElement>('.todo-block-list');
-    if (!todoList) return;
-
-    const styles = getComputedStyle(todoList);
-    const collapseHeight =
-      todoList.getBoundingClientRect().height +
-      (parseFloat(styles.marginTop) || 0) +
-      (parseFloat(styles.marginBottom) || 0);
-    if (collapseHeight <= 0.5) return;
+  function reserveExternalBottomCollapse(collapseHeight: number) {
+    if (
+      !containerRef ||
+      collapseHeight <= 0.5 ||
+      !autoScroll() ||
+      !pinnedToBottom ||
+      stickyNavigationOwnsScroll()
+    )
+      return;
 
     const existingReserve = untrack(appendBottomReserve);
     const projectedClientHeight = containerRef.clientHeight + collapseHeight;
@@ -4837,6 +4831,47 @@ export function MessageList() {
     setAppendBottomReserve((reserve) => reserve + collapseHeight);
   }
 
+  function handleExternalLayoutClickCapture(event: MouseEvent) {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const todoToggle = target.closest<HTMLElement>('.todo-block-header[aria-expanded="true"]');
+    const todoList = todoToggle
+      ?.closest('.todo-block')
+      ?.querySelector<HTMLElement>('.todo-block-list');
+    if (!todoList) return;
+
+    const styles = getComputedStyle(todoList);
+    const collapseHeight =
+      todoList.getBoundingClientRect().height +
+      (parseFloat(styles.marginTop) || 0) +
+      (parseFloat(styles.marginBottom) || 0);
+    reserveExternalBottomCollapse(collapseHeight);
+  }
+
+  function reserveQueuedMessageRemoval(queuedMessageId: string) {
+    const row = [...document.querySelectorAll<HTMLElement>('[data-queued-message-id]')].find(
+      (element) => element.dataset.queuedMessageId === queuedMessageId
+    );
+    const queue = row?.closest<HTMLElement>('.chat-queue-container');
+    const list = row?.closest<HTMLElement>('.chat-queue-list');
+    if (!row || !queue || !list) return;
+
+    const rows = list.querySelectorAll('[data-queued-message-id]');
+    if (rows.length === 1) {
+      const styles = getComputedStyle(queue);
+      reserveExternalBottomCollapse(
+        queue.getBoundingClientRect().height +
+          (parseFloat(styles.marginTop) || 0) +
+          (parseFloat(styles.marginBottom) || 0)
+      );
+      return;
+    }
+
+    reserveExternalBottomCollapse(
+      Math.max(0, list.clientHeight - (list.scrollHeight - row.offsetHeight))
+    );
+  }
+
   createEffect(() => {
     const container = containerRef;
     if (!container) return;
@@ -4848,6 +4883,10 @@ export function MessageList() {
 
   onMount(() => {
     if (!containerRef) return;
+    const unregisterQueuedMessageRemoval = registerQueuedMessageRemovalHandler(
+      reserveQueuedMessageRemoval
+    );
+    onCleanup(unregisterQueuedMessageRemoval);
     const stopCapturingThinkingAnchor = onBeforeShowThinkingPreferenceChange(() => {
       pendingThinkingLayoutAnchor =
         !autoScroll() &&

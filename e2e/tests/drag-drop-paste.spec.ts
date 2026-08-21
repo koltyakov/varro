@@ -236,6 +236,43 @@ test('keeps a line-start pasted image from creating a trailing line', async ({ p
     .toBe(2);
 });
 
+test('inserts one visible line break after a pasted image', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+  await page.getByLabel('GitHub Copilot / GPT-5 mini').click();
+  await page.getByText('GPT-4.1', { exact: true }).click();
+
+  const composer = page.locator('.rich-composer').first();
+  await composer.fill('something');
+  await composer.press('Shift+Enter');
+  await composer.evaluate((node) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(
+      new File([new TextEncoder().encode('image.png')], 'image.png', { type: 'image/png' })
+    );
+    dataTransfer.setData('text/plain', '\n');
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: dataTransfer });
+    node.dispatchEvent(event);
+  });
+  await expect(composer.locator('[data-chip-type="image"]')).toHaveCount(1);
+
+  await composer.press('Shift+Enter');
+
+  await expect
+    .poll(() => composer.evaluate((editor) => editor.querySelectorAll('br').length))
+    .toBe(2);
+  await expect
+    .poll(() =>
+      composer.evaluate((editor) => {
+        const selection = window.getSelection();
+        return (
+          selection?.anchorNode === editor && selection.anchorOffset === editor.childNodes.length
+        );
+      })
+    )
+    .toBe(true);
+});
+
 test('paints a sent portrait carousel at its final presentation without blinking', async ({
   page,
 }) => {

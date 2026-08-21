@@ -1754,7 +1754,13 @@ function createScenarioState(name: ScenarioName): ScenarioState {
       'message-todo-assistant',
       user.info.id,
       BASE_TIME - 6_000,
-      'Captured the next implementation steps and waiting for follow-up work.',
+      new URLSearchParams(window.location.search).get('queuedSteerHandoff') === '1'
+        ? Array.from(
+            { length: 10 },
+            (_, index) =>
+              `Captured implementation detail ${index + 1} while waiting for follow-up work.`
+          ).join('\n')
+        : 'Captured the next implementation steps and waiting for follow-up work.',
       [
         makeTodoToolPart(session.id, 'message-todo-assistant', 'todo-tool-1', [
           {
@@ -5190,6 +5196,11 @@ async function handleApiRequest(
   if (promptMatch && method === 'POST') {
     const sessionId = decodeURIComponent(promptMatch[1]!);
     const payload = asRecord(body);
+    const simulateQueuedSteerHandoff =
+      new URLSearchParams(window.location.search).get('queuedSteerHandoff') === '1';
+    if (simulateQueuedSteerHandoff) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
     const simulateStalePromptSync =
       new URLSearchParams(window.location.search).get('stalePromptSync') === '1';
     if (simulateStalePromptSync) {
@@ -5321,6 +5332,11 @@ async function handleApiRequest(
       state.sessionStatuses[sessionId] = { type: 'busy' };
     } else {
       state.sessionStatuses[sessionId] = { type: 'idle' };
+    }
+    if (simulateQueuedSteerHandoff) {
+      state.messagesBySessionId[sessionId] = (state.messagesBySessionId[sessionId] || []).filter(
+        (entry) => entry.info.id !== assistantId
+      );
     }
     persistHarnessMessageState(state);
     if (simulateStalePromptSync) {

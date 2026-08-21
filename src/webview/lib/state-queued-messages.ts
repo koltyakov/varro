@@ -1,4 +1,5 @@
 import type { QueuedMessage } from './app-state-types';
+import { prepareForQueuedMessageRemoval } from './message-list-layout';
 import { setState, state } from './app-state';
 import { postMessage } from './bridge';
 import { STORAGE_KEYS, writeStored } from './state-storage';
@@ -86,6 +87,7 @@ export function replaceQueuedMessage(id: string, message: QueuedMessage) {
 export function removeQueuedMessage(id: string) {
   const next = state.queuedMessages.filter((item) => item.id !== id);
   if (next.length === state.queuedMessages.length) return;
+  prepareForQueuedMessageRemoval(id);
   commitQueuedMessages(next);
 }
 
