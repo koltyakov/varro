@@ -25,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup?.();
   cleanup = undefined;
+  vi.useRealTimers();
   setState('messages', []);
   container.remove();
 });
@@ -51,6 +52,35 @@ describe('AssistantDialogSummaryForMessage', () => {
     button?.click();
 
     expect(forkSessionMock).toHaveBeenCalledWith('session-1');
+  });
+
+  it('shows the custom fork tooltip after 500ms', async () => {
+    vi.useFakeTimers();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{ durationMs: 1_000, inputTokens: 0, outputTokens: 0, agentCount: 0 }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+        />
+      ),
+      container
+    );
+
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fork chat from here"]'
+    );
+    expect(button?.hasAttribute('title')).toBe(false);
+
+    button?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.advanceTimersByTimeAsync(499);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+      'Fork chat from here'
+    );
   });
 
   it('uses the next source-session message as the exclusive fork boundary', () => {

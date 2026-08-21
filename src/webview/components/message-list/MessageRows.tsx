@@ -14,6 +14,7 @@ import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
 import { ForkIcon } from '../ForkIcon';
 import { Message as MessageComponent } from '../Message';
+import { Tooltip } from '../Tooltip';
 import {
   buildPlanDocumentContent,
   buildPlanImplementationPrompt,
@@ -295,16 +296,17 @@ function AssistantDialogSummary(props: {
               ? 'Collecting stats...'
               : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
         </span>
-        <button
-          type="button"
-          class="assistant-dialog-summary-fork"
-          aria-label="Fork chat from here"
-          title="Fork chat from here"
-          disabled={isLoading()}
-          onClick={() => props.onFork()}
-        >
-          <ForkIcon />
-        </button>
+        <Tooltip content="Fork chat from here" delay={500}>
+          <button
+            type="button"
+            class="assistant-dialog-summary-fork"
+            aria-label="Fork chat from here"
+            disabled={isLoading()}
+            onClick={() => props.onFork()}
+          >
+            <ForkIcon />
+          </button>
+        </Tooltip>
       </div>
       <Show when={props.showImplementPlanAction}>
         <div class="assistant-dialog-summary-actions">
