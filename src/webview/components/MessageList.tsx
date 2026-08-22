@@ -1014,14 +1014,28 @@ export function MessageList() {
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
       const rememberedRect = rememberedElement?.getBoundingClientRect();
-      const rememberedElementIsVisible = !!(
+      const rememberedTargetTop = lastDetachedVisibleAnchor
+        ? rememberedElement?.dataset.msgId === lastDetachedVisibleAnchor.messageId
+          ? (lastDetachedVisibleAnchor.messageTop ?? lastDetachedVisibleAnchor.top)
+          : lastDetachedVisibleAnchor.top
+        : 0;
+      const rememberedElementIsCurrent = !!(
         rememberedRect &&
         containerRect &&
         rememberedRect.bottom > containerRect.top &&
-        rememberedRect.top < containerRect.bottom
+        rememberedRect.top < containerRect.bottom &&
+        Math.abs(rememberedRect.top - containerRect.top - rememberedTargetTop) <= 1
       );
+      const hostGeometryChanged =
+        window.innerWidth !== lastHostViewportWidth ||
+        window.devicePixelRatio !== lastHostDevicePixelRatio;
+      // Host resize events arrive after layout, so a painted descendant may already be offscreen.
       const rememberedAnchor =
-        lastDetachedVisibleAnchor && rememberedElementIsVisible ? lastDetachedVisibleAnchor : null;
+        lastDetachedVisibleAnchor &&
+        rememberedElement &&
+        (rememberedElementIsCurrent || (hostGeometryChanged && lastDetachedVisibleAnchor.element))
+          ? lastDetachedVisibleAnchor
+          : null;
       const virtualAnchor =
         containerRef && shouldVirtualize()
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
@@ -4156,25 +4170,20 @@ export function MessageList() {
         return;
       }
       const containerRect = containerRef.getBoundingClientRect();
-      let fallback: VisibleScrollAnchor | null = null;
       let anchor: VisibleScrollAnchor | null = null;
       for (const row of containerRef.querySelectorAll<HTMLElement>('[data-msg-id]')) {
         const rect = row.getBoundingClientRect();
         if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
         const messageId = row.dataset.msgId;
         if (!messageId) continue;
-        const candidate = {
+        anchor = {
           messageId,
           top: rect.top - containerRect.top,
           topPad: 0,
         };
-        fallback ??= candidate;
-        if (rect.top >= containerRect.top - 0.5) {
-          anchor = candidate;
-          break;
-        }
+        break;
       }
-      anchor = refineTallRenderItemScrollAnchor(anchor ?? fallback, containerRef.clientHeight / 3, {
+      anchor = refineTallRenderItemScrollAnchor(anchor, 0, {
         includeCompact: true,
       });
       if (

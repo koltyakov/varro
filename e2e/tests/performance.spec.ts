@@ -367,10 +367,12 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   await page.waitForTimeout(300);
   const target = await list.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
-    const card = [...element.querySelectorAll<HTMLElement>('.user-message-card')].find((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return rect.bottom > bounds.top && rect.top < bounds.bottom;
-    });
+    const card = [...element.querySelectorAll<HTMLElement>('.user-message-card')].find(
+      (candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > bounds.top && rect.top < bounds.bottom;
+      }
+    );
     const row = card?.closest<HTMLElement>('[data-msg-id]');
     if (!row?.dataset.msgId) return null;
     return {
@@ -385,14 +387,10 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   await expect
     .poll(() =>
       list.evaluate((element, anchorId) => {
-        const row = element.querySelector<HTMLElement>(
-          `[data-msg-id="${CSS.escape(anchorId)}"]`
-        );
+        const row = element.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(anchorId)}"]`);
         const card = row?.querySelector<HTMLElement>('.user-message-card');
         return card
-          ? Math.abs(
-              card.getBoundingClientRect().top - element.getBoundingClientRect().top - 9
-            )
+          ? Math.abs(card.getBoundingClientRect().top - element.getBoundingClientRect().top - 9)
           : Number.POSITIVE_INFINITY;
       }, target!.id)
     )
@@ -453,7 +451,10 @@ test('viewport narrowing preserves the first visible row through host-shaped ref
   await page.setViewportSize({ width: 360, height: 786 });
   const samples = await samplesPromise;
 
-  expect(samples.every((top) => top !== null), JSON.stringify(samples)).toBe(true);
+  expect(
+    samples.every((top) => top !== null),
+    JSON.stringify(samples)
+  ).toBe(true);
   // The first test RAF can run before ResizeObserver corrects geometry in the same
   // pre-paint turn. Every callback after that handoff represents corrected frames.
   expect(
@@ -489,7 +490,8 @@ test('viewport narrowing preserves an inner block in a viewport-tall markdown it
       .find((candidate) => candidate.innerText === 'Huge section 45')
       ?.closest<HTMLElement>('[data-msg-id]');
     if (!target) throw new Error('Tall Markdown target row is not mounted');
-    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top + 700;
+    element.scrollTop +=
+      target.getBoundingClientRect().top - element.getBoundingClientRect().top + 700;
     element.dispatchEvent(new Event('scroll'));
   });
 
@@ -500,12 +502,12 @@ test('viewport narrowing preserves an inner block in a viewport-tall markdown it
 
   const anchor = await list.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
-    const item = [
-      ...element.querySelectorAll<HTMLElement>('.rendered-markdown li'),
-    ].find((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return rect.top >= bounds.top + 20 && rect.bottom < bounds.bottom;
-    });
+    const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
+      (candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.top >= bounds.top + 20 && rect.bottom < bounds.bottom;
+      }
+    );
     if (!item) return null;
     return {
       text: item.innerText,
@@ -520,27 +522,30 @@ test('viewport narrowing preserves an inner block in a viewport-tall markdown it
     await waitForAnimationFrame(page);
     samples.push(
       await list.evaluate((element, text) => {
-        const item = [
-          ...element.querySelectorAll<HTMLElement>('.rendered-markdown li'),
-        ].find((candidate) => candidate.innerText === text);
+        const item = [...element.querySelectorAll<HTMLElement>('.rendered-markdown li')].find(
+          (candidate) => candidate.innerText === text
+        );
         return {
           connected: !!item?.isConnected,
-          top: item
-            ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
-            : null,
+          top: item ? item.getBoundingClientRect().top - element.getBoundingClientRect().top : null,
         };
       }, anchor!.text)
     );
   }
 
-  expect(samples.every((sample) => sample.connected), JSON.stringify(samples)).toBe(true);
+  expect(
+    samples.every((sample) => sample.connected),
+    JSON.stringify(samples)
+  ).toBe(true);
   expect(
     Math.max(...samples.map((sample) => Math.abs(sample.top! - anchor!.top))),
     JSON.stringify({ anchor, samples })
   ).toBeLessThanOrEqual(3);
 });
 
-test('cold scrollbar positioning preserves an inner block during width reflow', async ({ page }) => {
+test('cold scrollbar positioning preserves an inner block during width reflow', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 486, height: 808 });
   await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -587,7 +592,8 @@ test('cold scrollbar positioning preserves an inner block during width reflow', 
       .find((candidate) => candidate.innerText === 'Huge section 46')
       ?.closest<HTMLElement>('[data-msg-id]');
     if (!target) throw new Error('Tall Markdown target row is not mounted');
-    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top + 1_300;
+    element.scrollTop +=
+      target.getBoundingClientRect().top - element.getBoundingClientRect().top + 1_300;
     element.dispatchEvent(new Event('scroll'));
   });
   await page.waitForTimeout(80);
@@ -635,16 +641,17 @@ test('cold scrollbar positioning preserves an inner block during width reflow', 
         );
         return {
           connected: !!item?.isConnected,
-          top: item
-            ? item.getBoundingClientRect().top - element.getBoundingClientRect().top
-            : null,
+          top: item ? item.getBoundingClientRect().top - element.getBoundingClientRect().top : null,
           scrollTop: element.scrollTop,
         };
       }, anchor!.text)
     );
   }
 
-  expect(samples.every((sample) => sample.connected), JSON.stringify({ anchor, samples })).toBe(true);
+  expect(
+    samples.every((sample) => sample.connected),
+    JSON.stringify({ anchor, samples })
+  ).toBe(true);
   expect(
     Math.max(...samples.slice(1).map((sample) => Math.abs(sample.top! - anchor!.top))),
     JSON.stringify({ anchor, samples })
@@ -655,7 +662,9 @@ test('cold scrollbar positioning preserves an inner block during width reflow', 
   ).toBeGreaterThan(100);
 });
 
-test('width reflow after PageDown preserves a painted block in a tall response', async ({ page }) => {
+test('width reflow after PageDown preserves a painted block in a tall response', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 486, height: 808 });
   await page.goto('/e2e/harness/index.html?scenario=huge-content-transcript');
   await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
@@ -673,9 +682,7 @@ test('width reflow after PageDown preserves a painted block in a tall response',
 
   const anchor = await list.evaluate((element) => {
     const viewport = element.getBoundingClientRect();
-    const candidates = element.querySelectorAll<HTMLElement>(
-      '.rendered-markdown :is(p, li, pre)'
-    );
+    const candidates = element.querySelectorAll<HTMLElement>('.rendered-markdown :is(p, li, pre)');
     const item = [...candidates].find((candidate) => {
       const rect = candidate.getBoundingClientRect();
       const owner = candidate.closest<HTMLElement>('[data-assistant-render-key]');
@@ -694,8 +701,9 @@ test('width reflow after PageDown preserves a painted block in a tall response',
 
   const sample = () =>
     list.evaluate((element, target) => {
-      const item = [...element.querySelectorAll<HTMLElement>(`.rendered-markdown ${target.tagName}`)]
-        .find((candidate) => candidate.innerText === target.text);
+      const item = [
+        ...element.querySelectorAll<HTMLElement>(`.rendered-markdown ${target.tagName}`),
+      ].find((candidate) => candidate.innerText === target.text);
       return item?.getBoundingClientRect().top ?? null;
     }, anchor!);
   const samples = [];
@@ -707,9 +715,10 @@ test('width reflow after PageDown preserves a painted block in a tall response',
     }
   }
 
-  expect(samples.every((entry) => entry.top !== null), JSON.stringify({ anchor, samples })).toBe(
-    true
-  );
+  expect(
+    samples.every((entry) => entry.top !== null),
+    JSON.stringify({ anchor, samples })
+  ).toBe(true);
   expect(
     Math.max(...samples.slice(1).map((entry) => Math.abs(entry.top! - anchor!.top))),
     JSON.stringify({ anchor, samples })
@@ -859,9 +868,7 @@ test('viewport narrowing replaces a stale tall-row anchor after sticky navigatio
       const card = element.querySelector<HTMLElement>(
         `[data-msg-id="${CSS.escape(messageId)}"] .user-message-card`
       );
-      return card
-        ? card.getBoundingClientRect().top - element.getBoundingClientRect().top
-        : null;
+      return card ? card.getBoundingClientRect().top - element.getBoundingClientRect().top : null;
     };
     const values = [];
     for (let frame = 0; frame < 12; frame += 1) {
@@ -875,7 +882,10 @@ test('viewport narrowing replaces a stale tall-row anchor after sticky navigatio
   await page.setViewportSize({ width: 360, height: 786 });
   const samples = await samplesPromise;
 
-  expect(samples.every((top) => top !== null), JSON.stringify(samples)).toBe(true);
+  expect(
+    samples.every((top) => top !== null),
+    JSON.stringify(samples)
+  ).toBe(true);
   expect(
     Math.max(...samples.slice(1).map((top) => Math.abs(top! - anchorTop))),
     JSON.stringify({ anchorTop, samples })
