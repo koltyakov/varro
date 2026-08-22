@@ -58,6 +58,7 @@ import {
   isActiveSessionWorking,
   getSessionTreeRootId,
   getSessionTreeIds,
+  getSelectedModelForSession,
   getStoredVariantForModel,
   setSessionUsageLimit,
   isSessionCompacting,
@@ -3142,6 +3143,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (variants.length === 0) return null;
     if (currentModel().variant && variants.includes(currentModel().variant!)) {
       return currentModel().variant;
+    }
+
+    const sessionModel = getSelectedModelForSession(composerSessionId());
+    if (
+      sessionModel &&
+      sessionModel.providerID === currentModel().providerID &&
+      sessionModel.modelID === currentModel().modelID &&
+      !sessionModel.variant
+    ) {
+      return null;
     }
 
     const rememberedVariant = getStoredVariantForModel(

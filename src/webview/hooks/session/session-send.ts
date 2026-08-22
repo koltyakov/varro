@@ -750,14 +750,14 @@ export class SessionSendOperations {
       options?.agent ??
       routingStore.getSelectedAgentForSession(targetSessionId) ??
       appStore.state.selectedAgent;
+    const sessionSelectedModel = routingStore.getSelectedModelForSession(targetSessionId);
     const selectedModel =
-      options?.selectedModel ??
-      routingStore.getSelectedModelForSession(targetSessionId) ??
-      appStore.state.selectedModel;
+      options?.selectedModel ?? sessionSelectedModel ?? appStore.state.selectedModel;
     const modelVariantSelections = { ...appStore.state.modelVariantSelections };
-    if (options?.selectedModel && !options.selectedModel.variant) {
+    const explicitDefaultModel = options?.selectedModel ?? sessionSelectedModel;
+    if (explicitDefaultModel && !explicitDefaultModel.variant) {
       modelVariantSelections[
-        getModelVariantSelectionKey(options.selectedModel.providerID, options.selectedModel.modelID)
+        getModelVariantSelectionKey(explicitDefaultModel.providerID, explicitDefaultModel.modelID)
       ] = null;
     }
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);

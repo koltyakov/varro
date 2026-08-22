@@ -174,6 +174,7 @@ afterEach(() => {
   setState('providerDefaults', {});
   setState('selectedAgent', null);
   setState('selectedModel', null);
+  setState('sessionSelectedModels', reconcile({}));
   setState('modelVariantSelections', {});
   setState('providerLimits', {});
   setState('mcpStatus', {});
@@ -5896,6 +5897,39 @@ describe('ChatInput', () => {
       modelID: 'gpt-5.4',
       variant: 'medium',
     });
+  });
+
+  it('shows Default for a session without reasoning despite a remembered variant', () => {
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    setState('providerDefaults', { openai: 'gpt-5.4' });
+    setState('activeSessionId', 'session-1');
+    setState('selectedModel', { providerID: 'openai', modelID: 'gpt-5.4' });
+    setState('sessionSelectedModels', {
+      'session-1': { providerID: 'openai', modelID: 'gpt-5.4' },
+    });
+    setState('modelVariantSelections', { 'openai:gpt-5.4': 'high' });
+
+    cleanup = render(() => ChatInput(), container!);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Thinking level"]')
+        ?.textContent
+    ).toContain('Default');
   });
 
   it('warns when the model or reasoning level changes after a session request', async () => {

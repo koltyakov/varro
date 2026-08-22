@@ -16,6 +16,7 @@ vi.mock('../lib/bridge', async (importOriginal) => {
 
 import { appStore } from '../lib/stores/app-store';
 import { composerStore } from '../lib/stores/composer-store';
+import { routingStore } from '../lib/stores/routing-store';
 import { startNewChatDraft } from '../lib/new-chat-draft';
 import { replaceClipboardImages, replaceContextFiles } from '../lib/state';
 import { SessionSendOperations } from './session/session-send';
@@ -161,6 +162,53 @@ describe('SessionSendOperations', () => {
         deferred: true,
         sessionId: 'session-1',
       },
+    });
+  });
+
+  it('uses a session Default without replacing the remembered reasoning variant', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          'gpt-5.4': {
+            id: 'gpt-5.4',
+            name: 'GPT-5.4',
+            capabilities: { toolcall: true, reasoning: true },
+            cost: { input: 0, output: 0 },
+            variants: { low: {}, medium: {}, high: {} },
+          },
+        },
+      },
+    ]);
+    appStore.setState('providerDefaults', { openai: 'gpt-5.4' });
+    routingStore.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-5.4', variant: 'high' },
+      { rememberVariant: 'high' }
+    );
+    routingStore.setSelectedModel(
+      { providerID: 'openai', modelID: 'gpt-5.4' },
+      { sessionId: 'session-1', persistGlobal: false }
+    );
+    const sendAsync = vi.fn<SendAsync>(async () => {});
+    const operations = createOperations(sendAsync);
+
+    await operations.sendMessage('Use the session default');
+
+    expect(sendAsync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        model: { providerID: 'openai', modelID: 'gpt-5.4' },
+      })
+    );
+    expect(sendAsync.mock.calls[0]?.[1]).not.toHaveProperty('variant');
+    expect(appStore.state.modelVariantSelections['openai:gpt-5.4']).toBe('high');
+    expect(routingStore.getPersistedSelectedModel()).toEqual({
+      providerID: 'openai',
+      modelID: 'gpt-5.4',
+      variant: 'high',
     });
   });
 
