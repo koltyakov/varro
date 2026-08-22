@@ -399,7 +399,7 @@ test.describe('auto-scroll', () => {
       .toBeLessThan(2);
   });
 
-  test('keeps the transcript fixed when streamed text moves reasoning into Explored', async ({
+  test('does not move the transcript backward when streamed text moves reasoning into Explored', async ({
     page,
   }) => {
     await page.addInitScript(() => localStorage.setItem('varro.showThinking', 'true'));
@@ -424,20 +424,61 @@ test.describe('auto-scroll', () => {
       };
       const harness = (
         window as typeof window & {
-          __varroE2E?: { updateMessagePart?: (updatedPart: Record<string, unknown>) => void };
+          __varroE2E?: {
+            updateMessagePart?: (updatedPart: Record<string, unknown>) => void;
+          };
         }
       ).__varroE2E;
+      const textPart = {
+        id: 'text-stream-after-reasoning',
+        sessionID: part.sessionID,
+        messageID: part.messageID,
+        type: 'text' as const,
+        text: '',
+      };
+      const laterCommand = {
+        id: 'command-after-streamed-reasoning',
+        sessionID: part.sessionID,
+        messageID: part.messageID,
+        type: 'tool',
+        callID: 'command-after-streamed-reasoning-call',
+        tool: 'bash',
+        state: {
+          status: 'running',
+          input: { command: 'npm run test' },
+          title: 'npm run test',
+          time: { start: Date.now() + 1 },
+        },
+      };
       harness?.updateMessagePart?.(part);
-      window.postMessage(
-        { type: 'server/event', payload: { type: 'message.part.updated', properties: { part } } },
-        '*'
-      );
+      harness?.updateMessagePart?.(textPart);
+      harness?.updateMessagePart?.(laterCommand);
+      for (const updatedPart of [part, textPart, laterCommand]) {
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part: updatedPart } },
+          },
+          '*'
+        );
+      }
     });
 
     await expect(activeReasoning).toBeVisible();
+    const laterCommand = page.locator('[data-activity-part-id="command-after-streamed-reasoning"]');
+    await expect(laterCommand).toBeVisible();
     await activeReasoning.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));
     });
+    await laterCommand.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    await waitForAnimationFrames(page, 35);
+    await expect
+      .poll(() =>
+        getScrollMetrics(page, '.interactive-list').then((metrics) => metrics.distanceFromBottom)
+      )
+      .toBeLessThan(2);
     const beforeTop = await anchor.evaluate((element) => {
       const container = element.closest<HTMLElement>('.interactive-list')!;
       return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
@@ -517,11 +558,15 @@ test.describe('auto-scroll', () => {
     });
 
     expect(
-      samples.every((top) => Math.abs(top - beforeTop) <= 1.5),
+      samples.every((top) => top - beforeTop <= 1.5),
       JSON.stringify({ beforeTop, samples })
     ).toBe(true);
     await expect(activeReasoning).toHaveCount(0);
-    const explored = page.locator('.assistant-activity-summary').last();
+    await expect(laterCommand).toBeVisible();
+    const explored = page
+      .locator('[data-assistant-activity-group-key] .assistant-activity-summary')
+      .filter({ hasText: 'Explored' })
+      .first();
     await expect(explored).toContainText('Explored');
     await explored.click();
     const hiddenReasoning = page
@@ -533,6 +578,146 @@ test.describe('auto-scroll', () => {
     await expect(hiddenReasoning.locator('.thinking-content')).toContainText(
       'Preparing the streamed response.'
     );
+  });
+
+  test('does not move a bottom-pinned turn backward when activity groups coalesce', async ({
+    page,
+  }) => {
+    await page.goto('/e2e/harness/index.html?scenario=tool-cards-large-transcript');
+    const list = page.locator('.interactive-list');
+    const anchor = page.locator('[data-msg-id="message-tool-cards-user-69"] .user-message-card');
+    await expect(page.locator('.interactive-list-track')).toHaveClass(/virtualized/);
+    await page.evaluate(() => {
+      const sessionID = 'session-tool-cards-large-transcript';
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: { updateSessionStatus?: (id: string, status: { type: 'busy' }) => void };
+      };
+      harnessWindow.__varroE2E?.updateSessionStatus?.(sessionID, { type: 'busy' });
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'session.status', properties: { sessionID, status: { type: 'busy' } } },
+        },
+        '*'
+      );
+    });
+    await list.click({ position: { x: 8, y: 8 } });
+    await page.keyboard.press('End');
+    await expect
+      .poll(() => getScrollMetrics(page, '.interactive-list').then((m) => m.distanceFromBottom))
+      .toBeLessThan(2);
+    await expect(anchor).toBeVisible();
+
+    const samples = await anchor.evaluate(async (element) => {
+      const sessionID = 'session-tool-cards-large-transcript';
+      const parentID = 'message-tool-cards-user-69';
+      const messageInfo = (id: string, created: number) => ({
+        id,
+        sessionID,
+        role: 'assistant' as const,
+        parentID,
+        time: { created },
+        modelID: 'model-test',
+        providerID: 'provider-test',
+        mode: 'primary' as const,
+        path: { cwd: '/workspace', root: '/workspace' },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+      const harnessWindow = window as typeof window & {
+        __varroE2E?: {
+          updateMessageInfo?: (info: ReturnType<typeof messageInfo>) => void;
+          updateMessagePart?: (part: Record<string, unknown>) => void;
+        };
+      };
+      const firstInfo = messageInfo('message-cross-step-tools', Date.now());
+      const reasoningPart = {
+        id: 'message-coalescing-reasoning',
+        sessionID,
+        messageID: firstInfo.id,
+        type: 'reasoning' as const,
+        text: 'Planning the parallel inspection.',
+        time: { start: Date.now() - 4, end: Date.now() - 3 },
+      };
+      const activityParts = Array.from({ length: 8 }, (_, index) => ({
+        id: `message-cross-step-tool-${index}`,
+        sessionID,
+        messageID: firstInfo.id,
+        type: 'tool' as const,
+        callID: `message-cross-step-tool-${index}-call`,
+        tool: index === 4 || index === 5 ? 'read' : 'grep',
+        state:
+          index === 4
+            ? {
+                status: 'running' as const,
+                input: { filePath: `src/file-${index}.ts` },
+                title: `Inspect ${index}`,
+                time: { start: Date.now() - 2 },
+              }
+            : {
+                status: 'completed' as const,
+                input:
+                  index === 5 ? { filePath: `src/file-${index}.ts` } : { pattern: `item-${index}` },
+                output: 'Completed',
+                title: `Inspect ${index}`,
+                metadata: {},
+                time: { start: Date.now() - 2, end: Date.now() - 1 },
+              },
+      }));
+      harnessWindow.__varroE2E?.updateMessageInfo?.(firstInfo);
+      window.postMessage(
+        {
+          type: 'server/event',
+          payload: { type: 'message.updated', properties: { info: firstInfo } },
+        },
+        '*'
+      );
+      for (const part of [reasoningPart, ...activityParts]) {
+        harnessWindow.__varroE2E?.updateMessagePart?.(part);
+        window.postMessage(
+          {
+            type: 'server/event',
+            payload: { type: 'message.part.updated', properties: { part } },
+          },
+          '*'
+        );
+      }
+
+      const container = element.closest<HTMLElement>('.interactive-list')!;
+      const result: number[] = [];
+      for (let frame = 0; frame < 120; frame += 1) {
+        if (frame === 30) {
+          const runningPart = activityParts[4]!;
+          const completedPart = {
+            ...runningPart,
+            state: {
+              status: 'completed' as const,
+              input: runningPart.state.input,
+              output: 'Completed',
+              title: runningPart.state.title,
+              metadata: {},
+              time: { start: Date.now() - 2, end: Date.now() - 1 },
+            },
+          };
+          harnessWindow.__varroE2E?.updateMessagePart?.(completedPart);
+          window.postMessage(
+            {
+              type: 'server/event',
+              payload: { type: 'message.part.updated', properties: { part: completedPart } },
+            },
+            '*'
+          );
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        result.push(element.getBoundingClientRect().top - container.getBoundingClientRect().top);
+      }
+      return result;
+    });
+
+    expect(
+      samples.every((top, index) => index === 0 || top - samples[index - 1]! <= 1.5),
+      JSON.stringify(samples)
+    ).toBe(true);
   });
 
   test('does not push a full transcript backward when send-time panels collapse', async ({

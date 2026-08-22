@@ -7,10 +7,12 @@ import {
   buildDuplicateDeliveryPrompt,
   buildLivePrompt,
   duplicateDeliveryFailures,
+  executeActionPlan,
   fixtureIsSafeForScenario,
   missingLiveGates,
   modelDisplayName,
   parseRestartCount,
+  shouldRetryNestedHandoff,
   summarizeCanonicalDelivery,
 } from './ai-fuzzy-live.mjs';
 
@@ -52,6 +54,112 @@ test('the initial task requests the content forms needed by the live gate', () =
   assert.match(prompt, /eight independent read or search tool calls/);
   assert.match(prompt, /exactly two existing source or test files/);
   assert.match(prompt, /exactly six separate read-only bash calls concurrently/);
+});
+
+test('dispatches editable-control keys to the composer during AI-08', async () => {
+  const keyCalls = [];
+  const cdp = {
+    key: async (selector, key) => {
+      keyCalls.push([selector, key]);
+      return true;
+    },
+  };
+
+  const results = await executeActionPlan(
+    cdp,
+    [
+      { step: 1, action: 'PageDown in composer' },
+      { step: 2, action: 'Space in composer' },
+      { step: 3, action: 'Shift+Space in composer' },
+    ],
+    'session',
+    0
+  );
+
+  assert.deepEqual(keyCalls, [
+    ['[aria-label="Message composer"]', 'PageDown'],
+    ['[aria-label="Message composer"]', 'Space'],
+    ['[aria-label="Message composer"]', 'Shift+Space'],
+  ]);
+  assert.equal(results.every(({ executed }) => executed), true);
+});
+
+test('exposes the jump control when AI-08 starts bottom-pinned', async () => {
+  const calls = [];
+  const cdp = {
+    click: async (selector) => {
+      calls.push(['click', selector]);
+      return calls.length === 4;
+    },
+    wheel: async (selector, delta, side) => {
+      calls.push(['wheel', selector, delta, side]);
+      return true;
+    },
+  };
+
+  const results = await executeActionPlan(
+    cdp,
+    [{ step: 14, action: 'click sticky or jump to latest' }],
+    'session',
+    0
+  );
+
+  assert.deepEqual(calls, [
+    ['click', '[data-sticky-msg-id]'],
+    ['click', '[aria-label="Scroll to latest message"]'],
+    ['wheel', '.interactive-list', -420, 'right'],
+    ['click', '[aria-label="Scroll to latest message"]'],
+  ]);
+  assert.equal(results[0].executed, true);
+});
+
+test('waits for the expanded diff to mount before closing it', async () => {
+  let overlayAttempts = 0;
+  const cdp = {
+    click: async (selector) => {
+      if (selector.startsWith('.diff-view')) {
+        overlayAttempts += 1;
+        return overlayAttempts === 3;
+      }
+      return selector.startsWith('[aria-label="Close expanded diff"]');
+    },
+  };
+
+  const results = await executeActionPlan(
+    cdp,
+    [{ step: 13, action: 'focus and close diff' }],
+    'session',
+    0
+  );
+
+  assert.equal(overlayAttempts, 3);
+  assert.equal(results[0].executed, true);
+});
+
+test('retries a nested handoff only when live tray geometry changed', () => {
+  const handoff = {
+    passed: false,
+    before: {
+      activeActivityCount: 4,
+      transcript: { scrollHeight: 1000 },
+      nestedActivityScroller: { scrollHeight: 128, clientHeight: 108 },
+    },
+    afterNested: {
+      activeActivityCount: 6,
+      transcript: { scrollHeight: 1014 },
+      nestedActivityScroller: { scrollHeight: 237, clientHeight: 122 },
+    },
+  };
+
+  assert.equal(shouldRetryNestedHandoff(handoff), true);
+  assert.equal(
+    shouldRetryNestedHandoff({
+      ...handoff,
+      before: handoff.afterNested,
+    }),
+    false
+  );
+  assert.equal(shouldRetryNestedHandoff({ ...handoff, passed: true }), false);
 });
 
 test('builds the controlled duplicate-delivery stream prompt', () => {

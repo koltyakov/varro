@@ -82,6 +82,8 @@ export function QueuedMessages(props: {
             const isLocked = () => isInFlight() || isEditing();
             const didDispatchFail = () => props.failedDispatchItemIds?.has(item.id) ?? false;
             const didSteerFail = () => props.failedSteerItemIds?.has(item.id) ?? false;
+            const [labelTruncated, setLabelTruncated] = createSignal(false);
+            let labelRef: HTMLSpanElement | undefined;
             const imageCount = item.clipboardImages?.length || 0;
             const attachmentCount =
               (item.droppedFiles?.length || 0) + (item.terminalSelection ? 1 : 0);
@@ -141,7 +143,6 @@ export function QueuedMessages(props: {
                 data-queued-message-id={item.id}
                 class={`chat-queue-item${item.paused ? ' is-paused' : ''}${draggedItemId() === item.id ? ' is-dragging' : ''}${dragOverItemId() === item.id ? ' is-drag-over' : ''}${isEditing() ? ' is-editing' : ''}`}
                 role="listitem"
-                title={item.text || label}
                 onDragEnter={dragOverItem}
                 onDragOver={dragOverItem}
                 onDragLeave={(event) => {
@@ -185,7 +186,18 @@ export function QueuedMessages(props: {
                       </span>
                     </Show>
                   </button>
-                  <span class="chat-queue-label">{label}</span>
+                  <span
+                    class="chat-queue-label"
+                    title={labelTruncated() ? label : undefined}
+                    ref={(element) => {
+                      labelRef = element;
+                    }}
+                    onMouseEnter={() => {
+                      setLabelTruncated(!!labelRef && labelRef.scrollWidth > labelRef.clientWidth);
+                    }}
+                  >
+                    {label}
+                  </span>
                   <Show when={item.paused}>
                     <span class="chat-queue-paused-label">Paused</span>
                   </Show>

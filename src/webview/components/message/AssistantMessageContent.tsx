@@ -1039,6 +1039,7 @@ function AssistantActivityGroup(props: {
         <button
           type="button"
           class="assistant-activity-summary"
+          data-activity-summary-group-key={encodeURIComponent(props.expansionKey)}
           aria-expanded={expanded()}
           onClick={toggleExpanded}
         >

@@ -1,6 +1,9 @@
 import { batch } from 'solid-js';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
-import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
+import {
+  captureSessionStatusSnapshotTime,
+  type SessionStatusSnapshotOptions,
+} from '../../lib/stores/session-store';
 import {
   latestAssistantFinished,
   latestAssistantFinishedBeforeLoading,
@@ -107,7 +110,7 @@ export async function selectSessionWithDependencies(
   });
 
   const mcpSync = deps.syncSessionMcps(id).catch(() => {});
-  const statusSnapshotStartedAt = Date.now();
+  const statusSnapshotStartedAt = captureSessionStatusSnapshotTime();
   const statusSync = deps.loadSessionStatuses().catch(() => null);
 
   const isCurrentSelection = () =>

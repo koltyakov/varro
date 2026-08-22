@@ -45,6 +45,7 @@ import { SidebarProviderContextFiles } from './sidebar-provider-context-files';
 import { SidebarProviderRuntime } from './sidebar-provider-runtime';
 import { WebviewSession } from './webview-session';
 import { UsageReportService } from './usage-report-service';
+import { resolveServerLaunch } from './util/server-launch';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'varro.chat';
@@ -310,6 +311,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         pickFiles: () => this.pickFiles(),
         searchFiles: (requestId, query, limit) => this.searchFiles(requestId, query, limit),
         runInTerminal: (command, title) => this.runInTerminal(command, title),
+        openSessionInTerminal: (sessionId) => this.openSessionInTerminal(sessionId),
         handleRalphMessage: (msg) => this.ralphHost.handleMessage(msg),
         updateQueuedMessages: ({ messages }) => this.queuedMessages.update(messages),
         updateDraftImages: ({ images }) => this.draftImages.update(images),
@@ -582,6 +584,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (replacesBinary) this.server.finishWindowsCliUpgrade();
       throw err;
     }
+  }
+
+  private openSessionInTerminal(sessionId: string) {
+    const launch = resolveServerLaunch(this.server.resolveCommand(), ['--session', sessionId]);
+    const terminal = vscode.window.createTerminal({
+      name: 'OpenCode Session',
+      cwd: this.contextProvider.context.workspacePath || undefined,
+      shellPath: launch.command,
+      shellArgs: launch.args,
+    });
+    terminal.show(false);
   }
 
   private currentTheme() {

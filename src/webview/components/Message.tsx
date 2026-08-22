@@ -251,7 +251,7 @@ export function Message(props: {
     const info = assistant();
     const providerID = providerAuthProviderID();
     if (info && providerID && providerAuthRequired()) {
-      markProviderAuthFailure(providerID, info.id);
+      markProviderAuthFailure(providerID, info.id, info.time.created);
     }
   });
   const providerAuthRestored = createMemo(() => {

@@ -52,10 +52,17 @@ export type SessionStatusSnapshotOptions = {
 const sessionStatusLocalUpdatedAt = new Map<string, number>();
 // Once a snapshot acknowledges local markers, older snapshots must not apply after they are pruned.
 let latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
+let sessionStatusLogicalTime = 0;
+
+export function captureSessionStatusSnapshotTime() {
+  sessionStatusLogicalTime = Math.max(sessionStatusLogicalTime + 1, Date.now());
+  return sessionStatusLogicalTime;
+}
 
 export function resetSessionStatusSnapshotTracking() {
   sessionStatusLocalUpdatedAt.clear();
   latestAppliedSessionStatusSnapshotStartedAt = Number.NEGATIVE_INFINITY;
+  sessionStatusLogicalTime = 0;
 }
 
 export const sessionStore = {
@@ -154,7 +161,7 @@ export const sessionStore = {
   },
   setSessionStatusEntry(sessionId: string, status: SessionStatus) {
     const prev = state.sessionStatus[sessionId];
-    sessionStatusLocalUpdatedAt.set(sessionId, Date.now());
+    sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     recordStatusCompletionTransition(sessionId, prev, status);
     setState('sessionStatus', (current) => {
       const currentStatus = current[sessionId];
@@ -163,7 +170,7 @@ export const sessionStore = {
     });
   },
   clearSessionStatusEntry(sessionId: string) {
-    sessionStatusLocalUpdatedAt.set(sessionId, Date.now());
+    sessionStatusLocalUpdatedAt.set(sessionId, captureSessionStatusSnapshotTime());
     setState(
       'sessionStatus',
       produce((statuses) => {

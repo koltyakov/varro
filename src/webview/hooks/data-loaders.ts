@@ -3,7 +3,7 @@ import { client, type SessionListPage } from '../lib/client';
 import { appStore } from '../lib/stores/app-store';
 import { permissionsStore } from '../lib/stores/permissions-store';
 import { routingStore } from '../lib/stores/routing-store';
-import { sessionStore } from '../lib/stores/session-store';
+import { captureSessionStatusSnapshotTime, sessionStore } from '../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../lib/stores/session-store';
 import { clearQueuedMessagesForSession } from '../lib/state-queued-messages';
 import { getEffectiveComposerSessionId } from '../lib/state-view-persistence';
@@ -187,7 +187,7 @@ export function createDataLoaderOperations(deps: {
   let providerLoadGeneration = 0;
   let compatibilityLoadGeneration = 0;
   let recycleBinLoadGeneration = 0;
-  let inFlightMcpLoad: { sessionId: string | null; promise: Promise<void> } | null = null;
+  let inFlightMcpLoad: { sessionId: string | null; promise: Promise<boolean> } | null = null;
   let inFlightSessionPageLoad: Promise<void> | null = null;
   let knownProviderIDs: Set<string> | null = null;
   const questionSnapshots = createMutationAwareSnapshotReconciler(deps.getQuestions);
@@ -208,9 +208,11 @@ export function createDataLoaderOperations(deps: {
     return true;
   };
 
-  const loadMcps = () => {
+  const loadMcps = (options?: { fresh?: boolean }) => {
     const sessionId = deps.getActiveSessionId();
-    if (inFlightMcpLoad?.sessionId === sessionId) return inFlightMcpLoad.promise;
+    if (!options?.fresh && inFlightMcpLoad?.sessionId === sessionId) {
+      return inFlightMcpLoad.promise;
+    }
     const workspace = workspaceGeneration;
     const generation = ++mcpLoadGeneration;
     const request = loadMcpsWithDependencies(
@@ -363,10 +365,18 @@ export function createDataLoaderOperations(deps: {
         applySessions: (sessions, hasMore) => {
           const reconciled = sessionSnapshots.reconcile(sessions, mutationBaseline);
           const retainedIds = new Set(reconciled.map((session) => session.id));
-          for (const current of deps.getSessions()) {
-            if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
+          const nextSessions = hasMore
+            ? [
+                ...reconciled,
+                ...deps.getSessions().filter((session) => !retainedIds.has(session.id)),
+              ]
+            : reconciled;
+          if (!hasMore) {
+            for (const current of deps.getSessions()) {
+              if (!retainedIds.has(current.id)) deps.clearQueuedMessagesForSession(current.id);
+            }
           }
-          deps.applySessions(reconciled);
+          deps.applySessions(nextSessions);
           deps.setSessionsHasMore?.(hasMore);
         },
       },
@@ -549,7 +559,7 @@ export async function loadMcpsWithDependencies(
   const activeSessionId = deps.getActiveSessionId();
   try {
     const status = await deps.listMcpStatus();
-    if (!isCurrent()) return;
+    if (!isCurrent()) return false;
     const nextStatus = status || {};
     deps.setMcpStatus(nextStatus);
     if (
@@ -564,8 +574,10 @@ export async function loadMcpsWithDependencies(
           .map(([name]) => name)
       );
     }
+    return true;
   } catch (err) {
     if (isCurrent()) logError('loadMcps', err);
+    return false;
   }
 }
 
@@ -808,7 +820,7 @@ export async function hydrateSessionStatusesWithDependencies(
   isCurrent: () => boolean = () => true
 ) {
   try {
-    const snapshotStartedAt = Date.now();
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
     const statuses = await deps.loadSessionStatuses();
     if (!isCurrent()) return;
     deps.setSessionStatuses(statuses, { snapshotStartedAt });

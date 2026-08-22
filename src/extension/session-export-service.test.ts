@@ -166,6 +166,23 @@ describe('SessionExportService', () => {
     });
   });
 
+  it('does not display an export after the workspace changes', async () => {
+    const spawnResult = createSpawnResult();
+    const server = createServer();
+    let workspacePath = '/repo';
+    server.getWorkspaceCwd.mockImplementation(() => workspacePath);
+    const service = new SessionExportService(server, 1000);
+
+    const exportPromise = service.exportSession('session-1');
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    workspacePath = '/other-repo';
+    spawnResult.handlers.close(0, null);
+
+    await expect(exportPromise).rejects.toThrow('Workspace changed during session export');
+    expect(mocks.openTextDocument).not.toHaveBeenCalled();
+    expect(mocks.showTextDocument).not.toHaveBeenCalled();
+  });
+
   it('reports invalid JSON and still removes the temp directory', async () => {
     const spawnResult = createSpawnResult();
     const service = new SessionExportService(createServer(), 1000);

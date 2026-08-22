@@ -65,6 +65,7 @@ export type RalphMessageEntry = {
       output?: number;
       reasoning?: number;
       cache?: { read?: number; write?: number };
+      total?: number;
     };
   };
   parts: Array<{ type: string; text?: string; files?: string[] }>;
@@ -1208,17 +1209,22 @@ export function createRalphRunner(ports: RalphRunnerPorts): RalphRunner {
         if (m.info.role === 'assistant') {
           const t = m.info.tokens;
           if (t) {
-            tokens.input += t.input ?? 0;
-            tokens.output += t.output ?? 0;
-            tokens.reasoning += t.reasoning ?? 0;
-            tokens.cacheRead += t.cache?.read ?? 0;
-            tokens.cacheWrite += t.cache?.write ?? 0;
+            const input = t.input ?? 0;
+            const output = t.output ?? 0;
+            const reasoning = t.reasoning ?? 0;
+            const cacheRead = t.cache?.read ?? 0;
+            const cacheWrite = t.cache?.write ?? 0;
+            tokens.input += input;
+            tokens.output += output;
+            tokens.reasoning += reasoning;
+            tokens.cacheRead += cacheRead;
+            tokens.cacheWrite += cacheWrite;
+            tokens.total += t.total ?? input + output + reasoning + cacheRead + cacheWrite;
           }
           cost += m.info.cost ?? 0;
         }
       }
     }
-    tokens.total = tokens.input + tokens.output + tokens.reasoning;
     const lastAssistantIndex = findLatestMessageIndex(
       iterationMessages,
       (message) => message.info.role === 'assistant'

@@ -3,6 +3,7 @@ import type {
   ClipboardImageSnapshot,
   DroppedFile,
   EditorDiagnostic,
+  QueuedContextSnapshot,
 } from '../../shared/protocol';
 import type { NativePdfAttachment } from '../../shared/native-pdf';
 
@@ -26,6 +27,7 @@ export interface QueuedMessage {
   nativePdfs?: NativePdfAttachment[];
   terminalSelection?: { text: string; terminalName: string } | null;
   attachedDiagnostics?: AttachedDiagnostics | null;
+  queuedContext?: QueuedContextSnapshot;
 }
 
 export type { NativePdfAttachment };

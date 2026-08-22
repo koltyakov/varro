@@ -1,5 +1,5 @@
 import { appStore } from '../../lib/stores/app-store';
-import { sessionStore } from '../../lib/stores/session-store';
+import { captureSessionStatusSnapshotTime, sessionStore } from '../../lib/stores/session-store';
 import type { SessionStatusSnapshotOptions } from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { deriveUsageLimitNotice } from '../../lib/usage-limit';
@@ -349,7 +349,7 @@ export async function recheckSessionStatusWithDependencies(
 ) {
   if (!deps.isDocumentVisible()) return;
   try {
-    const fallbackStartedAt = Date.now();
+    const fallbackStartedAt = captureSessionStatusSnapshotTime();
     const snapshot = deps.loadSessionStatusSnapshot
       ? await deps.loadSessionStatusSnapshot()
       : { statuses: await deps.loadSessionStatuses(), startedAt: fallbackStartedAt };

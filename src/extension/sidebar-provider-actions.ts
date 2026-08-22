@@ -10,6 +10,7 @@ import type { SidebarProviderContextFiles } from './sidebar-provider-context-fil
 import type { SessionDiffDocumentProvider } from './session-diff-document-provider';
 import type { ToolOutputDocumentProvider } from './tool-output-document-provider';
 import type { OpenCodeServer } from './server';
+import { assertSessionInCurrentWorkspace } from './session-workspace';
 import type { UsageReportService } from './usage-report-service';
 import type { ChatModelSelection, ExtensionMessage } from '../shared/protocol';
 
@@ -57,6 +58,7 @@ export interface SidebarProviderActionDeps {
   pickFiles(): Promise<void>;
   searchFiles(requestId: number, query: string, limit?: number): void;
   runInTerminal(command: string, title?: string): void | Promise<void>;
+  openSessionInTerminal(sessionId: string): void | Promise<void>;
   handleRalphMessage: MessageRouterCallbacks['handleRalphMessage'];
   updateQueuedMessages: MessageRouterCallbacks['updateQueuedMessages'];
   updateDraftImages: MessageRouterCallbacks['updateDraftImages'];
@@ -113,8 +115,10 @@ export function createSidebarProviderActions(
       deps.postTerminalSelection(deps.contextProvider.terminalSelection);
     },
     runInTerminal: (command, title) => deps.runInTerminal(command, title),
-    openSessionInOpenCode: (sessionId) =>
-      deps.runInTerminal(`opencode --session ${sessionId}`, 'OpenCode Session'),
+    openSessionInOpenCode: async (sessionId) => {
+      await assertSessionInCurrentWorkspace(deps.server, sessionId);
+      await deps.openSessionInTerminal(sessionId);
+    },
     handleRalphMessage: (msg) => deps.handleRalphMessage(msg),
     updateQueuedMessages: (payload) => deps.updateQueuedMessages(payload),
     updateDraftImages: (payload) => deps.updateDraftImages(payload),
@@ -153,18 +157,20 @@ export function createSidebarProviderActions(
       deps.postContext();
     },
     openPath: async (payload: OpenPathPayload) => {
-      if (
-        payload.view === 'diff' &&
-        payload.sessionID &&
-        (await deps.sessionDiffProvider.open(payload.sessionID, payload.path))
-      ) {
-        if (payload.requestId !== undefined) {
-          deps.post({
-            type: 'vscode/open-result',
-            payload: { requestId: payload.requestId, status: 'opened' },
-          });
+      if (payload.view === 'diff' && payload.sessionID) {
+        const result = await deps.sessionDiffProvider.open(payload.sessionID, payload.path);
+        if (result !== 'unavailable') {
+          if (payload.requestId !== undefined) {
+            deps.post({
+              type: 'vscode/open-result',
+              payload: {
+                requestId: payload.requestId,
+                status: result === 'opened' ? 'opened' : 'unavailable',
+              },
+            });
+          }
+          return;
         }
-        return;
       }
       const status = await deps.contextProvider.openPath(payload.path, {
         line: payload.line,

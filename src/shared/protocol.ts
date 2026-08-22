@@ -533,6 +533,11 @@ export type ClipboardImageSnapshot = {
   contextFile?: Pick<DroppedFile, 'path' | 'relativePath' | 'type'>;
 };
 
+export type QueuedContextSnapshot = {
+  editorContext: EditorContext;
+  currentDocumentEnabled: boolean;
+};
+
 export type QueuedMessageSnapshot = {
   id: string;
   messageId?: string;
@@ -545,6 +550,7 @@ export type QueuedMessageSnapshot = {
   nativePdfs?: NativePdfAttachment[];
   terminalSelection: { text: string; terminalName: string } | null;
   attachedDiagnostics?: { diagnostics: EditorDiagnostic[]; total: number };
+  queuedContext?: QueuedContextSnapshot;
 };
 
 export type InitialWebviewState = {

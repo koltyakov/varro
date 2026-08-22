@@ -181,8 +181,11 @@ function admitAndIdle(harness: Harness, sessionID: string, messageID: string): v
   harness.emitIdle(sessionID);
 }
 
-function assistantReport(text: string): RalphMessageEntry[] {
-  return [{ info: { role: 'assistant' }, parts: [{ type: 'text', text }] }];
+function assistantReport(
+  text: string,
+  tokens?: NonNullable<RalphMessageEntry['info']['tokens']>
+): RalphMessageEntry[] {
+  return [{ info: { role: 'assistant', tokens }, parts: [{ type: 'text', text }] }];
 }
 
 function completedVerificationReport(text: string): RalphMessageEntry[] {
@@ -1335,7 +1338,13 @@ describe('ralph runner iteration repair', () => {
     harness.readWorkspaceFile.mockResolvedValue('# Plan\n- [x] all done');
     harness.createSession.mockResolvedValueOnce('child-1');
     harness.listMessages.mockResolvedValue(
-      assistantReport('Finished quickly.\nlint: PASS\ntypecheck: PASS\ntest: PASS')
+      assistantReport('Finished quickly.\nlint: PASS\ntypecheck: PASS\ntest: PASS', {
+        input: 1,
+        output: 2,
+        reasoning: 3,
+        cache: { read: 4, write: 5 },
+        total: 20,
+      })
     );
     settlePromptsViaIdle(harness, { immediate: true });
 
@@ -1353,6 +1362,14 @@ describe('ralph runner iteration repair', () => {
           lint: 'pass',
           typecheck: 'pass',
           test: 'pass',
+        },
+        tokens: {
+          input: 1,
+          output: 2,
+          reasoning: 3,
+          cacheRead: 4,
+          cacheWrite: 5,
+          total: 20,
         },
       })
     );

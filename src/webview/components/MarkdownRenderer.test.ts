@@ -13,7 +13,7 @@ import {
   resetMermaidDiagramsForThemeForTests,
   splitStreamingMarkdownContent,
 } from './MarkdownRenderer';
-import { setState } from '../lib/state';
+import { setState, setTheme } from '../lib/state';
 import { loadCodeHighlighter } from '../lib/code-highlighter';
 
 type TestRuntimeValue =
@@ -43,6 +43,11 @@ let container: HTMLDivElement | null = null;
 let cleanup: (() => void) | undefined;
 const selectSessionMock = vi.hoisted(() => vi.fn());
 const showSessionActionFeedbackMock = vi.hoisted(() => vi.fn());
+const mermaidMock = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  parse: vi.fn(async () => ({ diagramType: 'flowchart' })),
+  render: vi.fn(async () => ({ svg: '<svg></svg>' })),
+}));
 
 /* oxlint-disable anti-slop/no-module-mocking -- These tests exercise markdown action integration with useOpenCode and feedback modules. */
 vi.mock('../hooks/useOpenCode', () => ({
@@ -51,6 +56,7 @@ vi.mock('../hooks/useOpenCode', () => ({
 vi.mock('./chat/SessionActionFeedback', () => ({
   showSessionActionFeedback: showSessionActionFeedbackMock,
 }));
+vi.mock('mermaid', () => ({ default: mermaidMock }));
 
 beforeAll(() => loadCodeHighlighter());
 
@@ -80,6 +86,9 @@ beforeEach(() => {
   __resetMarkdownCachesForTests();
   document.body.className = '';
   showSessionActionFeedbackMock.mockReset();
+  mermaidMock.initialize.mockReset();
+  mermaidMock.parse.mockReset().mockResolvedValue({ diagramType: 'flowchart' });
+  mermaidMock.render.mockReset().mockResolvedValue({ svg: '<svg></svg>' });
   document.body.removeAttribute('style');
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -105,6 +114,29 @@ afterEach(() => {
 });
 
 describe('MarkdownRenderer', () => {
+  it('renders raw HTML as text when HTML escaping is requested', () => {
+    const html = __parseMarkdownForTests('**Review** <button type="button">Run</button>', {
+      cacheByContent: true,
+      escapeHtml: true,
+    });
+    const root = document.createElement('div');
+    root.innerHTML = html;
+
+    expect(root.querySelector('button')).toBeNull();
+    expect(root.textContent).toContain('Review <button type="button">Run</button>');
+  });
+
+  it('does not reuse rendered Markdown for colliding content hashes', () => {
+    const first = 'OcbLqTZb]B8V*RyFHEyj';
+    const second = 'GifJgLaGm0`PdPJEHDaw';
+
+    const firstHtml = __parseMarkdownForTests(first, { cacheByContent: true });
+    const secondHtml = __parseMarkdownForTests(second, { cacheByContent: true });
+
+    expect(secondHtml).not.toBe(firstHtml);
+    expect(secondHtml).toContain('GifJgLaGm0`PdPJEHDaw');
+  });
+
   it('retries a valid Mermaid diagram after a cold render failure', async () => {
     const mermaid = {
       initialize: vi.fn(),
@@ -211,6 +243,34 @@ describe('MarkdownRenderer', () => {
       'Rendering diagram...'
     );
     expect(diagram.querySelector('.mermaid-diagram-fallback')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('does not mount an in-flight Mermaid render from the previous theme', async () => {
+    setTheme('dark');
+    document.body.className = 'vscode-dark';
+    let resolveOldRender!: (value: { svg: string }) => void;
+    mermaidMock.render
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ svg: string }>((resolve) => {
+            resolveOldRender = resolve;
+          })
+      )
+      .mockResolvedValueOnce({ svg: '<svg><text>new theme</text></svg>' });
+    cleanup = render(
+      () => MarkdownRenderer({ content: '```mermaid\ngraph TD\n  A --> B\n```' }),
+      container!
+    );
+    await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalledOnce());
+
+    document.body.className = 'vscode-light';
+    setTheme('light');
+    resolveOldRender({ svg: '<svg><text>old theme</text></svg>' });
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await vi.waitFor(() => expect(mermaidMock.render).toHaveBeenCalledTimes(2));
+
+    expect(container?.querySelector('.mermaid-diagram-output')?.textContent).toBe('new theme');
   });
 
   it('emits a Mermaid hydration target only for Mermaid code fences', () => {

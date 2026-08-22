@@ -1,12 +1,11 @@
-/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters -- Process output and OpenCode responses are validated before export. */
 import { spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import { mkdtemp, open, readFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
-import { asRecord } from '../shared/type-utils';
-import { isSameWorkspacePath, normalizeWorkspaceIdentity } from '../shared/workspace-path';
+import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
+import { assertSessionInCurrentWorkspace } from './session-workspace';
 import { assertValidJson, normalizeCliOutput } from './sidebar-provider-utils';
 import { resolveServerLaunch } from './util/server-launch';
 import { buildServerEnv } from './util/server-path';
@@ -22,13 +21,22 @@ export class SessionExportService {
 
   async exportSession(sessionId: string) {
     try {
-      await this.assertSessionInCurrentWorkspace(sessionId);
-      const content = await this.readExportContentFromTempFile(sessionId);
+      const workspacePath = this.server.getWorkspaceCwd();
+      const workspaceIdentity = normalizeWorkspaceIdentity(workspacePath);
+      await assertSessionInCurrentWorkspace(this.server, sessionId);
+      this.assertWorkspaceUnchanged(workspaceIdentity);
+      const content = await this.readExportContentFromTempFile(
+        sessionId,
+        workspacePath,
+        workspaceIdentity
+      );
+      this.assertWorkspaceUnchanged(workspaceIdentity);
       assertValidJson(content, 'OpenCode export');
       const document = await vscode.workspace.openTextDocument({
         language: 'json',
         content,
       });
+      this.assertWorkspaceUnchanged(workspaceIdentity);
       await vscode.window.showTextDocument(document, { preview: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -37,33 +45,28 @@ export class SessionExportService {
     }
   }
 
-  private async assertSessionInCurrentWorkspace(sessionId: string): Promise<void> {
-    const workspacePath = this.server.getWorkspaceCwd();
-    if (!normalizeWorkspaceIdentity(workspacePath)) return;
-    const session = asRecord(
-      await this.server.request('GET', `/session/${encodeURIComponent(sessionId)}`)
-    );
-    if (
-      getString(session?.id) !== sessionId ||
-      !isSameWorkspacePath(getString(session?.directory), workspacePath)
-    ) {
-      throw new Error('Session does not belong to the current workspace');
-    }
-  }
-
-  private async readExportContentFromTempFile(sessionId: string): Promise<string> {
+  private async readExportContentFromTempFile(
+    sessionId: string,
+    workspacePath: string | undefined,
+    workspaceIdentity: string | null
+  ): Promise<string> {
     const tempDir = await mkdtemp(join(tmpdir(), 'varro-opencode-export-'));
     const tempFile = join(tempDir, 'session-export.json');
 
     try {
-      await this.runCliCommandToFile(['export', sessionId], tempFile);
+      this.assertWorkspaceUnchanged(workspaceIdentity);
+      await this.runCliCommandToFile(['export', sessionId], tempFile, workspacePath);
       return normalizeCliOutput(await readFile(tempFile, 'utf-8'));
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
   }
 
-  private async runCliCommandToFile(args: string[], outputPath: string): Promise<void> {
+  private async runCliCommandToFile(
+    args: string[],
+    outputPath: string,
+    workspacePath: string | undefined
+  ): Promise<void> {
     const fileHandle = await open(outputPath, 'w');
 
     return new Promise((resolveOutput, reject) => {
@@ -133,11 +136,12 @@ export class SessionExportService {
       };
 
       try {
+        this.assertWorkspaceUnchanged(normalizeWorkspaceIdentity(workspacePath));
         const command = this.server.resolveCommand();
         const launch = resolveServerLaunch(command, args);
         const spawnOptions: SpawnOptions = {
           stdio: ['ignore', fileHandle.fd, 'pipe'],
-          cwd: this.server.getWorkspaceCwd(),
+          cwd: workspacePath,
           env: buildServerEnv(),
           windowsHide: true,
         };
@@ -173,10 +177,15 @@ export class SessionExportService {
       }
     });
   }
-}
 
-function getString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
+  private assertWorkspaceUnchanged(workspaceIdentity: string | null): void {
+    if (
+      workspaceIdentity &&
+      normalizeWorkspaceIdentity(this.server.getWorkspaceCwd()) !== workspaceIdentity
+    ) {
+      throw new Error('Workspace changed during session export');
+    }
+  }
 }
 
 async function terminateProcessTree(proc: ChildProcess, force: boolean): Promise<void> {

@@ -629,7 +629,7 @@ Perform exactly those 50 actions and ensure the sequence contains at least one o
 
 - upward and downward wheel input
 - `PageDown`, `Space`, and `Shift+Space` on the transcript
-- the same keys while the composer or inline editor is focused
+- the same keys while the composer is focused; settled inline-edit coverage belongs to AI-03 and AI-10
 - sidebar width resize
 - disclosure expansion and collapse
 - file-card and diff expansion, focus, and collapse

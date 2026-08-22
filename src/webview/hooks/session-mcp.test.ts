@@ -271,6 +271,117 @@ describe('session MCP helpers', () => {
     });
   });
 
+  it('refreshes status after superseded side effects before reconciling the latest selection', async () => {
+    let resolveFirstConnect: (() => void) | undefined;
+    const cachedStatuses = new Map<string, { status: 'connected' | 'disabled' }>([
+      ['alpha', { status: 'connected' }],
+      ['beta', { status: 'disabled' }],
+    ]);
+    const remoteStatuses = new Map(cachedStatuses);
+    const selections = new Map([
+      ['session-a', ['beta']],
+      ['session-b', ['alpha']],
+    ]);
+    const connectMcp = vi.fn(async (name: string) => {
+      if (name === 'beta') {
+        await new Promise<void>((resolve) => {
+          resolveFirstConnect = resolve;
+        });
+      }
+      remoteStatuses.set(name, { status: 'connected' });
+    });
+    const disconnectMcp = vi.fn(async (name: string) => {
+      remoteStatuses.set(name, { status: 'disabled' });
+    });
+    const loadMcps = vi.fn(async () => {
+      cachedStatuses.clear();
+      for (const [name, status] of remoteStatuses) cachedStatuses.set(name, status);
+    });
+    const operations = new SessionMcpOperations({
+      getSelectedMcpsForSession: (sessionId) =>
+        sessionId ? (selections.get(sessionId) ?? []) : [],
+      getRequiredMcpSessionIds: (sessionId) => (sessionId ? [sessionId] : []),
+      getMcpStatus: () => Object.fromEntries(cachedStatuses),
+      loadMcps,
+      getAvailableMcpNames: () => ['alpha', 'beta'],
+      connectMcp,
+      authenticateMcp: vi.fn(async () => {}),
+      disconnectMcp,
+      logError: vi.fn(),
+      setSelectedMcpsForSession: vi.fn(),
+      setDraftSelectedMcps: vi.fn(),
+    });
+
+    const first = operations.syncSessionMcps('session-a');
+    await vi.waitFor(() => expect(connectMcp).toHaveBeenCalledWith('beta'));
+    const second = operations.syncSessionMcps('session-b');
+    resolveFirstConnect?.();
+    await Promise.all([first, second]);
+
+    expect(loadMcps).toHaveBeenCalledWith({ fresh: true });
+    expect(connectMcp.mock.calls.map(([name]) => name)).toEqual(['beta', 'alpha']);
+    expect(disconnectMcp.mock.calls.map(([name]) => name)).toEqual(['alpha', 'beta']);
+    expect(Object.fromEntries(remoteStatuses)).toEqual({
+      alpha: { status: 'connected' },
+      beta: { status: 'disabled' },
+    });
+  });
+
+  it('retries a failed authoritative refresh before the queued reconciliation', async () => {
+    let resolveFirstConnect: (() => void) | undefined;
+    let freshLoadCount = 0;
+    const cachedStatuses = new Map<string, { status: 'connected' | 'disabled' }>([
+      ['alpha', { status: 'connected' }],
+      ['beta', { status: 'disabled' }],
+    ]);
+    const remoteStatuses = new Map(cachedStatuses);
+    const selections = new Map([
+      ['session-a', ['beta']],
+      ['session-b', ['alpha']],
+    ]);
+    const loadMcps = vi.fn(async (options?: { fresh?: boolean }) => {
+      if (options?.fresh && ++freshLoadCount === 1) return false;
+      cachedStatuses.clear();
+      for (const [name, status] of remoteStatuses) cachedStatuses.set(name, status);
+      return true;
+    });
+    const operations = new SessionMcpOperations({
+      getSelectedMcpsForSession: (sessionId) =>
+        sessionId ? (selections.get(sessionId) ?? []) : [],
+      getRequiredMcpSessionIds: (sessionId) => (sessionId ? [sessionId] : []),
+      getMcpStatus: () => Object.fromEntries(cachedStatuses),
+      loadMcps,
+      getAvailableMcpNames: () => ['alpha', 'beta'],
+      connectMcp: vi.fn(async (name: string) => {
+        if (name === 'beta') {
+          await new Promise<void>((resolve) => {
+            resolveFirstConnect = resolve;
+          });
+        }
+        remoteStatuses.set(name, { status: 'connected' });
+      }),
+      authenticateMcp: vi.fn(async () => {}),
+      disconnectMcp: vi.fn(async (name: string) => {
+        remoteStatuses.set(name, { status: 'disabled' });
+      }),
+      logError: vi.fn(),
+      setSelectedMcpsForSession: vi.fn(),
+      setDraftSelectedMcps: vi.fn(),
+    });
+
+    const first = operations.syncSessionMcps('session-a');
+    await vi.waitFor(() => expect(resolveFirstConnect).toBeTypeOf('function'));
+    const second = operations.syncSessionMcps('session-b');
+    resolveFirstConnect?.();
+    await Promise.all([first, second]);
+
+    expect(loadMcps.mock.calls.filter(([options]) => options?.fresh)).toHaveLength(3);
+    expect(Object.fromEntries(remoteStatuses)).toEqual({
+      alpha: { status: 'connected' },
+      beta: { status: 'disabled' },
+    });
+  });
+
   it('stores and immediately reconciles MCP selections for a draft', async () => {
     const setDraftSelectedMcps = vi.fn();
     const syncSessionMcps = vi.fn(async () => {});

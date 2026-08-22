@@ -2397,6 +2397,19 @@ describe('ChatInput', () => {
         lineRanges: [{ startLine: 6, endLine: 26 }],
       },
     ]);
+    expect(state.queuedMessages[0]?.queuedContext).toEqual({
+      editorContext: {
+        workspacePath: '/repo',
+        activeFile: {
+          path: '/repo/src/menus.css',
+          relativePath: 'src/menus.css',
+          language: 'css',
+        },
+        selection: { startLine: 6, endLine: 26 },
+        diagnostics: [],
+      },
+      currentDocumentEnabled: true,
+    });
     expect(container?.querySelector('.chat-queue-meta-item')?.getAttribute('aria-label')).toBe(
       '1 attachment'
     );
@@ -2440,8 +2453,11 @@ describe('ChatInput', () => {
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
@@ -2506,11 +2522,15 @@ describe('ChatInput', () => {
 
     expect(sendMessageMock).toHaveBeenCalledWith('Continue in the background', {
       messageId: expect.stringMatching(/^msg_/),
+      agent: undefined,
       queuedAttachments: {
         droppedFiles: undefined,
         clipboardImages: undefined,
+        nativePdfs: undefined,
         terminalSelection: undefined,
+        attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-2',
     });
@@ -2661,6 +2681,28 @@ describe('ChatInput', () => {
     expect(container?.querySelector('.chat-queue-attachment-icon')).not.toBeNull();
     expect(container?.querySelector('[aria-label="Send as Steer"]')?.textContent).toBe('');
     expect(container?.querySelectorAll('.chat-queue-control')).toHaveLength(10);
+  });
+
+  it('sets a native title only when a queued message label is truncated', () => {
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('queuedMessages', [{ id: 'q1', sessionId: 'session-1', text: 'Queued follow-up' }]);
+
+    cleanup = render(() => ChatInput(), container!);
+
+    const row = container?.querySelector('.chat-queue-item');
+    const label = container?.querySelector('.chat-queue-label');
+    Object.defineProperty(label, 'scrollWidth', { configurable: true, value: 100 });
+    Object.defineProperty(label, 'clientWidth', { configurable: true, value: 100 });
+
+    label?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(label?.getAttribute('title')).toBeNull();
+
+    Object.defineProperty(label, 'clientWidth', { configurable: true, value: 50 });
+    label?.dispatchEvent(new MouseEvent('mouseenter'));
+
+    expect(label?.getAttribute('title')).toBe('Queued follow-up');
+    expect(row?.getAttribute('title')).toBeNull();
   });
 
   it('pauses queued rows individually and toggles all session rows with Alt-click', () => {
@@ -3047,6 +3089,7 @@ describe('ChatInput', () => {
         terminalSelection: undefined,
         attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
@@ -3096,6 +3139,7 @@ describe('ChatInput', () => {
         terminalSelection: undefined,
         attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
@@ -3171,6 +3215,7 @@ describe('ChatInput', () => {
         terminalSelection: { text: 'npm test', terminalName: 'zsh' },
         attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
@@ -3399,6 +3444,7 @@ describe('ChatInput', () => {
           terminalSelection: undefined,
           attachedDiagnostics: undefined,
         },
+        queuedContext: expect.any(Object),
         preserveComposer: true,
         targetSessionId: 'session-1',
       },
@@ -3785,6 +3831,7 @@ describe('ChatInput', () => {
         terminalSelection: null,
         attachedDiagnostics: undefined,
       },
+      queuedContext: expect.any(Object),
       preserveComposer: true,
       targetSessionId: 'session-1',
     });

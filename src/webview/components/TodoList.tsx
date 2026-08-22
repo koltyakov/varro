@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js';
 import { defaultAppState } from '../lib/state';
 import { STORAGE_KEYS, readStored, writeStored } from '../lib/state-storage';
 import type { NormalizedTodo } from '../types';
@@ -48,7 +48,15 @@ export function TodoList() {
   let previousAllDone = allDone();
   let blockRef: HTMLDivElement | undefined;
   let listRef: HTMLUListElement | undefined;
+  let activeTodoTextRef: HTMLSpanElement | undefined;
   let manuallyExpanded = false;
+  const [activeTodoTruncated, setActiveTodoTruncated] = createSignal(false);
+
+  const updateActiveTodoTruncation = () => {
+    setActiveTodoTruncated(
+      !!activeTodoTextRef && activeTodoTextRef.scrollWidth > activeTodoTextRef.clientWidth
+    );
+  };
 
   const setAutomaticCollapsed = (nextCollapsed: boolean) => {
     manuallyExpanded = false;
@@ -68,6 +76,13 @@ export function TodoList() {
     }, 5_000);
     onCleanup(() => window.clearInterval(interval));
   });
+
+  createEffect(
+    on(
+      () => activeTodo()?.id,
+      () => setActiveTodoTruncated(false)
+    )
+  );
 
   createEffect(() => {
     const nextTodoIds = new Set(todos().map((todo) => todo.id));
@@ -211,7 +226,11 @@ export function TodoList() {
         </span>
         <Show when={collapsed() && activeTodo()}>
           {(todo) => (
-            <span class="todo-block-active" title={todo().content}>
+            <span
+              class="todo-block-active"
+              title={activeTodoTruncated() ? todo().content : undefined}
+              onMouseEnter={updateActiveTodoTruncation}
+            >
               <svg class="todo-block-active-indicators" viewBox="0 0 6 14" aria-hidden="true">
                 <For each={activeTodoDots()}>
                   {(dot, index) => (
@@ -225,7 +244,14 @@ export function TodoList() {
                   )}
                 </For>
               </svg>
-              <span class="todo-block-active-text">{todo().content}</span>
+              <span
+                class="todo-block-active-text"
+                ref={(element) => {
+                  activeTodoTextRef = element;
+                }}
+              >
+                {todo().content}
+              </span>
             </span>
           )}
         </Show>

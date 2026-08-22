@@ -141,7 +141,70 @@ function runInTerminal(provider: object, command: string, title?: string) {
   ).runInTerminal(command, title);
 }
 
+function openSessionInTerminal(provider: object, sessionId: string) {
+  return (
+    provider as unknown as {
+      openSessionInTerminal: (sessionId: string) => Promise<void>;
+    }
+  ).openSessionInTerminal(sessionId);
+}
+
 describe('SidebarProvider terminal commands', () => {
+  it('launches session handoff with the configured OpenCode executable', async () => {
+    const server = createServer({
+      resolveCommand: vi.fn(() => '/Applications/OpenCode Tools/opencode'),
+    });
+    const { provider } = await createSidebarProviderInstance({ server });
+    attachTestView(provider);
+
+    await openSessionInTerminal(provider, 'session-1');
+
+    expect(getVscodeMock().window.createTerminal).toHaveBeenCalledWith({
+      name: 'OpenCode Session',
+      cwd: '/repo',
+      shellPath: '/Applications/OpenCode Tools/opencode',
+      shellArgs: ['--session', 'session-1'],
+    });
+    expect(getVscodeMock().window.createTerminal.mock.results[0]?.value.show).toHaveBeenCalledWith(
+      false
+    );
+  });
+
+  it('launches Windows command shims through the command interpreter', async () => {
+    const originalPlatform = process.platform;
+    const originalComSpec = process.env.ComSpec;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+    try {
+      const server = createServer({
+        resolveCommand: vi.fn(() => 'C:\\Program Files\\OpenCode\\opencode.cmd'),
+      });
+      const { provider } = await createSidebarProviderInstance({ server });
+      attachTestView(provider);
+
+      await openSessionInTerminal(provider, 'session-1');
+
+      expect(getVscodeMock().window.createTerminal).toHaveBeenCalledWith({
+        name: 'OpenCode Session',
+        cwd: '/repo',
+        shellPath: 'C:\\Windows\\System32\\cmd.exe',
+        shellArgs: [
+          '/d',
+          '/s',
+          '/c',
+          '"C:\\Program Files\\OpenCode\\opencode.cmd" --session session-1',
+        ],
+      });
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      });
+      if (originalComSpec === undefined) delete process.env.ComSpec;
+      else process.env.ComSpec = originalComSpec;
+    }
+  });
+
   it('releases the binary before running an install or update command', async () => {
     // Windows cannot overwrite a running opencode.exe, so the one-click update
     // needs the same prerequisite as Varro's own upgrade path.

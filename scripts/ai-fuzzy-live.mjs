@@ -83,6 +83,19 @@ export function missingLiveGates(snapshot, scenario) {
   return missing;
 }
 
+export function shouldRetryNestedHandoff(handoff) {
+  if (handoff?.passed || !handoff?.before || !handoff?.afterNested) return false;
+  const beforeNested = handoff.before.nestedActivityScroller;
+  const afterNested = handoff.afterNested.nestedActivityScroller;
+  return (
+    handoff.before.activeActivityCount !== handoff.afterNested.activeActivityCount ||
+    Math.abs(handoff.before.transcript.scrollHeight - handoff.afterNested.transcript.scrollHeight) >
+      0.5 ||
+    Math.abs((beforeNested?.scrollHeight ?? 0) - (afterNested?.scrollHeight ?? 0)) > 0.5 ||
+    Math.abs((beforeNested?.clientHeight ?? 0) - (afterNested?.clientHeight ?? 0)) > 0.5
+  );
+}
+
 export function buildLivePrompt({ seed, attempt, missing = [] }) {
   const marker = `[VFZ:${seed}:TOOLS-A${String(attempt)}]`;
   if (attempt === 1) {
@@ -427,7 +440,20 @@ class CdpController {
   async point(selector, edge = 'center') {
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const result = await this.evaluate(`(() => {
-        const element = document.querySelector(${JSON.stringify(selector)});
+        const elements = [...document.querySelectorAll(${JSON.stringify(selector)})];
+        const visibleElement = elements.find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
+        });
+        const element = visibleElement ?? elements.toSorted((left, right) => {
+          const distance = (candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            if (rect.bottom < 0) return -rect.bottom;
+            if (rect.top > innerHeight) return rect.top - innerHeight;
+            return 0;
+          };
+          return distance(left) - distance(right);
+        })[0];
         if (!element) return null;
         const rect = element.getBoundingClientRect();
         const visible = rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth;
@@ -472,54 +498,6 @@ class CdpController {
       });
     }
     return true;
-  }
-
-  async clickFirstVisible(selector) {
-    for (let attempt = 0; attempt < 24; attempt += 1) {
-      const result = await this.evaluate(`(() => {
-        const scroller = document.querySelector('.interactive-list');
-        const viewport = scroller?.getBoundingClientRect();
-        if (!scroller || !viewport) return null;
-        const candidates = [...document.querySelectorAll(${JSON.stringify(selector)})]
-          .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-          .filter(({ rect }) => rect.width > 0 && rect.height > 0);
-        const visible = candidates.find(({ rect }) => rect.bottom > viewport.top && rect.top < viewport.bottom);
-        if (visible) return { visible: true, x: visible.rect.x + visible.rect.width / 2,
-          y: visible.rect.y + visible.rect.height / 2 };
-        const nearest = candidates.toSorted((left, right) =>
-          Math.min(Math.abs(left.rect.bottom - viewport.top), Math.abs(left.rect.top - viewport.bottom)) -
-          Math.min(Math.abs(right.rect.bottom - viewport.top), Math.abs(right.rect.top - viewport.bottom)))[0];
-        return { visible: false,
-          direction: nearest ? (nearest.rect.bottom <= viewport.top ? -1 : 1) : -1,
-          x: viewport.right - 6, y: viewport.y + viewport.height / 2 };
-      })()`);
-      if (!result) return false;
-      if (result.visible) {
-        for (const [type, buttons] of [
-          ['mousePressed', 1],
-          ['mouseReleased', 0],
-        ]) {
-          await this.call('Input.dispatchMouseEvent', {
-            type,
-            x: result.x,
-            y: result.y,
-            button: 'left',
-            buttons,
-            clickCount: 1,
-          });
-        }
-        return true;
-      }
-      await this.call('Input.dispatchMouseEvent', {
-        type: 'mouseWheel',
-        x: result.x,
-        y: result.y,
-        deltaX: 0,
-        deltaY: result.direction * 180,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return false;
   }
 
   async clickText(text, excludeText = '') {
@@ -582,6 +560,15 @@ class CdpController {
 
   async sendComposerPrompt(prompt) {
     if (!(await this.click('[aria-label="Message composer"]'))) return false;
+    const selectAllModifier = process.platform === 'darwin' ? 4 : 2;
+    for (const type of ['keyDown', 'keyUp']) {
+      await this.call('Input.dispatchKeyEvent', {
+        type,
+        key: 'a',
+        code: 'KeyA',
+        modifiers: selectAllModifier,
+      });
+    }
     await this.call('Input.insertText', { text: prompt });
     for (const type of ['keyDown', 'keyUp']) {
       await this.call('Input.dispatchKeyEvent', {
@@ -816,7 +803,15 @@ async function switchAwayAndBack(cdp, currentTitle) {
   return reopened;
 }
 
-async function executeActionPlan(cdp, plan, currentTitle, port) {
+async function clickWithRetry(cdp, selector) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await cdp.click(selector)) return true;
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+export async function executeActionPlan(cdp, plan, currentTitle, port) {
   const results = [];
   for (const action of plan) {
     let executed = false;
@@ -826,23 +821,10 @@ async function executeActionPlan(cdp, plan, currentTitle, port) {
       executed = (await nestedHandoff(cdp)).passed;
     } else if (action.action.endsWith('on transcript') || action.action === 'key on transcript') {
       executed = await cdp.key('.interactive-list', action.key ?? action.action.split(' ')[0]);
-    } else if (action.action === 'PageDown in composer') {
-      executed = await cdp.key('[aria-label="Message composer"]', 'PageDown');
-    } else if (action.action === 'Space in inline editor') {
-      executed = await cdp.clickFirstVisible('.user-message-card-editable');
-      if (!executed && (await cdp.click('[data-sticky-msg-id]'))) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        executed = await cdp.clickFirstVisible('.user-message-card-editable');
-      }
-      if (executed) {
-        executed = await cdp.key(
-          '.interactive-input-part.editing-message [contenteditable="true"]',
-          'Space'
-        );
-      }
-      await cdp.key(
-        '.interactive-input-part.editing-message [contenteditable="true"]',
-        'Escape'
+    } else if (action.action.endsWith('in composer')) {
+      executed = await cdp.key(
+        '[aria-label="Message composer"]',
+        action.key ?? action.action.split(' ')[0]
       );
     } else if (action.action === 'resize sidebar') {
       await resizeVscodeSidebar(port, action.width ?? 430);
@@ -852,12 +834,23 @@ async function executeActionPlan(cdp, plan, currentTitle, port) {
     } else if (action.action === 'open file card and diff') {
       executed = await cdp.click('[aria-label^="Expand changes in"]');
     } else if (action.action === 'focus and close diff') {
-      executed = await cdp.click('.diff-view-overlay-content, .diff-view-lines');
-      if (executed) executed = await cdp.click('[aria-label="Close expanded diff"], [aria-label^="Collapse changes in"]');
+      executed = await clickWithRetry(
+        cdp,
+        '.diff-view-overlay-content, .diff-view-lines, .file-change-inline-diffs, .diff-view-file, .file-change-card'
+      );
+      if (executed) {
+        executed = await clickWithRetry(
+          cdp,
+          '[aria-label="Close expanded diff"], [aria-label^="Collapse changes in"]'
+        );
+      }
     } else if (action.action === 'click sticky or jump to latest') {
       executed =
         (await cdp.click('[data-sticky-msg-id]')) ||
         (await cdp.click('[aria-label="Scroll to latest message"]'));
+      if (!executed && (await cdp.wheel('.interactive-list', -420, 'right'))) {
+        executed = await clickWithRetry(cdp, '[aria-label="Scroll to latest message"]');
+      }
     } else if (action.action === 'wheel transcript') {
       executed = await cdp.wheel('.interactive-list', action.delta, 'right');
     }
@@ -1013,6 +1006,12 @@ async function runLive(options) {
     let actions = [];
     if (best?.missing.length === 0) {
       handoff = await nestedHandoff(cdp);
+      if (shouldRetryNestedHandoff(handoff)) {
+        const firstAttempt = handoff;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const retry = await nestedHandoff(cdp);
+        handoff = { ...retry, recoveryAttempts: [firstAttempt, retry] };
+      }
       if (scenario === 'AI-08' && handoff.passed) {
         actions = [
           { ...manifest.actionPlan[0], executed: true },

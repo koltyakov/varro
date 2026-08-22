@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEffect, createRoot } from 'solid-js';
 import type { FileDiff, Message, Part, Session } from '../../types';
-import { resetSessionStatusSnapshotTracking, sessionStore } from './session-store';
+import {
+  captureSessionStatusSnapshotTime,
+  resetSessionStatusSnapshotTracking,
+  sessionStore,
+} from './session-store';
 import {
   resetDefaultAppState,
   setMessagesIncremental,
@@ -146,6 +150,18 @@ describe('sessionStore', () => {
       'session-1': { type: 'idle' },
       'session-2': { type: 'idle' },
     });
+    nowSpy.mockRestore();
+  });
+
+  it('preserves a local event that arrives in the same millisecond as a snapshot starts', () => {
+    const timestamp = Date.now() + 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(timestamp);
+    const snapshotStartedAt = captureSessionStatusSnapshotTime();
+    sessionStore.setSessionStatusEntry('session-1', { type: 'busy' });
+
+    sessionStore.setSessionStatuses({ 'session-1': { type: 'idle' } }, { snapshotStartedAt });
+
+    expect(state.sessionStatus['session-1']).toEqual({ type: 'busy' });
     nowSpy.mockRestore();
   });
 

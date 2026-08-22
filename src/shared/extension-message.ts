@@ -314,7 +314,7 @@ function isWebviewThemeKind<T>(value: T): value is T & WebviewThemeKind {
   );
 }
 
-function isEditorContext<T>(value: T): value is T & EditorContext {
+export function isEditorContext<T>(value: T): value is T & EditorContext {
   const record = asRecord(value);
   if (!record) return false;
   if (record.workspacePath !== null && !isString(record.workspacePath)) return false;

@@ -266,6 +266,30 @@ describe('TodoList', () => {
     );
   });
 
+  it('sets a native title only when the collapsed todo text is truncated', () => {
+    setState('todos', [
+      { id: 'todo-1', content: 'Working task', status: 'in_progress', priority: 'high' },
+    ]);
+
+    cleanup = render(() => TodoList(), container!);
+    container
+      ?.querySelector('button.todo-block-header')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    const active = container?.querySelector('.todo-block-active');
+    const text = container?.querySelector('.todo-block-active-text');
+    Object.defineProperty(text, 'scrollWidth', { configurable: true, value: 100 });
+    Object.defineProperty(text, 'clientWidth', { configurable: true, value: 100 });
+
+    active?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(active?.getAttribute('title')).toBeNull();
+
+    Object.defineProperty(text, 'clientWidth', { configurable: true, value: 50 });
+    active?.dispatchEvent(new MouseEvent('mouseenter'));
+
+    expect(active?.getAttribute('title')).toBe('Working task');
+  });
+
   it('scrolls to the active todo when it changes', async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {

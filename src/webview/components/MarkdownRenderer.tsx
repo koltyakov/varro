@@ -286,25 +286,16 @@ function setCachedValue(cache: MarkdownStringCache, key: string, value: string) 
   markdownCacheBytes += bytes;
 }
 
-function hashContent(value: string) {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${value.length}:${(hash >>> 0).toString(36)}`;
-}
-
 function getRenderedMarkdownCacheKey(content: string, options: ParseMarkdownOptions) {
-  return [
-    hashContent(state.editorContext.workspacePath || ''),
-    hashContent(getSessionReferenceContextKey(content)),
+  return JSON.stringify([
+    state.editorContext.workspacePath || '',
+    getSessionReferenceContextKey(content),
     options.disablePathLinkify ? 'no-paths' : 'paths',
     options.disableCodeHighlighting ? 'plain-code' : `highlight-code:${codeHighlighterVersion()}`,
     options.allowMermaidHydration ? 'hydrate-mermaid' : 'defer-mermaid',
     options.escapeHtml ? 'escaped-html' : 'rendered-html',
-    hashContent(content),
-  ].join('\u0000');
+    content,
+  ]);
 }
 
 export function renderHighlightedCodeHtml(
@@ -475,6 +466,10 @@ function buildFileLink(raw: string, label?: string) {
     title: escapeHtml(title),
   };
 }
+
+renderer.html = function ({ text }: { text: string }) {
+  return renderMarkdownContext?.escapeHtml ? escapeHtml(text) : text;
+};
 
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   if (lang?.trim().toLowerCase() === 'mermaid' && text.length <= MAX_MERMAID_SOURCE_LENGTH) {
@@ -1173,6 +1168,7 @@ export function __resetMarkdownCachesForTests() {
   sanitizeHtmlCache.clear();
   markdownCacheLru.clear();
   mermaidSvgCache.clear();
+  mermaidHydrationGeneration += 1;
   markdownCacheBytes = 0;
 }
 
@@ -1290,6 +1286,7 @@ function getMarkdownHydrationFlags(html: string): MarkdownHydrationFlags {
 
 let mermaidRenderSequence = 0;
 let mermaidRenderQueue: Promise<void> = Promise.resolve();
+let mermaidHydrationGeneration = 0;
 const mermaidSvgCache = new Map<string, string>();
 
 function readMermaidThemeColor(styles: CSSStyleDeclaration, name: string, fallback: string) {
@@ -1480,6 +1477,7 @@ function mountMermaidSvg(diagram: HTMLElement, svg: string) {
 
 export function resetMermaidDiagramsForThemeForTests(root: HTMLElement | undefined) {
   if (!root) return;
+  mermaidHydrationGeneration += 1;
   for (const diagram of root.querySelectorAll<HTMLElement>(
     '.mermaid-diagram[data-mermaid-source]'
   )) {
@@ -1497,6 +1495,7 @@ export function resetMermaidDiagramsForThemeForTests(root: HTMLElement | undefin
 
 async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
   if (!root) return;
+  const hydrationGeneration = mermaidHydrationGeneration;
 
   const diagrams = Array.from(
     root.querySelectorAll<HTMLElement>(
@@ -1528,13 +1527,20 @@ async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
   try {
     ({ default: mermaid } = await import('mermaid'));
   } catch {
+    if (hydrationGeneration !== mermaidHydrationGeneration) return;
     for (const { diagram } of pending) {
       showMermaidFailure(diagram, 'Could not load diagram renderer. Showing Mermaid source.');
     }
     return;
   }
   for (const { diagram, source, config, cacheKey } of pending) {
-    if (!diagram.isConnected || diagram.dataset.mermaidHydrated) continue;
+    if (
+      hydrationGeneration !== mermaidHydrationGeneration ||
+      !diagram.isConnected ||
+      diagram.dataset.mermaidHydrated
+    ) {
+      continue;
+    }
     diagram.dataset.mermaidHydrated = 'loading';
 
     try {
@@ -1548,10 +1554,10 @@ async function hydrateMermaidDiagrams(root: HTMLDivElement | undefined) {
         cacheMermaidSvg(cacheKey, clean);
         return clean;
       });
-      if (!diagram.isConnected) continue;
+      if (hydrationGeneration !== mermaidHydrationGeneration || !diagram.isConnected) continue;
       mountMermaidSvg(diagram, sanitized);
     } catch {
-      if (!diagram.isConnected) continue;
+      if (hydrationGeneration !== mermaidHydrationGeneration || !diagram.isConnected) continue;
       showMermaidFailure(diagram, 'Could not render diagram. Showing Mermaid source.');
     }
   }

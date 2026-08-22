@@ -128,7 +128,7 @@ describe('open code runtime synchronization', () => {
     expect(applied).not.toHaveBeenCalled();
   });
 
-  it('does not refresh routing state after an MCP reconciliation is invalidated', async () => {
+  it('refreshes authoritative MCP state after a reconciliation is invalidated', async () => {
     const connection = deferred<void>();
     const loadMcps = vi.fn(async () => {});
     const operations = new SessionMcpOperations({
@@ -150,7 +150,7 @@ describe('open code runtime synchronization', () => {
     connection.resolve();
     await reconciliation;
 
-    expect(loadMcps).not.toHaveBeenCalled();
+    expect(loadMcps).toHaveBeenCalledOnce();
   });
 
   it('clears workspace-derived state while preserving preferences and session maps', () => {

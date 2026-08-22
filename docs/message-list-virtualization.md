@@ -289,7 +289,12 @@ Direct input acquires ownership only when it can affect the transcript:
   animation. Pause indefinite cosmetic activity animation outside the virtual core.
 - If an exiting tray item merely reveals another clipped item, freeze the bottom target for one frame
   without adding false reserve. A complete tray collapse reserves tray height, changed flow gaps, and
-  source-row padding before projection changes.
+  source-row padding before projection changes. A partial tray collapse reserves only the visible item
+  height and any leading item gap that disappears while surviving activity remains mounted.
+- When a running part splits one compact activity segment into multiple summaries, completing that part
+  may coalesce the summaries again. Reserve each disappearing summary and its flow gap, and restore the
+  same logical group across the active-to-compact remount rather than whichever summary is last in the
+  document.
 - Animation identity is a one-time message/render-key claim, not current DOM position. Virtual remount,
   completed-history reopening, or appending to an existing file-edit stack must not replay a claimed
   entrance.

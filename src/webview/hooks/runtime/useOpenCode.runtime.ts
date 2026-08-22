@@ -1,5 +1,5 @@
 import { createOpenCodeRuntime, type OpenCodeRuntime } from './open-code-runtime-instance';
-import type { PermissionMode } from '../../../shared/protocol';
+import type { PermissionMode, QueuedContextSnapshot } from '../../../shared/protocol';
 import type { SelectedModel, SessionSelectionOptions } from '../../lib/app-state-types';
 import type { QueuedAttachmentSnapshot } from '../session/session-send';
 
@@ -103,6 +103,7 @@ export async function sendMessage(
     noReply?: boolean;
     delivery?: 'steer' | 'queue';
     queuedAttachments?: QueuedAttachmentSnapshot;
+    queuedContext?: QueuedContextSnapshot;
     preserveComposer?: boolean;
     targetSessionId?: string;
   }

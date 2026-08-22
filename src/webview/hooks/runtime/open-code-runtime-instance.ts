@@ -4,6 +4,7 @@ import type {
   AutoApproveJudgeReference,
   ExtensionMessage,
   PermissionMode,
+  QueuedContextSnapshot,
   WebviewThemeKind,
 } from '../../../shared/protocol';
 import { AUTO_APPROVE_JUDGE_TIMEOUT_MS } from '../../../shared/protocol';
@@ -17,7 +18,11 @@ import { composerStore } from '../../lib/stores/composer-store';
 import { permissionsStore } from '../../lib/stores/permissions-store';
 import { ralphStore } from '../../lib/stores/ralph-store';
 import { routingStore } from '../../lib/stores/routing-store';
-import { resetSessionStatusSnapshotTracking, sessionStore } from '../../lib/stores/session-store';
+import {
+  captureSessionStatusSnapshotTime,
+  resetSessionStatusSnapshotTracking,
+  sessionStore,
+} from '../../lib/stores/session-store';
 import { uiStore } from '../../lib/stores/ui-store';
 import { toApprovedPermissionReference, toPlainJudgeModel } from '../../lib/judge-request';
 import { resetMessageEditState } from '../../lib/message-edit-state';
@@ -147,6 +152,7 @@ export interface OpenCodeRuntime {
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
       queuedAttachments?: QueuedAttachmentSnapshot;
+      queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
       targetSessionId?: string;
     }
@@ -391,7 +397,7 @@ export function createSessionStatusSnapshotCoordinator(
 
     const requestGeneration = generation;
     const request = Promise.resolve().then(async () => {
-      const startedAt = Date.now();
+      const startedAt = captureSessionStatusSnapshotTime();
       const statuses = await loadSessionStatuses();
       return { statuses, startedAt };
     });
@@ -2102,6 +2108,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
   const sessionManagementOperations = new SessionManagementOperations({
     getActiveSessionId: () => appStore.state.activeSessionId,
     getWorkspaceGeneration: () => workspaceGeneration,
+    getSessionSelectionGeneration: () => sessionSelectionGeneration,
     getNewChatDraftGeneration,
     createRemoteSession: (body) => client.session.create(body),
     updateRemoteSession: (sessionId, body) => client.session.update(sessionId, body),
@@ -2333,6 +2340,7 @@ export function createOpenCodeRuntime(): OpenCodeRuntime {
       noReply?: boolean;
       delivery?: 'steer' | 'queue';
       queuedAttachments?: QueuedAttachmentSnapshot;
+      queuedContext?: QueuedContextSnapshot;
       preserveComposer?: boolean;
       targetSessionId?: string;
     }

@@ -234,6 +234,36 @@ describe('data loaders', () => {
     await Promise.all([first, second]);
   });
 
+  it('starts a fresh MCP status load when an in-flight response predates a mutation', async () => {
+    const responseA = deferred<Record<string, { status: 'connected' }>>();
+    const responseB = deferred<Record<string, { status: 'connected' }>>();
+    const setMcpStatus = vi.fn();
+    const listMcpStatus = vi
+      .fn<() => Promise<Record<string, { status: 'connected' }>>>()
+      .mockReturnValueOnce(responseA.promise)
+      .mockReturnValueOnce(responseB.promise);
+    const operations = createDataLoaderOperations(
+      createLoaderDeps({
+        listMcpStatus,
+        setMcpStatus,
+        getActiveSessionId: () => 'session-1',
+        getSelectedMcpsForSession: () => [],
+      })
+    );
+
+    const staleLoad = operations.loadMcps();
+    const freshLoad = operations.loadMcps({ fresh: true });
+    expect(listMcpStatus).toHaveBeenCalledTimes(2);
+
+    responseB.resolve({ beta: { status: 'connected' } });
+    await freshLoad;
+    responseA.resolve({ alpha: { status: 'connected' } });
+    await staleLoad;
+
+    expect(setMcpStatus).toHaveBeenCalledOnce();
+    expect(setMcpStatus).toHaveBeenCalledWith({ beta: { status: 'connected' } });
+  });
+
   it('does not initialize MCP selection for a session activated while status was loading', async () => {
     const response = deferred<Record<string, { status: 'connected' }>>();
     const activeSession = { value: 'session-a' };
@@ -854,7 +884,7 @@ describe('data loaders', () => {
     expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('removed');
   });
 
-  it('removes sessions omitted from a partial refresh while growing the session window', async () => {
+  it('preserves queues omitted from a partial refresh until a complete snapshot confirms removal', async () => {
     const stale = session('stale');
     const newest = session('newest');
     const oldest = session('oldest');
@@ -882,9 +912,9 @@ describe('data loaders', () => {
     await operations.loadSessions();
 
     expect(listSessions).toHaveBeenNthCalledWith(1, 100);
-    expect(currentSessions).toEqual([newest]);
+    expect(currentSessions).toEqual([newest, stale]);
     expect(setSessionsHasMore).toHaveBeenLastCalledWith(true);
-    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
+    expect(clearQueuedMessagesForSession).not.toHaveBeenCalled();
 
     await operations.loadMoreSessions();
 
@@ -892,6 +922,8 @@ describe('data loaders', () => {
     expect(currentSessions).toEqual([newest, oldest]);
     expect(setSessionsHasMore).toHaveBeenLastCalledWith(false);
     expect(setSessionsLoadingMore.mock.calls).toEqual([[true], [false]]);
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledOnce();
+    expect(clearQueuedMessagesForSession).toHaveBeenCalledWith('stale');
   });
 
   it('clears pagination loading state when workspace work is invalidated', async () => {

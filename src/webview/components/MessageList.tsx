@@ -215,6 +215,13 @@ type VisibleScrollAnchor = {
   element?: HTMLElement;
 };
 
+type ActivityExitSummaryAnchor = {
+  sessionId: string;
+  element: HTMLElement;
+  groupKey?: string;
+  top: number;
+};
+
 function visibleRangesEqual(previous: VisibleRange, next: VisibleRange) {
   return (
     previous.start === next.start &&
@@ -516,7 +523,7 @@ export function MessageList() {
   let lastAutoScrolledTrackHeight = 0;
   let lastAutoScrolledBottomScrollTop = 0;
   let activityExitBottomTarget: number | null = null;
-  let activityExitSummaryAnchor: { sessionId: string; top: number } | null = null;
+  let activityExitSummaryAnchor: ActivityExitSummaryAnchor | null = null;
   let activityExitSummaryObserver: MutationObserver | null = null;
   let activityExitSummarySettleRafId = 0;
   let activityExitSummarySettleFrames = 0;
@@ -3371,11 +3378,13 @@ export function MessageList() {
     if (!summary) return;
     activityExitSummaryAnchor = {
       sessionId,
+      element: summary,
+      groupKey: summary.dataset.activitySummaryGroupKey,
       top: summary.getBoundingClientRect().top - containerRef.getBoundingClientRect().top,
     };
   }
 
-  function startActivityExitSummaryObserver(anchor: { sessionId: string; top: number }) {
+  function startActivityExitSummaryObserver(anchor: ActivityExitSummaryAnchor) {
     if (!trackRef || activityExitSummaryObserver) return;
     activityExitSummaryObserver = new MutationObserver(() => {
       if (
@@ -3406,7 +3415,7 @@ export function MessageList() {
     });
   }
 
-  function startActivityExitSummarySettle(anchor: { sessionId: string; top: number }) {
+  function startActivityExitSummarySettle(anchor: ActivityExitSummaryAnchor) {
     activityExitSummarySettleFrames = Math.max(activityExitSummarySettleFrames, 30);
     if (activityExitSummarySettleRafId) return;
     const settle = () => {
@@ -3438,11 +3447,17 @@ export function MessageList() {
     activityExitSummarySettleRafId = requestAnimationFrame(settle);
   }
 
-  function restoreActivityExitSummaryAnchor(anchor: { sessionId: string; top: number }) {
+  function restoreActivityExitSummaryAnchor(anchor: ActivityExitSummaryAnchor) {
     if (!containerRef || state.activeSessionId !== anchor.sessionId) return;
-    const summaries = containerRef.querySelectorAll<HTMLElement>('.assistant-activity-summary');
-    const summary = summaries[summaries.length - 1];
+    const summary = anchor.element.isConnected
+      ? anchor.element
+      : anchor.groupKey
+        ? containerRef.querySelector<HTMLElement>(
+            `.assistant-activity-summary[data-activity-summary-group-key="${CSS.escape(anchor.groupKey)}"]`
+          )
+        : null;
     if (!summary) return;
+    anchor.element = summary;
     const currentTop =
       summary.getBoundingClientRect().top - containerRef.getBoundingClientRect().top;
     const delta = currentTop - anchor.top;
@@ -3491,6 +3506,88 @@ export function MessageList() {
     activityExitSummarySettleFrames = 0;
   }
 
+  function reserveBottomCollapseSpace(reserve: number) {
+    if (!containerRef || reserve <= 0.5) return;
+
+    captureActivityExitSummaryAnchor();
+    if (activityExitSummaryAnchor) {
+      startActivityExitSummaryObserver(activityExitSummaryAnchor);
+      startActivityExitSummarySettle(activityExitSummaryAnchor);
+    }
+    appendBottomReserveTarget = containerRef.scrollTop;
+    setAppendBottomReserve((current) => current + reserve);
+    activityExitBottomTarget = containerRef.scrollTop;
+    if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
+    const collapseTarget = activityExitBottomTarget;
+    activityCollapseSettleRafId = requestAnimationFrame(() => {
+      activityCollapseSettleRafId = 0;
+      if (
+        !containerRef ||
+        activityExitBottomTarget !== collapseTarget ||
+        exitingActivityPartKeys().size > 0
+      ) {
+        return;
+      }
+      reconcileAppendBottomReserve();
+      setPreservedScrollTop(collapseTarget);
+      activityExitBottomTarget = null;
+      lastAutoScrolledBottomScrollTop = collapseTarget;
+      const sessionId = state.activeSessionId;
+      if (sessionId) startFollowLoop(sessionId);
+    });
+  }
+
+  function reserveCollapsedActivityGroupSpace(groupKeys: ReadonlySet<string>) {
+    if (
+      groupKeys.size === 0 ||
+      !containerRef ||
+      !autoScroll() ||
+      (!pinnedToBottom && getDistanceFromBottom(containerRef) > 2) ||
+      stickyNavigationOwnsScroll()
+    ) {
+      return;
+    }
+
+    const groupsByFlow = new Map<HTMLElement, Set<HTMLElement>>();
+    for (const key of groupKeys) {
+      const group = containerRef.querySelector<HTMLElement>(
+        `[data-assistant-activity-group-key="${CSS.escape(encodeURIComponent(key))}"]`
+      );
+      const flow = group?.parentElement;
+      if (!group || !flow || group.getClientRects().length === 0) continue;
+      const groups = groupsByFlow.get(flow);
+      if (groups) groups.add(group);
+      else groupsByFlow.set(flow, new Set([group]));
+    }
+
+    let reserve = 0;
+    for (const [flow, groups] of groupsByFlow) {
+      const visibleChildren = [...flow.children].filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element.getClientRects().length > 0
+      );
+      const disappearing = visibleChildren.filter((element) => groups.has(element));
+      reserve += disappearing.reduce(
+        (total, element) => total + element.getBoundingClientRect().height,
+        0
+      );
+      const survivingChildCount = visibleChildren.length - disappearing.length;
+      const gap = Number.parseFloat(getComputedStyle(flow).rowGap) || 0;
+      reserve +=
+        Math.max(0, visibleChildren.length - 1) * gap - Math.max(0, survivingChildCount - 1) * gap;
+      if (survivingChildCount === 0 && disappearing.length === visibleChildren.length) {
+        const row = flow.closest<HTMLElement>('.interactive-item-container');
+        if (row) {
+          reserve += Math.max(
+            0,
+            row.getBoundingClientRect().height - flow.getBoundingClientRect().height
+          );
+        }
+      }
+    }
+    reserveBottomCollapseSpace(reserve);
+  }
+
   function reserveCollapsedActivityTraySpace(keys: ReadonlySet<string>) {
     if (
       keys.size === 0 ||
@@ -3506,24 +3603,56 @@ export function MessageList() {
     const trays = new Set<HTMLElement>();
     for (const item of containerRef.querySelectorAll<HTMLElement>('[data-activity-part-id]')) {
       if (!partIds.has(item.dataset.activityPartId || '')) continue;
+      if (item.getClientRects().length === 0) continue;
       const tray = item.closest<HTMLElement>('.assistant-active-activity-tray');
       if (tray) trays.add(tray);
     }
-
+    let reserve = 0;
     const collapsingTrays: Array<{
       tray: HTMLElement;
       summary: HTMLElement | null;
       flow: HTMLElement;
     }> = [];
     for (const tray of trays) {
-      const items = [...tray.querySelectorAll<HTMLElement>('[data-activity-part-id]')];
-      if (items.some((item) => !partIds.has(item.dataset.activityPartId || ''))) continue;
+      const itemViewport = tray.querySelector<HTMLElement>('.assistant-active-activity-items');
+      const items = [
+        ...(itemViewport?.querySelectorAll<HTMLElement>(
+          ':scope > .assistant-active-activity-item'
+        ) ?? []),
+      ].filter((item) => item.getClientRects().length > 0);
+      const collapsingItems = items.filter((item) =>
+        partIds.has(item.dataset.activityPartId || '')
+      );
+      if (collapsingItems.length < items.length) {
+        const collapsingItemSet = new Set(collapsingItems);
+        const firstSurvivingItem = items.find((item) => !collapsingItemSet.has(item));
+        const firstSurvivingIndex = firstSurvivingItem ? items.indexOf(firstSurvivingItem) : -1;
+        const lostContentHeight =
+          collapsingItems.reduce((total, item) => total + item.getBoundingClientRect().height, 0) +
+          (firstSurvivingItem && firstSurvivingIndex > 0
+            ? Number.parseFloat(
+                getComputedStyle(
+                  firstSurvivingItem.querySelector<HTMLElement>(
+                    '.assistant-active-activity-item-content'
+                  ) ?? firstSurvivingItem
+                ).paddingTop
+              ) || 0
+            : 0);
+        const itemViewportHeight = itemViewport?.getBoundingClientRect().height ?? 0;
+        const contentHeight = itemViewport?.scrollHeight ?? 0;
+        reserve += Math.max(
+          0,
+          itemViewportHeight -
+            Math.min(itemViewportHeight, Math.max(0, contentHeight - lostContentHeight))
+        );
+        continue;
+      }
       const summary = tray.querySelector<HTMLElement>('.assistant-active-activity-summary');
       const flow = tray.parentElement;
       if (flow) collapsingTrays.push({ tray, summary, flow });
     }
 
-    let reserve = collapsingTrays.reduce(
+    reserve += collapsingTrays.reduce(
       (total, { tray, summary }) =>
         total +
         Math.max(
@@ -3562,34 +3691,7 @@ export function MessageList() {
         }
       }
     }
-    if (reserve <= 0.5) return;
-
-    captureActivityExitSummaryAnchor();
-    if (activityExitSummaryAnchor) {
-      startActivityExitSummaryObserver(activityExitSummaryAnchor);
-      startActivityExitSummarySettle(activityExitSummaryAnchor);
-    }
-    appendBottomReserveTarget = containerRef.scrollTop;
-    setAppendBottomReserve((current) => current + reserve);
-    activityExitBottomTarget = containerRef.scrollTop;
-    if (activityCollapseSettleRafId) cancelAnimationFrame(activityCollapseSettleRafId);
-    const collapseTarget = activityExitBottomTarget;
-    activityCollapseSettleRafId = requestAnimationFrame(() => {
-      activityCollapseSettleRafId = 0;
-      if (
-        !containerRef ||
-        activityExitBottomTarget !== collapseTarget ||
-        exitingActivityPartKeys().size > 0
-      ) {
-        return;
-      }
-      reconcileAppendBottomReserve();
-      setPreservedScrollTop(collapseTarget);
-      activityExitBottomTarget = null;
-      lastAutoScrolledBottomScrollTop = collapseTarget;
-      const sessionId = state.activeSessionId;
-      if (sessionId) startFollowLoop(sessionId);
-    });
+    reserveBottomCollapseSpace(reserve);
   }
 
   function clearActivityExitReserve() {
@@ -5812,14 +5914,7 @@ export function MessageList() {
     const hiddenKeys = activityPartKeysBehindStreamingPart();
     const newlyHiddenTransitionKeys = new Set<string>();
     for (const key of hiddenKeys) {
-      if (
-        !previousHiddenKeys.has(key) &&
-        (visibleActiveActivityPartKeys().has(key) ||
-          retainedActivityPartKeys().has(key) ||
-          exitingActivityPartKeys().has(key))
-      ) {
-        newlyHiddenTransitionKeys.add(key);
-      }
+      if (!previousHiddenKeys.has(key)) newlyHiddenTransitionKeys.add(key);
     }
     reserveCollapsedActivityTraySpace(newlyHiddenTransitionKeys);
     return hiddenKeys;
@@ -6112,6 +6207,30 @@ export function MessageList() {
     },
     new Map()
   );
+  createComputed<ReadonlyMap<string, readonly AssistantActivityGroupInfo[]>>((previous) => {
+    const current = assistantActivityGroupMap();
+    const currentKeys = new Set(
+      [...current.values()].flatMap((groups) => groups.map(({ key }) => key))
+    );
+    const currentPartKeys = new Set(
+      [...current.values()].flatMap((groups) =>
+        groups.flatMap((group) => group.parts.map(getAssistantActivityPartKey))
+      )
+    );
+    const disappearedKeys = new Set<string>();
+    for (const groups of previous.values()) {
+      for (const group of groups) {
+        if (
+          !currentKeys.has(group.key) &&
+          group.parts.every((part) => currentPartKeys.has(getAssistantActivityPartKey(part)))
+        ) {
+          disappearedKeys.add(group.key);
+        }
+      }
+    }
+    reserveCollapsedActivityGroupSpace(disappearedKeys);
+    return current;
+  }, new Map());
   const compactActivityDisclosureLayoutSignatures = createMemo(() => {
     trackMessageBlockExpansionState();
     return getCompactActivityDisclosureLayoutSignatures(

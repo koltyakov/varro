@@ -4,16 +4,19 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import * as vscode from 'vscode';
 import type { FileDiff } from '../shared/opencode-types';
+import { normalizeWorkspaceIdentity } from '../shared/workspace-path';
 import type { OpenCodeServer } from './server';
+import { assertSessionInCurrentWorkspace } from './session-workspace';
 
 const SCHEME = 'varro-session-diff';
+type SessionDiffOpenResult = 'opened' | 'unavailable' | 'forbidden';
 
 export class SessionDiffDocumentProvider implements vscode.TextDocumentContentProvider {
   private readonly contents = new Map<string, string>();
   private readonly disposables: vscode.Disposable[];
   private disposed = false;
 
-  constructor(private readonly server: Pick<OpenCodeServer, 'request'>) {
+  constructor(private readonly server: Pick<OpenCodeServer, 'getWorkspaceCwd' | 'request'>) {
     this.disposables = [
       vscode.workspace.registerTextDocumentContentProvider(SCHEME, this),
       vscode.workspace.onDidCloseTextDocument((document) => {
@@ -26,16 +29,30 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
     return this.contents.get(uri.toString()) ?? '';
   }
 
-  async open(sessionID: string, requestedPath: string): Promise<boolean> {
-    if (this.disposed) return false;
+  async open(sessionID: string, requestedPath: string): Promise<SessionDiffOpenResult> {
+    if (this.disposed) return 'unavailable';
+    const workspaceIdentity = normalizeWorkspaceIdentity(this.server.getWorkspaceCwd());
+    const workspaceChanged = () =>
+      Boolean(
+        workspaceIdentity &&
+        normalizeWorkspaceIdentity(this.server.getWorkspaceCwd()) !== workspaceIdentity
+      );
+    try {
+      await assertSessionInCurrentWorkspace(this.server, sessionID);
+    } catch {
+      return 'forbidden';
+    }
     try {
       const value = await this.server.request(
         'GET',
         `/session/${encodeURIComponent(sessionID)}/diff`
       );
-      if (this.disposed || !Array.isArray(value)) return false;
+      if (workspaceChanged()) return 'forbidden';
+      if (this.disposed || !Array.isArray(value)) return 'unavailable';
       const diff = findFileDiff(value, requestedPath);
-      if (!diff || typeof diff.before !== 'string' || typeof diff.after !== 'string') return false;
+      if (!diff || typeof diff.before !== 'string' || typeof diff.after !== 'string') {
+        return 'unavailable';
+      }
 
       const id = randomUUID();
       const filename = basename(requestedPath.replace(/\\/g, '/')) || 'file';
@@ -51,14 +68,14 @@ export class SessionDiffDocumentProvider implements vscode.TextDocumentContentPr
           `${filename} (Varro session)`,
           { preview: true }
         );
-        return true;
+        return 'opened';
       } catch {
         this.contents.delete(beforeUri.toString());
         this.contents.delete(afterUri.toString());
-        return false;
+        return workspaceChanged() ? 'forbidden' : 'unavailable';
       }
     } catch {
-      return false;
+      return workspaceChanged() ? 'forbidden' : 'unavailable';
     }
   }
 

@@ -1,5 +1,7 @@
 /* oxlint-disable anti-slop/no-known-value-widening, anti-slop/no-module-mocking, anti-slop/no-runtime-typeof, anti-slop/no-shape-in-symbol-names, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- These tests model malformed transport payloads and inspect module-boundary calls with minimal service fixtures. */
 import type * as vscode from 'vscode';
+import type * as nodeFsPromises from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PermissionRule } from '../shared/opencode-types';
@@ -54,6 +56,14 @@ const mocks = vi.hoisted(() => {
     window,
     getExtension: vi.fn(() => extensionSlot.value),
     uriFile: vi.fn((fsPath: string) => ({ fsPath })),
+    workspaceReadFile: vi.fn((_uri: vscode.Uri) => Promise.resolve(new Uint8Array())),
+    nodeCreateReadStream: vi.fn(),
+    nodeOpen: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+    nodeRealpath: vi.fn<(path: string) => Promise<string>>(),
+    nodeStat: vi.fn<(path: string) => Promise<{ dev: number; ino: number }>>(),
+    workspaceStat: vi.fn((_uri: vscode.Uri) =>
+      Promise.resolve({ type: 1, ctime: 0, mtime: 1, size: 0 })
+    ),
     clipboardWriteText: vi.fn((_value: string) => Promise.resolve()),
     executeCommand: vi.fn((_command: string) => Promise.resolve()),
     triggerCancellation() {
@@ -72,10 +82,31 @@ vi.mock('vscode', () => ({
   extensions: { getExtension: mocks.getExtension },
   window: mocks.window,
   Uri: { file: mocks.uriFile },
+  workspace: {
+    fs: {
+      readFile: mocks.workspaceReadFile,
+      stat: mocks.workspaceStat,
+    },
+  },
   ProgressLocation: { SourceControl: 1 },
+  FileType: { SymbolicLink: 64 },
   env: { clipboard: { writeText: mocks.clipboardWriteText } },
   commands: { executeCommand: mocks.executeCommand },
 }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeFsPromises>();
+  const open = (...args: unknown[]) => mocks.nodeOpen(...args);
+  const realpath = (path: string) => mocks.nodeRealpath(path);
+  const stat = (path: string) => mocks.nodeStat(path);
+  return {
+    ...actual,
+    default: { ...actual, open, realpath, stat },
+    open,
+    realpath,
+    stat,
+  };
+});
 
 vi.mock('./logger', () => ({ logger: mocks.logger }));
 
@@ -98,7 +129,7 @@ type RequestOptions = {
 };
 
 function uri(fsPath: string): vscode.Uri {
-  return { fsPath } as vscode.Uri;
+  return { fsPath, scheme: 'file' } as vscode.Uri;
 }
 
 function createRepository(root = '/repo', patch = 'diff --git a/src/a.ts b/src/a.ts\n+change') {
@@ -109,7 +140,7 @@ function createRepository(root = '/repo', patch = 'diff --git a/src/a.ts b/src/a
     state: {
       indexChanges: [{ uri: uri(`${root}/src/a.ts`) }],
       mergeChanges: [] as Array<{ uri: vscode.Uri }>,
-      workingTreeChanges: [] as Array<{ uri: vscode.Uri }>,
+      workingTreeChanges: [] as Array<{ uri: vscode.Uri; status?: number }>,
     },
     status: vi.fn(() => Promise.resolve()),
     diff: vi.fn((_cached?: boolean) => Promise.resolve(patch)),
@@ -270,6 +301,22 @@ beforeEach(() => {
   mocks.window.showErrorMessage.mockResolvedValue(undefined);
   mocks.window.showInformationMessage.mockResolvedValue(undefined);
   mocks.window.showQuickPick.mockResolvedValue(undefined);
+  mocks.workspaceReadFile.mockReset().mockResolvedValue(new Uint8Array());
+  mocks.nodeCreateReadStream.mockReset().mockImplementation((fsPath: string) =>
+    Readable.from(
+      (async function* () {
+        yield await mocks.workspaceReadFile(uri(fsPath));
+      })()
+    )
+  );
+  mocks.nodeOpen.mockReset().mockImplementation(async (fsPath: unknown) => ({
+    createReadStream: () => mocks.nodeCreateReadStream(String(fsPath)),
+    close: vi.fn(async () => {}),
+    stat: vi.fn(async () => ({ dev: 1, ino: 1 })),
+  }));
+  mocks.nodeRealpath.mockReset().mockImplementation(async (path: string) => path);
+  mocks.nodeStat.mockReset().mockResolvedValue({ dev: 1, ino: 1 });
+  mocks.workspaceStat.mockReset().mockResolvedValue({ type: 1, ctime: 0, mtime: 1, size: 0 });
 });
 
 describe('CommitMessageService', () => {
@@ -309,7 +356,7 @@ describe('CommitMessageService', () => {
     expect(
       (mocks.extensionSlot.value as { activate: ReturnType<typeof vi.fn> }).activate
     ).toHaveBeenCalledOnce();
-    expect(repository.status).toHaveBeenCalledOnce();
+    expect(repository.status).toHaveBeenCalledTimes(2);
     expect(repository.diff).toHaveBeenCalledTimes(2);
     expect(repository.diff).toHaveBeenNthCalledWith(1, true);
     expect(repository.diff).toHaveBeenNthCalledWith(2, true);
@@ -665,6 +712,213 @@ describe('CommitMessageService', () => {
     expect(repository.inputBox.value).toContain('feat: generated message');
   });
 
+  it('generates from an untracked file when no tracked diff exists', async () => {
+    const repository = createRepository('/repo', '');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/src/new-file.ts'),
+      status: 7,
+    });
+    const contents = new TextEncoder().encode('export const newValue = 42;\n');
+    mocks.workspaceStat.mockResolvedValue({
+      type: 1,
+      ctime: 0,
+      mtime: 1,
+      size: contents.byteLength,
+    });
+    mocks.workspaceReadFile.mockResolvedValue(contents);
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    expect(mocks.nodeCreateReadStream).toHaveBeenCalled();
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('src/new-file.ts');
+    expect(prompt).toContain('export const newValue = 42;');
+    expect(repository.inputBox.value).toContain('feat: generated message');
+    expect(mocks.window.showWarningMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('no changes')
+    );
+  });
+
+  it('does not read through an untracked symbolic link', async () => {
+    const repository = createRepository('/repo', '');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/linked-secret'),
+      status: 7,
+    });
+    mocks.workspaceStat.mockResolvedValue({
+      type: 65,
+      ctime: 0,
+      mtime: 1,
+      size: 20,
+    });
+    mocks.workspaceReadFile.mockResolvedValue(new TextEncoder().encode('outside-repo-secret'));
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('symbolic link; content omitted');
+    expect(prompt).not.toContain('outside-repo-secret');
+    expect(mocks.workspaceReadFile).not.toHaveBeenCalled();
+  });
+
+  it('does not read through a symbolic link swapped in after metadata inspection', async () => {
+    const repository = createRepository('/repo', '');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/swapped-secret'),
+      status: 7,
+    });
+    mocks.workspaceStat.mockResolvedValue({
+      type: 1,
+      ctime: 0,
+      mtime: 1,
+      size: 20,
+    });
+    mocks.workspaceReadFile.mockResolvedValue(new TextEncoder().encode('outside-repo-secret'));
+    mocks.nodeCreateReadStream.mockImplementation(
+      () =>
+        new Readable({
+          read() {
+            this.destroy(Object.assign(new Error('symbolic link refused'), { code: 'ELOOP' }));
+          },
+        })
+    );
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('content unavailable');
+    expect(prompt).not.toContain('outside-repo-secret');
+    expect(mocks.workspaceReadFile).not.toHaveBeenCalled();
+  });
+
+  it('does not read through a parent directory redirected outside the repository', async () => {
+    const repository = createRepository('/repo', '');
+    repository.state.indexChanges = [];
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/src/linked-secret'),
+      status: 7,
+    });
+    mocks.workspaceStat.mockResolvedValue({
+      type: 1,
+      ctime: 0,
+      mtime: 1,
+      size: 20,
+    });
+    mocks.workspaceReadFile.mockResolvedValue(new TextEncoder().encode('outside-repo-secret'));
+    mocks.nodeRealpath.mockImplementation(async (path: string) =>
+      path === '/repo' ? path : '/outside/secret'
+    );
+    setGitRepositories([repository]);
+    const request = createRequest();
+    const { service } = createService(request);
+
+    await service.generate();
+
+    const messageBody = requestBody(request, '/message?');
+    const prompt = ((messageBody?.parts || []) as Array<{ text: string }>)[0]?.text || '';
+    expect(prompt).toContain('content unavailable');
+    expect(prompt).not.toContain('outside-repo-secret');
+  });
+
+  it('detects metadata changes when atomic untracked reads are unavailable', async () => {
+    const repository = createRepository('/repo', 'tracked change');
+    repository.state.indexChanges = [];
+    repository.diff.mockImplementation((cached?: boolean) =>
+      Promise.resolve(cached ? '' : 'tracked change')
+    );
+    repository.state.workingTreeChanges.push({
+      uri: { ...uri('/repo/remote-file.ts'), scheme: 'vscode-remote' } as vscode.Uri,
+      status: 7,
+    });
+    mocks.workspaceStat
+      .mockResolvedValueOnce({ type: 1, ctime: 0, mtime: 1, size: 10 })
+      .mockResolvedValueOnce({ type: 1, ctime: 0, mtime: 2, size: 20 });
+    setGitRepositories([repository]);
+    const { service } = createService();
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Unstaged changes changed')
+    );
+  });
+
+  it('does not apply output when an untracked file changes during generation', async () => {
+    const repository = createRepository('/repo', 'tracked change');
+    repository.state.indexChanges = [];
+    repository.diff.mockImplementation((cached?: boolean) =>
+      Promise.resolve(cached ? '' : 'tracked change')
+    );
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/src/new-file.ts'),
+      status: 7,
+    });
+    const initial = new TextEncoder().encode('initial contents\n');
+    const changed = new TextEncoder().encode('changed contents\n');
+    mocks.workspaceStat.mockResolvedValue({
+      type: 1,
+      ctime: 0,
+      mtime: 1,
+      size: initial.byteLength,
+    });
+    mocks.workspaceReadFile.mockResolvedValueOnce(initial).mockResolvedValueOnce(changed);
+    setGitRepositories([repository]);
+    const { service } = createService();
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Unstaged changes changed')
+    );
+  });
+
+  it('does not apply output when a large untracked file changes without metadata changes', async () => {
+    const repository = createRepository('/repo', 'tracked change');
+    repository.state.indexChanges = [];
+    repository.diff.mockImplementation((cached?: boolean) =>
+      Promise.resolve(cached ? '' : 'tracked change')
+    );
+    repository.state.workingTreeChanges.push({
+      uri: uri('/repo/large.bin'),
+      status: 7,
+    });
+    const initial = new TextEncoder().encode('a'.repeat(20_001));
+    const changed = new TextEncoder().encode(`${'a'.repeat(20_000)}b`);
+    mocks.workspaceStat.mockResolvedValue({
+      type: 1,
+      ctime: 0,
+      mtime: 1,
+      size: initial.byteLength,
+    });
+    mocks.workspaceReadFile.mockResolvedValueOnce(initial).mockResolvedValueOnce(changed);
+    setGitRepositories([repository]);
+    const { service } = createService();
+
+    await service.generate();
+
+    expect(repository.inputBox.value).toBe('');
+    expect(mocks.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Unstaged changes changed')
+    );
+  });
+
   it('warns without calling OpenCode when there are no changes', async () => {
     const repository = createRepository('/repo', ' \r\n ');
     setGitRepositories([repository]);
@@ -706,7 +960,7 @@ describe('CommitMessageService', () => {
 
     await service.generate();
 
-    expect(selectedRepository.status).toHaveBeenCalledOnce();
+    expect(selectedRepository.status).toHaveBeenCalledTimes(2);
     expect(editorRepository.status).not.toHaveBeenCalled();
     expect(
       request.mock.calls.every(([_method, path]) => path.includes('directory=%2Fselected'))
@@ -723,7 +977,7 @@ describe('CommitMessageService', () => {
 
     await service.generate(sourceControl);
 
-    expect(explicitRepository.status).toHaveBeenCalledOnce();
+    expect(explicitRepository.status).toHaveBeenCalledTimes(2);
     expect(selectedRepository.status).not.toHaveBeenCalled();
   });
 

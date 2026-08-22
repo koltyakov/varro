@@ -257,6 +257,37 @@ describe('state helpers', () => {
             },
           ],
           terminalSelection: null,
+          queuedContext: {
+            currentDocumentEnabled: true,
+            editorContext: {
+              workspacePath: '/repo',
+              workspaceFolders: [{ name: 'repo', path: '/repo' }],
+              activeFile: {
+                path: '/repo/src/app.ts',
+                relativePath: 'src/app.ts',
+                language: 'typescript',
+              },
+              selection: { startLine: 2, endLine: 3 },
+              editorText: {
+                kind: 'selection',
+                path: '/repo/src/app.ts',
+                relativePath: 'src/app.ts',
+                language: 'typescript',
+                range: { startLine: 2, endLine: 3 },
+                text: 'const value = 1;',
+                truncated: false,
+              },
+              diagnostics: [
+                {
+                  path: '/repo/src/app.ts',
+                  severity: 'warning',
+                  message: 'Review value',
+                  line: 2,
+                },
+              ],
+              diagnosticsTotal: 1,
+            },
+          },
         },
       ],
     };
@@ -277,6 +308,37 @@ describe('state helpers', () => {
           size: 1,
         },
       ]);
+      expect(stateModule.state.queuedMessages[0]?.queuedContext).toEqual({
+        currentDocumentEnabled: true,
+        editorContext: {
+          workspacePath: '/repo',
+          workspaceFolders: [{ name: 'repo', path: '/repo' }],
+          activeFile: {
+            path: '/repo/src/app.ts',
+            relativePath: 'src/app.ts',
+            language: 'typescript',
+          },
+          selection: { startLine: 2, endLine: 3 },
+          editorText: {
+            kind: 'selection',
+            path: '/repo/src/app.ts',
+            relativePath: 'src/app.ts',
+            language: 'typescript',
+            range: { startLine: 2, endLine: 3 },
+            text: 'const value = 1;',
+            truncated: false,
+          },
+          diagnostics: [
+            {
+              path: '/repo/src/app.ts',
+              severity: 'warning',
+              message: 'Review value',
+              line: 2,
+            },
+          ],
+          diagnosticsTotal: 1,
+        },
+      });
       expect(JSON.parse(window.localStorage.getItem('varro.queuedMessages') || '[]')).toEqual([]);
     } finally {
       // SAFETY: The fixture provides the unknown fields read by this statement.
@@ -348,6 +410,7 @@ describe('state helpers', () => {
             { path: '/repo/a.ts', relativePath: 'a.ts', type: 'file' },
             { path: '/repo/b.ts', relativePath: 'b.ts', type: 'other' },
           ],
+          queuedContext: { currentDocumentEnabled: 'yes', editorContext: {} },
         },
         { id: 'valid', sessionId: 'session-1', text: 'duplicate' },
         { id: '', sessionId: 'session-1', text: 'missing id' },

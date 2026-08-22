@@ -4,7 +4,7 @@ type SessionMcpDependencies = {
   getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
   getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
   getMcpStatus(): Record<string, McpStatus>;
-  loadMcps(): Promise<void | boolean | object>;
+  loadMcps(options?: { fresh?: boolean }): Promise<void | boolean | object>;
   getAvailableMcpNames(): string[];
   connectMcp(name: string): Promise<void | boolean | object>;
   authenticateMcp(name: string): Promise<void | boolean | object>;
@@ -17,11 +17,23 @@ type SessionMcpDependencies = {
 export class SessionMcpOperations {
   private reconciliationGeneration = 0;
   private reconciliationQueue = Promise.resolve();
+  private statusRefreshRequired = false;
 
   constructor(private readonly deps: SessionMcpDependencies) {}
 
   readonly invalidate = () => {
     this.reconciliationGeneration += 1;
+  };
+
+  private loadMcps = async (options?: { fresh?: boolean }) => {
+    try {
+      const result = await this.deps.loadMcps(options);
+      if (options?.fresh) this.statusRefreshRequired = result === false;
+      return result;
+    } catch (err) {
+      if (options?.fresh) this.statusRefreshRequired = true;
+      throw err;
+    }
   };
 
   private reconcileSessionMcps = (
@@ -31,12 +43,16 @@ export class SessionMcpOperations {
     const generation = ++this.reconciliationGeneration;
     const reconciliation = this.reconciliationQueue.then(async () => {
       if (generation !== this.reconciliationGeneration) return;
+      if (this.statusRefreshRequired) {
+        const refreshed = await this.loadMcps({ fresh: true });
+        if (refreshed === false) return;
+      }
       await syncSessionMcpsWithDependencies(
         {
           getSelectedMcpsForSession: this.deps.getSelectedMcpsForSession,
           getRequiredMcpSessionIds: this.deps.getRequiredMcpSessionIds,
           getMcpStatus: this.deps.getMcpStatus,
-          loadMcps: this.deps.loadMcps,
+          loadMcps: this.loadMcps,
           getAvailableMcpNames: this.deps.getAvailableMcpNames,
           connectMcp: this.deps.connectMcp,
           authenticateMcp: this.deps.authenticateMcp,
@@ -74,7 +90,7 @@ export async function syncSessionMcpsWithDependencies(
     getSelectedMcpsForSession(sessionId: string | null): string[] | null | undefined;
     getRequiredMcpSessionIds?(targetSessionId: string | null): string[];
     getMcpStatus(): Record<string, McpStatus>;
-    loadMcps(): Promise<void | boolean | object>;
+    loadMcps(options?: { fresh?: boolean }): Promise<void | boolean | object>;
     getAvailableMcpNames(): string[];
     connectMcp(name: string): Promise<void | boolean | object>;
     authenticateMcp(name: string): Promise<void | boolean | object>;
@@ -86,7 +102,8 @@ export async function syncSessionMcpsWithDependencies(
   preserveBackgroundMcps = true
 ) {
   if (!deps.getSelectedMcpsForSession(sessionId) || Object.keys(deps.getMcpStatus()).length === 0) {
-    await deps.loadMcps();
+    const refreshed = await deps.loadMcps();
+    if (refreshed === false) return;
   }
   if (!isCurrent()) return;
 
@@ -123,12 +140,14 @@ export async function syncSessionMcpsWithDependencies(
     ...connect.map((name) => deps.connectMcp(name)),
     ...disconnect.map((name) => deps.disconnectMcp(name)),
   ]);
-  if (!isCurrent()) return;
   for (const result of results) {
     if (result.status === 'rejected') deps.logError('syncSessionMcps', result.reason);
   }
 
-  await deps.loadMcps();
+  // These requests mutate server-global MCP state. Refresh even when a newer
+  // reconciliation superseded this one so the queued pass reads authoritative state.
+  await deps.loadMcps({ fresh: true });
+  if (!isCurrent()) return;
 }
 
 export async function applySessionMcpsWithDependencies(

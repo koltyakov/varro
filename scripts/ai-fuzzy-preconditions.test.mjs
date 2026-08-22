@@ -61,4 +61,9 @@ test('creates a stable 50-step mixed-ownership action plan', () => {
   assert.deepEqual(first, second);
   assert.equal(first[0].action, 'wheel verified nested scroller, then outer transcript');
   assert.equal(first[1].action, 'switch session away and back');
+  assert.deepEqual(
+    first.slice(5, 8).map(({ action }) => action),
+    ['PageDown in composer', 'Space in composer', 'Shift+Space in composer']
+  );
+  assert.equal(first.some(({ action }) => action.includes('inline editor')), false);
 });

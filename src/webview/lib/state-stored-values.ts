@@ -12,6 +12,7 @@ import type {
   PermissionMode,
 } from '../../shared/protocol';
 import { isPermissionMode } from '../../shared/protocol';
+import { isEditorContext } from '../../shared/extension-message';
 import { MAX_NATIVE_PDF_TOTAL_BYTES, isNativePdfAttachment } from '../../shared/native-pdf';
 import { STORAGE_KEYS, readStored, writeStored } from './state-storage';
 import {
@@ -260,6 +261,16 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
   }
   const terminalSelection = normalizeStoredTerminalSelection(record.terminalSelection);
   const attachedDiagnostics = normalizeStoredDiagnostics(record.attachedDiagnostics);
+  const queuedContextRecord = asStoredRecord(record.queuedContext);
+  const queuedContext =
+    queuedContextRecord &&
+    isEditorContext(queuedContextRecord.editorContext) &&
+    isBoolean(queuedContextRecord.currentDocumentEnabled)
+      ? {
+          editorContext: queuedContextRecord.editorContext,
+          currentDocumentEnabled: queuedContextRecord.currentDocumentEnabled,
+        }
+      : undefined;
   if (
     record.text.trim().length === 0 &&
     droppedFiles.length === 0 &&
@@ -283,6 +294,7 @@ function normalizeStoredQueuedMessage<T>(value: T): QueuedMessage | null {
     nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
     terminalSelection,
     attachedDiagnostics: attachedDiagnostics || undefined,
+    queuedContext,
   };
 }
 

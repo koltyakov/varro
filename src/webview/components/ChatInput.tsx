@@ -1864,6 +1864,26 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         nativePdfs: queuedAttachments.nativePdfs,
         terminalSelection: queuedAttachments.terminalSelection,
         attachedDiagnostics: queuedAttachments.attachedDiagnostics,
+        queuedContext: {
+          editorContext: {
+            ...state.editorContext,
+            workspaceFolders: state.editorContext.workspaceFolders?.map((folder) => ({
+              ...folder,
+            })),
+            activeFile: state.editorContext.activeFile
+              ? { ...state.editorContext.activeFile }
+              : null,
+            selection: state.editorContext.selection ? { ...state.editorContext.selection } : null,
+            editorText: state.editorContext.editorText
+              ? {
+                  ...state.editorContext.editorText,
+                  range: { ...state.editorContext.editorText.range },
+                }
+              : state.editorContext.editorText,
+            diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+          },
+          currentDocumentEnabled: activeContextEnabled(sessionId),
+        },
       };
       const replaced =
         queuedEdit?.sessionId === sessionId && replaceQueuedMessage(queuedEdit.id, message);
@@ -1961,6 +1981,16 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
           nativePdfs: item.nativePdfs,
           terminalSelection: item.terminalSelection,
           attachedDiagnostics: item.attachedDiagnostics ? item.attachedDiagnostics : undefined,
+        },
+        queuedContext: item.queuedContext ?? {
+          editorContext: {
+            workspacePath:
+              state.sessions.find((session) => session.id === item.sessionId)?.directory ?? null,
+            activeFile: null,
+            selection: null,
+            diagnostics: [],
+          },
+          currentDocumentEnabled: false,
         },
         preserveComposer: true,
         targetSessionId: item.sessionId,

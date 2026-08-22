@@ -37,6 +37,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       nativePdfs = [],
       terminalSelection = null,
       attachedDiagnostics,
+      queuedContext,
     }) => ({
       id,
       messageId: messageId || undefined,
@@ -49,6 +50,7 @@ function commitQueuedMessages(messages: QueuedMessage[]) {
       nativePdfs: nativePdfs.length > 0 ? nativePdfs : undefined,
       terminalSelection,
       attachedDiagnostics: attachedDiagnostics || undefined,
+      queuedContext,
     })
   );
   postMessage({ type: 'queued-messages/update', payload: { messages: hostPersisted } });

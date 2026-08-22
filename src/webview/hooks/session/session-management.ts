@@ -5,6 +5,7 @@ import type { PermissionRule, Session, SessionStatus } from '../../types';
 type SessionManagementDependencies = {
   getActiveSessionId(): string | null;
   getWorkspaceGeneration?(): number;
+  getSessionSelectionGeneration?(): number;
   getNewChatDraftGeneration(): number;
   createRemoteSession(body: { title?: string; permission?: PermissionRule[] }): Promise<Session>;
   updateRemoteSession(sessionId: string, body: { title: string }): Promise<Session>;
@@ -104,6 +105,10 @@ export class SessionManagementOperations {
   readonly forkSession = async (id: string, messageID?: string) => {
     return forkSessionWithDependencies(
       {
+        getActiveSessionId: this.deps.getActiveSessionId,
+        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
+        getSessionSelectionGeneration: this.deps.getSessionSelectionGeneration,
+        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
         forkRemoteSession: this.deps.forkRemoteSession,
         getPermissionModeForSession: this.deps.getPermissionModeForSession,
         setPermissionModeForSession: this.deps.setPermissionModeForSession,
@@ -134,6 +139,9 @@ export class SessionManagementOperations {
       {
         getSessions: this.deps.getSessions,
         getActiveSessionId: this.deps.getActiveSessionId,
+        getWorkspaceGeneration: this.deps.getWorkspaceGeneration,
+        getSessionSelectionGeneration: this.deps.getSessionSelectionGeneration,
+        getNewChatDraftGeneration: this.deps.getNewChatDraftGeneration,
         getDeletedSessionTreeIds: this.deps.getDeletedSessionTreeIds,
         getNextSessionIdAfterDeletion: this.deps.getNextSessionIdAfterDeletion,
         deleteRemoteSession: this.deps.deleteRemoteSession,
@@ -295,6 +303,10 @@ export async function createSessionWithDependencies(
 
 export async function forkSessionWithDependencies(
   deps: {
+    getActiveSessionId(): string | null;
+    getWorkspaceGeneration?(): number;
+    getSessionSelectionGeneration?(): number;
+    getNewChatDraftGeneration(): number;
     forkRemoteSession(sessionId: string, messageID?: string): Promise<Session>;
     getPermissionModeForSession(sessionId: string): PermissionMode;
     setPermissionModeForSession(sessionId: string, mode: PermissionMode): void;
@@ -308,19 +320,32 @@ export async function forkSessionWithDependencies(
   id: string,
   messageID?: string
 ): Promise<string | null> {
+  const previousActiveSessionId = deps.getActiveSessionId();
+  const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
+  const selectionGeneration = deps.getSessionSelectionGeneration?.() ?? 0;
+  const draftGeneration = deps.getNewChatDraftGeneration();
   try {
     // Forks are independent roots, so the source session's permission mode
     // must be copied over explicitly or the fork silently resets to default.
     const permissionMode = deps.getPermissionModeForSession(id);
     const session = await deps.forkRemoteSession(id, messageID);
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return null;
     deps.upsertSession(session);
     if (permissionMode !== 'default') {
       deps.setPermissionModeForSession(session.id, permissionMode);
     }
-    await deps.selectSession(session.id);
+    if (
+      deps.getActiveSessionId() === previousActiveSessionId &&
+      (deps.getSessionSelectionGeneration?.() ?? 0) === selectionGeneration &&
+      deps.getNewChatDraftGeneration() === draftGeneration
+    ) {
+      await deps.selectSession(session.id);
+    }
     return session.id;
   } catch (err) {
-    deps.setError(err instanceof Error ? err.message : 'Failed to fork session');
+    if ((deps.getWorkspaceGeneration?.() ?? 0) === workspaceGeneration) {
+      deps.setError(err instanceof Error ? err.message : 'Failed to fork session');
+    }
     return null;
   }
 }
@@ -353,6 +378,9 @@ export async function deleteSessionWithDependencies(
   deps: {
     getSessions(): Session[];
     getActiveSessionId(): string | null;
+    getWorkspaceGeneration?(): number;
+    getSessionSelectionGeneration?(): number;
+    getNewChatDraftGeneration?(): number;
     getDeletedSessionTreeIds(rootId: string, sessions: Session[]): Set<string>;
     getNextSessionIdAfterDeletion(sessions: Session[]): string | null;
     deleteRemoteSession(sessionId: string): Promise<void | boolean | object>;
@@ -367,23 +395,36 @@ export async function deleteSessionWithDependencies(
   },
   id: string
 ) {
+  const workspaceGeneration = deps.getWorkspaceGeneration?.() ?? 0;
+  const selectionGeneration = deps.getSessionSelectionGeneration?.() ?? 0;
+  const draftGeneration = deps.getNewChatDraftGeneration?.() ?? 0;
   try {
     const deletedIds = deps.getDeletedSessionTreeIds(id, deps.getSessions());
-    const remainingSessions = deps.getSessions().filter((session) => !deletedIds.has(session.id));
     const activeSessionId = deps.getActiveSessionId();
     const wasActive = activeSessionId ? deletedIds.has(activeSessionId) : false;
-    const nextActiveId = wasActive ? deps.getNextSessionIdAfterDeletion(remainingSessions) : null;
 
     await deps.deleteRemoteSession(id);
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return;
     deps.hideDeletedSessionTree(id);
     await deps.loadRecycleBin();
+    if ((deps.getWorkspaceGeneration?.() ?? 0) !== workspaceGeneration) return;
 
-    if (nextActiveId) {
+    const currentActiveSessionId = deps.getActiveSessionId();
+    const remainingSessions = deps.getSessions().filter((session) => !deletedIds.has(session.id));
+    const nextActiveId = wasActive ? deps.getNextSessionIdAfterDeletion(remainingSessions) : null;
+    if (
+      nextActiveId &&
+      (deps.getSessionSelectionGeneration?.() ?? 0) === selectionGeneration &&
+      (deps.getNewChatDraftGeneration?.() ?? 0) === draftGeneration &&
+      (currentActiveSessionId === null || deletedIds.has(currentActiveSessionId))
+    ) {
       await deps.selectSession(nextActiveId, { markSeen: false });
     }
   } catch (err) {
-    deps.setError?.(err instanceof Error ? err.message : 'Failed to delete session');
-    deps.logError('deleteSession', err);
+    if ((deps.getWorkspaceGeneration?.() ?? 0) === workspaceGeneration) {
+      deps.setError?.(err instanceof Error ? err.message : 'Failed to delete session');
+      deps.logError('deleteSession', err);
+    }
   }
 }
 

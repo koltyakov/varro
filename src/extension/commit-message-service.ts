@@ -1,6 +1,9 @@
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- This service validates Git and OpenCode responses at their I/O boundaries. */
 /* oxlint-disable anti-slop/no-known-value-widening -- Named service contracts intentionally hide transport-specific response detail. */
-import { relative } from 'node:path';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, realpath, stat as fileStat } from 'node:fs/promises';
+import { isAbsolute, relative, sep } from 'node:path';
 import * as vscode from 'vscode';
 
 import type { PermissionRule } from '../shared/opencode-types';
@@ -23,6 +26,7 @@ interface CommitMessageRequest {
 
 type GitChange = {
   uri: vscode.Uri;
+  status?: number;
 };
 
 type GitCommit = {
@@ -73,7 +77,15 @@ type CommitHistoryContext = {
 
 type ChangeScope = 'staged' | 'unstaged';
 
+type CapturedChanges = {
+  patch: string;
+  fingerprint: string;
+};
+
 const MAX_DIFF_CHARS = 60_000;
+const MAX_UNTRACKED_FILE_BYTES = 20_000;
+const MAX_UNTRACKED_TOTAL_BYTES = 40_000;
+const GIT_STATUS_UNTRACKED = 7;
 const MAX_HISTORY_ENTRIES = 50;
 const MAX_HISTORY_EXAMPLES = 8;
 const GENERATION_TIMEOUT_MS = 30_000;
@@ -250,7 +262,8 @@ export class CommitMessageService {
 
     const stagedPatch = await repository.diff(true);
     const scope: ChangeScope = stagedPatch.trim() ? 'staged' : 'unstaged';
-    const changePatch = scope === 'staged' ? stagedPatch : await repository.diff(false);
+    const capturedChanges = await captureRepositoryChanges(repository, scope, stagedPatch);
+    const changePatch = capturedChanges.patch;
     if (!changePatch.trim()) {
       await vscode.window.showWarningMessage(
         'There are no changes to use for generating a commit message.'
@@ -280,8 +293,9 @@ export class CommitMessageService {
         this.generateWithHelper(repository, changePatch, changePaths, scope, token)
     );
 
-    const latestPatch = await repository.diff(scope === 'staged');
-    if (latestPatch !== changePatch) {
+    await repository.status();
+    const latestChanges = await captureRepositoryChanges(repository, scope);
+    if (latestChanges.fingerprint !== capturedChanges.fingerprint) {
       await vscode.window.showWarningMessage(
         `${scope === 'staged' ? 'Staged' : 'Unstaged'} changes changed while the commit message was being generated. Generate it again.`
       );
@@ -495,6 +509,134 @@ function collectChangePaths(repository: GitRepository, scope: ChangeScope): stri
     paths.add(path || change.uri.fsPath);
   }
   return [...paths];
+}
+
+async function captureRepositoryChanges(
+  repository: GitRepository,
+  scope: ChangeScope,
+  stagedPatch?: string
+): Promise<CapturedChanges> {
+  const trackedPatch =
+    scope === 'staged'
+      ? (stagedPatch ?? (await repository.diff(true)))
+      : await repository.diff(false);
+  if (scope === 'staged') {
+    return { patch: trackedPatch, fingerprint: trackedPatch };
+  }
+
+  let includedBytes = 0;
+  const patches: string[] = [];
+  const fingerprints: string[] = [];
+  for (const change of repository.state.workingTreeChanges ?? []) {
+    if (change.status !== GIT_STATUS_UNTRACKED) continue;
+    const path = relative(repository.rootUri.fsPath, change.uri.fsPath).replace(/\\/g, '/');
+    const displayPath = path.replace(/[\r\n]/g, ' ');
+    let metadataFingerprint = 'metadata-unavailable';
+    try {
+      const stat = await vscode.workspace.fs.stat(change.uri);
+      metadataFingerprint = `${stat.type}\u0000${stat.size}\u0000${stat.mtime}\u0000${stat.ctime}`;
+      if ((stat.type & vscode.FileType.SymbolicLink) !== 0) {
+        patches.push(
+          `diff --git a/${displayPath} b/${displayPath}\nnew file mode 120000\nsymbolic link; content omitted`
+        );
+        fingerprints.push(`${displayPath}\u0000symlink\u0000${stat.size}\u0000${stat.mtime}`);
+        continue;
+      }
+
+      const fileRead = await readUntrackedFile(repository.rootUri.fsPath, change.uri);
+      fingerprints.push(`${displayPath}\u0000${fileRead.hash}`);
+      if (fileRead.byteLength > MAX_UNTRACKED_FILE_BYTES) {
+        patches.push(
+          `diff --git a/${displayPath} b/${displayPath}\nnew untracked file (${fileRead.byteLength} bytes; content omitted)`
+        );
+        continue;
+      }
+
+      const bytes = fileRead.preview;
+      const availableBytes = Math.max(0, MAX_UNTRACKED_TOTAL_BYTES - includedBytes);
+      if (availableBytes === 0) {
+        patches.push(
+          `diff --git a/${displayPath} b/${displayPath}\nnew untracked file (${bytes.byteLength} bytes; content omitted)`
+        );
+        continue;
+      }
+
+      const included = bytes.slice(0, Math.min(bytes.byteLength, availableBytes));
+      includedBytes += included.byteLength;
+      const binary = included.includes(0);
+      const content = binary
+        ? `Binary untracked file (${bytes.byteLength} bytes)`
+        : new TextDecoder().decode(included).replace(/^/gm, '+');
+      const truncation =
+        included.byteLength < bytes.byteLength ? '\n+... content truncated ...' : '';
+      patches.push(
+        `diff --git a/${displayPath} b/${displayPath}\nnew file mode 100644\n--- /dev/null\n+++ b/${displayPath}\n@@ -0,0 +1 @@\n${content}${truncation}`
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      patches.push(
+        `diff --git a/${displayPath} b/${displayPath}\nnew untracked file (content unavailable)`
+      );
+      fingerprints.push(`${displayPath}\u0000${metadataFingerprint}\u0000unavailable:${message}`);
+    }
+  }
+
+  return {
+    patch: [trackedPatch, ...patches].filter((part) => part.trim()).join('\n'),
+    fingerprint: [trackedPatch, ...fingerprints].join('\u0001'),
+  };
+}
+
+async function readUntrackedFile(
+  repositoryRoot: string,
+  uri: vscode.Uri
+): Promise<{ preview: Uint8Array; byteLength: number; hash: string }> {
+  if (uri.scheme !== 'file' || process.platform === 'win32') {
+    throw new Error('Atomic untracked file reads are unavailable for this workspace');
+  }
+
+  const hash = createHash('sha256');
+  const previewChunks: Buffer[] = [];
+  let previewLength = 0;
+  let byteLength = 0;
+  const file = await open(uri.fsPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const [openedStat, resolvedRoot, resolvedPath] = await Promise.all([
+      file.stat(),
+      realpath(repositoryRoot),
+      realpath(uri.fsPath),
+    ]);
+    const currentStat = await fileStat(resolvedPath);
+    const relativePath = relative(resolvedRoot, resolvedPath);
+    if (
+      relativePath === '..' ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath) ||
+      openedStat.dev !== currentStat.dev ||
+      openedStat.ino !== currentStat.ino
+    ) {
+      throw new Error('Untracked file resolved outside the repository');
+    }
+    const stream = file.createReadStream({ autoClose: false });
+    for await (const chunk of stream) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      hash.update(bytes);
+      byteLength += bytes.byteLength;
+      const remaining = MAX_UNTRACKED_FILE_BYTES - previewLength;
+      if (remaining <= 0) continue;
+      const previewChunk = bytes.subarray(0, remaining);
+      previewChunks.push(Buffer.from(previewChunk));
+      previewLength += previewChunk.byteLength;
+    }
+  } finally {
+    await file.close();
+  }
+
+  return {
+    preview: Buffer.concat(previewChunks, previewLength),
+    byteLength,
+    hash: hash.digest('hex'),
+  };
 }
 
 async function loadCommitHistory(repository: GitRepository): Promise<CommitHistoryContext> {

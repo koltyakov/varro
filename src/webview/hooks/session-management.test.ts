@@ -293,16 +293,20 @@ describe('session management helpers', () => {
   );
 
   it('deletes a session and selects the next visible session when needed', async () => {
+    let activeSessionId: string | null = 'session-1';
     const selectSession = vi.fn(async () => {});
 
     await deleteSessionWithDependencies(
       {
         getSessions: () => [session('session-1'), session('session-2')],
-        getActiveSessionId: () => 'session-1',
+        getActiveSessionId: () => activeSessionId,
+        getWorkspaceGeneration: () => 0,
         getDeletedSessionTreeIds: () => new Set(['session-1']),
         getNextSessionIdAfterDeletion: () => 'session-2',
         deleteRemoteSession: vi.fn(async () => true),
-        hideDeletedSessionTree: vi.fn(),
+        hideDeletedSessionTree: vi.fn(() => {
+          activeSessionId = null;
+        }),
         loadRecycleBin: vi.fn(async () => {}),
         selectSession,
         logError: vi.fn(),
@@ -311,6 +315,88 @@ describe('session management helpers', () => {
     );
 
     expect(selectSession).toHaveBeenCalledWith('session-2', { markSeen: false });
+  });
+
+  it('does not replace a newer session selection when deletion finishes late', async () => {
+    let activeSessionId: string | null = 'session-1';
+    const remoteDelete = deferred<void>();
+    const selectSession = vi.fn(async () => {});
+    const pending = deleteSessionWithDependencies(
+      {
+        getSessions: () => [session('session-1'), session('session-2'), session('session-3')],
+        getActiveSessionId: () => activeSessionId,
+        getWorkspaceGeneration: () => 0,
+        getDeletedSessionTreeIds: () => new Set(['session-1']),
+        getNextSessionIdAfterDeletion: () => 'session-2',
+        deleteRemoteSession: vi.fn(() => remoteDelete.promise),
+        hideDeletedSessionTree: vi.fn(),
+        loadRecycleBin: vi.fn(async () => {}),
+        selectSession,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    activeSessionId = 'session-3';
+    remoteDelete.resolve();
+    await pending;
+
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('does not replace a new-chat draft when deletion finishes late', async () => {
+    let activeSessionId: string | null = 'session-1';
+    let draftGeneration = 0;
+    const remoteDelete = deferred<void>();
+    const selectSession = vi.fn(async () => {});
+    const pending = deleteSessionWithDependencies(
+      {
+        getSessions: () => [session('session-1'), session('session-2')],
+        getActiveSessionId: () => activeSessionId,
+        getNewChatDraftGeneration: () => draftGeneration,
+        getDeletedSessionTreeIds: () => new Set(['session-1']),
+        getNextSessionIdAfterDeletion: () => 'session-2',
+        deleteRemoteSession: vi.fn(() => remoteDelete.promise),
+        hideDeletedSessionTree: vi.fn(),
+        loadRecycleBin: vi.fn(async () => {}),
+        selectSession,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    activeSessionId = null;
+    draftGeneration += 1;
+    remoteDelete.resolve();
+    await pending;
+
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('does not select a replacement session removed while deletion is pending', async () => {
+    let sessions = [session('session-1'), session('session-2')];
+    const remoteDelete = deferred<void>();
+    const selectSession = vi.fn(async () => {});
+    const pending = deleteSessionWithDependencies(
+      {
+        getSessions: () => sessions,
+        getActiveSessionId: () => 'session-1',
+        getDeletedSessionTreeIds: () => new Set(['session-1']),
+        getNextSessionIdAfterDeletion: (remaining) => remaining[0]?.id ?? null,
+        deleteRemoteSession: vi.fn(() => remoteDelete.promise),
+        hideDeletedSessionTree: vi.fn(),
+        loadRecycleBin: vi.fn(async () => {}),
+        selectSession,
+        logError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    sessions = [session('session-1')];
+    remoteDelete.resolve();
+    await pending;
+
+    expect(selectSession).not.toHaveBeenCalled();
   });
 
   it('restores recycle-bin entries by refreshing sessions, recycle bin, and statuses', async () => {
@@ -465,6 +551,9 @@ describe('session management helpers', () => {
 
     const result = await forkSessionWithDependencies(
       {
+        getActiveSessionId: () => 'session-1',
+        getWorkspaceGeneration: () => 0,
+        getNewChatDraftGeneration: () => 0,
         forkRemoteSession,
         getPermissionModeForSession: () => 'full',
         setPermissionModeForSession,
@@ -485,11 +574,72 @@ describe('session management helpers', () => {
     expect(selectSession).toHaveBeenCalledWith('session-3');
   });
 
+  it('does not replace a newer session selection when a fork finishes late', async () => {
+    let activeSessionId: string | null = 'session-1';
+    const remoteFork = deferred<Session>();
+    const selectSession = vi.fn(async () => {});
+    const upsertSession = vi.fn();
+    const pending = forkSessionWithDependencies(
+      {
+        getActiveSessionId: () => activeSessionId,
+        getWorkspaceGeneration: () => 0,
+        getNewChatDraftGeneration: () => 0,
+        forkRemoteSession: vi.fn(() => remoteFork.promise),
+        getPermissionModeForSession: () => 'default',
+        setPermissionModeForSession: vi.fn(),
+        upsertSession,
+        selectSession,
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    activeSessionId = 'session-2';
+    remoteFork.resolve(session('session-fork'));
+    await expect(pending).resolves.toBe('session-fork');
+
+    expect(upsertSession).toHaveBeenCalledWith(session('session-fork'));
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
+  it('does not replace a newer session selection after navigating away and back', async () => {
+    let activeSessionId: string | null = 'session-1';
+    let selectionGeneration = 0;
+    const remoteFork = deferred<Session>();
+    const selectSession = vi.fn(async () => {});
+    const pending = forkSessionWithDependencies(
+      {
+        getActiveSessionId: () => activeSessionId,
+        getSessionSelectionGeneration: () => selectionGeneration,
+        getNewChatDraftGeneration: () => 0,
+        forkRemoteSession: vi.fn(() => remoteFork.promise),
+        getPermissionModeForSession: () => 'default',
+        setPermissionModeForSession: vi.fn(),
+        upsertSession: vi.fn(),
+        selectSession,
+        setError: vi.fn(),
+      },
+      'session-1'
+    );
+
+    activeSessionId = 'session-2';
+    selectionGeneration += 1;
+    activeSessionId = 'session-1';
+    selectionGeneration += 1;
+    remoteFork.resolve(session('session-fork'));
+    await pending;
+
+    expect(selectSession).not.toHaveBeenCalled();
+  });
+
   it('does not write a permission mode for forks of default-mode sessions', async () => {
     const setPermissionModeForSession = vi.fn();
 
     await forkSessionWithDependencies(
       {
+        getActiveSessionId: () => 'session-1',
+        getWorkspaceGeneration: () => 0,
+        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(async () => session('session-3')),
         getPermissionModeForSession: () => 'default',
         setPermissionModeForSession,
@@ -508,6 +658,9 @@ describe('session management helpers', () => {
 
     const result = await forkSessionWithDependencies(
       {
+        getActiveSessionId: () => 'session-1',
+        getWorkspaceGeneration: () => 0,
+        getNewChatDraftGeneration: () => 0,
         forkRemoteSession: vi.fn(async () => {
           throw new Error('fork failed');
         }),

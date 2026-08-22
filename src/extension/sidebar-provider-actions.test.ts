@@ -91,12 +91,17 @@ function createActionFixture() {
     cancelRequest: vi.fn(),
   };
   const sessionDiffProvider = {
-    open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve(false)),
+    open: vi.fn<SessionDiffProvider['open']>(() => Promise.resolve('unavailable')),
   } satisfies SessionDiffProvider;
   const toolOutputProvider = {
     open: vi.fn<ToolOutputProvider['open']>(() => Promise.resolve(false)),
   } satisfies ToolOutputProvider;
   const server = {
+    getWorkspaceCwd: vi.fn(() => '/repo'),
+    request: vi.fn(async (_method: string, path: string) => ({
+      id: decodeURIComponent(path.slice('/session/'.length)),
+      directory: '/repo',
+    })),
     readRestartBlockers: vi.fn(() =>
       Promise.resolve({
         totalSessionCount: 2,
@@ -140,6 +145,7 @@ function createActionFixture() {
     pickFiles: vi.fn(() => Promise.resolve()),
     searchFiles: vi.fn(),
     runInTerminal: vi.fn(),
+    openSessionInTerminal: vi.fn(),
     handleRalphMessage: vi.fn<SidebarProviderActionDeps['handleRalphMessage']>(),
     updateQueuedMessages: vi.fn<SidebarProviderActionDeps['updateQueuedMessages']>(() =>
       Promise.resolve()
@@ -174,10 +180,39 @@ describe('createSidebarProviderActions', () => {
 
     await actions.openSessionInOpenCode('session-1');
 
-    expect(deps.runInTerminal).toHaveBeenCalledWith(
-      'opencode --session session-1',
-      'OpenCode Session'
+    expect(deps.openSessionInTerminal).toHaveBeenCalledWith('session-1');
+  });
+
+  it('refuses to open an OpenCode session from another workspace', async () => {
+    const { actions, deps, server } = createActionFixture();
+    Object.assign(server, {
+      getWorkspaceCwd: vi.fn(() => '/repo'),
+      request: vi.fn(async () => ({ id: 'session-foreign', directory: '/other-repo' })),
+    });
+
+    await expect(actions.openSessionInOpenCode('session-foreign')).rejects.toThrow(
+      'Session does not belong to the current workspace'
     );
+
+    expect(deps.openSessionInTerminal).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to opening a path rejected by the session diff guard', async () => {
+    const { actions, contextProvider, deps } = createActionFixture();
+    deps.sessionDiffProvider.open.mockResolvedValue('forbidden');
+
+    await actions.openPath({
+      path: '/other-repo/src/app.ts',
+      view: 'diff',
+      sessionID: 'session-foreign',
+      requestId: 7,
+    });
+
+    expect(contextProvider.openPath).not.toHaveBeenCalled();
+    expect(deps.post).toHaveBeenCalledWith({
+      type: 'vscode/open-result',
+      payload: { requestId: 7, status: 'unavailable' },
+    });
   });
 
   it('updates command state and mirrors the active chat model', () => {

@@ -577,4 +577,61 @@ describe('SessionSendOperations', () => {
       terminalName: 'zsh',
     });
   });
+
+  it('builds a queued prompt from its captured editor context instead of live editor state', async () => {
+    appStore.setState('activeSessionId', 'session-1');
+    appStore.setState('editorContext', {
+      workspacePath: '/new-workspace',
+      activeFile: {
+        path: '/new-workspace/private.ts',
+        relativePath: 'private.ts',
+        language: 'typescript',
+      },
+      selection: null,
+      editorText: {
+        kind: 'dirty-buffer',
+        path: '/new-workspace/private.ts',
+        relativePath: 'private.ts',
+        language: 'typescript',
+        range: { startLine: 1, endLine: 1 },
+        text: 'const privateValue = true;',
+        truncated: false,
+      },
+      diagnostics: [],
+    });
+    const sendAsync = vi.fn(async () => {});
+    const operations = createOperations(sendAsync);
+
+    await operations.sendMessage('queued prompt', {
+      messageId: 'msg_queued_context',
+      queuedAttachments: {
+        droppedFiles: [],
+        clipboardImages: [],
+        terminalSelection: null,
+      },
+      queuedContext: {
+        editorContext: {
+          workspacePath: '/original-workspace',
+          activeFile: {
+            path: '/original-workspace/original.ts',
+            relativePath: 'original.ts',
+            language: 'typescript',
+          },
+          selection: { startLine: 4, endLine: 4 },
+          diagnostics: [],
+        },
+        currentDocumentEnabled: true,
+      },
+      preserveComposer: true,
+    });
+
+    expect(sendAsync).toHaveBeenCalledWith('session-1', {
+      messageID: 'msg_queued_context',
+      parts: [
+        { type: 'text', text: 'queued prompt' },
+        { type: 'text', text: '[Working directory: /original-workspace]' },
+        { type: 'text', text: '[Selection from original.ts lines 4]' },
+      ],
+    });
+  });
 });

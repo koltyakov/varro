@@ -1,5 +1,10 @@
 import { batch } from 'solid-js';
-import type { DroppedFile, EditorContext, PermissionMode } from '../../../shared/protocol';
+import type {
+  DroppedFile,
+  EditorContext,
+  PermissionMode,
+  QueuedContextSnapshot,
+} from '../../../shared/protocol';
 import { isProviderAuthFailure } from '../../../shared/error-classification';
 import {
   formatSelectionReference,
@@ -102,6 +107,7 @@ type SessionSendOptions = SendFlowOptions & {
   preserveModelSelection?: boolean;
   preserveScrollPosition?: boolean;
   queuedAttachments?: QueuedAttachmentSnapshot;
+  queuedContext?: QueuedContextSnapshot;
   preserveComposer?: boolean;
   targetSessionId?: string;
 };
@@ -761,6 +767,8 @@ export class SessionSendOperations {
       ] = null;
     }
     const capturedAttachments = captureComposerAttachments(options?.queuedAttachments);
+    const sourceEditorContext =
+      options?.queuedContext?.editorContext ?? appStore.state.editorContext;
     const capturedComposerState: ComposerState = {
       selectedAgent,
       selectedModel: selectedModel ? { ...selectedModel } : null,
@@ -768,14 +776,17 @@ export class SessionSendOperations {
       providerDefaults: { ...appStore.state.providerDefaults },
       modelVariantSelections,
       editorContext: {
-        ...appStore.state.editorContext,
-        activeFile: appStore.state.editorContext.activeFile
-          ? { ...appStore.state.editorContext.activeFile }
-          : null,
-        selection: appStore.state.editorContext.selection
-          ? { ...appStore.state.editorContext.selection }
-          : null,
-        diagnostics: appStore.state.editorContext.diagnostics.map((diagnostic) => ({
+        ...sourceEditorContext,
+        workspaceFolders: sourceEditorContext.workspaceFolders?.map((folder) => ({ ...folder })),
+        activeFile: sourceEditorContext.activeFile ? { ...sourceEditorContext.activeFile } : null,
+        selection: sourceEditorContext.selection ? { ...sourceEditorContext.selection } : null,
+        editorText: sourceEditorContext.editorText
+          ? {
+              ...sourceEditorContext.editorText,
+              range: { ...sourceEditorContext.editorText.range },
+            }
+          : sourceEditorContext.editorText,
+        diagnostics: sourceEditorContext.diagnostics.map((diagnostic) => ({
           ...diagnostic,
         })),
       },
@@ -792,7 +803,9 @@ export class SessionSendOperations {
           )
         : [],
     };
-    const currentDocumentEnabled = composerStore.getCurrentDocumentEnabled(targetSessionId);
+    const currentDocumentEnabled =
+      options?.queuedContext?.currentDocumentEnabled ??
+      composerStore.getCurrentDocumentEnabled(targetSessionId);
     const ensureSessionPermission = this.deps.ensureSessionPermission;
     const draftGeneration = getNewChatDraftGeneration();
     const workspaceGeneration = this.deps.getWorkspaceGeneration?.() ?? 0;
