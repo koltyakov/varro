@@ -36,6 +36,9 @@ const reasoningPendingAutoCollapseKeys = new Set<string>();
 // settled yet. Rows are recreated on every part commit, so the in-flight
 // auto-open must survive the recreation to collapse when the call finishes.
 const toolCallPendingAutoCollapseKeys = new Set<string>();
+// Reasoning blocks the user toggled manually; their stored state must survive
+// row recreation even after the message settles.
+const reasoningUserTouchedKeys = new Set<string>();
 // Activity groups the user toggled manually; the auto expand/collapse
 // lifecycle leaves those alone for the rest of the session.
 const activityGroupUserManagedKeys = new Set<string>();
@@ -83,6 +86,14 @@ export function takeReasoningAutoOpened(key: string) {
     return true;
   }
   return false;
+}
+
+export function markReasoningUserTouched(key: string) {
+  reasoningUserTouchedKeys.add(key);
+}
+
+export function isReasoningUserTouched(key: string) {
+  return reasoningUserTouchedKeys.has(key);
 }
 
 export function markToolCallAutoOpened(key: string) {
@@ -137,6 +148,7 @@ export function resetToolCallExpansionState() {
   toolCallExpansionState.clear();
   messageBlockExpansionState.clear();
   reasoningPendingAutoCollapseKeys.clear();
+  reasoningUserTouchedKeys.clear();
   toolCallPendingAutoCollapseKeys.clear();
   activityGroupUserManagedKeys.clear();
   activityGroupAutoExpandedKeys.clear();

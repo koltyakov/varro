@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'solid-js/web';
 import { createStore } from 'solid-js/store';
 import { resetDefaultAppState, setShowThinking, setState } from '../lib/state';
-import { resetToolCallExpansionState } from '../lib/tool-call-expansion-state';
+import {
+  clearReasoningAutoOpened,
+  resetToolCallExpansionState,
+} from '../lib/tool-call-expansion-state';
 import type { AssistantMessage, Part, ReasoningPart } from '../types';
 import {
   MessagePart,
@@ -272,6 +275,65 @@ describe('MessagePart', () => {
     expect(
       container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
     ).toBe('false');
+  });
+
+  it('collapses a remounted reasoning block when the message settles after the part ended', async () => {
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    const [info, setInfo] = createStore(assistantMessage('message-1', { time: { created: 0 } }));
+
+    renderPart(part, { messageInfo: info });
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // The part commits its end while the message keeps running; the row is
+    // recreated and the new instance never observes the streaming run.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, time: { start: 0, end: 1000 } }, { messageInfo: info });
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // When the message settles in place, the pending auto-open that survived
+    // the recreation must collapse the remounted instance.
+    setInfo('time', 'completed', 5);
+    await nextFrame();
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
+
+    // The settled state survives later remounts.
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, time: { start: 0, end: 1000 } }, { messageInfo: info });
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+  });
+
+  it('keeps a settled reasoning block whose auto-open marker was lost collapsed', () => {
+    const key = 'reasoning\u0000session-1\u0000message-1\u0000reasoning-1';
+    const part = reasoningPart('**Planning**\n\nStep one', { time: { start: 0 } });
+    renderPart(part);
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('true');
+
+    // The row is disposed before the message settles and the pending
+    // auto-open does not survive (eviction, session rehydration), so the
+    // stored expanded state is stale when the settled row is recreated.
+    clearReasoningAutoOpened(key);
+    cleanup?.();
+    container!.innerHTML = '';
+    renderPart({ ...part, time: { start: 0, end: 1000 } });
+
+    expect(
+      container?.querySelector<HTMLButtonElement>('.thinking-header')?.getAttribute('aria-expanded')
+    ).toBe('false');
+    expect(container?.querySelector('.thinking-content')).toBeNull();
   });
 
   it('keeps a user-collapsed streaming reasoning block closed across a completed remount', () => {

@@ -15,7 +15,9 @@ import { hasVisibleReasoningContent } from '../lib/part-utils';
 import {
   clearReasoningAutoOpened,
   getMessageBlockExpanded,
+  isReasoningUserTouched,
   markReasoningAutoOpened,
+  markReasoningUserTouched,
   setMessageBlockExpanded,
   takeReasoningAutoOpened,
 } from '../lib/tool-call-expansion-state';
@@ -117,6 +119,21 @@ function RetryNotice(props: { part: Extract<Part, { type: 'retry' }> }) {
   );
 }
 
+// Resolve the initial expanded state for (re)created reasoning rows. An
+// in-flight auto-open settles to collapsed; a settled block whose
+// auto-collapse never ran (row recreated, session rehydrated, or its pending
+// marker evicted) must not inherit a stale expanded state. Only a block the
+// user touched keeps its stored state across such recreation.
+function resolveReasoningInitialExpanded(
+  key: string,
+  settled: boolean,
+  pendingAutoCollapsed: boolean
+) {
+  if (pendingAutoCollapsed) return false;
+  if (settled && !isReasoningUserTouched(key)) return false;
+  return getMessageBlockExpanded(key) ?? false;
+}
+
 function ReasoningBlock(props: {
   part: ReasoningPart;
   messageInfo?: AssistantMessage;
@@ -137,8 +154,9 @@ function ReasoningBlock(props: {
   // A previous instance of this block auto-expanded a streaming run and the
   // message has settled. Rows are recreated on every part commit, so the
   // pending auto-open may never observe the settle; settle it on mount.
+  const settledAtMount = isMessageSettled();
   const settledPendingAutoCollapse =
-    isMessageSettled() && takeReasoningAutoOpened(currentExpansionKey);
+    settledAtMount && takeReasoningAutoOpened(currentExpansionKey);
   if (settledPendingAutoCollapse) {
     setMessageBlockExpanded(currentExpansionKey, false);
   }
@@ -150,7 +168,7 @@ function ReasoningBlock(props: {
   let autoManaged = true;
   let autoOpened = false;
   const [expanded, setExpanded] = createSignal(
-    settledPendingAutoCollapse ? false : getMessageBlockExpanded(currentExpansionKey) ?? false
+    resolveReasoningInitialExpanded(currentExpansionKey, settledAtMount, settledPendingAutoCollapse)
   );
   const reasoningText = createMemo(() => props.streamedText ?? props.part.text);
   const subjectLabel = createMemo(() => getReasoningSubject(reasoningText()));
@@ -165,8 +183,9 @@ function ReasoningBlock(props: {
   createEffect(() => {
     const nextExpansionKey = expansionKey();
     if (nextExpansionKey === currentExpansionKey) return;
+    const nextSettled = isMessageSettled();
     const nextSettledPendingAutoCollapse =
-      isMessageSettled() && takeReasoningAutoOpened(nextExpansionKey);
+      nextSettled && takeReasoningAutoOpened(nextExpansionKey);
     if (nextSettledPendingAutoCollapse) {
       setMessageBlockExpanded(nextExpansionKey, false);
     }
@@ -175,11 +194,7 @@ function ReasoningBlock(props: {
     autoFollow = true;
     autoManaged = true;
     autoOpened = false;
-    setExpanded(
-      nextSettledPendingAutoCollapse
-        ? false
-        : getMessageBlockExpanded(nextExpansionKey) ?? false
-    );
+    setExpanded(resolveReasoningInitialExpanded(nextExpansionKey, nextSettled, nextSettledPendingAutoCollapse));
   });
 
   const followStreamingBottom = () => {
@@ -232,11 +247,17 @@ function ReasoningBlock(props: {
       }
       autoOpened = true;
       markReasoningAutoOpened(expansionKey());
-    } else if (isMessageSettled() && autoManaged && autoOpened) {
-      setExpanded(false);
-      setMessageBlockExpanded(expansionKey(), false);
-      clearReasoningAutoOpened(expansionKey());
-      autoOpened = false;
+    } else if (isMessageSettled() && autoManaged && !isReasoningUserTouched(expansionKey())) {
+      // Collapse any untouched auto state once the message settles: this
+      // instance's own auto-open, the marker that survived a row recreation
+      // after the part ended, or a stale stored expansion whose marker was
+      // already gone.
+      if (autoOpened || expanded() || takeReasoningAutoOpened(expansionKey())) {
+        setExpanded(false);
+        setMessageBlockExpanded(expansionKey(), false);
+        clearReasoningAutoOpened(expansionKey());
+        autoOpened = false;
+      }
     }
   });
 
@@ -249,6 +270,7 @@ function ReasoningBlock(props: {
 
   const toggleExpanded = () => {
     autoManaged = false;
+    markReasoningUserTouched(expansionKey());
     clearReasoningAutoOpened(expansionKey());
     const nextExpanded = !expanded();
     setMessageBlockExpanded(expansionKey(), nextExpanded);
