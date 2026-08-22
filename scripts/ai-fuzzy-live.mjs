@@ -95,6 +95,11 @@ export function buildLivePrompt({ seed, attempt, missing = [] }) {
       'make the smallest justified edit now in exactly two existing files, inspect its diff, and keep the diff available'
     );
   }
+  if (missing.includes('sticky latest prompt') || missing.includes('scrollable active tray')) {
+    requests.push(
+      'perform enough additional read or search work with brief progress reasoning before the final concurrent commands for the current prompt to move above the viewport'
+    );
+  }
   if (missing.includes('scrollable active tray') || missing.includes('active model stream')) {
     requests.push(
       'then issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline"; do not write prose until all six complete'
@@ -102,9 +107,6 @@ export function buildLivePrompt({ seed, attempt, missing = [] }) {
   }
   if (missing.includes('expandable activity disclosure')) {
     requests.push('retain completed reads or searches so an Explored disclosure is rendered');
-  }
-  if (missing.includes('sticky latest prompt')) {
-    requests.push('continue with enough reasoning and tool work for the current prompt to move above the viewport');
   }
   if (requests.length === 0) {
     requests.push('continue the bounded task with another parallel read group, one edit, and one focused check');
@@ -472,6 +474,54 @@ class CdpController {
     return true;
   }
 
+  async clickFirstVisible(selector) {
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const result = await this.evaluate(`(() => {
+        const scroller = document.querySelector('.interactive-list');
+        const viewport = scroller?.getBoundingClientRect();
+        if (!scroller || !viewport) return null;
+        const candidates = [...document.querySelectorAll(${JSON.stringify(selector)})]
+          .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.width > 0 && rect.height > 0);
+        const visible = candidates.find(({ rect }) => rect.bottom > viewport.top && rect.top < viewport.bottom);
+        if (visible) return { visible: true, x: visible.rect.x + visible.rect.width / 2,
+          y: visible.rect.y + visible.rect.height / 2 };
+        const nearest = candidates.toSorted((left, right) =>
+          Math.min(Math.abs(left.rect.bottom - viewport.top), Math.abs(left.rect.top - viewport.bottom)) -
+          Math.min(Math.abs(right.rect.bottom - viewport.top), Math.abs(right.rect.top - viewport.bottom)))[0];
+        return { visible: false,
+          direction: nearest ? (nearest.rect.bottom <= viewport.top ? -1 : 1) : -1,
+          x: viewport.right - 6, y: viewport.y + viewport.height / 2 };
+      })()`);
+      if (!result) return false;
+      if (result.visible) {
+        for (const [type, buttons] of [
+          ['mousePressed', 1],
+          ['mouseReleased', 0],
+        ]) {
+          await this.call('Input.dispatchMouseEvent', {
+            type,
+            x: result.x,
+            y: result.y,
+            button: 'left',
+            buttons,
+            clickCount: 1,
+          });
+        }
+        return true;
+      }
+      await this.call('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: result.x,
+        y: result.y,
+        deltaX: 0,
+        deltaY: result.direction * 180,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return false;
+  }
+
   async clickText(text, excludeText = '') {
     const exclusion = excludeText
       ? `&& !candidate.innerText.includes(${JSON.stringify(excludeText)})`
@@ -624,6 +674,7 @@ async function openRunSession(cdp, title) {
 async function waitForLiveGate({ client, cdp, sessionId, scenario, timeoutMs }) {
   const deadline = Date.now() + timeoutMs;
   let sawBusy = false;
+  let nudgedForSticky = false;
   let best = null;
   while (Date.now() < deadline) {
     const [snapshot, busy] = await Promise.all([cdp.snapshot(), client.isBusy(sessionId)]);
@@ -632,6 +683,17 @@ async function waitForLiveGate({ client, cdp, sessionId, scenario, timeoutMs }) 
     const missing = missingLiveGates(snapshot, scenario);
     if (!best || missing.length < best.missing.length) best = { snapshot, missing };
     if (missing.length === 0) return { snapshot, missing };
+    if (
+      !nudgedForSticky &&
+      busy &&
+      snapshot.nestedActivityScroller?.hasRange &&
+      missing.length === 1 &&
+      missing[0] === 'sticky latest prompt'
+    ) {
+      nudgedForSticky = await cdp.wheel('.interactive-list', -96, 'right');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
     if (sawBusy && !busy) return best;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -767,9 +829,21 @@ async function executeActionPlan(cdp, plan, currentTitle, port) {
     } else if (action.action === 'PageDown in composer') {
       executed = await cdp.key('[aria-label="Message composer"]', 'PageDown');
     } else if (action.action === 'Space in inline editor') {
-      executed = await cdp.click('.user-message-card');
-      if (executed) executed = await cdp.key('[contenteditable="true"]', 'Space');
-      await cdp.key('[contenteditable="true"]', 'Escape');
+      executed = await cdp.clickFirstVisible('.user-message-card-editable');
+      if (!executed && (await cdp.click('[data-sticky-msg-id]'))) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        executed = await cdp.clickFirstVisible('.user-message-card-editable');
+      }
+      if (executed) {
+        executed = await cdp.key(
+          '.interactive-input-part.editing-message [contenteditable="true"]',
+          'Space'
+        );
+      }
+      await cdp.key(
+        '.interactive-input-part.editing-message [contenteditable="true"]',
+        'Escape'
+      );
     } else if (action.action === 'resize sidebar') {
       await resizeVscodeSidebar(port, action.width ?? 430);
       executed = true;
@@ -916,7 +990,13 @@ async function runLive(options) {
       }
       const missing = best?.missing ?? [];
       const prompt = buildLivePrompt({ seed: manifest.seed, attempt, missing });
-      await client.send(tracked.id, prompt, parseModel(options.model ?? DEFAULT_MODEL));
+      await cdp.wheel('.interactive-list', -96, 'right');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const reattached = await cdp.click('[aria-label="Scroll to latest message"]');
+      if (!reattached) await cdp.key('.interactive-list', 'End');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const sent = await cdp.sendComposerPrompt(prompt);
+      if (!sent) throw new Error('Native composer input was unavailable');
       const gate = await waitForLiveGate({
         client,
         cdp,
@@ -934,12 +1014,15 @@ async function runLive(options) {
     if (best?.missing.length === 0) {
       handoff = await nestedHandoff(cdp);
       if (scenario === 'AI-08' && handoff.passed) {
-        actions = await executeActionPlan(
-          cdp,
-          manifest.actionPlan,
-          tracked.title,
-          launch.remoteDebuggingPort
-        );
+        actions = [
+          { ...manifest.actionPlan[0], executed: true },
+          ...(await executeActionPlan(
+            cdp,
+            manifest.actionPlan.slice(1),
+            tracked.title,
+            launch.remoteDebuggingPort
+          )),
+        ];
       }
     }
     const settled = await waitForIdle(client, tracked.id, timeoutMs);

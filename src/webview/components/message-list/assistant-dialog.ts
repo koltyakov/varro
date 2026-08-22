@@ -15,6 +15,8 @@ import type { AssistantMessage, MessageEntry } from '../../types';
 
 export type AssistantDialogSummaryInfo = {
   durationMs: number;
+  completedAt?: number;
+  promptMessageId?: string;
   inputTokens: number;
   outputTokens: number;
   agentCount: number;
@@ -47,11 +49,13 @@ export function getAssistantDialogSummaryMap(
   let currentPrimaryMessageIds: string[] = [];
   let currentSubagentHandoffCount = 0;
   let currentUserRequestCreated: number | null = null;
+  let currentUserRequestId: string | null = null;
   const resetCurrentDialog = () => {
     currentMessages = [];
     currentPrimaryMessageIds = [];
     currentSubagentHandoffCount = 0;
     currentUserRequestCreated = null;
+    currentUserRequestId = null;
   };
 
   const flush = (args?: { nextUserRequestCreated?: number; trailing?: boolean }) => {
@@ -136,6 +140,8 @@ export function getAssistantDialogSummaryMap(
         0,
         end - (currentUserRequestCreated ?? currentMessages[0]!.time.created)
       ),
+      completedAt: end,
+      promptMessageId: currentUserRequestId ?? undefined,
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       agentCount,
@@ -158,6 +164,7 @@ export function getAssistantDialogSummaryMap(
       });
       if (entry.info.role === 'user') {
         currentUserRequestCreated = entry.info.time.created;
+        currentUserRequestId = entry.info.id;
       }
       continue;
     }

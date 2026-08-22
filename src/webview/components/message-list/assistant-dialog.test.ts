@@ -84,7 +84,13 @@ describe('getAssistantDialogSummaryMap', () => {
       getAssistantDialogSummaryMap(messages, undefined, {
         primarySessionId: 'session-parent',
       }).get('assistant-final')
-    ).toMatchObject({ durationMs: 3_000, inputTokens: 20, outputTokens: 10 });
+    ).toMatchObject({
+      durationMs: 3_000,
+      completedAt: 4_000,
+      promptMessageId: 'user-1',
+      inputTokens: 20,
+      outputTokens: 10,
+    });
   });
 
   it('does not let a child completion become the primary worked summary', () => {

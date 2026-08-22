@@ -14,6 +14,7 @@ import type { StickyUserMessagePreview } from './sticky-preview';
 
 const STALE_LOADING_TOTAL_MS = 90_000;
 const STALE_LOADING_INACTIVITY_MS = 60_000;
+const HOVER_INTENT_DELAY_MS = 300;
 const LOADING_VERBS = [
   'Thinking',
   'Analyzing',
@@ -78,11 +79,43 @@ export function StickyUserMessagePreviewCard(props: {
   promptNumber?: number;
   sentAt?: number;
   showSentTimestamp?: boolean;
+  suppressTimestampAnimation?: boolean;
   onClick?: (preview: StickyUserMessagePreview) => void;
   loading?: boolean;
   onGeometryChange?: () => void;
+  onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
 }) {
   const isClickable = () => !!props.onClick;
+  const onUserMessageHoverChange = props.onUserMessageHoverChange;
+  let hoveredMessageId: string | null = null;
+  let hoverIntentTimer: ReturnType<typeof setTimeout> | undefined;
+  const [isHoverIntentActive, setIsHoverIntentActive] = createSignal(false);
+  const timestampVisible = () => !!props.showSentTimestamp || isHoverIntentActive();
+  const notifyUserMessageHoverChange = (hovering: boolean) => {
+    if (hoverIntentTimer) {
+      clearTimeout(hoverIntentTimer);
+      hoverIntentTimer = undefined;
+    }
+    if (!hovering) {
+      setIsHoverIntentActive(false);
+      if (hoveredMessageId) {
+        onUserMessageHoverChange?.(hoveredMessageId, false);
+        hoveredMessageId = null;
+      }
+      return;
+    }
+    const messageId = props.preview.id;
+    hoverIntentTimer = setTimeout(() => {
+      hoverIntentTimer = undefined;
+      hoveredMessageId = messageId;
+      setIsHoverIntentActive(true);
+      onUserMessageHoverChange?.(messageId, true);
+    }, HOVER_INTENT_DELAY_MS);
+  };
+  onCleanup(() => {
+    if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
+    if (hoveredMessageId) onUserMessageHoverChange?.(hoveredMessageId, false);
+  });
   const sentTimestamp = createMemo(() =>
     props.sentAt === undefined ? null : formatMessageSentTime(props.sentAt)
   );
@@ -102,6 +135,8 @@ export function StickyUserMessagePreviewCard(props: {
           <div
             class={`latest-user-message-sticky${isClickable() ? ' latest-user-message-sticky-clickable' : ''}${props.loading ? ' is-loading' : ''}`}
             title={props.loading ? 'Loading message' : undefined}
+            onMouseEnter={() => notifyUserMessageHoverChange(true)}
+            onMouseLeave={() => notifyUserMessageHoverChange(false)}
             onClick={(event) => {
               const target = event.target;
               if (target instanceof Element && target.closest('a, button')) return;
@@ -199,7 +234,7 @@ export function StickyUserMessagePreviewCard(props: {
           <Show when={sentTimestamp()}>
             {(timestamp) => (
               <time
-                class={`message-sent-time latest-user-message-sticky-time${props.showSentTimestamp ? ' is-visible' : ''}`}
+                class={`message-sent-time latest-user-message-sticky-time${timestampVisible() ? ' is-visible' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
                 dateTime={new Date(props.sentAt!).toISOString()}
               >
                 {timestamp()}

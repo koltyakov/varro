@@ -204,6 +204,10 @@ export function VirtualizedContent(
         promptNumberMap={props.promptNumberMap}
         showPromptNumbers={props.showPromptNumbers}
         showSentTimestamps={props.showSentTimestamps}
+        revealedSentTimestampMessageId={props.revealedSentTimestampMessageId}
+        revealedWorkedSummaryPromptMessageId={props.revealedWorkedSummaryPromptMessageId}
+        showWorkedSummaryTimes={props.showWorkedSummaryTimes}
+        suppressTimestampAnimations={props.suppressTimestampAnimations}
         lastAssistantID={props.lastAssistantID}
         previousTrailingFileEventSignatureMap={props.previousTrailingFileEventSignatureMap}
         assistantDialogSummaryMap={props.assistantDialogSummaryMap}
@@ -221,6 +225,8 @@ export function VirtualizedContent(
         observeMeasuredRow={props.observeMeasuredRow}
         questionRequestForTool={props.questionRequestForTool}
         permissionMatchForTool={props.permissionMatchForTool}
+        onWorkedSummaryHoverChange={props.onWorkedSummaryHoverChange}
+        onUserMessageHoverChange={props.onUserMessageHoverChange}
       />
     );
   };

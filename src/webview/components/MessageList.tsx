@@ -289,6 +289,10 @@ export function MessageList() {
   let trackRef: HTMLDivElement | undefined;
   const [autoScroll, setAutoScroll] = createSignal(true);
   const [showPromptNumbers, setShowPromptNumbers] = createSignal(false);
+  const [suppressTimestampAnimations, setSuppressTimestampAnimations] = createSignal(false);
+  const [workedSummaryPromptMessageId, setWorkedSummaryPromptMessageId] = createSignal<
+    string | null
+  >(null);
   const [retainedActivityPartKeys, setRetainedActivityPartKeys] = createSignal<ReadonlySet<string>>(
     new Set()
   );
@@ -313,6 +317,7 @@ export function MessageList() {
   let promptNumberSessionId: string | null = null;
   let promptNumberSessionWindowVersion = 0;
   let promptNumberHoldGeneration = 0;
+  let timestampAnimationSuppressionTimer: ReturnType<typeof setTimeout> | undefined;
   let altHeld = false;
   let disposed = false;
 
@@ -361,6 +366,11 @@ export function MessageList() {
   function showPromptNumbersForAlt() {
     if (altHeld) return;
     altHeld = true;
+    if (timestampAnimationSuppressionTimer) {
+      clearTimeout(timestampAnimationSuppressionTimer);
+      timestampAnimationSuppressionTimer = undefined;
+    }
+    setSuppressTimestampAnimations(true);
     promptNumberHoldGeneration += 1;
     setShowPromptNumbers(true);
     const sessionId = state.activeSessionId;
@@ -368,8 +378,14 @@ export function MessageList() {
   }
 
   function hidePromptNumbersForAlt() {
+    if (!altHeld) return;
     altHeld = false;
     setShowPromptNumbers(false);
+    if (timestampAnimationSuppressionTimer) clearTimeout(timestampAnimationSuppressionTimer);
+    timestampAnimationSuppressionTimer = setTimeout(() => {
+      timestampAnimationSuppressionTimer = undefined;
+      setSuppressTimestampAnimations(false);
+    }, 50);
   }
 
   const handleAltDown = (event: KeyboardEvent) => {
@@ -389,6 +405,7 @@ export function MessageList() {
   onCleanup(() => {
     disposed = true;
     altHeld = false;
+    if (timestampAnimationSuppressionTimer) clearTimeout(timestampAnimationSuppressionTimer);
     window.removeEventListener('keydown', handleAltDown);
     window.removeEventListener('keyup', handleAltUp);
     window.removeEventListener('mousemove', syncAltState);
@@ -422,6 +439,12 @@ export function MessageList() {
     const sessionId = state.activeSessionId;
     return !!sessionId && showPromptNumbers() && promptNumbersReady(sessionId);
   });
+  const handleWorkedSummaryHoverChange = (promptMessageId: string, hovering: boolean) => {
+    setWorkedSummaryPromptMessageId((current) => {
+      if (hovering) return promptMessageId;
+      return current === promptMessageId ? null : current;
+    });
+  };
   const lastAssistantID = createMemo(() => {
     messageStructureVersion();
     const msgs = getVisibleThreadMessages(state.messages, state.activeSessionId, state.sessions);
@@ -6812,13 +6835,17 @@ export function MessageList() {
                 preview={preview()}
                 parts={messages()[messageIndexById().get(preview().id) ?? -1]?.parts}
                 sentAt={messages()[messageIndexById().get(preview().id) ?? -1]?.info.time.created}
-                showSentTimestamp={showPromptNumbers()}
+                showSentTimestamp={
+                  showPromptNumbers() || workedSummaryPromptMessageId() === preview().id
+                }
+                suppressTimestampAnimation={suppressTimestampAnimations()}
                 promptNumber={
                   promptNumbersVisible() ? promptNumberMap().get(preview().id) : undefined
                 }
                 loading={pendingStickyJump()?.preview.id === preview().id}
                 onClick={handleStickyPreviewClick}
                 onGeometryChange={handleStickyPreviewGeometryChange}
+                onUserMessageHoverChange={handleWorkedSummaryHoverChange}
               />
             )}
           </Show>
@@ -6899,6 +6926,10 @@ export function MessageList() {
               promptNumberMap={promptNumberMap()}
               showPromptNumbers={promptNumbersVisible()}
               showSentTimestamps={showPromptNumbers()}
+              revealedSentTimestampMessageId={workedSummaryPromptMessageId()}
+              revealedWorkedSummaryPromptMessageId={workedSummaryPromptMessageId()}
+              showWorkedSummaryTimes={showPromptNumbers()}
+              suppressTimestampAnimations={suppressTimestampAnimations()}
               lastAssistantID={lastAssistantID()}
               outerListVirtualized={shouldVirtualize()}
               previousTrailingFileEventSignatureMap={previousTrailingFileEventSignatureMap()}
@@ -6941,6 +6972,8 @@ export function MessageList() {
               observeMeasuredRow={observeMeasuredRow}
               questionRequestForTool={getQuestionRequestForTool}
               permissionMatchForTool={getPermissionMatchForTool}
+              onWorkedSummaryHoverChange={handleWorkedSummaryHoverChange}
+              onUserMessageHoverChange={handleWorkedSummaryHoverChange}
             />
           </Show>
           <Show when={!editingMessage()}>
@@ -6969,6 +7002,12 @@ export function MessageList() {
                   msg={trailing().message}
                   hasBuildAgent={hasBuildAgent()}
                   latestPlanImplementationMessageId={latestPlanImplementationMessageId()}
+                  onWorkedSummaryHoverChange={handleWorkedSummaryHoverChange}
+                  showCompletedTime={
+                    showPromptNumbers() ||
+                    workedSummaryPromptMessageId() === trailing().summary.promptMessageId
+                  }
+                  suppressTimestampAnimation={suppressTimestampAnimations()}
                 />
               </div>
             )}

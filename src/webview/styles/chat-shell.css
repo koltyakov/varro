@@ -665,7 +665,12 @@ input:focus-visible {
    virtualized row paint containment and keep that row above adjacent content. */
 .interactive-list-track.virtualized
   .interactive-item-container.interactive-request:has(
-    > .chat-turn-user > .message-sent-time.is-visible
+    > .chat-turn-user
+      > :is(
+        .chat-turn-content:hover + .message-sent-time,
+        .message-sent-time.is-visible,
+        .message-sent-time.is-transition-active
+      )
   ) {
   position: relative;
   z-index: var(--z-lifted);
@@ -748,8 +753,12 @@ input:focus-visible {
   white-space: nowrap;
   color: var(--color-vscode-muted);
   opacity: 0;
+  filter: blur(3px);
   pointer-events: none;
   user-select: none;
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease;
 }
 
 .chat-turn-user > .message-sent-time {
@@ -768,6 +777,12 @@ input:focus-visible {
 
 .message-sent-time.is-visible {
   opacity: 1;
+  filter: blur(0);
+}
+
+.message-sent-time.is-animation-suppressed {
+  filter: blur(0);
+  transition: none;
 }
 
 .chat-turn-card {

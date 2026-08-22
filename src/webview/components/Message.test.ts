@@ -1322,9 +1322,11 @@ describe('parseUserMessageContent', () => {
 
 describe('Message user rendering', () => {
   it('reveals a system-formatted time without mounting new layout content', () => {
+    vi.useFakeTimers();
     const now = new Date();
     const created = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45);
     const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
+    const onUserMessageHoverChange = vi.fn();
     cleanup = render(
       () =>
         Message({
@@ -1333,6 +1335,7 @@ describe('Message user rendering', () => {
           get showSentTimestamp() {
             return showSentTimestamp();
           },
+          onUserMessageHoverChange,
         }),
       container!
     );
@@ -1348,6 +1351,31 @@ describe('Message user rendering', () => {
 
     expect(container?.querySelector('.message-sent-time')).toBe(timestamp);
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
+
+    setShowSentTimestamp(false);
+    const card = container?.querySelector('.user-message-card');
+    card?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(150);
+    card?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(150);
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+
+    card?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+    vi.advanceTimersByTime(299);
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-timestamp-today', true);
+    expect(timestamp?.classList.contains('is-visible')).toBe(true);
+    expect(timestamp?.classList.contains('is-transition-active')).toBe(true);
+    card?.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('message-timestamp-today', false);
+    expect(timestamp?.classList.contains('is-visible')).toBe(false);
+    expect(timestamp?.classList.contains('is-transition-active')).toBe(true);
+    vi.advanceTimersByTime(160);
+    expect(timestamp?.classList.contains('is-transition-active')).toBe(false);
   });
 
   it('includes the system-formatted date for messages sent before today', () => {

@@ -1,3 +1,7 @@
+export function formatClockTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(timestamp);
+}
+
 export function formatMessageSentTime(created: number, now = new Date()) {
   const sent = new Date(created);
   const isToday =
@@ -5,8 +9,7 @@ export function formatMessageSentTime(created: number, now = new Date()) {
     sent.getMonth() === now.getMonth() &&
     sent.getDate() === now.getDate();
 
-  return new Intl.DateTimeFormat(
-    undefined,
-    isToday ? { timeStyle: 'short' } : { dateStyle: 'short', timeStyle: 'short' }
-  ).format(sent);
+  return isToday
+    ? formatClockTime(created)
+    : new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(sent);
 }

@@ -59,6 +59,6 @@ test('creates a stable 50-step mixed-ownership action plan', () => {
 
   assert.equal(first.length, 50);
   assert.deepEqual(first, second);
-  assert.equal(first[0].action, 'switch session away and back');
-  assert.equal(first[1].action, 'wheel verified nested scroller, then outer transcript');
+  assert.equal(first[0].action, 'wheel verified nested scroller, then outer transcript');
+  assert.equal(first[1].action, 'switch session away and back');
 });

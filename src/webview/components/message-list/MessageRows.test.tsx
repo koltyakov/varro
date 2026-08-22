@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import type * as UseOpenCodeModule from '../../hooks/useOpenCode';
+import { formatClockTime } from '../../lib/message-time';
 import { setState } from '../../lib/state';
 import { assistantMessage } from '../MessageList.test-utils';
 import { AssistantDialogSummaryForMessage, getForkBoundaryMessageId } from './MessageRows';
@@ -31,6 +32,61 @@ afterEach(() => {
 });
 
 describe('AssistantDialogSummaryForMessage', () => {
+  it('shows the completion clock time and reports its prompt while hovered', () => {
+    vi.useFakeTimers();
+    const completedAt = new Date(2026, 0, 2, 13, 45).getTime();
+    const onWorkedSummaryHoverChange = vi.fn();
+    cleanup = render(
+      () => (
+        <AssistantDialogSummaryForMessage
+          summary={{
+            durationMs: 1_000,
+            completedAt,
+            promptMessageId: 'user-1',
+            inputTokens: 10,
+            outputTokens: 5,
+            agentCount: 0,
+          }}
+          msg={{ info: assistantMessage('assistant-1', { sessionID: 'session-1' }), parts: [] }}
+          hasBuildAgent={false}
+          latestPlanImplementationMessageId={null}
+          onWorkedSummaryHoverChange={onWorkedSummaryHoverChange}
+          showCompletedTime={true}
+        />
+      ),
+      container
+    );
+
+    const summary = container.querySelector<HTMLElement>('.assistant-dialog-summary');
+    const completedTime = summary?.querySelector<HTMLTimeElement>(
+      '.assistant-dialog-summary-completed-time'
+    );
+    expect(completedTime?.textContent).toBe(formatClockTime(completedAt));
+    expect(completedTime?.textContent).not.toMatch(/\d{1,2}\/\d{1,2}/);
+    expect(summary?.classList.contains('is-completion-time-visible')).toBe(true);
+    expect(summary?.querySelector('.assistant-dialog-summary-token-budget')?.textContent).toBe(
+      ' - Tokens ↑ 10 ↓ 5'
+    );
+
+    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(150);
+    summary?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(150);
+    expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
+
+    summary?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(299);
+    expect(onWorkedSummaryHoverChange).not.toHaveBeenCalled();
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', true);
+    expect(summary?.classList.contains('is-hover-intent-active')).toBe(true);
+    summary?.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(onWorkedSummaryHoverChange).toHaveBeenLastCalledWith('user-1', false);
+  });
+
   it('forks the session from the summarized assistant message', () => {
     cleanup = render(
       () => (

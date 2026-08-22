@@ -196,9 +196,11 @@ describe('MessageListChrome', () => {
   });
 
   it('reveals the reserved sticky timestamp without mounting new content', () => {
+    vi.useFakeTimers();
     const now = new Date();
     const sentAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 45).getTime();
     const [showSentTimestamp, setShowSentTimestamp] = createSignal(false);
+    const onUserMessageHoverChange = vi.fn();
     cleanup = render(
       () => (
         <StickyUserMessagePreviewCard
@@ -211,6 +213,7 @@ describe('MessageListChrome', () => {
           }}
           sentAt={sentAt}
           showSentTimestamp={showSentTimestamp()}
+          onUserMessageHoverChange={onUserMessageHoverChange}
         />
       ),
       container!
@@ -226,6 +229,22 @@ describe('MessageListChrome', () => {
 
     expect(container?.querySelector('.latest-user-message-sticky-time')).toBe(timestamp);
     expect(timestamp?.classList.contains('is-visible')).toBe(true);
+
+    const sticky = container?.querySelector('.latest-user-message-sticky');
+    sticky?.dispatchEvent(new MouseEvent('mouseenter'));
+    vi.advanceTimersByTime(150);
+    sticky?.dispatchEvent(new MouseEvent('mouseleave'));
+    vi.advanceTimersByTime(150);
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+
+    sticky?.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(299);
+    expect(onUserMessageHoverChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('msg-1', true);
+    sticky?.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(onUserMessageHoverChange).toHaveBeenLastCalledWith('msg-1', false);
   });
 
   it('toggles the overflow fade as the preview scrolls', async () => {

@@ -10,6 +10,7 @@ import { isLoading, skipPlanSession, state } from '../../lib/state';
 import { prepareMeasuredEntrance } from '../../lib/measured-entrance';
 import type { AssistantActivityGroupInfo } from '../../lib/assistant-activity';
 import { formatNumber, formatTurnDuration, isAssistantMessage } from '../../lib/message-metrics';
+import { formatClockTime } from '../../lib/message-time';
 import type { ToolCallPermissionMatch } from '../../lib/tool-call-matching';
 import type { MessageEntry, QuestionRequest, ToolPart } from '../../types';
 import { ForkIcon } from '../ForkIcon';
@@ -23,11 +24,17 @@ import {
 } from './plan-actions';
 import type { AssistantDialogSummaryInfo } from './assistant-dialog';
 
+const HOVER_INTENT_DELAY_MS = 300;
+
 export type MessageRowSharedProps = {
   modelChangeMap: Map<string, ModelChangeInfo>;
   promptNumberMap: ReadonlyMap<string, number>;
   showPromptNumbers: boolean;
   showSentTimestamps: boolean;
+  revealedSentTimestampMessageId?: string | null;
+  revealedWorkedSummaryPromptMessageId?: string | null;
+  showWorkedSummaryTimes?: boolean;
+  suppressTimestampAnimations?: boolean;
   lastAssistantID: string | null;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -46,6 +53,8 @@ export type MessageRowSharedProps = {
   observeMeasuredRow?: (element: HTMLDivElement, messageId: string, active: boolean) => void;
   questionRequestForTool: (part: ToolPart) => QuestionRequest | null;
   permissionMatchForTool: (part: ToolPart) => ToolCallPermissionMatch | null;
+  onWorkedSummaryHoverChange?: (promptMessageId: string, hovering: boolean) => void;
+  onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
 };
 
 export type ModelChangeInfo = {
@@ -209,7 +218,11 @@ export function MessageRow(
             promptNumber={
               props.showPromptNumbers ? props.promptNumberMap.get(props.msg.info.id) : undefined
             }
-            showSentTimestamp={props.showSentTimestamps}
+            showSentTimestamp={
+              props.showSentTimestamps || props.revealedSentTimestampMessageId === props.msg.info.id
+            }
+            onUserMessageHoverChange={props.onUserMessageHoverChange}
+            suppressTimestampAnimation={props.suppressTimestampAnimations}
             isLastAssistant={props.msg.info.id === props.lastAssistantID}
             nearViewport={props.nearViewport}
             outerListVirtualized={props.outerListVirtualized}
@@ -238,6 +251,12 @@ export function MessageRow(
               msg={props.msg}
               hasBuildAgent={props.hasBuildAgent}
               latestPlanImplementationMessageId={props.latestPlanImplementationMessageId}
+              onWorkedSummaryHoverChange={props.onWorkedSummaryHoverChange}
+              showCompletedTime={
+                props.showWorkedSummaryTimes ||
+                props.revealedWorkedSummaryPromptMessageId === assistantSummary().promptMessageId
+              }
+              suppressTimestampAnimation={props.suppressTimestampAnimations}
             />
           )}
         </Show>
@@ -250,7 +269,12 @@ export function AssistantDialogSummaryForMessage(
   props: {
     summary: AssistantDialogSummaryInfo;
     msg: MessageEntry;
-  } & Pick<MessageRowSharedProps, 'hasBuildAgent' | 'latestPlanImplementationMessageId'>
+    showCompletedTime?: boolean;
+    suppressTimestampAnimation?: boolean;
+  } & Pick<
+    MessageRowSharedProps,
+    'hasBuildAgent' | 'latestPlanImplementationMessageId' | 'onWorkedSummaryHoverChange'
+  >
 ) {
   return (
     <AssistantDialogSummary
@@ -277,6 +301,9 @@ export function AssistantDialogSummaryForMessage(
           ? forkSession(props.msg.info.sessionID, boundaryMessageId)
           : forkSession(props.msg.info.sessionID));
       }}
+      onWorkedSummaryHoverChange={props.onWorkedSummaryHoverChange}
+      showCompletedTime={props.showCompletedTime}
+      suppressTimestampAnimation={props.suppressTimestampAnimation}
     />
   );
 }
@@ -300,6 +327,9 @@ function AssistantDialogSummary(props: {
   onImplementPlan?: () => void;
   onSkipPlan?: () => void;
   onFork: () => void;
+  onWorkedSummaryHoverChange?: (promptMessageId: string, hovering: boolean) => void;
+  showCompletedTime?: boolean;
+  suppressTimestampAnimation?: boolean;
 }) {
   const tokenSuffix = () =>
     props.summary.inputTokens > 0 || props.summary.outputTokens > 0
@@ -313,16 +343,74 @@ function AssistantDialogSummary(props: {
       : props.summary.questionSkipped
         ? ' - Question skipped'
         : '';
+  const isWorkedSummary = () => !props.summary.interrupted && !props.summary.collectingStats;
+  const completedTime = () =>
+    isWorkedSummary() && props.summary.completedAt !== undefined
+      ? formatClockTime(props.summary.completedAt)
+      : null;
+  const onWorkedSummaryHoverChange = props.onWorkedSummaryHoverChange;
+  let hoveredPromptMessageId: string | null = null;
+  let hoverIntentTimer: ReturnType<typeof setTimeout> | undefined;
+  const [isHoverIntentActive, setIsHoverIntentActive] = createSignal(false);
+  const notifyHoverChange = (hovering: boolean) => {
+    if (hoverIntentTimer) {
+      clearTimeout(hoverIntentTimer);
+      hoverIntentTimer = undefined;
+    }
+    if (!hovering) {
+      setIsHoverIntentActive(false);
+      if (hoveredPromptMessageId) {
+        onWorkedSummaryHoverChange?.(hoveredPromptMessageId, false);
+        hoveredPromptMessageId = null;
+      }
+      return;
+    }
+    if (!isWorkedSummary() || !props.summary.promptMessageId) return;
+    const promptMessageId = props.summary.promptMessageId;
+    hoverIntentTimer = setTimeout(() => {
+      hoverIntentTimer = undefined;
+      hoveredPromptMessageId = promptMessageId;
+      setIsHoverIntentActive(true);
+      onWorkedSummaryHoverChange?.(promptMessageId, true);
+    }, HOVER_INTENT_DELAY_MS);
+  };
+  onCleanup(() => {
+    if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
+    if (hoveredPromptMessageId) {
+      onWorkedSummaryHoverChange?.(hoveredPromptMessageId, false);
+    }
+  });
 
   return (
-    <div class="model-change-indicator assistant-dialog-summary">
+    <div
+      class={`model-change-indicator assistant-dialog-summary${props.showCompletedTime || isHoverIntentActive() ? ' is-completion-time-visible' : ''}${isHoverIntentActive() ? ' is-hover-intent-active' : ''}`}
+      data-prompt-msg-id={props.summary.promptMessageId}
+      onMouseEnter={() => notifyHoverChange(true)}
+      onMouseLeave={() => notifyHoverChange(false)}
+    >
       <div class="assistant-dialog-summary-content">
+        <Show when={completedTime()}>
+          {(time) => (
+            <time
+              class={`assistant-dialog-summary-completed-time${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
+              dateTime={new Date(props.summary.completedAt!).toISOString()}
+            >
+              <span class="assistant-dialog-summary-completed-time-text">{time()}</span>
+            </time>
+          )}
+        </Show>
         <span class="model-change-label">
-          {props.summary.interrupted
-            ? 'Interrupted'
-            : props.summary.collectingStats
-              ? 'Collecting stats...'
-              : `Worked for ${formatTurnDuration(props.summary.durationMs)}${statusSuffix()}${tokenSuffix()}${agentSuffix()}`}
+          <Show
+            when={!props.summary.interrupted && !props.summary.collectingStats}
+            fallback={props.summary.interrupted ? 'Interrupted' : 'Collecting stats...'}
+          >
+            Worked for {formatTurnDuration(props.summary.durationMs)}
+            {statusSuffix()}
+            <Show when={tokenSuffix()}>
+              {(tokens) => <span class="assistant-dialog-summary-token-budget">{tokens()}</span>}
+            </Show>
+            {agentSuffix()}
+          </Show>
         </span>
         <Tooltip content="Fork chat from here" delay={500}>
           <button

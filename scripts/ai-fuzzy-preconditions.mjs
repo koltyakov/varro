@@ -110,8 +110,8 @@ export function buildActionPlan(seed) {
   const width = [360, 430, 486, 720];
   const keys = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Space', 'Shift+Space', 'Home', 'End'];
   const required = [
-    'switch session away and back',
     'wheel verified nested scroller, then outer transcript',
+    'switch session away and back',
     'PageDown on transcript',
     'Space on transcript',
     'Shift+Space on transcript',

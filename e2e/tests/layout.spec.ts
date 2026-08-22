@@ -278,8 +278,8 @@ test('keeps active-tray wheel input local before outer transcript movement', asy
   await expect(trayItems.locator('.assistant-active-activity-item')).toHaveCount(12);
   await trayItems.evaluate(async (element) => {
     await Promise.all(
-      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap((item) =>
-        item.getAnimations().map((animation) => animation.finished)
+      [...element.querySelectorAll<HTMLElement>('.assistant-active-activity-item')].flatMap(
+        (item) => item.getAnimations().map((animation) => animation.finished)
       )
     );
   });
@@ -1156,8 +1156,7 @@ test('keeps revealed timestamps above Explored in virtualized rows', async ({ pa
       rowContain: getComputedStyle(row).contain,
       rowZIndex: Number(getComputedStyle(row).zIndex),
       activityZIndex: Number(getComputedStyle(followingActivity).zIndex),
-      extendsPastRow:
-        element.getBoundingClientRect().bottom > row.getBoundingClientRect().bottom,
+      extendsPastRow: element.getBoundingClientRect().bottom > row.getBoundingClientRect().bottom,
     };
   });
   await page.keyboard.up('Alt');
@@ -1165,6 +1164,129 @@ test('keeps revealed timestamps above Explored in virtualized rows', async ({ pa
   expect(stacking.extendsPastRow).toBe(true);
   expect(stacking.rowContain).not.toContain('paint');
   expect(stacking.rowZIndex).toBeGreaterThan(stacking.activityZIndex);
+});
+
+test('reveals user and sticky message timestamps on hover', async ({ page }) => {
+  await page.setViewportSize({ width: 486, height: 800 });
+  await page.goto('/e2e/harness/index.html?scenario=sticky-preview');
+
+  const userTurn = page.locator('.chat-turn-user').last();
+  const userTimestamp = userTurn.locator(':scope > .message-sent-time');
+  await expect(userTimestamp).toHaveCSS('opacity', '0');
+  await expect(userTimestamp).toHaveCSS('filter', 'blur(3px)');
+  await expect(userTimestamp).toHaveCSS('transition-duration', '0.12s, 0.12s');
+  await userTurn.locator(':scope > .user-message-card').hover();
+  await expect(userTimestamp).toHaveCSS('opacity', '1');
+  await expect(userTimestamp).toHaveCSS('filter', 'blur(0px)');
+
+  const list = page.locator('.interactive-list');
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await page.getByRole('textbox', { name: 'Message composer' }).hover();
+
+  const sticky = page.locator('.latest-user-message-sticky');
+  const stickyTimestamp = page.locator('.latest-user-message-sticky-time');
+  await expect(sticky).toBeVisible();
+  await expect(stickyTimestamp).toHaveCSS('opacity', '0');
+  await expect(stickyTimestamp).toHaveCSS('filter', 'blur(3px)');
+  await expect(stickyTimestamp).toHaveCSS('transition-duration', '0.12s, 0.12s');
+  await sticky.hover();
+  await expect(stickyTimestamp).toHaveCSS('opacity', '1');
+  await expect(stickyTimestamp).toHaveCSS('filter', 'blur(0px)');
+
+  await page.getByRole('textbox', { name: 'Message composer' }).hover();
+  const workedSummary = page.locator('.assistant-dialog-summary').last();
+  const completedTime = workedSummary.locator('.assistant-dialog-summary-completed-time');
+  const tokenBudget = workedSummary.locator('.assistant-dialog-summary-token-budget');
+  await expect(workedSummary).toContainText('Worked for');
+  await expect(tokenBudget).not.toHaveCSS('display', 'none');
+  await expect(completedTime).toHaveCSS('opacity', '0');
+  await expect(completedTime).toHaveCSS('filter', 'blur(3px)');
+  await expect(completedTime).toHaveCSS('transition-duration', '0.12s, 0.12s');
+  await workedSummary.hover();
+  await expect(completedTime).toHaveCSS('opacity', '1');
+  await expect(completedTime).toHaveCSS('filter', 'blur(0px)');
+  const promptMessageId = await workedSummary.getAttribute('data-prompt-msg-id');
+  expect(promptMessageId).not.toBeNull();
+  const matchingSticky = page.locator(
+    `.latest-user-message-sticky-overlay[data-sticky-msg-id="${promptMessageId}"]`
+  );
+  const promptTimestamp = (await matchingSticky.count())
+    ? stickyTimestamp
+    : page.locator(`[data-msg-id="${promptMessageId}"] .message-sent-time`);
+  await expect(promptTimestamp).toHaveCSS('opacity', '1');
+
+  const promptCard = page.locator(`[data-msg-id="${promptMessageId}"] .user-message-card`);
+  await expect(promptCard).toBeInViewport();
+  await page.getByRole('textbox', { name: 'Message composer' }).hover();
+  await expect(completedTime).toHaveCSS('opacity', '0');
+  await expect(completedTime).toHaveCSS('filter', 'blur(3px)');
+  await promptCard.hover();
+  await expect(completedTime).toHaveCSS('opacity', '1');
+  await expect(completedTime).toHaveCSS('filter', 'blur(0px)');
+  const timeChipStyle = await completedTime.evaluate((element) => {
+    const summary = element.closest<HTMLElement>('.assistant-dialog-summary');
+    const content = summary?.querySelector<HTMLElement>('.assistant-dialog-summary-content');
+    const fork = summary?.querySelector<HTMLElement>('.assistant-dialog-summary-fork');
+    if (!summary || !content || !fork) throw new Error('Worked time chip fixtures are missing');
+    const chipStyle = getComputedStyle(element);
+    const chipBorderStyle = getComputedStyle(element, '::before');
+    const timeText = element.querySelector<HTMLElement>(
+      '.assistant-dialog-summary-completed-time-text'
+    );
+    if (!timeText) throw new Error('Worked time text is missing');
+    const lineStyle = getComputedStyle(content, '::before');
+    return {
+      left: element.getBoundingClientRect().left - summary.getBoundingClientRect().left,
+      borderBottom: Number.parseFloat(chipBorderStyle.bottom),
+      backgroundColor: chipStyle.backgroundColor,
+      chatBackgroundColor: getComputedStyle(document.body).backgroundColor,
+      borderColor: chipBorderStyle.borderBottomColor,
+      borderTop: Number.parseFloat(chipBorderStyle.top),
+      borderTopWidth: chipBorderStyle.borderTopWidth,
+      borderRadius: chipBorderStyle.borderBottomLeftRadius,
+      paddingLeft: chipStyle.paddingLeft,
+      paddingRight: chipStyle.paddingRight,
+      textCenter:
+        timeText.getBoundingClientRect().top +
+        timeText.getBoundingClientRect().height / 2 -
+        element.getBoundingClientRect().top,
+      bottomPadding:
+        element.getBoundingClientRect().bottom -
+        Number.parseFloat(chipBorderStyle.bottom) -
+        timeText.getBoundingClientRect().bottom,
+      forkRadius: getComputedStyle(fork).borderTopLeftRadius,
+      lineColor: lineStyle.backgroundColor,
+    };
+  });
+  expect(timeChipStyle.left).toBeCloseTo(5, 0);
+  expect(timeChipStyle.borderBottom).toBeCloseTo(3, 0);
+  expect(timeChipStyle.backgroundColor).toBe(timeChipStyle.chatBackgroundColor);
+  expect(timeChipStyle.borderColor).toBe(timeChipStyle.lineColor);
+  expect(timeChipStyle.borderTop).toBeCloseTo(12, 0);
+  expect(timeChipStyle.textCenter).toBeCloseTo(timeChipStyle.borderTop, 0);
+  expect(timeChipStyle.borderTopWidth).toBe('0px');
+  expect(timeChipStyle.borderRadius).toBe(timeChipStyle.forkRadius);
+  expect(timeChipStyle.paddingLeft).toBe('5px');
+  expect(timeChipStyle.paddingRight).toBe(timeChipStyle.paddingLeft);
+  expect(timeChipStyle.bottomPadding).toBeCloseTo(3, 0);
+  expect(timeChipStyle.bottomPadding).toBeLessThan(Number.parseFloat(timeChipStyle.paddingLeft));
+
+  await page.getByRole('textbox', { name: 'Message composer' }).hover();
+  await expect(completedTime).toHaveCSS('opacity', '0');
+  await page.keyboard.down('Alt');
+  await expect(completedTime).toHaveCSS('opacity', '1');
+  await expect(completedTime).toHaveCSS('filter', 'blur(0px)');
+  await expect(completedTime).toHaveCSS('transition-duration', '0s');
+  await expect(stickyTimestamp).toHaveCSS('transition-duration', '0s');
+  await page.keyboard.up('Alt');
+  await expect(completedTime).toHaveCSS('opacity', '0');
+  await expect(completedTime).toHaveCSS('transition-duration', '0.12s, 0.12s');
+
+  await page.setViewportSize({ width: 410, height: 800 });
+  await expect(tokenBudget).toHaveCSS('display', 'none');
 });
 
 test('matches the visual incoming Thinking gap to markdown', async ({ page }) => {
@@ -1726,10 +1848,7 @@ test('model picker does not paint behind the sticky prompt', async ({ page }) =>
     const overlapHeight = overlapBottom - overlapTop;
     const surfacesOverlap = overlapWidth > 0 && overlapHeight > 0;
     const topElement = surfacesOverlap
-      ? document.elementFromPoint(
-          overlapLeft + overlapWidth / 2,
-          overlapTop + overlapHeight / 2
-        )
+      ? document.elementFromPoint(overlapLeft + overlapWidth / 2, overlapTop + overlapHeight / 2)
       : null;
 
     return {
@@ -2302,11 +2421,15 @@ test('sticky collision handoff does not blink across user message render variant
     expect(result.prematureHide, JSON.stringify({ variant, result })).toBe(false);
     expect(result.reappeared, JSON.stringify({ variant, result })).toBe(false);
     expect(result.transitions, JSON.stringify({ variant, result })).toBe(1);
-    expect(result.maxSourceBeyondOverlay, JSON.stringify({ variant, result })).toBeLessThanOrEqual(0);
+    expect(result.maxSourceBeyondOverlay, JSON.stringify({ variant, result })).toBeLessThanOrEqual(
+      0
+    );
   }
 });
 
-test('active streaming never covers the mounted first prompt with a sticky copy', async ({ page }) => {
+test('active streaming never covers the mounted first prompt with a sticky copy', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 486, height: 800 });
   await page.goto(
     '/e2e/harness/index.html?scenario=sticky-preview-large-transcript&longActiveTurn=1'
@@ -2378,9 +2501,10 @@ test('active streaming never covers the mounted first prompt with a sticky copy'
     return result;
   });
 
-  expect(samples.some((sample) => sample.firstPromptBottom !== null), JSON.stringify(samples)).toBe(
-    true
-  );
+  expect(
+    samples.some((sample) => sample.firstPromptBottom !== null),
+    JSON.stringify(samples)
+  ).toBe(true);
   expect(
     samples.every(
       (sample) =>

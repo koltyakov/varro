@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createMemo, createResource, createSignal, onCleanup } from 'solid-js';
 import {
   friendlyErrorName,
   isAbortedAssistantError,
@@ -78,6 +78,8 @@ export type {
 const FINAL_MARK_PULSE_MIN_DURATION_MS = 600;
 const FINAL_MARK_PULSE_DURATION_PER_PIXEL_MS = 6;
 const FINAL_MARK_PULSE_DURATION_PROPERTY = '--assistant-final-mark-pulse-duration';
+const HOVER_INTENT_DELAY_MS = 300;
+const TIMESTAMP_TRANSITION_RETAIN_MS = 160;
 const FINAL_MARK_RAIL_SELECTOR = [
   '.assistant-turn-content-highlighted',
   '.assistant-turn-content-planning',
@@ -100,6 +102,8 @@ export function Message(props: {
   parts: Part[];
   promptNumber?: number;
   showSentTimestamp?: boolean;
+  suppressTimestampAnimation?: boolean;
+  onUserMessageHoverChange?: (messageId: string, hovering: boolean) => void;
   isLastAssistant?: boolean;
   nearViewport?: boolean;
   outerListVirtualized?: boolean;
@@ -167,6 +171,55 @@ export function Message(props: {
   });
 
   const isUser = () => props.info.role === 'user';
+  const onUserMessageHoverChange = props.onUserMessageHoverChange;
+  let hoveredUserMessageId: string | null = null;
+  let hoverIntentTimer: ReturnType<typeof setTimeout> | undefined;
+  let timestampTransitionTimer: ReturnType<typeof setTimeout> | undefined;
+  const [isUserMessageHoverActive, setIsUserMessageHoverActive] = createSignal(false);
+  const [timestampTransitionActive, setTimestampTransitionActive] = createSignal(false);
+  const timestampVisible = () => !!props.showSentTimestamp || isUserMessageHoverActive();
+  const notifyUserMessageHoverChange = (hovering: boolean) => {
+    if (hoverIntentTimer) {
+      clearTimeout(hoverIntentTimer);
+      hoverIntentTimer = undefined;
+    }
+    if (!hovering) {
+      setIsUserMessageHoverActive(false);
+      if (hoveredUserMessageId) {
+        onUserMessageHoverChange?.(hoveredUserMessageId, false);
+        hoveredUserMessageId = null;
+      }
+      return;
+    }
+    if (!isUser()) return;
+    const messageId = props.info.id;
+    hoverIntentTimer = setTimeout(() => {
+      hoverIntentTimer = undefined;
+      hoveredUserMessageId = messageId;
+      setIsUserMessageHoverActive(true);
+      onUserMessageHoverChange?.(messageId, true);
+    }, HOVER_INTENT_DELAY_MS);
+  };
+  createEffect(() => {
+    if (timestampTransitionTimer) {
+      clearTimeout(timestampTransitionTimer);
+      timestampTransitionTimer = undefined;
+    }
+    if (timestampVisible()) {
+      setTimestampTransitionActive(true);
+      return;
+    }
+    if (!timestampTransitionActive()) return;
+    timestampTransitionTimer = setTimeout(() => {
+      timestampTransitionTimer = undefined;
+      setTimestampTransitionActive(false);
+    }, TIMESTAMP_TRANSITION_RETAIN_MS);
+  });
+  onCleanup(() => {
+    if (hoverIntentTimer) clearTimeout(hoverIntentTimer);
+    if (timestampTransitionTimer) clearTimeout(timestampTransitionTimer);
+    if (hoveredUserMessageId) onUserMessageHoverChange?.(hoveredUserMessageId, false);
+  });
   const sentTimestamp = createMemo(() => formatMessageSentTime(props.info.time.created));
   const assistant = () => (isAssistantMessage(props.info) ? props.info : null);
   // While the composer's usage-limit banner is up for this session, the latest
@@ -425,6 +478,8 @@ export function Message(props: {
                 : assistantContainerClass()
             } ${isSubagent() ? 'chat-turn-subagent' : ''} ${canEditUserMessage() && !isEditingUserMessage() ? 'user-message-card-editable' : ''}`}
             onClick={handleUserCardClick}
+            onMouseEnter={() => notifyUserMessageHoverChange(true)}
+            onMouseLeave={() => notifyUserMessageHoverChange(false)}
           >
             <Show when={isUser() && props.promptNumber}>
               {(promptNumber) => (
@@ -469,9 +524,9 @@ export function Message(props: {
           </div>
           <Show when={isUser()}>
             <time
-              class={`message-sent-time${props.showSentTimestamp ? ' is-visible' : ''}`}
+              class={`message-sent-time${timestampVisible() ? ' is-visible' : ''}${timestampTransitionActive() ? ' is-transition-active' : ''}${props.suppressTimestampAnimation ? ' is-animation-suppressed' : ''}`}
               dateTime={new Date(props.info.time.created).toISOString()}
-              aria-hidden={!props.showSentTimestamp}
+              aria-hidden={!timestampVisible()}
             >
               {sentTimestamp()}
             </time>

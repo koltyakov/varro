@@ -1010,6 +1010,7 @@ body.vscode-light
 
 .model-change-indicator.assistant-dialog-summary {
   --assistant-summary-fork-border: color-mix(in srgb, var(--color-vscode-border) 70%, transparent);
+  --assistant-summary-line-color: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
 
   font-variant-numeric: tabular-nums;
   margin-top: 10px;
@@ -1018,6 +1019,7 @@ body.vscode-light
   height: 24px;
   box-sizing: border-box;
   display: block;
+  container-type: inline-size;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -1045,6 +1047,68 @@ body.vscode-light
   gap: 8px;
 }
 
+.assistant-dialog-summary-completed-time {
+  --assistant-summary-time-chip-radius: var(--radius-control);
+  --assistant-summary-time-chip-line: 12px;
+
+  position: absolute;
+  left: 5px;
+  top: 0;
+  height: 24px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--color-vscode-muted);
+  background: var(--color-vscode-list-bg);
+  border-radius: var(--radius-control);
+  opacity: 0;
+  filter: blur(3px);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease;
+}
+
+.assistant-dialog-summary-completed-time::before {
+  content: '';
+  position: absolute;
+  top: var(--assistant-summary-time-chip-line);
+  bottom: 3px;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--assistant-summary-line-color);
+  border-top: 0;
+  border-radius: 0 0 var(--assistant-summary-time-chip-radius)
+    var(--assistant-summary-time-chip-radius);
+  pointer-events: none;
+}
+
+.assistant-dialog-summary-completed-time-text {
+  position: relative;
+  z-index: 1;
+  color: color-mix(in srgb, var(--color-vscode-muted) 65%, transparent);
+}
+
+.assistant-dialog-summary.is-completion-time-visible .assistant-dialog-summary-completed-time {
+  opacity: 1;
+  filter: blur(0);
+}
+
+.assistant-dialog-summary-completed-time.is-animation-suppressed {
+  filter: blur(0);
+  transition: none;
+}
+
+@container (max-width: 400px) {
+  .assistant-dialog-summary-token-budget {
+    display: none;
+  }
+}
+
 .assistant-dialog-summary-fork {
   position: absolute;
   right: 5px;
@@ -1062,16 +1126,24 @@ body.vscode-light
   box-shadow: 0 1px 4px color-mix(in srgb, var(--color-vscode-widget-shadow) 70%, transparent);
   cursor: pointer;
   opacity: 0;
+  filter: blur(2px);
   pointer-events: none;
   transition:
-    opacity 100ms ease,
-    color 100ms ease,
-    background-color 100ms ease;
+    opacity 120ms ease,
+    filter 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
 }
 
-.assistant-dialog-summary:hover .assistant-dialog-summary-fork,
+.assistant-dialog-summary.is-hover-intent-active .assistant-dialog-summary-fork {
+  opacity: 1;
+  filter: blur(0);
+  pointer-events: auto;
+}
+
 .assistant-dialog-summary-fork:focus-visible {
   opacity: 1;
+  filter: blur(0);
   pointer-events: auto;
 }
 
@@ -1093,6 +1165,7 @@ body.vscode-light
 @media (hover: none) {
   .assistant-dialog-summary-fork:not(:disabled) {
     opacity: 1;
+    filter: blur(0);
     pointer-events: auto;
   }
 }
@@ -1102,13 +1175,12 @@ body.vscode-light
   content: '';
   flex: 1;
   height: 1px;
-  background: color-mix(in srgb, var(--color-vscode-border) 30%, transparent);
+  background: var(--assistant-summary-line-color);
   transition: background-color 100ms ease;
 }
 
-.assistant-dialog-summary:hover .assistant-dialog-summary-content::before,
-.assistant-dialog-summary:hover .assistant-dialog-summary-content::after {
-  background: var(--assistant-summary-fork-border);
+.assistant-dialog-summary:hover {
+  --assistant-summary-line-color: var(--assistant-summary-fork-border);
 }
 
 .assistant-dialog-summary-actions {
