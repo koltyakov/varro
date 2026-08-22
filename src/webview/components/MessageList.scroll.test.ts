@@ -785,6 +785,98 @@ describe('MessageList auto-scroll', () => {
     animationFrames.restore();
   });
 
+  it('preserves a painted descendant when width reflow changes its row-relative position', async () => {
+    const animationFrames = installQueuedAnimationFrameMocks();
+    let hostWidth = 500;
+    vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => hostWidth);
+
+    const rowHeight = 300;
+    let markerOffset = 140;
+    let list: HTMLDivElement | null = null;
+    let scrollTopValue = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this === list || this.classList.contains('interactive-list')) {
+          return new DOMRect(0, 0, hostWidth, 400);
+        }
+        if (this.classList.contains('interactive-list-track')) {
+          return new DOMRect(0, 0, hostWidth, 50 * rowHeight);
+        }
+        const row = this.dataset.msgId
+          ? this
+          : (this.closest<HTMLElement>('[data-msg-id]') ?? null);
+        const messageId = row?.dataset.msgId;
+        if (messageId?.startsWith('assistant-')) {
+          const index = Number(messageId.replace('assistant-', ''));
+          const rowTop = index * rowHeight - scrollTopValue;
+          if (this.matches('.rendered-markdown p')) {
+            return new DOMRect(0, rowTop + markerOffset, hostWidth, 20);
+          }
+          return new DOMRect(0, rowTop, hostWidth, rowHeight);
+        }
+        return new DOMRect(0, 0, hostWidth, 40);
+      }
+    );
+
+    setState('activeSessionId', 'session-1');
+    replaceMessages(
+      Array.from({ length: 50 }, (_, index) => {
+        const messageId = `assistant-${index}`;
+        return {
+          info: assistantMessage(messageId),
+          parts: [{ ...textPart(`text-${index}`, `Response ${index}`), messageID: messageId }],
+        };
+      })
+    );
+    cleanup = render(() => MessageList(), container!);
+    // SAFETY: The rendered DOM fixture provides the browser shape used by this statement.
+    list = container?.querySelector('.interactive-list') as HTMLDivElement;
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, get: () => hostWidth });
+    Object.defineProperty(list, 'offsetWidth', { configurable: true, get: () => hostWidth });
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 50 * rowHeight });
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTopValue,
+      set: (value: number) => {
+        scrollTopValue = value;
+      },
+    });
+
+    for (let frame = 0; frame < 4; frame += 1) {
+      await Promise.resolve();
+      animationFrames.flush();
+    }
+
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scrollTopValue = 20 * rowHeight;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    animationFrames.flush();
+    await Promise.resolve();
+    list.dispatchEvent(new Event('scroll'));
+    animationFrames.flush();
+    await Promise.resolve();
+    list.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 0 }));
+
+    scrollTopValue = 22 * rowHeight;
+    list.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+
+    const marker = container?.querySelector<HTMLElement>(
+      '[data-msg-id="assistant-22"] .rendered-markdown p'
+    );
+    expect(marker?.getBoundingClientRect().top).toBe(140);
+
+    markerOffset = 162;
+    hostWidth = 360;
+    window.dispatchEvent(new Event('resize'));
+    expect(marker?.getBoundingClientRect().top).toBe(140);
+    animationFrames.flush();
+    expect(marker?.getBoundingClientRect().top).toBe(140);
+    animationFrames.restore();
+  });
+
   it('preserves the wheel destination when width reflow precedes the native scroll event', async () => {
     const animationFrames = installQueuedAnimationFrameMocks();
     const observers: Array<{

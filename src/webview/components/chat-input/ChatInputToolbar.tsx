@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import packageJson from '../../../../package.json';
 import type { Agent } from '../../types';
 import type { ContextBreakdownSegment } from '../../../shared/context-breakdown';
 import type {
@@ -7,6 +8,7 @@ import type {
   ProviderLimitStatus,
   WorkspaceFolderContext,
 } from '../../../shared/protocol';
+import { postMessage } from '../../lib/bridge';
 import { Tooltip } from '../Tooltip';
 import { AttachButton } from './AttachButton';
 import { BusySendMenu } from './BusySendMenu';
@@ -149,6 +151,31 @@ type ChatInputMainToolbarProps = ToolbarSharedProps & {
 
 const SELECTION_COST_WARNING =
   'Switching the model or reasoning level mid-session may make this request more expensive.';
+const VARRO_REPOSITORY_URL = packageJson.repository;
+
+function openVarroRepository(event: MouseEvent) {
+  event.preventDefault();
+  postMessage({
+    type: 'vscode/open-external',
+    payload: { url: VARRO_REPOSITORY_URL },
+  });
+}
+
+function VarroRepositoryLink() {
+  return (
+    <a
+      class="toolbar-repository-link"
+      href={VARRO_REPOSITORY_URL}
+      aria-label={`Varro v${packageJson.version} on GitHub`}
+      onClick={openVarroRepository}
+    >
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+        <path d="M12 .7C5.75.7.7 5.77.7 12.04c0 5.01 3.24 9.26 7.73 10.76.56.1.77-.25.77-.55v-2.19c-3.15.69-3.81-1.34-3.81-1.34-.51-1.31-1.26-1.66-1.26-1.66-1.03-.71.08-.7.08-.7 1.14.08 1.74 1.17 1.74 1.17 1.01 1.74 2.65 1.24 3.3.95.1-.74.4-1.24.72-1.52-2.51-.29-5.15-1.26-5.15-5.6 0-1.24.44-2.25 1.17-3.04-.12-.29-.51-1.44.11-3 0 0 .95-.31 3.11 1.16a10.8 10.8 0 0 1 5.66 0C17.03 5.38 17.98 5.69 17.98 5.69c.62 1.56.23 2.71.11 3 .73.79 1.17 1.8 1.17 3.04 0 4.35-2.65 5.3-5.17 5.59.41.35.77 1.04.77 2.1v2.83c0 .3.2.66.78.55a11.35 11.35 0 0 0 7.66-10.76C23.3 5.77 18.24.7 12 .7Z" />
+      </svg>
+      <span>v{packageJson.version}</span>
+    </a>
+  );
+}
 
 function SelectionCostWarning(props: {
   providerName: string;
@@ -314,12 +341,18 @@ export function ChatInputMainToolbar(props: ChatInputMainToolbarProps) {
 
 export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
   const hasContextControl = () => props.showContextControl && !!props.contextUsage;
+  const showRepositoryLink = () =>
+    !props.showMcpControl &&
+    props.activeLspNames.length === 0 &&
+    !hasContextControl() &&
+    props.providerLimitBadges.length === 0;
   const showMetaRow = () =>
     props.showPermissionControl ||
     props.showMcpControl ||
     props.activeLspNames.length > 0 ||
     hasContextControl() ||
-    props.providerLimitBadges.length > 0;
+    props.providerLimitBadges.length > 0 ||
+    showRepositoryLink();
 
   return (
     <Show when={showMetaRow()}>
@@ -343,6 +376,10 @@ export function ChatInputMetaToolbar(props: ChatInputMetaToolbarProps) {
         </div>
 
         <div class="toolbar-meta-right">
+          <Show when={showRepositoryLink()}>
+            <VarroRepositoryLink />
+          </Show>
+
           <Show when={props.activeLspNames.length > 0}>
             <Tooltip
               content={`${props.activeLspNames.length} active LSP${props.activeLspNames.length === 1 ? '' : 's'}: ${props.activeLspNames.join(', ')}`}

@@ -201,6 +201,35 @@ describe('WebviewSession', () => {
     expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
   });
 
+  it('cancels requests owned by the disposed current view', async () => {
+    const { session, bridge, deps } = createSession();
+    const view = createWebviewView(true);
+
+    await session.resolve(view as never);
+    view.listeners.dispose?.();
+
+    expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
+    expect(session.getRequestGeneration()).toBe(2);
+    expect(bridge.getView()).toBeUndefined();
+  });
+
+  it('does not cancel a replacement generation from a stale view disposal callback', async () => {
+    const { session, bridge, deps } = createSession();
+    const first = createWebviewView(true);
+    const second = createWebviewView(true);
+
+    await session.resolve(first as never);
+    const disposeFirst = first.listeners.dispose;
+    await session.resolve(second as never);
+    disposeFirst?.();
+
+    expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2]]);
+    expect(bridge.getView()).toBe(second);
+
+    second.listeners.dispose?.();
+    expect(deps.cancelApiRequestsBeforeGeneration.mock.calls).toEqual([[1], [2], [3]]);
+  });
+
   it('queues focus, search, and attention commands until the webview is visible and ready', async () => {
     const { session, bridge, sessionState, deps } = createSession();
     const view = createWebviewView(false);

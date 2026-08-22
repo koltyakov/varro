@@ -991,10 +991,6 @@ export function MessageList() {
         ? getMountedScrollAnchorElement(lastDetachedVisibleAnchor)
         : null;
       const rememberedRect = rememberedElement?.getBoundingClientRect();
-      const directElementIsCurrent = !!(
-        lastDetachedVisibleAnchor?.element?.isConnected &&
-        containerRef?.contains(lastDetachedVisibleAnchor.element)
-      );
       const rememberedElementIsVisible = !!(
         rememberedRect &&
         containerRect &&
@@ -1002,11 +998,7 @@ export function MessageList() {
         rememberedRect.top < containerRect.bottom
       );
       const rememberedAnchor =
-        lastDetachedVisibleAnchor &&
-        (directElementIsCurrent ||
-          (!lastDetachedVisibleAnchor.element && rememberedElementIsVisible))
-          ? lastDetachedVisibleAnchor
-          : null;
+        lastDetachedVisibleAnchor && rememberedElementIsVisible ? lastDetachedVisibleAnchor : null;
       const virtualAnchor =
         containerRef && shouldVirtualize()
           ? captureDetachedVisibleScrollAnchor(containerRef.scrollTop)
@@ -2510,7 +2502,8 @@ export function MessageList() {
 
   function refineTallRenderItemScrollAnchor(
     anchor: VisibleScrollAnchor | null,
-    preferredViewportOffset = 0
+    preferredViewportOffset = 0,
+    options?: { includeCompact?: boolean }
   ) {
     if (!containerRef || !anchor) return anchor;
     const containerRect = containerRef.getBoundingClientRect();
@@ -2521,12 +2514,18 @@ export function MessageList() {
     const renderItem = getMountedScrollAnchorElement(
       anchor.element ? { ...anchor, element: undefined } : anchor
     );
-    if (!renderItem || renderItem.getBoundingClientRect().height <= containerRef.clientHeight) {
+    if (
+      !renderItem ||
+      (!options?.includeCompact &&
+        renderItem.getBoundingClientRect().height <= containerRef.clientHeight)
+    ) {
       return anchor;
     }
-    for (const userCard of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
-      const rect = userCard.getBoundingClientRect();
-      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) return anchor;
+    if (!options?.includeCompact) {
+      for (const userCard of containerRef.querySelectorAll<HTMLElement>('.user-message-card')) {
+        const rect = userCard.getBoundingClientRect();
+        if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) return anchor;
+      }
     }
 
     const candidates = Array.from(
@@ -4152,7 +4151,9 @@ export function MessageList() {
           break;
         }
       }
-      anchor = refineTallRenderItemScrollAnchor(anchor ?? fallback, containerRef.clientHeight / 3);
+      anchor = refineTallRenderItemScrollAnchor(anchor ?? fallback, containerRef.clientHeight / 3, {
+        includeCompact: true,
+      });
       if (
         anchor &&
         window.innerWidth === lastHostViewportWidth &&
@@ -4184,6 +4185,31 @@ export function MessageList() {
               : undefined,
         };
         const anchor = refineTallRenderItemScrollAnchor(movedAnchor) ?? movedAnchor;
+        const anchorElement = getMountedScrollAnchorElement(anchor);
+        const anchorRect = anchorElement?.getBoundingClientRect();
+        const containerRect = containerRef!.getBoundingClientRect();
+        if (
+          !anchorRect ||
+          anchorRect.bottom <= containerRect.top ||
+          anchorRect.top >= containerRect.bottom
+        ) {
+          const metrics = shouldVirtualize() ? virtualMetrics() : null;
+          const index = metrics
+            ? getFirstVisibleMessageIndexFromVirtualMetrics({
+                metrics,
+                scrollTop: getVirtualScrollTop(top),
+              })
+            : null;
+          const replacement = refineTallRenderItemScrollAnchor(
+            index === null
+              ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
+              : capturePaintedVisibleScrollAnchorFromIndex(index),
+            0,
+            { includeCompact: true }
+          );
+          directMovementAnchor = replacement ? { anchor: replacement, scrollTop: top } : null;
+          return replacement;
+        }
         directMovementAnchor = { anchor, scrollTop: top };
         return anchor;
       }
@@ -4419,7 +4445,9 @@ export function MessageList() {
       const anchor =
         captureVisibleUserMessageScrollAnchor() ??
         refineTallRenderItemScrollAnchor(
-          index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index)
+          index === null ? null : capturePaintedVisibleScrollAnchorFromIndex(index),
+          0,
+          { includeCompact: true }
         );
       if (anchor) {
         directMovementAnchor = {
@@ -4661,7 +4689,9 @@ export function MessageList() {
         const anchor = refineTallRenderItemScrollAnchor(
           destinationIndex === null
             ? captureVisibleScrollAnchor({ preferStableRenderItem: true })
-            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex)
+            : capturePaintedVisibleScrollAnchorFromIndex(destinationIndex),
+          0,
+          { includeCompact: true }
         );
         if (!anchor) return;
         directMovementAnchor = {
@@ -5534,12 +5564,27 @@ export function MessageList() {
           const reasoningChanged = fromReasoning !== toReasoning;
 
           if (providerChanged || modelChanged || reasoningChanged) {
-            const normalFrom = `${fromModel} ${fromReasoning}`;
-            const normalTo = modelChanged ? `${toModel} ${toReasoning}` : toReasoning;
-            const narrowFrom = modelChanged ? fromModel : fromReasoning;
-            const narrowTo = modelChanged
-              ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
-              : toReasoning;
+            const normalFrom = providerChanged
+              ? formatLabelWithProvider(`${fromModel} ${fromReasoning}`, fromProvider)
+              : `${fromModel} ${fromReasoning}`;
+            const normalTo = providerChanged
+              ? formatLabelWithProvider(`${toModel} ${toReasoning}`, toProvider)
+              : modelChanged
+                ? `${toModel} ${toReasoning}`
+                : toReasoning;
+            const narrowFrom = providerChanged
+              ? formatLabelWithProvider(fromModel, fromProvider)
+              : modelChanged
+                ? fromModel
+                : fromReasoning;
+            const narrowTo = providerChanged
+              ? formatLabelWithProvider(
+                  `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`,
+                  toProvider
+                )
+              : modelChanged
+                ? `${toModel}${reasoningChanged ? ` ${toReasoning}` : ''}`
+                : toReasoning;
             result.set(msg.info.id, {
               normalFrom,
               normalTo,

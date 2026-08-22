@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
+import packageJson from '../../../package.json';
 import type * as UseOpenCodeModule from '../hooks/useOpenCode';
 import type { ProviderLimitStatus, WebviewMessage } from '../../shared/protocol';
 import type { Session, TextPart, UserMessage } from '../types';
@@ -805,6 +806,21 @@ describe('ChatInput', () => {
 
     expect(container?.querySelector('.rich-composer')?.getAttribute('data-placeholder')).toBe(
       'Describe what to build'
+    );
+  });
+
+  it('links to the Varro repository when no status metadata is available', () => {
+    setState('activeSessionId', null);
+    setState('mcpStatus', {});
+    setState('lspStatus', []);
+    setState('providerLimits', {});
+    cleanup = render(() => ChatInput(), container!);
+
+    const repositoryLink = container?.querySelector<HTMLAnchorElement>('.toolbar-repository-link');
+    expect(repositoryLink?.href).toBe(packageJson.repository);
+    expect(repositoryLink?.textContent).toBe(`v${packageJson.version}`);
+    expect(repositoryLink?.getAttribute('aria-label')).toBe(
+      `Varro v${packageJson.version} on GitHub`
     );
   });
 
@@ -2323,8 +2339,8 @@ describe('ChatInput', () => {
     expect(state.clipboardImages).toEqual([]);
     expect(state.terminalSelection).toBeNull();
     expect(state.queuedMessages).toHaveLength(1);
+    expect(state.queuedMessages[0]).not.toHaveProperty('messageId');
     expect(state.queuedMessages[0]).toMatchObject({
-      messageId: expect.stringMatching(/^msg_/),
       text: 'Follow up with context',
       agent: 'build',
       droppedFiles: [
@@ -2429,6 +2445,7 @@ describe('ChatInput', () => {
       preserveComposer: true,
       targetSessionId: 'session-1',
     });
+    expect(client.session.messages).not.toHaveBeenCalled();
   });
 
   it('does not dispatch queued messages after an API failure', async () => {
@@ -2531,6 +2548,83 @@ describe('ChatInput', () => {
     await vi.advanceTimersByTimeAsync(300);
     await flushAsyncWork();
 
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toEqual([]);
+    expect(state.queuedMessageDispatchingId).toBeNull();
+  });
+
+  it('retains an attempted queued message when admission history cannot be read', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_ambiguous',
+        sessionId: 'session-1',
+        text: 'Keep this prompt',
+      },
+    ]);
+    vi.mocked(client.session.messages).mockRejectedValue(new Error('History unavailable'));
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toEqual([
+      expect.objectContaining({
+        id: 'q1',
+        messageId: 'msg_ambiguous',
+        text: 'Keep this prompt',
+      }),
+    ]);
+    expect(state.failedQueuedMessageIds).toContain('q1');
+  });
+
+  it('does not resend an admitted queued message found on an older history page', async () => {
+    vi.useFakeTimers();
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_admitted',
+        sessionId: 'session-1',
+        text: 'Already admitted',
+      },
+    ]);
+    // SAFETY: Session message pages are arrays with optional cursor metadata.
+    const firstPage = [] as Awaited<ReturnType<typeof client.session.messages>>;
+    firstPage.nextCursor = 'cursor-older';
+    vi.mocked(client.session.messages)
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([
+        {
+          info: {
+            id: 'msg_admitted',
+            sessionID: 'session-1',
+            role: 'user',
+            time: { created: 1 },
+            agent: 'build',
+            model: { providerID: 'openai', modelID: 'gpt-5.6-sol' },
+          },
+          parts: [],
+        },
+      ]);
+
+    cleanup = render(() => ChatInput(), container!);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(client.session.messages).toHaveBeenNthCalledWith(1, 'session-1', {
+      limit: 200,
+      before: undefined,
+    });
+    expect(client.session.messages).toHaveBeenNthCalledWith(2, 'session-1', {
+      limit: 200,
+      before: 'cursor-older',
+    });
     expect(sendMessageMock).not.toHaveBeenCalled();
     expect(state.queuedMessages).toEqual([]);
   });
@@ -2841,6 +2935,49 @@ describe('ChatInput', () => {
     expect(state.queuedMessages[0]?.id).toBe('q1');
     expect(state.queuedMessages[1]?.paused).toBe(true);
     expect(state.queuedMessages[2]?.id).toBe('q3');
+  });
+
+  it('sends an edited attempted message with a fresh message id', async () => {
+    vi.useFakeTimers();
+    setIsLoading(true);
+    setState('activeSessionId', 'session-1');
+    setState('sessionStatus', 'session-1', { type: 'busy' });
+    setState('queuedMessages', [
+      {
+        id: 'q1',
+        messageId: 'msg_old_revision',
+        sessionId: 'session-1',
+        text: 'Old revision',
+      },
+    ]);
+    sendMessageMock.mockResolvedValue(true);
+
+    cleanup = render(() => ChatInput(), container!);
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    setInputText('Edited revision');
+    await flushAsyncWork();
+    container
+      ?.querySelector<HTMLButtonElement>('[aria-label="Add to queue (Enter)"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushAsyncWork();
+
+    expect(state.queuedMessages[0]).not.toHaveProperty('messageId');
+    setState('sessionStatus', 'session-1', { type: 'idle' });
+    setIsLoading(false);
+    await vi.advanceTimersByTimeAsync(300);
+    await flushAsyncWork();
+
+    expect(client.session.messages).not.toHaveBeenCalled();
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      'Edited revision',
+      expect.objectContaining({
+        messageId: expect.stringMatching(/^msg_/),
+        targetSessionId: 'session-1',
+      })
+    );
+    expect(sendMessageMock.mock.calls[0]?.[1]?.messageId).not.toBe('msg_old_revision');
   });
 
   it('keeps an edited paused message queued when the session becomes idle', async () => {

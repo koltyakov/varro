@@ -272,11 +272,6 @@ input:focus-visible {
     display: block;
   }
 
-  .chat-header.chat-header-centered .chat-header-inner {
-    width: min(100%, calc(var(--chat-content-max-width) + var(--chat-sidebar-width)));
-    padding-left: 0;
-  }
-
   .chat-header-chat-desktop .chat-header-inner {
     width: min(100%, var(--chat-content-max-width));
     margin-inline: auto;

@@ -21,6 +21,7 @@ const handlers = new Set<MessageHandler>();
 const slowApiRequestHandlers = new Set<SlowApiRequestHandler>();
 const slowApiRequests = new Map<number, SlowApiRequest>();
 let disposed = false;
+let bridgeInitialized = false;
 const BRIDGE_CLEANUP_KEY = '__cleanupVarroBridge';
 type BridgeWindow = Window & {
   [BRIDGE_CLEANUP_KEY]?: () => void;
@@ -37,10 +38,10 @@ const messageListener = (event: MessageEvent) => {
   for (const handler of handlers) handler(msg);
 };
 
-window.addEventListener('message', messageListener);
-
 export function cleanupBridge() {
+  if (!bridgeInitialized && disposed) return;
   window.removeEventListener('message', messageListener);
+  bridgeInitialized = false;
   handlers.clear();
   for (const p of pending.values()) {
     p.cancelHostRequest();
@@ -117,7 +118,7 @@ const API_CALL_MCP_AUTH_TIMEOUT_MS = 315_000;
 const API_CALL_RETRY_DELAY_MS = 150;
 export const SLOW_API_REQUEST_THRESHOLD_MS = 15_000;
 
-onMessage((msg) => {
+const handleBridgeMessage: MessageHandler = (msg) => {
   if (msg.type === 'vscode/open-result') {
     const request = pendingOpenPaths.get(msg.payload.requestId);
     if (!request) return;
@@ -132,8 +133,18 @@ onMessage((msg) => {
     if (msg.payload.error) p.reject(new Error(msg.payload.error));
     else p.resolve(msg.payload.data);
   }
-});
-bridgeWindow[BRIDGE_CLEANUP_KEY] = cleanupBridge;
+};
+
+export function initializeBridge() {
+  if (bridgeInitialized) return;
+  disposed = false;
+  bridgeInitialized = true;
+  handlers.add(handleBridgeMessage);
+  window.addEventListener('message', messageListener);
+  bridgeWindow[BRIDGE_CLEANUP_KEY] = cleanupBridge;
+}
+
+initializeBridge();
 
 export function openPathWithResult(payload: {
   path: string;

@@ -2431,6 +2431,61 @@ describe('MessageList session scoping', () => {
     ]);
   });
 
+  it('shows both provider names when only the provider changes', async () => {
+    setState('activeSessionId', 'session-1');
+    setState('providers', [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'api',
+        models: {
+          shared: {
+            id: 'shared',
+            name: 'Shared',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+      {
+        id: 'copilot',
+        name: 'GitHub Copilot',
+        source: 'api',
+        models: {
+          shared: {
+            id: 'shared',
+            name: 'Shared',
+            capabilities: { toolcall: true },
+            cost: { input: 0, output: 0 },
+          },
+        },
+      },
+    ]);
+    replaceMessages([
+      {
+        info: assistantMessage('assistant-1', { providerID: 'openai', modelID: 'shared' }),
+        parts: [textPart('text-1', 'First response')],
+      },
+      {
+        info: assistantMessage('assistant-2', { providerID: 'copilot', modelID: 'shared' }),
+        parts: [textPart('text-2', 'Second response')],
+      },
+    ]);
+
+    cleanup = render(() => MessageList(), container!);
+    await Promise.resolve();
+
+    const label = container?.querySelector(
+      '.model-change-indicator:not(.assistant-dialog-summary) .model-change-label'
+    );
+    expect(label?.querySelector('.model-change-normal')?.textContent?.trim()).toBe(
+      'Shared No thinking (OpenAI) → Shared No thinking (GitHub Copilot)'
+    );
+    expect(label?.querySelector('.model-change-narrow')?.textContent?.trim()).toBe(
+      'Shared (OpenAI) → Shared (GitHub Copilot)'
+    );
+  });
+
   it('keeps child-session streaming text out of the parent thread', async () => {
     setState('activeSessionId', 'session-1');
     setSessions([

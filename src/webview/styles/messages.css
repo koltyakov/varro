@@ -1977,7 +1977,9 @@ body.vscode-light
   width: 100%;
   position: relative;
   overflow: hidden;
-  box-shadow: var(--chat-shadow-card);
+  box-shadow:
+    var(--chat-shadow-card),
+    0 4px 16px color-mix(in srgb, var(--color-vscode-widget-shadow) 34%, transparent);
   transition:
     background-color 0.15s,
     border-color 0.15s,
@@ -2154,6 +2156,31 @@ body.vscode-dark .interactive-session .chat-input-container.focused {
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-meta-right {
   flex: 0 0 auto;
   gap: 4px;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-repository-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: var(--color-vscode-fg-soft);
+  font-size: 11px;
+  line-height: 22px;
+  text-decoration: none;
+  opacity: 0.75;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-repository-link:hover,
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-repository-link:focus-visible {
+  color: var(--color-vscode-fg);
+  background: var(--color-vscode-toolbar-hover);
+  outline: none;
+  opacity: 1;
+}
+
+.interactive-session .chat-input-toolbars.toolbar-meta .toolbar-repository-link svg {
+  flex: 0 0 auto;
 }
 
 .interactive-session .chat-input-toolbars.toolbar-meta .toolbar-picker.permission-mode-button {

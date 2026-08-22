@@ -166,6 +166,7 @@ export class RestProxy {
     string,
     { id: number; generation: number; controller: AbortController }
   >();
+  private disposed = false;
 
   constructor(private readonly callbacks: RestProxyCallbacks) {}
 
@@ -185,6 +186,8 @@ export class RestProxy {
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const request of this.activeRequests.values()) {
       request.controller.abort(new Error('REST proxy disposed'));
     }
@@ -193,6 +196,13 @@ export class RestProxy {
 
   async handleRequest(payload: ApiRequestPayload) {
     const requestGeneration = this.callbacks.getRequestGeneration();
+    if (this.disposed) {
+      this.callbacks.postApiResponse(requestGeneration, {
+        id: payload.id,
+        error: 'REST proxy disposed',
+      });
+      return;
+    }
     const request = payload.cancelKey
       ? { id: payload.id, generation: requestGeneration, controller: new AbortController() }
       : undefined;

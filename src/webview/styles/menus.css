@@ -483,7 +483,7 @@
 }
 
 .model-picker-row .model-picker-item {
-  padding-right: 36px;
+  padding-right: 32px;
 }
 
 .model-picker-row:hover,
@@ -535,6 +535,7 @@
 }
 
 .model-picker-row:hover .model-picker-pin,
+.model-picker-row:focus-within .model-picker-pin,
 .model-picker-pin:focus-visible,
 .model-picker-pin.active {
   opacity: 1;
@@ -598,6 +599,15 @@ body.vscode-high-contrast-light .model-picker-item.selected {
 }
 
 .model-picker-item .dropdown-check {
+  position: absolute;
+  top: 7px;
+  right: 11px;
+}
+
+.model-picker-row:hover .dropdown-check,
+.model-picker-row:focus-within .dropdown-check,
+.model-picker-row.pinned .dropdown-check {
+  position: static;
   margin-left: auto;
 }
 

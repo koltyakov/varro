@@ -410,6 +410,26 @@ describe('RestProxy handleRequest', () => {
     expect(signals.get('/session/current')?.aborted).toBe(true);
   });
 
+  it('rejects requests received after disposal without contacting the server', async () => {
+    const { proxy, callbacks } = createProxy();
+
+    proxy.dispose();
+    proxy.dispose();
+    await proxy.handleRequest({
+      id: 43,
+      cancelKey: 'disposed-request',
+      method: 'GET',
+      path: '/session',
+    });
+
+    expect(callbacks.server.request).not.toHaveBeenCalled();
+    expect(callbacks.ensureServerStarted).not.toHaveBeenCalled();
+    expect(callbacks.postApiResponse).toHaveBeenCalledWith(1, {
+      id: 43,
+      error: 'REST proxy disposed',
+    });
+  });
+
   it('returns error for disallowed API request', async () => {
     const { proxy, callbacks } = createProxy();
     await proxy.handleRequest(makePayload(1, 'DELETE', '/global/health'));

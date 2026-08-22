@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
   document.body.appendChild(entryRoot);
   return {
     cleanupBridge: vi.fn(),
+    initializeBridge: vi.fn(),
     postMessage: vi.fn(() => true),
     clearStartupHandlers: vi.fn(),
     disposeSolid: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('solid-js/web', () => ({ render: mocks.render }));
 vi.mock('./App', () => ({ AppRoot: () => null }));
 vi.mock('./lib/bridge', () => ({
   cleanupBridge: mocks.cleanupBridge,
+  initializeBridge: mocks.initializeBridge,
   postMessage: mocks.postMessage,
 }));
 
@@ -46,6 +48,7 @@ describe('webview bootstrap', () => {
     bootstrapWindow[APP_CLEANUP_KEY]?.();
     delete bootstrapWindow[APP_CLEANUP_KEY];
     mocks.cleanupBridge.mockReset();
+    mocks.initializeBridge.mockReset();
     mocks.postMessage.mockReset().mockReturnValue(true);
     mocks.clearStartupHandlers.mockReset();
     mocks.disposeSolid.mockReset();
@@ -134,6 +137,7 @@ describe('webview bootstrap', () => {
     expect(firstDispose).toHaveBeenCalledOnce();
     expect(secondDispose).not.toHaveBeenCalled();
     expect(mocks.cleanupBridge).toHaveBeenCalledOnce();
+    expect(mocks.initializeBridge).toHaveBeenCalledTimes(2);
   });
 
   it('logs disposal errors and still cleans up the bridge', () => {

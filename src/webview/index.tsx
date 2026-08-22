@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web';
 import { AppRoot } from './App';
-import { cleanupBridge, postMessage } from './lib/bridge';
+import { cleanupBridge, initializeBridge, postMessage } from './lib/bridge';
 // oxlint-disable-next-line no-unassigned-import
 import './index.css';
 import { isFunction } from './lib/runtime-values';
@@ -111,6 +111,7 @@ export function bootstrapWebview(root: HTMLElement | null) {
 
 export function startWebview(root: HTMLElement | null) {
   bootstrapWindow[APP_CLEANUP_KEY]?.();
+  initializeBridge();
   const cleanup = bootstrapWebview(root);
   if (!cleanup) {
     delete bootstrapWindow[APP_CLEANUP_KEY];

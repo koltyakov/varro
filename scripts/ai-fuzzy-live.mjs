@@ -61,6 +61,16 @@ export function parseRestartCount(value) {
   return restartCount;
 }
 
+export function fixtureIsSafeForScenario(fixture, manifest, scenario) {
+  if (fixture.commit !== manifest.fixture.commit) return false;
+  if (!fixture.status) return true;
+  if (scenario !== 'AI-08') return false;
+  const preparedFixture = manifest.livePreparation?.['AI-07']?.fixtureAfterPreparation;
+  return (
+    preparedFixture?.commit === fixture.commit && preparedFixture?.status === fixture.status
+  );
+}
+
 export function missingLiveGates(snapshot, scenario) {
   const missing = [];
   if (!snapshot.virtualized) missing.push('virtualized transcript');
@@ -76,7 +86,7 @@ export function missingLiveGates(snapshot, scenario) {
 export function buildLivePrompt({ seed, attempt, missing = [] }) {
   const marker = `[VFZ:${seed}:TOOLS-A${String(attempt)}]`;
   if (attempt === 1) {
-    return `${marker} Work only in the current OpenCode repository. Investigate one real, bounded test-coverage or code-quality issue. Start with at least eight independent read or search tool calls in one parallel assistant step. Make a small verified change to exactly two existing source or test files, run two focused checks separately, and inspect the resulting diff. After the edit, start another parallel group of at least eight independent reads or searches before the final checks so completed file cards and a scrollable active tray coexist. Keep a todo list and brief reasoning between groups. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
+    return `${marker} Work only in the current OpenCode repository. Investigate one real, bounded test-coverage or code-quality issue. Start with at least eight independent read or search tool calls in one parallel assistant step. Make a small verified change to exactly two existing source or test files, run two focused checks separately, and inspect the resulting diff. After the edit, issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline". Do not write final prose until all six complete. Keep a todo list and brief reasoning between groups. Finish with VFZ-TOOLS-END. Do not commit, change branches, install dependencies, generate dependency trees, touch files outside this repository, or undo existing work.`;
   }
 
   const requests = [];
@@ -87,7 +97,7 @@ export function buildLivePrompt({ seed, attempt, missing = [] }) {
   }
   if (missing.includes('scrollable active tray') || missing.includes('active model stream')) {
     requests.push(
-      'then start at least ten independent read or search calls together in one parallel assistant step before writing prose'
+      'then issue exactly six separate read-only bash calls concurrently, one command per tool call: "sleep 8 && git status --short", "sleep 16 && git rev-parse --short HEAD", "sleep 24 && git diff --check", "sleep 32 && git status --porcelain=v1", "sleep 40 && git diff --stat", and "sleep 48 && git log -1 --oneline"; do not write prose until all six complete'
     );
   }
   if (missing.includes('expandable activity disclosure')) {
@@ -120,17 +130,58 @@ export function duplicateDeliveryFailures(observation, sawBusy) {
   return failures;
 }
 
+export function summarizeCanonicalDelivery(messages, marker, tokens) {
+  const userIndex = messages.findIndex(
+    (entry) =>
+      entry?.info?.role === 'user' &&
+      entry.parts?.some((part) => part?.type === 'text' && part.text?.includes(marker))
+  );
+  const user = userIndex >= 0 ? messages[userIndex] : null;
+  const assistants = user
+    ? messages
+        .slice(userIndex + 1)
+        .filter(
+          (entry) =>
+            entry?.info?.role === 'assistant' &&
+            (!entry.info.parentID || entry.info.parentID === user.info.id)
+        )
+        .map((entry) => ({
+          id: entry.info.id,
+          parentID: entry.info.parentID ?? null,
+          finish: entry.info.finish ?? null,
+          error: entry.info.error ?? null,
+          text: entry.parts
+            .filter((part) => part?.type === 'text' || part?.type === 'reasoning')
+            .map((part) => part.text ?? '')
+            .join('\n'),
+        }))
+    : [];
+  const combinedText = assistants.map((entry) => entry.text).join('\n');
+  return {
+    user: user ? { id: user.info.id } : null,
+    assistants,
+    expectedTokensPresent: tokens.map((token) => combinedText.includes(token)),
+  };
+}
+
 export function buildDuplicateDeliveryObserverExpression(marker, tokens) {
   return `(() => {
     globalThis.__varroDuplicateDeliveryObserver?.stop();
     const marker = ${JSON.stringify(marker)};
     const tokens = ${JSON.stringify(tokens)};
+    const rowId = (row) => row.closest('[data-msg-id]')?.getAttribute('data-msg-id') ?? null;
+    const baselineAssistantIds = new Set(
+      [...document.querySelectorAll('.chat-turn-assistant')].map(rowId).filter(Boolean)
+    );
     const observation = {
       frames: 0,
       userSeen: false,
       assistantSeen: false,
+      rawAssistantSeen: false,
       maxUserRows: 0,
       maxAssistantRows: 0,
+      maxRawAssistantRows: 0,
+      rawAssistantSamples: [],
       maxTokenCounts: tokens.map(() => 0),
       tokenSeen: tokens.map(() => false),
       firstViolation: null,
@@ -145,12 +196,23 @@ export function buildDuplicateDeliveryObserverExpression(marker, tokens) {
       const assistantRows = [...document.querySelectorAll('.chat-turn-assistant')].filter((row) =>
         tokens.some((token) => row.textContent?.includes(token))
       );
+      const rawAssistantRows = [...document.querySelectorAll('.chat-turn-assistant')].filter((row) => {
+        const id = rowId(row);
+        return id && !baselineAssistantIds.has(id);
+      });
       const assistantText = assistantRows.map((row) => row.textContent ?? '').join('\\n');
       const tokenCounts = tokens.map((token) => assistantText.split(token).length - 1);
       observation.userSeen ||= userRows.length > 0;
       observation.assistantSeen ||= assistantRows.length > 0;
+      observation.rawAssistantSeen ||= rawAssistantRows.length > 0;
       observation.maxUserRows = Math.max(observation.maxUserRows, userRows.length);
       observation.maxAssistantRows = Math.max(observation.maxAssistantRows, assistantRows.length);
+      observation.maxRawAssistantRows = Math.max(observation.maxRawAssistantRows, rawAssistantRows.length);
+      for (const row of rawAssistantRows) {
+        const id = rowId(row);
+        if (observation.rawAssistantSamples.some((sample) => sample.id === id)) continue;
+        observation.rawAssistantSamples.push({ id, text: (row.textContent ?? '').slice(0, 1000) });
+      }
       tokenCounts.forEach((count, index) => {
         observation.maxTokenCounts[index] = Math.max(observation.maxTokenCounts[index], count);
         observation.tokenSeen[index] ||= count > 0;
@@ -204,6 +266,13 @@ class OpenCodeClient {
   async isBusy(sessionId) {
     const statuses = await this.request('GET', '/session/status');
     return statuses?.[sessionId]?.type === 'busy';
+  }
+
+  messages(sessionId, limit = 200) {
+    return this.request(
+      'GET',
+      `/session/${encodeURIComponent(sessionId)}/message?limit=${String(limit)}`
+    ).then((result) => (Array.isArray(result) ? result : (result?.items ?? [])));
   }
 
   send(sessionId, prompt, model) {
@@ -588,22 +657,64 @@ async function waitForBusy(client, sessionId, timeoutMs) {
 }
 
 async function nestedHandoff(cdp) {
+  const captureOuterAnchor = () =>
+    cdp.evaluate(`(() => {
+      const scroller = document.querySelector('[aria-label="Chat messages"]');
+      if (!scroller) return null;
+      const viewport = scroller.getBoundingClientRect();
+      const row = [...scroller.querySelectorAll('[data-msg-id]')].find((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.bottom > viewport.top && rect.top < viewport.bottom;
+      });
+      if (!row) return null;
+      return {
+        messageId: row.getAttribute('data-msg-id'),
+        top: row.getBoundingClientRect().top - viewport.top,
+      };
+    })()`);
+  const captureSameOuterAnchor = (anchor) =>
+    anchor
+      ? cdp.evaluate(`(() => {
+          const scroller = document.querySelector('[aria-label="Chat messages"]');
+          const row = [...(scroller?.querySelectorAll('[data-msg-id]') ?? [])].find(
+            (element) => element.getAttribute('data-msg-id') === ${JSON.stringify(anchor.messageId)}
+          );
+          if (!scroller || !row) return null;
+          return row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        })()`)
+      : null;
   const before = await cdp.snapshot();
+  const outerAnchor = await captureOuterAnchor();
   const nested = before.nestedActivityScroller;
   if (!nested?.hasRange) return { passed: false, reason: 'active tray lost its scroll range' };
   const nestedDelta = nested.scrollTop > 0 ? -96 : 96;
   await cdp.wheel('.assistant-active-activity-items', nestedDelta);
   await new Promise((resolve) => setTimeout(resolve, 80));
   const afterNested = await cdp.snapshot();
+  const afterNestedOuterAnchorTop = await captureSameOuterAnchor(outerAnchor);
   const outerDelta = before.transcript.scrollTop > 1 ? -96 : 96;
   await cdp.wheel('.interactive-list', outerDelta, 'right');
   await new Promise((resolve) => setTimeout(resolve, 250));
   const afterOuter = await cdp.snapshot();
+  const afterOuterAnchorTop = await captureSameOuterAnchor(outerAnchor);
+  const nestedPreservedOuterContent =
+    outerAnchor !== null &&
+    afterNestedOuterAnchorTop !== null &&
+    // Active command completion can move the tray by a few pixels during this 80 ms sample.
+    // A leaked nested wheel moves the transcript by the full 96 px input delta.
+    Math.abs(afterNestedOuterAnchorTop - outerAnchor.top) <= 12;
+  const outerMovedContent =
+    afterOuterAnchorTop === null ||
+    (afterNestedOuterAnchorTop !== null &&
+      Math.abs(afterOuterAnchorTop - afterNestedOuterAnchorTop) > 1.5);
   return {
     passed:
       afterNested.nestedActivityScroller?.scrollTop !== nested.scrollTop &&
-      afterNested.transcript.scrollTop === before.transcript.scrollTop &&
-      afterOuter.transcript.scrollTop !== afterNested.transcript.scrollTop,
+      nestedPreservedOuterContent &&
+      outerMovedContent,
+    outerAnchor,
+    afterNestedOuterAnchorTop,
+    afterOuterAnchorTop,
     before,
     afterNested,
     afterOuter,
@@ -710,7 +821,7 @@ async function runLive(options) {
     throw new Error('Run verify-run for this manifest after launching the dedicated host');
   }
   const fixture = await fixtureStatus(manifest.workspace);
-  if (fixture.status || fixture.commit !== manifest.fixture.commit) {
+  if (!fixtureIsSafeForScenario(fixture, manifest, scenario)) {
     throw new Error('The OpenCode fixture is not at the clean recorded baseline');
   }
   const tracked = manifest.runSessions.find((session) => !session.deleted);
@@ -743,12 +854,25 @@ async function runLive(options) {
       const sent = await cdp.sendComposerPrompt(prompt);
       const sawBusy = sent && (await waitForBusy(client, tracked.id, Math.min(timeoutMs, 15_000)));
       const settled = sawBusy ? await waitForIdle(client, tracked.id, timeoutMs) : false;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       const observation = await cdp.finishDuplicateDeliveryObservation();
+      let canonicalDelivery;
+      try {
+        canonicalDelivery = summarizeCanonicalDelivery(
+          await client.messages(tracked.id),
+          marker,
+          tokens
+        );
+      } catch (error) {
+        canonicalDelivery = {
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
       const failures = sent
         ? duplicateDeliveryFailures(observation, sawBusy)
         : ['native composer input was unavailable'];
       if (!settled) failures.push('model stream did not settle');
+      if (canonicalDelivery.error) failures.push('canonical session messages could not be read');
       const fixtureAfterPreparation = await fixtureStatus(manifest.workspace);
       if (
         fixtureAfterPreparation.status !== fixture.status ||
@@ -767,6 +891,7 @@ async function runLive(options) {
         sawBusy,
         settled,
         observation,
+        canonicalDelivery,
         failures,
         fixtureAfterPreparation,
       };

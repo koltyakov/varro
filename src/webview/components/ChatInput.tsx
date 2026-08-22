@@ -5,7 +5,6 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  lazy,
   onCleanup,
   onMount,
   untrack,
@@ -242,14 +241,9 @@ import {
   steeringQueuedMessageIds,
 } from './chat-input/queued-steer';
 import { isString } from '../lib/runtime-values';
+import { LspPicker } from './LspPicker';
+import { McpPicker } from './McpPicker';
 import { ModelPicker } from './ModelPicker';
-
-const LazyMcpPicker = lazy(() =>
-  import('./McpPicker').then((module) => ({ default: module.McpPicker }))
-);
-const LazyLspPicker = lazy(() =>
-  import('./LspPicker').then((module) => ({ default: module.LspPicker }))
-);
 
 const COMPOSER_BUSY_DISPLAY_SETTLE_DELAY_MS = 700;
 
@@ -568,6 +562,23 @@ function attachCurrentDiagnostics() {
     diagnostics: state.editorContext.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     total: state.editorContext.diagnosticsTotal ?? state.editorContext.diagnostics.length,
   });
+}
+
+async function queuedMessageWasAdmitted(sessionId: string, messageId: string) {
+  let before: string | undefined;
+  const consumedCursors = new Set<string>();
+  do {
+    const messages = await client.session.messages(sessionId, { limit: 200, before });
+    if (messages.some((message) => message.info.id === messageId)) return true;
+    const nextCursor = messages.nextCursor;
+    if (!nextCursor) return false;
+    if (consumedCursors.has(nextCursor)) {
+      throw new Error('Queued message history cursor did not advance');
+    }
+    consumedCursors.add(nextCursor);
+    before = nextCursor;
+  } while (before);
+  return false;
 }
 
 export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => void } = {}) {
@@ -1844,7 +1855,6 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       }
       const message = {
         id: createAttachmentID(),
-        messageId: existingQueuedMessage?.messageId ?? createOpenCodeMessageID(),
         sessionId,
         text: sendableText,
         agent: state.selectedAgent ? state.selectedAgent : undefined,
@@ -1933,12 +1943,12 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
     if (failedQueuedMessageIds().has(item.id) && !retry) return;
     setQueuedMessageFailed(item.id, false);
     setDispatchingQueuedMessageId(item.id);
-    const messageId = item.messageId ?? createOpenCodeMessageID();
-    if (!item.messageId) replaceQueuedMessage(item.id, { ...item, messageId });
+    const priorAttemptId = item.messageId;
+    const messageId = priorAttemptId ?? createOpenCodeMessageID();
+    if (!priorAttemptId) replaceQueuedMessage(item.id, { ...item, messageId });
     let sent = false;
     try {
-      const messages = await client.session.messages(item.sessionId, { limit: 200 });
-      if (messages.some((message) => message.info.id === messageId)) {
+      if (priorAttemptId && (await queuedMessageWasAdmitted(item.sessionId, priorAttemptId))) {
         removeQueuedMessage(item.id);
         return;
       }
@@ -1957,13 +1967,14 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
       });
     } catch {
       sent = false;
+    } finally {
+      setDispatchingQueuedMessageId(null);
     }
     if (sent) {
       removeQueuedMessage(item.id);
     } else if (state.queuedMessages.some((queued) => queued.id === item.id)) {
       setQueuedMessageFailed(item.id, true);
     }
-    setDispatchingQueuedMessageId(null);
   }
 
   function findNextQueuedMessageForDispatch() {
@@ -3560,24 +3571,20 @@ export function ChatInput(props: { newSession?: boolean; onBeforeSend?: () => vo
         </Show>
 
         <Show when={showMcpPicker()}>
-          <Suspense>
-            <LazyMcpPicker
-              sessionId={composerSessionId()}
-              onChange={(names) => void applySessionMcps(names, composerSessionId())}
-              onClose={() => setShowMcpPicker(false)}
-              popoverRef={(el) => (mcpPopoverRef = el)}
-            />
-          </Suspense>
+          <McpPicker
+            sessionId={composerSessionId()}
+            onChange={(names) => void applySessionMcps(names, composerSessionId())}
+            onClose={() => setShowMcpPicker(false)}
+            popoverRef={(el) => (mcpPopoverRef = el)}
+          />
         </Show>
 
         <Show when={showLspPicker()}>
-          <Suspense>
-            <LazyLspPicker
-              items={state.lspStatus}
-              onClose={() => setShowLspPicker(false)}
-              popoverRef={(el) => (lspPopoverRef = el)}
-            />
-          </Suspense>
+          <LspPicker
+            items={state.lspStatus}
+            onClose={() => setShowLspPicker(false)}
+            popoverRef={(el) => (lspPopoverRef = el)}
+          />
         </Show>
 
         <div

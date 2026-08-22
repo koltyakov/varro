@@ -81,6 +81,34 @@ describe('bridge', () => {
     expect(secondHandler).toHaveBeenCalledOnce();
   });
 
+  it('can be initialized again after cleanup', async () => {
+    const bridge = await loadBridge();
+    const oldHandler = vi.fn();
+    const newHandler = vi.fn();
+    const send = vi.fn();
+    window.__sendToExtension = send;
+    bridge.onMessage(oldHandler);
+
+    bridge.cleanupBridge();
+    bridge.initializeBridge();
+    bridge.onMessage(newHandler);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'command/focus-input' } }));
+
+    expect(oldHandler).not.toHaveBeenCalled();
+    expect(newHandler).toHaveBeenCalledOnce();
+    expect(bridgeWindow[BRIDGE_CLEANUP_KEY]).toBe(bridge.cleanupBridge);
+
+    const request = bridge.apiCall('GET', '/session');
+    // SAFETY: apiCall always posts an api/request payload with a numeric request ID.
+    const message = send.mock.calls[0]?.[0] as { payload: { id: number } };
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'api/response', payload: { id: message.payload.id, data: { ok: true } } },
+      })
+    );
+    await expect(request).resolves.toEqual({ ok: true });
+  });
+
   it('subscribes and unsubscribes message handlers', async () => {
     const bridge = await loadBridge();
     const handler = vi.fn();

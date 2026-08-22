@@ -178,6 +178,8 @@ export class WebviewSession {
     this.webviewDisposables.push(
       webviewView.onDidDispose(() => {
         if (this.bridge.getView() === webviewView) {
+          const nextGeneration = ++this.webviewLoadGeneration;
+          this.deps.cancelApiRequestsBeforeGeneration(nextGeneration);
           this.bridge.setView(undefined);
           this.webviewReady = false;
           this.webviewHasFocus = false;

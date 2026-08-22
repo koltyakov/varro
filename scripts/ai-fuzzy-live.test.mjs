@@ -7,9 +7,11 @@ import {
   buildDuplicateDeliveryPrompt,
   buildLivePrompt,
   duplicateDeliveryFailures,
+  fixtureIsSafeForScenario,
   missingLiveGates,
   modelDisplayName,
   parseRestartCount,
+  summarizeCanonicalDelivery,
 } from './ai-fuzzy-live.mjs';
 
 const ready = {
@@ -40,7 +42,7 @@ test('builds a targeted bounded recovery prompt from missing gates', () => {
 
   assert.match(prompt, /^\[VFZ:abc:TOOLS-A2\]/);
   assert.match(prompt, /exactly two existing files/);
-  assert.match(prompt, /ten independent read or search calls/);
+  assert.match(prompt, /six separate read-only bash calls concurrently/);
   assert.match(prompt, /Do not repeat completed work/);
 });
 
@@ -49,7 +51,7 @@ test('the initial task requests the content forms needed by the live gate', () =
 
   assert.match(prompt, /eight independent read or search tool calls/);
   assert.match(prompt, /exactly two existing source or test files/);
-  assert.match(prompt, /another parallel group/);
+  assert.match(prompt, /exactly six separate read-only bash calls concurrently/);
 });
 
 test('builds the controlled duplicate-delivery stream prompt', () => {
@@ -70,6 +72,22 @@ test('accepts a bounded restart count for duplicate-delivery stress', () => {
   assert.equal(parseRestartCount('4'), 4);
   assert.throws(() => parseRestartCount('0'), /integer from 1 through 10/);
   assert.throws(() => parseRestartCount('11'), /integer from 1 through 10/);
+});
+
+test('allows AI-08 to continue from the exact recorded AI-07 fixture state', () => {
+  const fixture = { commit: 'abc', status: ' M source.ts' };
+  const manifest = {
+    fixture: { commit: 'abc', status: '' },
+    livePreparation: { 'AI-07': { fixtureAfterPreparation: fixture } },
+  };
+
+  assert.equal(fixtureIsSafeForScenario({ commit: 'abc', status: '' }, manifest, 'AI-07'), true);
+  assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-08'), true);
+  assert.equal(fixtureIsSafeForScenario(fixture, manifest, 'AI-07'), false);
+  assert.equal(
+    fixtureIsSafeForScenario({ ...fixture, status: ' M other.ts' }, manifest, 'AI-08'),
+    false
+  );
 });
 
 test('builds valid JavaScript for the duplicate-delivery frame observer', () => {
@@ -104,4 +122,29 @@ test('rejects transient duplicate user rows, assistant rows, and stream tokens',
       'a streamed token rendered more than once',
     ]
   );
+});
+
+test('summarizes the canonical assistant response for the marked user prompt', () => {
+  const summary = summarizeCanonicalDelivery(
+    [
+      {
+        info: { id: 'user-old', role: 'user' },
+        parts: [{ type: 'text', text: 'old prompt' }],
+      },
+      {
+        info: { id: 'user-new', role: 'user' },
+        parts: [{ type: 'text', text: '[VFZ:abc:DUP] prompt' }],
+      },
+      {
+        info: { id: 'assistant-new', role: 'assistant', parentID: 'user-new', finish: 'stop' },
+        parts: [{ type: 'text', text: 'VFZ-DUP-01\nVFZ-DUP-END' }],
+      },
+    ],
+    '[VFZ:abc:DUP]',
+    ['VFZ-DUP-01', 'VFZ-DUP-END']
+  );
+
+  assert.deepEqual(summary.user, { id: 'user-new' });
+  assert.equal(summary.assistants[0]?.id, 'assistant-new');
+  assert.deepEqual(summary.expectedTokensPresent, [true, true]);
 });
