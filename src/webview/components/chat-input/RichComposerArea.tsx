@@ -448,7 +448,7 @@ export function RichComposerArea(props: {
     revealCaretAfterPaste = false;
 
     const range = getSelectionRange();
-    if (!range?.collapsed) return;
+    if (!range?.collapsed || !('getBoundingClientRect' in range)) return;
     const caretRect = range.getBoundingClientRect();
     if (caretRect.height === 0) return;
     const editorRect = editorEl.getBoundingClientRect();
