@@ -62,7 +62,7 @@ export function RichComposerArea(props: {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
   let historyHandledByKeydown = false;
-  let revealCaretAfterPaste = false;
+  let revealCaretAfterControlledInput = false;
   const [preview, setPreview] = createSignal<{
     chipId: string;
     image: { url: string; alt: string };
@@ -443,9 +443,9 @@ export function RichComposerArea(props: {
     sel.addRange(range);
   }
 
-  function revealPastedCaret() {
-    if (!revealCaretAfterPaste || !editorEl) return;
-    revealCaretAfterPaste = false;
+  function revealCaret() {
+    if (!revealCaretAfterControlledInput || !editorEl) return;
+    revealCaretAfterControlledInput = false;
 
     const range = getSelectionRange();
     if (!range?.collapsed || !('getBoundingClientRect' in range)) return;
@@ -500,7 +500,7 @@ export function RichComposerArea(props: {
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
       }
-      revealPastedCaret();
+      revealCaret();
       return;
     }
 
@@ -520,7 +520,7 @@ export function RichComposerArea(props: {
     if (isFocused) {
       setCursorOffset(Math.min(cursorOff, text.length));
     }
-    revealPastedCaret();
+    revealCaret();
   });
 
   function handleInput(event?: InputEvent) {
@@ -577,7 +577,7 @@ export function RichComposerArea(props: {
     };
     e.preventDefault();
     const nextValue = `${props.value.slice(0, selection.start)}${text}${props.value.slice(selection.end)}`;
-    revealCaretAfterPaste = true;
+    revealCaretAfterControlledInput = true;
     props.onInput(nextValue, selection.start + text.length);
     props.onPasteInsertion?.(e, {
       start: selection.start,
@@ -618,6 +618,7 @@ export function RichComposerArea(props: {
     if (emptyBullet) {
       e.preventDefault();
       const nextValue = `${props.value.slice(0, lineStart)}${props.value.slice(lineEnd)}`;
+      revealCaretAfterControlledInput = true;
       props.onInput(nextValue, lineStart);
       return true;
     }
@@ -626,6 +627,7 @@ export function RichComposerArea(props: {
     if (!bulletPrefix || selection.start < lineStart + bulletPrefix.length) {
       e.preventDefault();
       const nextValue = `${props.value.slice(0, selection.start)}\n${props.value.slice(selection.end)}`;
+      revealCaretAfterControlledInput = true;
       props.onInput(nextValue, selection.start + 1);
       return true;
     }
@@ -633,6 +635,7 @@ export function RichComposerArea(props: {
     e.preventDefault();
     const insertion = `\n${bulletPrefix}`;
     const nextValue = `${props.value.slice(0, selection.start)}${insertion}${props.value.slice(selection.end)}`;
+    revealCaretAfterControlledInput = true;
     props.onInput(nextValue, selection.start + insertion.length);
     return true;
   }

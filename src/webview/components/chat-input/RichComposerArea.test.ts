@@ -464,6 +464,77 @@ describe('RichComposerArea', () => {
     expect(onInput).toHaveBeenCalledWith('something\n', 'something\n'.length);
   });
 
+  it('scrolls to reveal the caret after Shift+Enter', async () => {
+    const originalRangeRect = Range.prototype.getBoundingClientRect;
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => new DOMRect(0, 220, 0, 20),
+    });
+
+    try {
+      cleanup = render(() => {
+        const [value, setValue] = createSignal('last visible line');
+        const [cursorOffset, setCursorOffset] = createSignal(value().length);
+
+        return RichComposerArea({
+          editorRef: () => {},
+          placeholder: 'Compose',
+          get value() {
+            return value();
+          },
+          get cursorOffset() {
+            return cursorOffset();
+          },
+          chips: [],
+          isFocused: true,
+          showCompletionMenu: false,
+          completionItems: [],
+          completionSelectedIndex: 0,
+          onInput: (text, nextOffset) => {
+            setValue(text);
+            setCursorOffset(nextOffset);
+          },
+          onKeyDown: () => {},
+          onPaste: () => {},
+          onFocus: () => {},
+          onBlur: () => {},
+          onClick: () => {},
+          onKeyUp: () => {},
+          onSelect: () => {},
+          onSelectCompletion: () => {},
+        });
+      }, container!);
+
+      const editor = container?.querySelector<HTMLDivElement>('.rich-composer');
+      if (!editor?.firstChild) throw new Error('Expected populated composer editor');
+      editor.focus();
+      editor.scrollTop = 40;
+      editor.getBoundingClientRect = () => new DOMRect(0, 20, 0, 180);
+      setCollapsedSelection(editor.firstChild, 'last visible line'.length);
+
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      await flushAsyncWork();
+
+      expect(editor.scrollTop).toBe(80);
+    } finally {
+      if (originalRangeRect) {
+        Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+          configurable: true,
+          value: originalRangeRect,
+        });
+      } else {
+        Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
+      }
+    }
+  });
+
   it('keeps the caret on the inserted line before an existing blank line', async () => {
     const firstBlock =
       'From: GPT-5.6 Sol Default\nTo: GPT-5.6 Sol High\nNormal: GPT-5.6 Sol Default -> High';
