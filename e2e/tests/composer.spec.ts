@@ -109,6 +109,44 @@ test('replaces a selected session reference when pasting', async ({ page }) => {
   await expect(composer.locator('.composer-session-reference')).toHaveCount(0);
 });
 
+test('scrolls a large paste to keep the caret visible', async ({ page }) => {
+  await page.goto('/e2e/harness/index.html?scenario=blank');
+
+  const composer = page.locator('.rich-composer').first();
+  const pastedText = Array.from({ length: 80 }, (_, index) => `Pasted line ${index + 1}`).join(
+    '\n'
+  );
+  await composer.focus();
+  await composer.evaluate((editor, text) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', text);
+    editor.dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData })
+    );
+  }, pastedText);
+
+  await expect(composer).toContainText('Pasted line 80');
+  await expect(composer.locator('br')).toHaveCount(79);
+  await expect
+    .poll(() =>
+      composer.evaluate((editor) => {
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (!range || !editor.contains(range.startContainer)) {
+          return { scrolled: false, caretVisible: false };
+        }
+        const editorRect = editor.getBoundingClientRect();
+        const caretRect = range.getBoundingClientRect();
+        return {
+          scrolled: editor.scrollTop > 0,
+          caretVisible:
+            caretRect.top >= editorRect.top - 0.5 && caretRect.bottom <= editorRect.bottom + 0.5,
+        };
+      })
+    )
+    .toEqual({ scrolled: true, caretVisible: true });
+});
+
 test('undoes deleted decorated composer text without duplication', async ({ page }) => {
   await page.goto('/e2e/harness/index.html?scenario=session-search');
 

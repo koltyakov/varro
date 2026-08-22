@@ -62,6 +62,7 @@ export function RichComposerArea(props: {
   let editorEl: HTMLDivElement | undefined;
   let isComposing = false;
   let historyHandledByKeydown = false;
+  let revealCaretAfterPaste = false;
   const [preview, setPreview] = createSignal<{
     chipId: string;
     image: { url: string; alt: string };
@@ -442,6 +443,23 @@ export function RichComposerArea(props: {
     sel.addRange(range);
   }
 
+  function revealPastedCaret() {
+    if (!revealCaretAfterPaste || !editorEl) return;
+    revealCaretAfterPaste = false;
+
+    const range = getSelectionRange();
+    if (!range?.collapsed) return;
+    const caretRect = range.getBoundingClientRect();
+    if (caretRect.height === 0) return;
+    const editorRect = editorEl.getBoundingClientRect();
+
+    if (caretRect.bottom > editorRect.bottom) {
+      editorEl.scrollTop += caretRect.bottom - editorRect.bottom;
+    } else if (caretRect.top < editorRect.top) {
+      editorEl.scrollTop -= editorRect.top - caretRect.top;
+    }
+  }
+
   function syncEmptyState() {
     if (!editorEl) return;
     editorEl.dataset.empty = isEditorEmpty(editorEl) ? 'true' : 'false';
@@ -482,6 +500,7 @@ export function RichComposerArea(props: {
       if (isFocused && requestedCursor != null && getCursorOffset() !== requestedCursor) {
         setCursorOffset(Math.min(requestedCursor, text.length));
       }
+      revealPastedCaret();
       return;
     }
 
@@ -501,6 +520,7 @@ export function RichComposerArea(props: {
     if (isFocused) {
       setCursorOffset(Math.min(cursorOff, text.length));
     }
+    revealPastedCaret();
   });
 
   function handleInput(event?: InputEvent) {
@@ -557,6 +577,7 @@ export function RichComposerArea(props: {
     };
     e.preventDefault();
     const nextValue = `${props.value.slice(0, selection.start)}${text}${props.value.slice(selection.end)}`;
+    revealCaretAfterPaste = true;
     props.onInput(nextValue, selection.start + text.length);
     props.onPasteInsertion?.(e, {
       start: selection.start,
